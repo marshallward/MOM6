@@ -838,8 +838,9 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV
 
             if (CS%ELIZABETH_DIFFUSE) then
               Coriolis_u= 0.5*( G%CoriolisBu(I,J) + G%CoriolisBu(I,J-1) )
-              factor_u=abs(Coriolis_u) - MAX(abs(Coriolis_u),abs(drdx*G_rho0/sqrt(abs(drdz*G_rho0))))
-              Sfn_unlim_u(I,K)=(G%dxCu(I,j))**2*factor_u*(G%dy_Cu(I,j)*US%m_to_Z*Slope)
+              factor_u=abs(Coriolis_u) - MAX(abs(Coriolis_u),abs(drdx*G_rho0/sqrt(max(abs(drdz*G_rho0),abs(N2_floor)))))
+              Sfn_ELIZABETH(I,K)=(G%dxCu(I,j))**2*factor_u*(G%dy_Cu(I,j)*US%m_to_Z*Slope)
+              Sfn_unlim_u(I,K) = -((KH_u(I,j,K)*G%dy_Cu(I,j))*US%m_to_Z*Slope)+Sfn_ELIZABETH(I,K)
             else
               ! Estimate the streamfunction at each interface [m3 s-1].
               Sfn_unlim_u(I,K) = -((KH_u(I,j,K)*G%dy_Cu(I,j))*US%m_to_Z*Slope)
@@ -1094,8 +1095,9 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV
 
             if (CS%ELIZABETH_DIFFUSE) then
               Coriolis_v= 0.5*( G%CoriolisBu(I,J) + G%CoriolisBu(I-1,J) )
-              factor_v=abs(Coriolis_v) - MAX(abs(Coriolis_v),abs(drdy*G_rho0/sqrt(abs(drdz*G_rho0))))
-              Sfn_unlim_v(i,K)=(G%dyCv(i,J))**2*factor_v*(G%dx_Cv(i,J)*US%m_to_Z*Slope)
+              factor_v=abs(Coriolis_v) - MAX(abs(Coriolis_v),abs(drdy*G_rho0/sqrt(max(abs(drdz*G_rho0),abs(N2_floor)))))
+              Sfn_ELIZABETH(i,K)=(G%dyCv(i,J))**2*factor_v*(G%dx_Cv(i,J)*US%m_to_Z*Slope)
+              Sfn_unlim_v(i,K) = -((KH_v(i,J,K)*G%dx_Cv(i,J))*US%m_to_Z*Slope)+Sfn_ELIZABETH(i,K)
             else
               ! Estimate the streamfunction at each interface [m3 s-1].
               Sfn_unlim_v(i,K) = -((KH_v(i,J,K)*G%dx_Cv(i,J))*US%m_to_Z*Slope)
