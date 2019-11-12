@@ -94,7 +94,6 @@ use MOM_sum_output,            only : write_energy, accumulate_net_input
 use MOM_sum_output,            only : MOM_sum_output_init, sum_output_CS
 use MOM_ALE_sponge,            only : init_ALE_sponge_diags, ALE_sponge_CS
 use MOM_thickness_diffuse,     only : thickness_diffuse, thickness_diffuse_init, thickness_diffuse_CS
-use MOM_Elizabeth_diffuse,     only : Elizabeth_diffuse, Elizabeth_diffuse_init, Elizabeth_diffuse_CS
 use MOM_tracer_advect,         only : advect_tracer, tracer_advect_init
 use MOM_tracer_advect,         only : tracer_advect_end, tracer_advect_CS
 use MOM_tracer_hor_diff,       only : tracer_hordiff, tracer_hor_diff_init
@@ -233,7 +232,6 @@ type, public :: MOM_control_struct ; private
                                      !! (i.e., no split between barotropic and baroclinic).
   logical :: thickness_diffuse       !< If true, diffuse interface height w/ a diffusivity KHTH.
   logical :: thickness_diffuse_first !< If true, diffuse thickness before dynamics.
-  logical :: Elizabeth_diffuse       !< If true, diffuse interface height w/ a diffusivity KHTH.
   logical :: mixedlayer_restrat      !< If true, use submesoscale mixed layer restratifying scheme.
   logical :: useMEKE                 !< If true, call the MEKE parameterization.
   logical :: useWaves                !< If true, update Stokes drift
@@ -311,8 +309,6 @@ type, public :: MOM_control_struct ; private
   type(thickness_diffuse_CS),    pointer :: thickness_diffuse_CSp => NULL()
     !< Pointer to the control structure used for the isopycnal height diffusive transport.
     !! This is also common referred to as Gent-McWilliams diffusion
-  type(Elizabeth_diffuse_CS),   pointer :: Elizabeth_diffuse_CSp => NULL()
-    !< Pointer to the control structure used for the Elizabeth diffusion.
   type(mixedlayer_restrat_CS),   pointer :: mixedlayer_restrat_CSp => NULL()
     !< Pointer to the control structure used for the mixed layer restratification
   type(set_visc_CS),             pointer :: set_visc_CSp => NULL()
@@ -375,7 +371,6 @@ integer :: id_clock_tracer
 integer :: id_clock_diabatic
 integer :: id_clock_continuity  ! also in dynamics s/r
 integer :: id_clock_thick_diff
-integer :: id_clock_Elizabeth_diff
 integer :: id_clock_BBL_visc
 integer :: id_clock_ml_restrat
 integer :: id_clock_diagnostics
@@ -1006,23 +1001,6 @@ subroutine step_MOM_dynamics(forces, p_surf_begin, p_surf_end, dt, dt_thermo, &
     call cpu_clock_end(id_clock_thick_diff)
     call pass_var(h, G%Domain, clock=id_clock_pass) !###, halo=max(2,cont_stensil))
     if (showCallTree) call callTree_waypoint("finished thickness_diffuse (step_MOM)")
-  endif
-
-  ! apply the SI parameterization (Elizabeth_diffuse)
-  if (CS%Elizabeth_diffuse) then
-    call cpu_clock_begin(id_clock_Elizabeth_diff)
-
-    if (CS%debug) call hchksum(h,"Pre-Elizabeth_diffuse h", G%HI, haloshift=0, scale=GV%H_to_m)
-
-    if (associated(CS%VarMix)) &
-      call calc_slope_functions(h, CS%tv, dt, G, GV, US, CS%VarMix)
-    call Elizabeth_diffuse(h, CS%uhtr, CS%vhtr, CS%tv, dt, G, GV, US, &
-                           CS%MEKE, CS%VarMix, CS%CDp, CS%Elizabeth_diffuse_CSp)
-
-    if (CS%debug) call hchksum(h,"Post-Elizabeth_diffuse h", G%HI, haloshift=1, scale=GV%H_to_m)
-    call cpu_clock_end(id_clock_Elizabeth_diff)
-    call pass_var(h, G%Domain, clock=id_clock_pass) !###, halo=max(2,cont_stensil))
-    if (showCallTree) call callTree_waypoint("finished Elizabeth_diffuse (step_MOM)")
   endif
 
   ! apply the submesoscale mixed layer restratification parameterization
@@ -1733,9 +1711,6 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, restart_CSp, &
                  "This is only used if THICKNESSDIFFUSE is true.", &
                  default=.false.)
   if (.not.CS%thickness_diffuse) CS%thickness_diffuse_first = .false.
-  call get_param(param_file, "MOM", "ELIZABETHDIFFUSE", CS%Elizabeth_diffuse, &
-                 "If true, interface heights are diffused with a "//&
-                 "coefficient of KHTH.", default=.false.)
   call get_param(param_file, "MOM", "BATHYMETRY_AT_VEL", bathy_at_vel, &
                  "If true, there are separate values for the basin depths "//&
                  "at velocity points.  Otherwise the effects of topography "//&
@@ -2311,7 +2286,6 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, restart_CSp, &
   call VarMix_init(Time, G, GV, US, param_file, diag, CS%VarMix)
   call set_visc_init(Time, G, GV, US, param_file, diag, CS%visc, CS%set_visc_CSp, restart_CSp, CS%OBC)
   call thickness_diffuse_init(Time, G, GV, US, param_file, diag, CS%CDp, CS%thickness_diffuse_CSp)
-  call Elizabeth_diffuse_init(Time, G, GV, US, param_file, diag, CS%CDp, CS%Elizabeth_diffuse_CSp)
   if (CS%split) then
     allocate(eta(SZI_(G),SZJ_(G))) ; eta(:,:) = 0.0
     call initialize_dyn_split_RK2(CS%u, CS%v, CS%h, CS%uh, CS%vh, eta, Time, &
@@ -2581,7 +2555,6 @@ subroutine MOM_timing_init(CS)
    id_clock_thick_diff = cpu_clock_id('(Ocean thickness diffusion *)', grain=CLOCK_MODULE)
 !if (CS%mixedlayer_restrat) &
    id_clock_ml_restrat = cpu_clock_id('(Ocean mixed layer restrat)', grain=CLOCK_MODULE)
- id_clock_Elizabeth_diff = cpu_clock_id('(Ocean Elizabeth diffusion *)', grain=CLOCK_MODULE)
  id_clock_diagnostics  = cpu_clock_id('(Ocean collective diagnostics)', grain=CLOCK_MODULE)
  id_clock_Z_diag       = cpu_clock_id('(Ocean Z-space diagnostics)', grain=CLOCK_MODULE)
  id_clock_ALE          = cpu_clock_id('(Ocean ALE)', grain=CLOCK_MODULE)

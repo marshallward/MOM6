@@ -61,6 +61,8 @@ type, public :: thickness_diffuse_CS ; private
                                  !! longer than DT, or 0 (the default) to use DT.
   integer :: nkml                !< number of layers within mixed layer
   logical :: debug               !< write verbose checksums for debugging purposes
+  logical :: ELIZABETH_DIFFUSE   !< If true, apply thickness diffusivity parameterizing symmetric instability
+                                 !!(Written by Elizabeth Yankovsky, 2019)
   logical :: use_GME_thickness_diffuse !< If true, passes GM coefficients to MOM_hor_visc for use
                                  !! with GME closure.
   logical :: MEKE_GEOMETRIC      !< If true, uses the GM coefficient formulation from the GEOMETRIC
@@ -625,6 +627,10 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV
                         ! in roundoff and can be neglected [Z ~> m].
   real :: G_scale       ! The gravitational acceleration times some unit conversion
                         ! factors [m3 Z-1 H-1 s-2 ~> m s-2 or m4 kg-1 s-2].
+  real :: Coriolis_u    ! Coriolis parameter at u points
+  real :: Coriolis_v    ! Coriolis parameter at v points
+  real :: factor_u      ! ELIZABETH_DIFFUSE factor at u points
+  real :: factor_v      ! ELIZABETH_DIFFUSE factor at v points
   logical :: use_EOS    ! If true, density is calculated from T & S using an
                         ! equation of state.
   logical :: find_work  ! If true, find the change in energy due to the fluxes.
@@ -830,8 +836,14 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV
             hN2_x_PE(I,j,k) = hN2_u(I,K) * US%m_to_Z
             if (CS%id_slope_x > 0) CS%diagSlopeX(I,j,k) = Slope
 
-            ! Estimate the streamfunction at each interface [m3 s-1].
-            Sfn_unlim_u(I,K) = -((KH_u(I,j,K)*G%dy_Cu(I,j))*US%m_to_Z*Slope)
+            if (CS%ELIZABETH_DIFFUSE) then
+              Coriolis_u= 0.5*( G%CoriolisBu(I,J) + G%CoriolisBu(I,J-1) )
+              factor_u=abs(Coriolis_u) - MAX(abs(Coriolis_u),abs(drdx*G_rho0/sqrt(abs(drdz*G_rho0))))
+              Sfn_unlim_u(I,K)=(G%dxCu(I,j))**2*factor_u*(G%dy_Cu(I,j)*US%m_to_Z*Slope)
+            else
+              ! Estimate the streamfunction at each interface [m3 s-1].
+              Sfn_unlim_u(I,K) = -((KH_u(I,j,K)*G%dy_Cu(I,j))*US%m_to_Z*Slope)
+            endif
 
             ! Avoid moving dense water upslope from below the level of
             ! the bottom on the receiving side.
@@ -867,6 +879,7 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV
           hN2_u(I,K) = N2_floor * dz_neglect
           Sfn_unlim_u(I,K) = 0.
         endif ! if (k > nk_linear)
+        !write(0,*) 'ELIZABETH', CS%id_sfn_unlim_x
         if (CS%id_sfn_unlim_x>0) diag_sfn_unlim_x(I,j,K) = Sfn_unlim_u(I,K)
       enddo ! i-loop
     enddo ! k-loop
@@ -1079,8 +1092,14 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV
             hN2_y_PE(i,J,k) = hN2_v(i,K) * US%m_to_Z
             if (CS%id_slope_y > 0) CS%diagSlopeY(I,j,k) = Slope
 
-            ! Estimate the streamfunction at each interface [m3 s-1].
-            Sfn_unlim_v(i,K) = -((KH_v(i,J,K)*G%dx_Cv(i,J))*US%m_to_Z*Slope)
+            if (CS%ELIZABETH_DIFFUSE) then
+              Coriolis_v= 0.5*( G%CoriolisBu(I,J) + G%CoriolisBu(I-1,J) )
+              factor_v=abs(Coriolis_v) - MAX(abs(Coriolis_v),abs(drdy*G_rho0/sqrt(abs(drdz*G_rho0))))
+              Sfn_unlim_v(i,K)=(G%dyCv(i,J))**2*factor_v*(G%dx_Cv(i,J)*US%m_to_Z*Slope)
+            else
+              ! Estimate the streamfunction at each interface [m3 s-1].
+              Sfn_unlim_v(i,K) = -((KH_v(i,J,K)*G%dx_Cv(i,J))*US%m_to_Z*Slope)
+            endif
 
             ! Avoid moving dense water upslope from below the level of
             ! the bottom on the receiving side.
@@ -1843,7 +1862,9 @@ subroutine thickness_diffuse_init(Time, G, GV, US, param_file, diag, CDp, CS)
   call get_param(param_file, mdl, "DEBUG", CS%debug, &
                  "If true, write out verbose debugging data.", &
                  default=.false., debuggingParam=.true.)
-
+  call get_param(param_file, mdl, "ELIZABETH_DIFFUSE", CS%ELIZABETH_DIFFUSE, &
+                 "If true, uses the symmetric instability parameterization \n"//&
+                 "(Yankovsky et al., 2019).", default=.false.)
   call get_param(param_file, mdl, "MEKE_GM_SRC_ALT", CS%GM_src_alt, &
                  "If true, use the GM energy conversion form S^2*N^2*kappa rather \n"//&
                  "than the streamfunction for the GM source term.", default=.false.)
