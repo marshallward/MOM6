@@ -1599,7 +1599,7 @@ end subroutine MOM_domains_init
 !> clone_MD_to_MD copies one MOM_domain_type into another, while allowing
 !! some properties of the new type to differ from the original one.
 subroutine clone_MD_to_MD(MD_in, MOM_dom, min_halo, halo_size, symmetric, &
-                          domain_name)
+                          domain_name, swap_axes)
   type(MOM_domain_type), intent(in)    :: MD_in  !< An existing MOM_domain
   type(MOM_domain_type), pointer       :: MOM_dom !< A pointer to a MOM_domain that will be
                                   !! allocated if it is unassociated, and will have data
@@ -1617,6 +1617,7 @@ subroutine clone_MD_to_MD(MD_in, MOM_dom, min_halo, halo_size, symmetric, &
   character(len=*), &
                optional, intent(in)    :: domain_name !< A name for the new domain, "MOM"
                                   !! if missing.
+  logical, optional, intent(in) :: swap_axes   ! If true, swap X and Y axes
 
   integer :: global_indices(4)
   logical :: mask_table_exists
@@ -1691,7 +1692,7 @@ end subroutine clone_MD_to_MD
 !! domain2d type, while allowing some properties of the new type to differ from
 !! the original one.
 subroutine clone_MD_to_d2D(MD_in, mpp_domain, min_halo, halo_size, symmetric, &
-                           domain_name)
+                           domain_name, swap_axes)
   type(MOM_domain_type), intent(in)    :: MD_in !< An existing MOM_domain to be cloned
   type(domain2d),        intent(inout) :: mpp_domain !< The new mpp_domain to be set up
   integer, dimension(2), &
@@ -1707,6 +1708,7 @@ subroutine clone_MD_to_d2D(MD_in, mpp_domain, min_halo, halo_size, symmetric, &
   character(len=*), &
                optional, intent(in)    :: domain_name !< A name for the new domain, "MOM"
                                   !! if missing.
+  logical, optional, intent(in) :: swap_axes   ! If true, swap X and Y axes
 
   integer :: global_indices(4), layout(2), io_layout(2)
   integer :: X_FLAGS, Y_FLAGS, niglobal, njglobal, nihalo, njhalo

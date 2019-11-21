@@ -179,7 +179,8 @@ type, public :: MOM_control_struct ; private
   real :: time_in_thermo_cycle !< The running time of the current time-stepping
                     !! cycle in calls that step the thermodynamics [T ~> s].
 
-  type(ocean_grid_type) :: G  !< structure containing metrics and grid info
+  type(ocean_grid_type) :: G      !< structure containing metrics and grid info
+  type(ocean_grid_type) :: G_rot  !< Rotated grid metric
   type(verticalGrid_type), pointer :: &
     GV => NULL()    !< structure containing vertical grid info
   type(unit_scale_type), pointer :: &
@@ -1529,6 +1530,12 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, restart_CSp, &
   type(unit_scale_type),  pointer :: US => NULL()
   character(len=4), parameter :: vers_num = 'v2.0'
 
+  ! Rotational grid testing
+  ! NOTE: reflect_grid could also be supported
+  logical :: rotate_grid  ! true if grid has been rotated from input
+  logical :: swap_axes    ! true if X and Y are swapped (e.g. rotation)
+  integer :: grid_qturns   ! Number of grid quater-turns
+
   ! This include declares and sets the variable "version".
 # include "version_variable.h"
 
@@ -1932,6 +1939,11 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, restart_CSp, &
 
   call callTree_waypoint("MOM parameters read (initialize_MOM)")
 
+  ! Grid rotation test
+  ! NOTE: rotate_grid is equivalient to grid_qturns = 0
+  call get_param(param_file, "MOM", "ROTATE_GRID", rotate_grid, default=.false.)
+  call get_param(param_file, "MOM", "GRID_QUARTER_TURNS", grid_qturns, default=0)
+
   ! Set up the model domain and grids.
 #ifdef SYMMETRIC_MEMORY_
   symmetric = .true.
@@ -1946,6 +1958,13 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, restart_CSp, &
 #else
   call MOM_domains_init(G%domain, param_file, symmetric=symmetric)
 #endif
+  if (rotate_grid) then
+    ! Quarter-turns swap X and Y, half-turns preserve domain shape
+    ! TODO: mod or modulo?  How to handle negative turns?
+    swap_axes = (mod(grid_qturns, 2) == 1)
+    clone_MOM_domain(G%Domain, G_rot%Domain, swap_axes=swap_axes)
+  endif
+
   call callTree_waypoint("domains initialized (initialize_MOM)")
 
   call MOM_debugging_init(param_file)
