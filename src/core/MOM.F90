@@ -1523,6 +1523,7 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, restart_CSp, &
                                                           !! dynamics timesteps.
   ! local variables
   type(ocean_grid_type),  pointer :: G => NULL() ! A pointer to a structure with metrics and related
+  type(ocean_grid_type),  pointer :: G_rot => NULL() ! A pointer to a structure with metrics and related
   type(hor_index_type)            :: HI  !  A hor_index_type for array extents
   type(verticalGrid_type), pointer :: GV => NULL()
   type(dyn_horgrid_type), pointer :: dG => NULL()
@@ -1607,6 +1608,9 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, restart_CSp, &
 
   if (test_grid_copy) then ; allocate(G)
   else ; G => CS%G ; endif
+
+  ! Convenience
+  G_rot => CS%G_rot
 
   CS%Time => Time
 
@@ -1962,7 +1966,7 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, restart_CSp, &
     ! Quarter-turns swap X and Y, half-turns preserve domain shape
     ! TODO: mod or modulo?  How to handle negative turns?
     swap_axes = (mod(grid_qturns, 2) == 1)
-    clone_MOM_domain(G%Domain, G_rot%Domain, swap_axes=swap_axes)
+    call clone_MOM_domain(G%Domain, G_rot%Domain, swap_axes=swap_axes)
   endif
 
   call callTree_waypoint("domains initialized (initialize_MOM)")

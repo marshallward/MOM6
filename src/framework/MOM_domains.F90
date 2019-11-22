@@ -1630,19 +1630,34 @@ subroutine clone_MD_to_MD(MD_in, MOM_dom, min_halo, halo_size, symmetric, &
   endif
 
 ! Save the extra data for creating other domains of different resolution that overlay this domain
-  MOM_dom%niglobal = MD_in%niglobal ; MOM_dom%njglobal = MD_in%njglobal
-  MOM_dom%nihalo = MD_in%nihalo ; MOM_dom%njhalo = MD_in%njhalo
-
   MOM_dom%symmetric = MD_in%symmetric
   MOM_dom%nonblocking_updates = MD_in%nonblocking_updates
 
-  MOM_dom%X_FLAGS = MD_in%X_FLAGS ; MOM_dom%Y_FLAGS = MD_in%Y_FLAGS
-  MOM_dom%layout(:) = MD_in%layout(:) ; MOM_dom%io_layout(:) = MD_in%io_layout(:)
+  if (swap_axes) then
+    MOM_dom%niglobal = MD_in%njglobal ; MOM_dom%njglobal = MD_in%niglobal
+    MOM_dom%nihalo = MD_in%njhalo ; MOM_dom%njhalo = MD_in%nihalo
+
+    MOM_dom%X_FLAGS = MD_in%Y_FLAGS ; MOM_dom%Y_FLAGS = MD_in%X_FLAGS
+    MOM_dom%layout(:) = MD_in%layout(2:1:-1)
+    MOM_dom%io_layout(:) = MD_in%io_layout(2:1:-1)
+  else
+    MOM_dom%niglobal = MD_in%niglobal ; MOM_dom%njglobal = MD_in%njglobal
+    MOM_dom%nihalo = MD_in%nihalo ; MOM_dom%njhalo = MD_in%njhalo
+
+    MOM_dom%X_FLAGS = MD_in%X_FLAGS ; MOM_dom%Y_FLAGS = MD_in%Y_FLAGS
+    MOM_dom%layout(:) = MD_in%layout(:)
+    MOM_dom%io_layout(:) = MD_in%io_layout(:)
+  endif
 
   if (associated(MD_in%maskmap)) then
     mask_table_exists = .true.
-    allocate(MOM_dom%maskmap(MOM_dom%layout(1), MOM_dom%layout(2)))
-    MOM_dom%maskmap(:,:) = MD_in%maskmap(:,:)
+    if (swap_axes) then
+      allocate(MOM_dom%maskmap(MOM_dom%layout(2), MOM_dom%layout(1)))
+      MOM_dom%maskmap(:,:) = transpose(MD_in%maskmap(:,:))
+    else
+      allocate(MOM_dom%maskmap(MOM_dom%layout(1), MOM_dom%layout(2)))
+      MOM_dom%maskmap(:,:) = MD_in%maskmap(:,:)
+    endif
   else
     mask_table_exists = .false.
   endif
@@ -1666,8 +1681,13 @@ subroutine clone_MD_to_MD(MD_in, MOM_dom, min_halo, halo_size, symmetric, &
   dom_name = "MOM"
   if (present(domain_name)) dom_name = trim(domain_name)
 
-  global_indices(1) = 1 ; global_indices(2) = MOM_dom%niglobal
-  global_indices(3) = 1 ; global_indices(4) = MOM_dom%njglobal
+  if (swap_axes)
+    global_indices(1) = 1 ; global_indices(2) = MOM_dom%njglobal
+    global_indices(3) = 1 ; global_indices(4) = MOM_dom%niglobal
+  else
+    global_indices(1) = 1 ; global_indices(2) = MOM_dom%niglobal
+    global_indices(3) = 1 ; global_indices(4) = MOM_dom%njglobal
+  endif
   if (mask_table_exists) then
     call MOM_define_domain( global_indices, MOM_dom%layout, MOM_dom%mpp_domain, &
                 xflags=MOM_dom%X_FLAGS, yflags=MOM_dom%Y_FLAGS, &
@@ -1714,6 +1734,9 @@ subroutine clone_MD_to_d2D(MD_in, mpp_domain, min_halo, halo_size, symmetric, &
   integer :: X_FLAGS, Y_FLAGS, niglobal, njglobal, nihalo, njhalo
   logical :: symmetric_dom
   character(len=64) :: dom_name
+
+  if (swap_axes) &
+    call MOM_error(FATAL, "swap_axes not supported for MOM_domain to domain2d")
 
 ! Save the extra data for creating other domains of different resolution that overlay this domain
   niglobal = MD_in%niglobal ; njglobal = MD_in%njglobal
