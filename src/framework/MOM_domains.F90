@@ -1681,7 +1681,7 @@ subroutine clone_MD_to_MD(MD_in, MOM_dom, min_halo, halo_size, symmetric, &
   dom_name = "MOM"
   if (present(domain_name)) dom_name = trim(domain_name)
 
-  if (swap_axes)
+  if (swap_axes) then
     global_indices(1) = 1 ; global_indices(2) = MOM_dom%njglobal
     global_indices(3) = 1 ; global_indices(4) = MOM_dom%niglobal
   else
