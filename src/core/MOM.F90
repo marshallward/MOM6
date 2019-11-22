@@ -1522,8 +1522,10 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, restart_CSp, &
                                                           !! calls to step_MOM instead of the number of
                                                           !! dynamics timesteps.
   ! local variables
-  type(ocean_grid_type),  pointer :: G => NULL() ! A pointer to a structure with metrics and related
-  type(ocean_grid_type),  pointer :: G_rot => NULL() ! A pointer to a structure with metrics and related
+  type(ocean_grid_type),  pointer :: G_in => NULL() ! A pointer to the metric grid as specified
+                                                    ! in the input configuration
+  type(ocean_grid_type),  pointer :: G => NULL()    ! A pointer to the metric grid use for the run.
+                                                    ! This grid may be rotated or reflected.
   type(hor_index_type)            :: HI  !  A hor_index_type for array extents
   type(verticalGrid_type), pointer :: GV => NULL()
   type(dyn_horgrid_type), pointer :: dG => NULL()
@@ -1608,9 +1610,6 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, restart_CSp, &
 
   if (test_grid_copy) then ; allocate(G)
   else ; G => CS%G ; endif
-
-  ! Convenience
-  G_rot => CS%G_rot
 
   CS%Time => Time
 
@@ -1955,19 +1954,17 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, restart_CSp, &
   symmetric = .false.
 #endif
 #ifdef STATIC_MEMORY_
-  call MOM_domains_init(G%domain, param_file, symmetric=symmetric, &
+  call MOM_domains_init(CS%G_in%domain, param_file, symmetric=symmetric, &
             static_memory=.true., NIHALO=NIHALO_, NJHALO=NJHALO_, &
             NIGLOBAL=NIGLOBAL_, NJGLOBAL=NJGLOBAL_, NIPROC=NIPROC_, &
             NJPROC=NJPROC_)
 #else
-  call MOM_domains_init(G%domain, param_file, symmetric=symmetric)
+  call MOM_domains_init(CS%G_in%domain, param_file, symmetric=symmetric)
 #endif
-  if (rotate_grid) then
-    ! Quarter-turns swap X and Y, half-turns preserve domain shape
-    ! TODO: mod or modulo?  How to handle negative turns?
-    swap_axes = (mod(grid_qturns, 2) == 1)
-    call clone_MOM_domain(G%Domain, G_rot%Domain, swap_axes=swap_axes)
-  endif
+
+  ! Copy input grid (G_in) domain to active grid G
+  swap_axes = (modulo(grid_qturns, 2) == 1)
+  call clone_MOM_domain(CS%G_in%Domain, CS%G%Domain, swap_axes=swap_axes)
 
   call callTree_waypoint("domains initialized (initialize_MOM)")
 
