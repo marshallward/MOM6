@@ -179,8 +179,8 @@ type, public :: MOM_control_struct ; private
   real :: time_in_thermo_cycle !< The running time of the current time-stepping
                     !! cycle in calls that step the thermodynamics [T ~> s].
 
-  type(ocean_grid_type) :: G      !< structure containing metrics and grid info
-  type(ocean_grid_type) :: G_rot  !< Rotated grid metric
+  type(ocean_grid_type) :: G_in      !< structure containing metrics and grid info
+  type(ocean_grid_type) :: G         !< Rotated grid metric
   type(verticalGrid_type), pointer :: &
     GV => NULL()    !< structure containing vertical grid info
   type(unit_scale_type), pointer :: &
@@ -1522,10 +1522,7 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, restart_CSp, &
                                                           !! calls to step_MOM instead of the number of
                                                           !! dynamics timesteps.
   ! local variables
-  type(ocean_grid_type),  pointer :: G_in => NULL() ! A pointer to the metric grid as specified
-                                                    ! in the input configuration
-  type(ocean_grid_type),  pointer :: G => NULL()    ! A pointer to the metric grid use for the run.
-                                                    ! This grid may be rotated or reflected.
+  type(ocean_grid_type),  pointer :: G => NULL()    ! A pointer to the metric grid use for the run
   type(hor_index_type)            :: HI  !  A hor_index_type for array extents
   type(verticalGrid_type), pointer :: GV => NULL()
   type(dyn_horgrid_type), pointer :: dG => NULL()

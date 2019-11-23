@@ -1692,16 +1692,33 @@ subroutine clone_MD_to_MD(MD_in, MOM_dom, min_halo, halo_size, symmetric, &
   if (present(domain_name)) dom_name = trim(domain_name)
 
   if (mask_table_exists) then
-    call MOM_define_domain( global_indices, MOM_dom%layout, MOM_dom%mpp_domain, &
+    call MOM_define_domain(global_indices, MOM_dom%layout, MOM_dom%mpp_domain, &
                 xflags=MOM_dom%X_FLAGS, yflags=MOM_dom%Y_FLAGS, &
                 xhalo=MOM_dom%nihalo, yhalo=MOM_dom%njhalo, &
-                symmetry = MOM_dom%symmetric, name=dom_name, &
-                maskmap=MOM_dom%maskmap )
+                symmetry=MOM_dom%symmetric, name=dom_name, &
+                maskmap=MOM_dom%maskmap)
+
+    global_indices(2) = global_indices(2) / 2
+    global_indices(4) = global_indices(4) / 2
+    call MOM_define_domain(global_indices, MOM_dom%layout, &
+                MOM_dom%mpp_domain_d2, &
+                xflags=MOM_dom%X_FLAGS, yflags=MOM_dom%Y_FLAGS, &
+                xhalo=(MOM_dom%nihalo/2), yhalo=(MOM_dom%njhalo/2), &
+                symmetry=MOM_dom%symmetric, name=dom_name, &
+                maskmap=MOM_dom%maskmap)
   else
-    call MOM_define_domain( global_indices, MOM_dom%layout, MOM_dom%mpp_domain, &
+    call MOM_define_domain(global_indices, MOM_dom%layout, MOM_dom%mpp_domain, &
                 xflags=MOM_dom%X_FLAGS, yflags=MOM_dom%Y_FLAGS, &
                 xhalo=MOM_dom%nihalo, yhalo=MOM_dom%njhalo, &
-                symmetry = MOM_dom%symmetric, name=dom_name)
+                symmetry=MOM_dom%symmetric, name=dom_name)
+
+    global_indices(2) = global_indices(2) / 2
+    global_indices(4) = global_indices(4) / 2
+    call MOM_define_domain(global_indices, MOM_dom%layout, &
+                MOM_dom%mpp_domain_d2, &
+                xflags=MOM_dom%X_FLAGS, yflags=MOM_dom%Y_FLAGS, &
+                xhalo=(MOM_dom%nihalo/2), yhalo=(MOM_dom%njhalo/2), &
+                symmetry=MOM_dom%symmetric, name=dom_name)
   endif
 
   if ((MOM_dom%io_layout(1) + MOM_dom%io_layout(2) > 0) .and. &
