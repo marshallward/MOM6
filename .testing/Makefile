@@ -182,6 +182,7 @@ test: $(foreach t,$(TESTS),test.$(t))
 .PHONY: $(foreach t,$(TESTS),test.$(t))
 test.grids: $(foreach c,$(filter-out tc3,$(CONFIGS)),$(c).grid $(c).grid.diag)
 test.layouts: $(foreach c,$(CONFIGS),$(c).layout $(c).layout.diag)
+test.rotation: $(foreach c,$(CONFIGS),$(c).rotate $(c).rotate.diag)
 test.restarts: $(foreach c,$(CONFIGS),$(c).restart)
 test.repros: $(foreach c,$(CONFIGS),$(c).repro $(c).repro.diag)
 test.openmps: $(foreach c,$(CONFIGS),$(c).openmp $(c).openmp.diag)
@@ -203,6 +204,7 @@ endef
 
 $(eval $(call CMP_RULE,grid,symmetric asymmetric))
 $(eval $(call CMP_RULE,layout,symmetric layout))
+$(eval $(call CMP_RULE,rotate,symmetric rotate))
 $(eval $(call CMP_RULE,repro,symmetric repro))
 $(eval $(call CMP_RULE,openmp,symmetric openmp))
 $(eval $(call CMP_RULE,nan,symmetric nan))
@@ -252,7 +254,7 @@ results/%/ocean.stats.$(1): ../build/$(2)/MOM6
 	mkdir -p work/$$*/$(1)
 	cp -rL $$*/* work/$$*/$(1)
 	mkdir -p work/$$*/$(1)/RESTART
-	echo $(4) > work/$$*/$(1)/MOM_override
+	echo -e "$(4)" > work/$$*/$(1)/MOM_override
 	cd work/$$*/$(1) && $$(call MPIRUN_CMD,$(5)) -n $(6) ../../../$$< 2> debug.out > std.out \
 		|| ! sed 's/^/$$*.$(1): /' std.out debug.out \
 		&& sed 's/^/$$*.$(1): /' std.out
@@ -274,6 +276,7 @@ $(eval $(call STAT_RULE,target,target,,,,1))
 $(eval $(call STAT_RULE,repro,repro,,,,1))
 $(eval $(call STAT_RULE,openmp,openmp,,,,1))
 $(eval $(call STAT_RULE,layout,symmetric,,LAYOUT=2$(,)1,,2))
+$(eval $(call STAT_RULE,rotate,symmetric,,ROTATE_GRID=True\nGRID_QUARTER_TURNS=1,,1))
 $(eval $(call STAT_RULE,nan,symmetric,,,MALLOC_PERTURB_=256,1))
 $(eval $(call STAT_RULE,dim.t,symmetric,,T_RESCALE_POWER=11,,1))
 $(eval $(call STAT_RULE,dim.l,symmetric,,L_RESCALE_POWER=11,,1))

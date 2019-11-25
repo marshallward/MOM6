@@ -1941,8 +1941,10 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, restart_CSp, &
 
   ! Grid rotation test
   ! NOTE: rotate_grid is equivalient to grid_qturns = 0
-  call get_param(param_file, "MOM", "ROTATE_GRID", rotate_grid, default=.false.)
-  call get_param(param_file, "MOM", "GRID_QUARTER_TURNS", grid_qturns, default=0)
+  call get_param(param_file, "MOM", "ROTATE_GRID", rotate_grid, &
+                 "Enable rotation of the horizontal grid.", default=.false.)
+  call get_param(param_file, "MOM", "GRID_QUARTER_TURNS", grid_qturns, &
+                 "Angle of grid rotation, in units of quarter-turns.", default=0)
 
   ! Set up the model domain and grids.
 #ifdef SYMMETRIC_MEMORY_
@@ -1960,7 +1962,7 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, restart_CSp, &
 #endif
 
   ! Copy input grid (G_in) domain to active grid G
-  swap_axes = (modulo(grid_qturns, 2) == 1)
+  swap_axes = (modulo(grid_qturns, 2) == 1)   ! Half turns do not swap axes
   call clone_MOM_domain(CS%G_in%Domain, CS%G%Domain, swap_axes=swap_axes)
 
   call callTree_waypoint("domains initialized (initialize_MOM)")
