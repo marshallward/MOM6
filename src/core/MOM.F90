@@ -1958,7 +1958,8 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, restart_CSp, &
             NIGLOBAL=NIGLOBAL_, NJGLOBAL=NJGLOBAL_, NIPROC=NIPROC_, &
             NJPROC=NJPROC_)
 #else
-  call MOM_domains_init(CS%G_in%domain, param_file, symmetric=symmetric)
+  call MOM_domains_init(CS%G_in%domain, param_file, symmetric=symmetric, &
+                        domain_name="MOM_in")
 #endif
 
   ! Copy input grid (G_in) domain to active grid G

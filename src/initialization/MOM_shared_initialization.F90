@@ -1271,11 +1271,7 @@ subroutine write_ocean_geometry_file(G, param_file, directory, geom_file, US)
                    file_threading, dG=G)
 
   do J=Jsq,Jeq; do I=Isq,Ieq; out_q(I,J) = G%geoLatBu(I,J); enddo ; enddo
-  print *, "start geolatb"
-  print *, "shape(out_q):", shape(out_q)
-  print *, "shape(out_h):", shape(out_h)
   call write_field(unit, fields(1), G%Domain%mpp_domain, out_q)
-  print *, "done geolatb"
   do J=Jsq,Jeq; do I=Isq,Ieq; out_q(I,J) = G%geoLonBu(I,J); enddo ; enddo
   call write_field(unit, fields(2), G%Domain%mpp_domain, out_q)
   call write_field(unit, fields(3), G%Domain%mpp_domain, G%geoLatT)
