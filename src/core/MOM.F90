@@ -1523,7 +1523,7 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, restart_CSp, &
                                                           !! dynamics timesteps.
   ! local variables
   type(ocean_grid_type),  pointer :: G => NULL()    ! A pointer to the metric grid use for the run
-  type(hor_index_type)            :: HI  !  A hor_index_type for array extents
+  type(hor_index_type),   pointer :: HI => NULL()   ! A hor_index_type for array extents
   type(verticalGrid_type), pointer :: GV => NULL()
   type(dyn_horgrid_type), pointer :: dG => NULL()
   type(diag_ctrl),        pointer :: diag => NULL()
@@ -1535,6 +1535,8 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, restart_CSp, &
   logical :: rotate_grid  ! true if grid has been rotated from input
   logical :: swap_axes    ! true if X and Y are swapped (e.g. rotation)
   integer :: grid_qturns   ! Number of grid quater-turns
+  type(hor_index_type), target :: HI_in
+  type(dyn_horgrid_type), pointer :: dG_in
 
   ! This include declares and sets the variable "version".
 # include "version_variable.h"
@@ -1940,11 +1942,11 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, restart_CSp, &
   call callTree_waypoint("MOM parameters read (initialize_MOM)")
 
   ! Grid rotation test
-  ! NOTE: rotate_grid is equivalient to grid_qturns = 0
+  ! NOTE: rotate_grid is equivalent to grid_qturns % 4 == 0
   call get_param(param_file, "MOM", "ROTATE_GRID", rotate_grid, &
                  "Enable rotation of the horizontal grid.", default=.false.)
   call get_param(param_file, "MOM", "GRID_QUARTER_TURNS", grid_qturns, &
-                 "Angle of grid rotation, in units of quarter-turns.", default=0)
+                 "Angle of grid rotation, in units of quarter-turns.", default=1)
 
   ! Set up the model domain and grids.
 #ifdef SYMMETRIC_MEMORY_
@@ -1963,7 +1965,8 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, restart_CSp, &
 #endif
 
   ! Copy input grid (G_in) domain to active grid G
-  swap_axes = (modulo(grid_qturns, 2) == 1)   ! Half turns do not swap axes
+  ! Swap axes for quarter and 3-quarter turns
+  swap_axes = rotate_grid .and. (modulo(grid_qturns, 2) == 1)
   call clone_MOM_domain(CS%G_in%Domain, CS%G%Domain, swap_axes=swap_axes)
 
   call callTree_waypoint("domains initialized (initialize_MOM)")
@@ -1972,11 +1975,19 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, restart_CSp, &
   call diag_mediator_infrastructure_init()
   call MOM_io_init(param_file)
 
-  call hor_index_init(G%Domain, HI, param_file, &
+  call hor_index_init(CS%G%Domain, HI_in, param_file, &
                       local_indexing=.not.global_indexing)
+  call create_dyn_horgrid(dG_in, HI_in, bathymetry_at_vel=bathy_at_vel)
+  call clone_MOM_domain(CS%G_in%Domain, dG_in%Domain)
 
-  call create_dyn_horgrid(dG, HI, bathymetry_at_vel=bathy_at_vel)
-  call clone_MOM_domain(G%Domain, dG%Domain)
+  if (rotate_grid .and. modulo(grid_qturns, 4) /= 0) then
+    ! TODO: Rotate the grids
+    dG => dG_in
+    HI => HI_in
+  else
+    dG => dG_in
+    HI => HI_in
+  endif
 
   call verticalGridInit( param_file, CS%GV, US )
   GV => CS%GV
