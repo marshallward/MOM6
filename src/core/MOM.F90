@@ -108,6 +108,7 @@ use MOM_tracer_flow_control,   only : call_tracer_register, tracer_flow_control_
 use MOM_tracer_flow_control,   only : tracer_flow_control_init, call_tracer_surface_state
 use MOM_tracer_flow_control,   only : tracer_flow_control_end
 use MOM_transcribe_grid,       only : copy_dyngrid_to_MOM_grid, copy_MOM_grid_to_dyngrid
+use MOM_transcribe_grid,       only : rotate_dyngrid
 use MOM_unit_scaling,          only : unit_scale_type, unit_scaling_init
 use MOM_unit_scaling,          only : unit_scaling_end, fix_restart_unit_scaling
 use MOM_variables,             only : surface, allocate_surface_state, deallocate_surface_state
@@ -2009,8 +2010,8 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, restart_CSp, &
 
   ! Allocate initialize time-invariant MOM variables.
   call MOM_initialize_fixed(dG_in, US, CS%OBC, param_file, write_geom_files, dirs%output_directory)
-  !if (rotate_grid) &
-  !  call rotate_dyngrid(dG_in, dG)
+  if (rotate_grid) &
+    call rotate_dyngrid(dG_in, dG, US, grid_qturns)
 
   call callTree_waypoint("returned from MOM_initialize_fixed() (initialize_MOM)")
 

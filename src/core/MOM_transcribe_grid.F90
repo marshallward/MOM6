@@ -305,116 +305,112 @@ subroutine copy_MOM_grid_to_dyngrid(oG, dG, US)
 
 end subroutine copy_MOM_grid_to_dyngrid
 
-subroutine rotate_dyngrid(G_in, G, qturn)
+subroutine rotate_dyngrid(G_in, G, US, turns)
   type(dyn_horgrid_type), intent(in)    :: G_in   !< Common horizontal grid type
   type(dyn_horgrid_type), intent(inout) :: G      !< Ocean grid type
-  integer, intent(in) :: qturn
+  type(unit_scale_type),  intent(in)    :: US     !< A dimensional unit scaling type
+  integer, intent(in) :: turns
+
+  integer :: jsc, jec, jscB, jecB
+  integer :: qturn
+
+
 
   !<<< Everything below here is garbage copypasta
 
-  integer :: isd, ied, jsd, jed      ! Common data domains.
-  integer :: IsdB, IedB, JsdB, JedB  ! Common data domains.
-  integer :: Igst, Jgst              ! Global starting indices.
-  integer :: i, j
-
-  ! MOM_grid_init and create_dyn_horgrid are called outside of this routine.
-  ! This routine copies over the fields that were set by MOM_initialized_fixed.
-
-  !isd = max(oG%isd, dG%isd+ido) ; jsd = max(oG%jsd, dG%jsd+jdo)
-  !ied = min(oG%ied, dG%ied+ido) ; jed = min(oG%jed, dG%jed+jdo)
-  !IsdB = max(oG%IsdB, dG%IsdB+ido) ; JsdB = max(oG%JsdB, dG%JsdB+jdo)
-  !IedB = min(oG%IedB, dG%IedB+ido) ; JedB = min(oG%JedB, dG%JedB+jdo)
-
   !! Check that the grids conform.
+  ! TODO: Fix this up for rotation
   !if ((isd > oG%isc) .or. (ied < oG%ied) .or. (jsd > oG%jsc) .or. (jed > oG%jed)) &
   !  call MOM_error(FATAL, "copy_dyngrid_to_MOM_grid called with incompatible grids.")
 
+  ! XXX: Just test +90° rotation for now
+  ! TODO: Iterate over fields?  Probably not practical...
+  qturn = modulo(turns, 4)
 
-  !
+  if (qturn == 1) then
+    G%geoLonT = rotate_quarter(G_in%geoLonT)
+    G%geoLatT = rotate_quarter(G_in%geoLatT)
+    G%dxT = rotate_quarter(G_in%dxT)
+    G%dyT = rotate_quarter(G_in%dyT)
+    G%areaT = rotate_quarter(G_in%areaT)
+    G%bathyT = rotate_quarter(G_in%bathyT)
 
+    G%dF_dx = rotate_quarter(G_in%dF_dx)
+    G%dF_dy = rotate_quarter(G_in%dF_dy)
+    G%sin_rot = rotate_quarter(G_in%sin_rot)
+    G%cos_rot = rotate_quarter(G_in%cos_rot)
+    G%mask2dT = rotate_quarter(G_in%mask2dT)
 
-  !do i=isd,ied ; do j=jsd,jed
-  !  oG%geoLonT(i,j) = dG%geoLonT(i+ido,j+jdo)
-  !  oG%geoLatT(i,j) = dG%geoLatT(i+ido,j+jdo)
-  !  oG%dxT(i,j) = dG%dxT(i+ido,j+jdo)
-  !  oG%dyT(i,j) = dG%dyT(i+ido,j+jdo)
-  !  oG%areaT(i,j) = dG%areaT(i+ido,j+jdo)
-  !  oG%bathyT(i,j) = dG%bathyT(i+ido,j+jdo)
+    G%geoLonCu = rotate_quarter(G_in%geoLonCu)
+    G%geoLatCu = rotate_quarter(G_in%geoLatCu)
+    G%dxCu = rotate_quarter(G_in%dxCu)
+    G%dyCu = rotate_quarter(G_in%dyCu)
+    G%dy_Cu = rotate_quarter(G_in%dy_Cu)
 
-  !  oG%dF_dx(i,j) = dG%dF_dx(i+ido,j+jdo)
-  !  oG%dF_dy(i,j) = dG%dF_dy(i+ido,j+jdo)
-  !  oG%sin_rot(i,j) = dG%sin_rot(i+ido,j+jdo)
-  !  oG%cos_rot(i,j) = dG%cos_rot(i+ido,j+jdo)
-  !  oG%mask2dT(i,j) = dG%mask2dT(i+ido,j+jdo)
-  !enddo ; enddo
+    G%mask2dCu = rotate_quarter(G_in%mask2dCu)
+    G%areaCu = rotate_quarter(G_in%areaCu)
+    G%IareaCu = rotate_quarter(G_in%IareaCu)
 
-  !do I=IsdB,IedB ; do j=jsd,jed
-  !  oG%geoLonCu(I,j) = dG%geoLonCu(I+ido,j+jdo)
-  !  oG%geoLatCu(I,j) = dG%geoLatCu(I+ido,j+jdo)
-  !  oG%dxCu(I,j) = dG%dxCu(I+ido,j+jdo)
-  !  oG%dyCu(I,j) = dG%dyCu(I+ido,j+jdo)
-  !  oG%dy_Cu(I,j) = dG%dy_Cu(I+ido,j+jdo)
+    G%geoLonCv = rotate_quarter(G_in%geoLonCv)
+    G%geoLatCv = rotate_quarter(G_in%geoLatCv)
+    G%dxCv = rotate_quarter(G_in%dxCv)
+    G%dyCv = rotate_quarter(G_in%dyCv)
+    G%dx_Cv = rotate_quarter(G_in%dx_Cv)
 
-  !  oG%mask2dCu(I,j) = dG%mask2dCu(I+ido,j+jdo)
-  !  oG%areaCu(I,j) = dG%areaCu(I+ido,j+jdo)
-  !  oG%IareaCu(I,j) = dG%IareaCu(I+ido,j+jdo)
-  !enddo ; enddo
+    G%mask2dCv = rotate_quarter(G_in%mask2dCv)
+    G%areaCv = rotate_quarter(G_in%areaCv)
+    G%IareaCv = rotate_quarter(G_in%IareaCv)
 
-  !do i=isd,ied ; do J=JsdB,JedB
-  !  oG%geoLonCv(i,J) = dG%geoLonCv(i+ido,J+jdo)
-  !  oG%geoLatCv(i,J) = dG%geoLatCv(i+ido,J+jdo)
-  !  oG%dxCv(i,J) = dG%dxCv(i+ido,J+jdo)
-  !  oG%dyCv(i,J) = dG%dyCv(i+ido,J+jdo)
-  !  oG%dx_Cv(i,J) = dG%dx_Cv(i+ido,J+jdo)
+    G%geoLonBu = rotate_quarter(G_in%geoLonBu)
+    G%geoLatBu = rotate_quarter(G_in%geoLatBu)
+    G%dxBu = rotate_quarter(G_in%dxBu)
+    G%dyBu = rotate_quarter(G_in%dyBu)
+    G%areaBu = rotate_quarter(G_in%areaBu)
+    G%CoriolisBu = rotate_quarter(G_in%CoriolisBu)
+    G%mask2dBu = rotate_quarter(G_in%mask2dBu)
 
-  !  oG%mask2dCv(i,J) = dG%mask2dCv(i+ido,J+jdo)
-  !  oG%areaCv(i,J) = dG%areaCv(i+ido,J+jdo)
-  !  oG%IareaCv(i,J) = dG%IareaCv(i+ido,J+jdo)
-  !enddo ; enddo
+    G%bathymetry_at_vel = G_in%bathymetry_at_vel
+    if (G%bathymetry_at_vel) then
+      G%Dblock_u = rotate_quarter(G_in%Dblock_u)
+      G%Dopen_u = rotate_quarter(G_in%Dopen_u)
 
-  !do I=IsdB,IedB ; do J=JsdB,JedB
-  !  oG%geoLonBu(I,J) = dG%geoLonBu(I+ido,J+jdo)
-  !  oG%geoLatBu(I,J) = dG%geoLatBu(I+ido,J+jdo)
-  !  oG%dxBu(I,J) = dG%dxBu(I+ido,J+jdo)
-  !  oG%dyBu(I,J) = dG%dyBu(I+ido,J+jdo)
-  !  oG%areaBu(I,J) = dG%areaBu(I+ido,J+jdo)
-  !  oG%CoriolisBu(I,J) = dG%CoriolisBu(I+ido,J+jdo)
-  !  oG%mask2dBu(I,J) = dG%mask2dBu(I+ido,J+jdo)
-  !enddo ; enddo
+      G%Dblock_v = rotate_quarter(G_in%Dblock_v)
+      G%Dopen_v = rotate_quarter(G_in%Dopen_v)
+    endif
 
-  !oG%bathymetry_at_vel = dG%bathymetry_at_vel
-  !if (oG%bathymetry_at_vel) then
-  !  do I=IsdB,IedB ; do j=jsd,jed
-  !    oG%Dblock_u(I,j) = dG%Dblock_u(I+ido,j+jdo)
-  !    oG%Dopen_u(I,j) = dG%Dopen_u(I+ido,j+jdo)
-  !  enddo ; enddo
-  !  do i=isd,ied ; do J=JsdB,JedB
-  !    oG%Dblock_v(i,J) = dG%Dblock_v(i+ido,J+jdo)
-  !    oG%Dopen_v(i,J) = dG%Dopen_v(i+ido,J+jdo)
-  !  enddo ; enddo
-  !endif
+    G%gridLonT(:) = G_in%gridLatT(G_in%jeg:G_in%jsg:-1)
+    G%gridLatT(:) = G_in%gridLonT(:)
+    G%gridLonB(:) = G_in%gridLatB(G_in%jeg:(G_in%jsg-1):-1)
+    G%gridLatB(:) = G_in%gridLonB(:)
 
-  !oG%gridLonT(oG%isg:oG%ieg) = dG%gridLonT(dG%isg:dG%ieg)
-  !oG%gridLatT(oG%jsg:oG%jeg) = dG%gridLatT(dG%jsg:dG%jeg)
-  !! The more complicated logic here avoids segmentation faults if one grid uses
-  !! global symmetric memory while the other does not.  Because a northeast grid
-  !! convention is being used, the upper bounds for each array correspond.
-  !!   Note that the dynamic grid always uses symmetric memory.
-  !Ido2 = dG%IegB-oG%IegB ; Igst = max(oG%IsgB, (dG%isg-1)-Ido2)
-  !Jdo2 = dG%JegB-oG%JegB ; Jgst = max(oG%JsgB, (dG%jsg-1)-Jdo2)
-  !do I=Igst,oG%IegB ; oG%gridLonB(I) = dG%gridLonB(I+Ido2) ; enddo
-  !do J=Jgst,oG%JegB ; oG%gridLatB(J) = dG%gridLatB(J+Jdo2) ; enddo
+    !! Derived grids (from set_derived_dyn_horgrid)
+    !G%IdxT = rotate_quarter(G_in%IdxT)
+    !G%IdyT = rotate_quarter(G_in%IdyT)
+    !G%IareaT = rotate_quarter(G_in%IareaT)
+    !G%IdxCu = rotate_quarter(G_in%IdxCu)
+    !G%IdyCu = rotate_quarter(G_in%IdyCu)
+    !G%IdxCv = rotate_quarter(G_in%IdxCv)
+    !G%IdyCv = rotate_quarter(G_in%IdyCv)
+    !G%IdxBu = rotate_quarter(G_in%IdxBu)
+    !G%IdyBu = rotate_quarter(G_in%IdyBu)
+    !G%IareaBu = rotate_quarter(G_in%IareaBu)
 
-  !! Copy various scalar variables and strings.
-  !oG%x_axis_units = dG%x_axis_units ; oG%y_axis_units = dG%y_axis_units
-  !oG%areaT_global = dG%areaT_global ; oG%IareaT_global = dG%IareaT_global
-  !oG%south_lat = dG%south_lat ; oG%west_lon  = dG%west_lon
-  !oG%len_lat = dG%len_lat ; oG%len_lon = dG%len_lon
-  !oG%Rad_Earth = dG%Rad_Earth ; oG%max_depth = dG%max_depth
+    G%x_axis_units = G_in%y_axis_units
+    G%y_axis_units = G_in%x_axis_units
+    G%south_lat = G_in%west_lon
+    G%west_lon  = G_in%south_lat + G_in%len_lat
+    G%len_lat = G_in%len_lon
+    G%len_lon = -G_in%len_lat
+  endif
 
-  !!>>> end garbage
+  ! Rotation-invariant fields
+  G%areaT_global = G_in%areaT_global
+  G%IareaT_global = G_in%IareaT_global
+  G%Rad_Earth = G_in%Rad_Earth
+  G%max_depth = G_in%max_depth
 
-  !call set_derived_metrics(G, US)
+  ! Either do this or copy the derived grids, still not sure...
+  call set_derived_dyn_horgrid(G, US)
 
 end subroutine rotate_dyngrid
 
