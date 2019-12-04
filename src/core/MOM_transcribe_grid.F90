@@ -13,7 +13,7 @@ use MOM_unit_scaling, only : unit_scale_type
 
 implicit none ; private
 
-public copy_dyngrid_to_MOM_grid, copy_MOM_grid_to_dyngrid
+public copy_dyngrid_to_MOM_grid, copy_MOM_grid_to_dyngrid, rotate_dyngrid
 
 contains
 
@@ -304,5 +304,165 @@ subroutine copy_MOM_grid_to_dyngrid(oG, dG, US)
   call  set_derived_dyn_horgrid(dG, US)
 
 end subroutine copy_MOM_grid_to_dyngrid
+
+subroutine rotate_dyngrid(G_in, G, qturn)
+  type(dyn_horgrid_type), intent(in)    :: G_in   !< Common horizontal grid type
+  type(dyn_horgrid_type), intent(inout) :: G      !< Ocean grid type
+  integer, intent(in) :: qturn
+
+  !<<< Everything below here is garbage copypasta
+
+  integer :: isd, ied, jsd, jed      ! Common data domains.
+  integer :: IsdB, IedB, JsdB, JedB  ! Common data domains.
+  integer :: Igst, Jgst              ! Global starting indices.
+  integer :: i, j
+
+  ! MOM_grid_init and create_dyn_horgrid are called outside of this routine.
+  ! This routine copies over the fields that were set by MOM_initialized_fixed.
+
+  !isd = max(oG%isd, dG%isd+ido) ; jsd = max(oG%jsd, dG%jsd+jdo)
+  !ied = min(oG%ied, dG%ied+ido) ; jed = min(oG%jed, dG%jed+jdo)
+  !IsdB = max(oG%IsdB, dG%IsdB+ido) ; JsdB = max(oG%JsdB, dG%JsdB+jdo)
+  !IedB = min(oG%IedB, dG%IedB+ido) ; JedB = min(oG%JedB, dG%JedB+jdo)
+
+  !! Check that the grids conform.
+  !if ((isd > oG%isc) .or. (ied < oG%ied) .or. (jsd > oG%jsc) .or. (jed > oG%jed)) &
+  !  call MOM_error(FATAL, "copy_dyngrid_to_MOM_grid called with incompatible grids.")
+
+
+  !
+
+
+  !do i=isd,ied ; do j=jsd,jed
+  !  oG%geoLonT(i,j) = dG%geoLonT(i+ido,j+jdo)
+  !  oG%geoLatT(i,j) = dG%geoLatT(i+ido,j+jdo)
+  !  oG%dxT(i,j) = dG%dxT(i+ido,j+jdo)
+  !  oG%dyT(i,j) = dG%dyT(i+ido,j+jdo)
+  !  oG%areaT(i,j) = dG%areaT(i+ido,j+jdo)
+  !  oG%bathyT(i,j) = dG%bathyT(i+ido,j+jdo)
+
+  !  oG%dF_dx(i,j) = dG%dF_dx(i+ido,j+jdo)
+  !  oG%dF_dy(i,j) = dG%dF_dy(i+ido,j+jdo)
+  !  oG%sin_rot(i,j) = dG%sin_rot(i+ido,j+jdo)
+  !  oG%cos_rot(i,j) = dG%cos_rot(i+ido,j+jdo)
+  !  oG%mask2dT(i,j) = dG%mask2dT(i+ido,j+jdo)
+  !enddo ; enddo
+
+  !do I=IsdB,IedB ; do j=jsd,jed
+  !  oG%geoLonCu(I,j) = dG%geoLonCu(I+ido,j+jdo)
+  !  oG%geoLatCu(I,j) = dG%geoLatCu(I+ido,j+jdo)
+  !  oG%dxCu(I,j) = dG%dxCu(I+ido,j+jdo)
+  !  oG%dyCu(I,j) = dG%dyCu(I+ido,j+jdo)
+  !  oG%dy_Cu(I,j) = dG%dy_Cu(I+ido,j+jdo)
+
+  !  oG%mask2dCu(I,j) = dG%mask2dCu(I+ido,j+jdo)
+  !  oG%areaCu(I,j) = dG%areaCu(I+ido,j+jdo)
+  !  oG%IareaCu(I,j) = dG%IareaCu(I+ido,j+jdo)
+  !enddo ; enddo
+
+  !do i=isd,ied ; do J=JsdB,JedB
+  !  oG%geoLonCv(i,J) = dG%geoLonCv(i+ido,J+jdo)
+  !  oG%geoLatCv(i,J) = dG%geoLatCv(i+ido,J+jdo)
+  !  oG%dxCv(i,J) = dG%dxCv(i+ido,J+jdo)
+  !  oG%dyCv(i,J) = dG%dyCv(i+ido,J+jdo)
+  !  oG%dx_Cv(i,J) = dG%dx_Cv(i+ido,J+jdo)
+
+  !  oG%mask2dCv(i,J) = dG%mask2dCv(i+ido,J+jdo)
+  !  oG%areaCv(i,J) = dG%areaCv(i+ido,J+jdo)
+  !  oG%IareaCv(i,J) = dG%IareaCv(i+ido,J+jdo)
+  !enddo ; enddo
+
+  !do I=IsdB,IedB ; do J=JsdB,JedB
+  !  oG%geoLonBu(I,J) = dG%geoLonBu(I+ido,J+jdo)
+  !  oG%geoLatBu(I,J) = dG%geoLatBu(I+ido,J+jdo)
+  !  oG%dxBu(I,J) = dG%dxBu(I+ido,J+jdo)
+  !  oG%dyBu(I,J) = dG%dyBu(I+ido,J+jdo)
+  !  oG%areaBu(I,J) = dG%areaBu(I+ido,J+jdo)
+  !  oG%CoriolisBu(I,J) = dG%CoriolisBu(I+ido,J+jdo)
+  !  oG%mask2dBu(I,J) = dG%mask2dBu(I+ido,J+jdo)
+  !enddo ; enddo
+
+  !oG%bathymetry_at_vel = dG%bathymetry_at_vel
+  !if (oG%bathymetry_at_vel) then
+  !  do I=IsdB,IedB ; do j=jsd,jed
+  !    oG%Dblock_u(I,j) = dG%Dblock_u(I+ido,j+jdo)
+  !    oG%Dopen_u(I,j) = dG%Dopen_u(I+ido,j+jdo)
+  !  enddo ; enddo
+  !  do i=isd,ied ; do J=JsdB,JedB
+  !    oG%Dblock_v(i,J) = dG%Dblock_v(i+ido,J+jdo)
+  !    oG%Dopen_v(i,J) = dG%Dopen_v(i+ido,J+jdo)
+  !  enddo ; enddo
+  !endif
+
+  !oG%gridLonT(oG%isg:oG%ieg) = dG%gridLonT(dG%isg:dG%ieg)
+  !oG%gridLatT(oG%jsg:oG%jeg) = dG%gridLatT(dG%jsg:dG%jeg)
+  !! The more complicated logic here avoids segmentation faults if one grid uses
+  !! global symmetric memory while the other does not.  Because a northeast grid
+  !! convention is being used, the upper bounds for each array correspond.
+  !!   Note that the dynamic grid always uses symmetric memory.
+  !Ido2 = dG%IegB-oG%IegB ; Igst = max(oG%IsgB, (dG%isg-1)-Ido2)
+  !Jdo2 = dG%JegB-oG%JegB ; Jgst = max(oG%JsgB, (dG%jsg-1)-Jdo2)
+  !do I=Igst,oG%IegB ; oG%gridLonB(I) = dG%gridLonB(I+Ido2) ; enddo
+  !do J=Jgst,oG%JegB ; oG%gridLatB(J) = dG%gridLatB(J+Jdo2) ; enddo
+
+  !! Copy various scalar variables and strings.
+  !oG%x_axis_units = dG%x_axis_units ; oG%y_axis_units = dG%y_axis_units
+  !oG%areaT_global = dG%areaT_global ; oG%IareaT_global = dG%IareaT_global
+  !oG%south_lat = dG%south_lat ; oG%west_lon  = dG%west_lon
+  !oG%len_lat = dG%len_lat ; oG%len_lon = dG%len_lon
+  !oG%Rad_Earth = dG%Rad_Earth ; oG%max_depth = dG%max_depth
+
+  !!>>> end garbage
+
+  !call set_derived_metrics(G, US)
+
+end subroutine rotate_dyngrid
+
+function rotate_quarter(A_in, clockwise) result(A)
+  real, intent(in)  :: A_in(:,:)
+  logical, intent(in), optional :: clockwise
+  real :: A(size(A_in, 2), size(A_in, 1))
+
+  logical :: ccw    ! True if turn is counterclockwise (positive)
+  integer :: m, n   ! Input array shape
+
+  ccw = .true.
+  if (present(clockwise)) ccw = .not. clockwise
+
+  m = size(A_in, 1)
+  n = size(A_in, 2)
+
+  ! +90deg: B(i,j) = A(n-j,i)
+  !                = transpose + row reverse
+  ! -90deg: B(i,j) = A(j,m-i)
+  !                = row reverse + transpose
+
+  if (.not. ccw) then
+    A = transpose(A_in(m:1:-1, :))
+  else
+    A = transpose(A_in)
+  endif
+
+  if (ccw) &
+    A(:,:) = A(n:1:-1, :)
+
+end function rotate_quarter
+
+function rotate_half(A_in) result(A)
+  real, intent(in)  :: A_in(:,:)
+  real :: A(size(A_in, 1), size(A_in, 2))
+
+  integer :: m, n   ! Input array shape
+
+  m = size(A_in, 1)
+  n = size(A_in, 2)
+
+  ! 180deg: B(i,j) = A(m-i,n-j)
+  !                = row reversal + column reversal
+
+  A(:,:) = A_in(m:1:-1, :)
+  A(:,:) = A(:, n:1:-1)
+
+end function rotate_half
 
 end module MOM_transcribe_grid

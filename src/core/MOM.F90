@@ -1535,7 +1535,7 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, restart_CSp, &
   logical :: rotate_grid  ! true if grid has been rotated from input
   logical :: swap_axes    ! true if X and Y are swapped (e.g. rotation)
   integer :: grid_qturns   ! Number of grid quater-turns
-  type(hor_index_type), target :: HI_in
+  type(hor_index_type), target :: HI_in, HI_rot   ! Input and dynamic HI
   type(dyn_horgrid_type), pointer :: dG_in
 
   ! This include declares and sets the variable "version".
@@ -1975,18 +1975,24 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, restart_CSp, &
   call diag_mediator_infrastructure_init()
   call MOM_io_init(param_file)
 
-  call hor_index_init(CS%G%Domain, HI_in, param_file, &
+  ! Create HI and dG on the input grid
+  call hor_index_init(CS%G_in%Domain, HI_in, param_file, &
                       local_indexing=.not.global_indexing)
   call create_dyn_horgrid(dG_in, HI_in, bathymetry_at_vel=bathy_at_vel)
   call clone_MOM_domain(CS%G_in%Domain, dG_in%Domain)
 
-  if (rotate_grid .and. modulo(grid_qturns, 4) /= 0) then
-    ! TODO: Rotate the grids
-    dG => dG_in
-    HI => HI_in
+  ! Either point to the input grid or create a transformed grid
+  ! NOTE: I can probably move this to after MOM_initialize_fixed
+  if (rotate_grid) then
+    call hor_index_init(CS%G%Domain, HI_rot, param_file, &
+                        local_indexing=.not.global_indexing)
+    HI => HI_rot
+
+    call create_dyn_horgrid(dG, HI_rot, bathymetry_at_vel=bathy_at_vel)
+    call clone_MOM_domain(CS%G%Domain, dG%Domain)
   else
-    dG => dG_in
     HI => HI_in
+    dG => dG_in
   endif
 
   call verticalGridInit( param_file, CS%GV, US )
@@ -2002,7 +2008,10 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, restart_CSp, &
   call MOM_timing_init(CS)
 
   ! Allocate initialize time-invariant MOM variables.
-  call MOM_initialize_fixed(dG, US, CS%OBC, param_file, write_geom_files, dirs%output_directory)
+  call MOM_initialize_fixed(dG_in, US, CS%OBC, param_file, write_geom_files, dirs%output_directory)
+  !if (rotate_grid) &
+  !  call rotate_dyngrid(dG_in, dG)
+
   call callTree_waypoint("returned from MOM_initialize_fixed() (initialize_MOM)")
 
   if (associated(CS%OBC)) call call_OBC_register(param_file, CS%update_OBC_CSp, CS%OBC)
