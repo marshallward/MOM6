@@ -328,6 +328,7 @@ subroutine rotate_dyngrid(G_in, G, US, turns)
   qturn = modulo(turns, 4)
 
   if (qturn == 1) then
+    ! T-grid values can be naively rotated
     G%geoLonT = rotate_quarter(G_in%geoLonT)
     G%geoLatT = rotate_quarter(G_in%geoLatT)
     G%dxT = rotate_quarter(G_in%dxT)
@@ -341,6 +342,7 @@ subroutine rotate_dyngrid(G_in, G, US, turns)
     G%cos_rot = rotate_quarter(G_in%cos_rot)
     G%mask2dT = rotate_quarter(G_in%mask2dT)
 
+    ! U-points receive rotations of their pairs (u<->v, x<->y)
     G%geoLonCu = rotate_quarter(G_in%geoLonCu)
     G%geoLatCu = rotate_quarter(G_in%geoLatCu)
     G%dxCu = rotate_quarter(G_in%dxCu)
@@ -351,6 +353,7 @@ subroutine rotate_dyngrid(G_in, G, US, turns)
     G%areaCu = rotate_quarter(G_in%areaCu)
     G%IareaCu = rotate_quarter(G_in%IareaCu)
 
+    ! U-points receive rotations of their pairs (u<->v, x<->y)
     G%geoLonCv = rotate_quarter(G_in%geoLonCv)
     G%geoLatCv = rotate_quarter(G_in%geoLatCv)
     G%dxCv = rotate_quarter(G_in%dxCv)
@@ -361,6 +364,7 @@ subroutine rotate_dyngrid(G_in, G, US, turns)
     G%areaCv = rotate_quarter(G_in%areaCv)
     G%IareaCv = rotate_quarter(G_in%IareaCv)
 
+    ! vertex fields can probably just be rotated?
     G%geoLonBu = rotate_quarter(G_in%geoLonBu)
     G%geoLatBu = rotate_quarter(G_in%geoLatBu)
     G%dxBu = rotate_quarter(G_in%dxBu)
