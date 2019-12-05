@@ -132,6 +132,9 @@ use MOM_offline_main,          only : offline_fw_fluxes_into_ocean, offline_fw_f
 use MOM_offline_main,          only : offline_advection_layer, offline_transport_end
 use MOM_ALE,                   only : ale_offline_tracer_final, ALE_main_offline
 
+! testing
+use MOM_shared_initialization, only : write_ocean_geometry_file
+
 implicit none ; private
 
 #include <MOM_memory.h>
@@ -2012,6 +2015,11 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, restart_CSp, &
   call MOM_initialize_fixed(dG_in, US, CS%OBC, param_file, write_geom_files, dirs%output_directory)
   if (rotate_grid) &
     call rotate_dyngrid(dG_in, dG, US, grid_qturns)
+
+  ! Testing
+  if (rotate_grid) &
+    call write_ocean_geometry_file(dG, param_file, dirs%output_directory, &
+                                   geom_file='ocean_geometry_rot', US=US)
 
   call callTree_waypoint("returned from MOM_initialize_fixed() (initialize_MOM)")
 
