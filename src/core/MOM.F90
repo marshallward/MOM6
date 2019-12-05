@@ -183,8 +183,9 @@ type, public :: MOM_control_struct ; private
   real :: time_in_thermo_cycle !< The running time of the current time-stepping
                     !! cycle in calls that step the thermodynamics [T ~> s].
 
-  type(ocean_grid_type) :: G_in      !< structure containing metrics and grid info
-  type(ocean_grid_type) :: G         !< Rotated grid metric
+  type(ocean_grid_type) :: G_in           !< Input grid metric
+  type(ocean_grid_type), pointer :: G => NULL()   !< Model grid metric
+
   type(verticalGrid_type), pointer :: &
     GV => NULL()    !< structure containing vertical grid info
   type(unit_scale_type), pointer :: &
@@ -1611,9 +1612,6 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, restart_CSp, &
   endif
   allocate(CS)
 
-  if (test_grid_copy) then ; allocate(G)
-  else ; G => CS%G ; endif
-
   CS%Time => Time
 
   id_clock_init = cpu_clock_id('Ocean Initialization', grain=CLOCK_SUBCOMPONENT)
@@ -1970,8 +1968,17 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, restart_CSp, &
 
   ! Copy input grid (G_in) domain to active grid G
   ! Swap axes for quarter and 3-quarter turns
-  swap_axes = rotate_grid .and. (modulo(grid_qturns, 2) == 1)
-  call clone_MOM_domain(CS%G_in%Domain, CS%G%Domain, swap_axes=swap_axes)
+  if (rotate_grid) then
+    ! TODO: Remember to deallocate!
+    allocate(CS%G)
+    swap_axes = modulo(grid_qturns, 2) == 1
+    call clone_MOM_domain(CS%G_in%Domain, CS%G%Domain, swap_axes=swap_axes)
+  else
+    CS%G => CS%G_in
+  endif
+
+  if (test_grid_copy) then ; allocate(G)
+  else ; G => CS%G ; endif
 
   call callTree_waypoint("domains initialized (initialize_MOM)")
 
@@ -2016,10 +2023,11 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, restart_CSp, &
   if (rotate_grid) &
     call rotate_dyngrid(dG_in, dG, US, grid_qturns)
 
-  ! Testing
+  ! >>> testing
   if (rotate_grid) &
     call write_ocean_geometry_file(dG, param_file, dirs%output_directory, &
                                    geom_file='ocean_geometry_rot', US=US)
+  ! <<< end testing
 
   call callTree_waypoint("returned from MOM_initialize_fixed() (initialize_MOM)")
 
@@ -2196,9 +2204,17 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, restart_CSp, &
   ! (potentially static) ocean-specific grid type.
   !   The next line would be needed if G%Domain had not already been init'd above:
   !     call clone_MOM_domain(dG%Domain, G%Domain)
-  call MOM_grid_init(G, param_file, US, HI, bathymetry_at_vel=bathy_at_vel)
-  call copy_dyngrid_to_MOM_grid(dG, G, US)
-  call destroy_dyn_horgrid(dG)
+
+  ! If the grid has not been rotated, then G already points to G_in
+  ! TODO: Could use an associated() check here
+  if (rotate_grid) then
+    call MOM_grid_init(G, param_file, US, HI, bathymetry_at_vel=bathy_at_vel)
+    call copy_dyngrid_to_MOM_grid(dG, G, US)
+    call destroy_dyn_horgrid(dG)
+  endif
+  call MOM_grid_init(CS%G_in, param_file, US, HI_in, bathymetry_at_vel=bathy_at_vel)
+  call copy_dyngrid_to_MOM_grid(dG_in, CS%G_in, US)
+  call destroy_dyn_horgrid(dG_in)
 
   ! Set a few remaining fields that are specific to the ocean grid type.
   call set_first_direction(G, first_direction)
@@ -3146,7 +3162,7 @@ subroutine get_MOM_state_elements(CS, G, GV, US, C_p, use_temp)
   real,    optional, intent(out) :: C_p  !< The heat capacity
   logical, optional, intent(out) :: use_temp !< Indicates whether temperature is a state variable
 
-  if (present(G)) G => CS%G
+  if (present(G)) G => CS%G_in
   if (present(GV)) GV => CS%GV
   if (present(US)) US => CS%US
   if (present(C_p)) C_p = CS%tv%C_p
