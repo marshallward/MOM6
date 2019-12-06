@@ -2988,6 +2988,75 @@ subroutine deallocate_mech_forcing(forces)
 end subroutine deallocate_mech_forcing
 
 
+subroutine rotate_forcing(fluxes_in, G_in, fluxes, G, turns)
+  !< Create a rotated forces for a given forcing and grid transformation
+  type(mech_forcing), intent(in)  :: forces_in  !< Input forcing struct
+  type(ocean_grid_type), intent(in) :: G_in     !< Input grid metric
+  type(mech_forcing), intent(inout) :: forces     !< Rotated forcing struct
+  type(ocean_grid_type), intent(in) :: G        !< Rotated grid metric
+  integer, intent(in) :: turns
+
+  logical :: do_ustar, do_water, do_heat, do_salt, do_press, do_shelf, do_iceberg
+
+  do_ustar = associated(fluxes_in%ustar) &
+      .and. associated(fluxes_in%ustar_gustless)
+  ! TODO: Check for all associated fields, but for now just check one as a marker
+  do_water = associated(fluxes_in%evap)
+  do_heat = associated(fluxes_in%seaice_melt_heat)
+  do_salt = associated(fluxes_in%salt_flux)
+  do_press = associated(fluxes_in%press)
+  do_shelf = associated(fluxes_in%frac_shelf_h)
+  do_iceberg = associated(fluxes_in%ustar_berg)
+
+  if (do_ustar) then
+    fluxes%ustar = rotate_quarter(fluxes_in%ustar)
+    fluxes%ustar_gustless = rotate_quarter(fluxes_in%ustar_gustless)
+  endif
+
+  if (do_water) then
+    fluxes%evap = rotate_quarter(fluxes_in%evap)
+    fluxes%lprec = rotate_quarter(fluxes_in%lprec)
+    fluxes%fprec = rotate_quarter(fluxes_in%fprec)
+    fluxes%vprec = rotate_quarter(fluxes_in%vprec)
+    fluxes%lrunoff = rotate_quarter(fluxes_in%lrunoff)
+    fluxes%frunoff = rotate_quarter(fluxes_in%frunoff)
+    fluxes%seaice_melt = rotate_quarter(fluxes_in%seaice_melt)
+    fluxes%netMassOut = rotate_quarter(fluxes_in%netMassOut)
+    fluxes%netMassIn = rotate_quarter(fluxes_in%netMassIn)
+    fluxes%netSalt = rotate_quarter(fluxes_in%netSalt)
+  endif
+
+  if (do_heat) then
+    fluxes%seaice_melt_heat = rotate_quarter(fluxes_in%seaice_melt_heat)
+    fluxes%sw = rotate_quarter(fluxes_in%sw)
+    fluxes%lw = rotate_quarter(fluxes_in%lw)
+    fluxes%latent = rotate_quarter(fluxes_in%latent)
+    fluxes%sens = rotate_quarter(fluxes_in%sens)
+    fluxes%latent_evap_diag = rotate_quarter(fluxes_in%latent_evap_diag)
+    fluxes%latent_fprec_diag = rotate_quarter(fluxes_in%latent_fprec_diag)
+    fluxes%latent_frunoff_diag = rotate_quarter(fluxes_in%latent_frunoff_diag)
+  endif
+
+  if (do_salt) then
+    fluxes%salt_flux = rotate_quarter(fluxes_in%salt_flux)
+  endif
+
+  if (do_heat .and. do_water) then
+    !...
+  endif
+
+  if (do_shelf) then
+    !...
+  endif
+
+  if (do_iceberg) then
+    !...
+  endif
+
+  ! Scalars?
+
+end subroutine rotate_forcing
+
 subroutine rotate_mech_forcing(forces_in, G_in, forces, G, turns)
   !< Create a rotated forces for a given forcing and grid transformation
   type(mech_forcing), intent(in)  :: forces_in  !< Input forcing struct
