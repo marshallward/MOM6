@@ -432,7 +432,7 @@ subroutine extractFluxes1d(G, GV, fluxes, optics, nsw, j, dt,                   
   if (present(pen_sw_bnd_rate)) do_PSWBR = .true.
   !}BGR
 
-  Ih_limit  = 1.0 / FluxRescaleDepth
+  Ih_limit = 0.0 ; if (FluxRescaleDepth > 0.0) Ih_limit  = 1.0 / FluxRescaleDepth
   Irho0     = 1.0 / GV%Rho0
   I_Cp      = 1.0 / fluxes%C_p
   J_m2_to_H = 1.0 / (GV%H_to_kg_m2 * fluxes%C_p)
@@ -481,7 +481,7 @@ subroutine extractFluxes1d(G, GV, fluxes, optics, nsw, j, dt,                   
   do i=is,ie
 
     scale = 1.0
-    if (htot(i)*Ih_limit < 1.0) scale = htot(i)*Ih_limit
+    if ((Ih_limit > 0.0) .and. (htot(i)*Ih_limit < 1.0)) scale = htot(i)*Ih_limit
 
     ! Convert the penetrating shortwave forcing to (K * H) and reduce fluxes for shallow depths.
     ! (H=m for Bouss, H=kg/m2 for non-Bouss)
