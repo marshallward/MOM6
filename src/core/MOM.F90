@@ -108,7 +108,6 @@ use MOM_tracer_flow_control,   only : call_tracer_register, tracer_flow_control_
 use MOM_tracer_flow_control,   only : tracer_flow_control_init, call_tracer_surface_state
 use MOM_tracer_flow_control,   only : tracer_flow_control_end
 use MOM_transcribe_grid,       only : copy_dyngrid_to_MOM_grid, copy_MOM_grid_to_dyngrid
-use MOM_transcribe_grid,       only : rotate_dyngrid
 use MOM_unit_scaling,          only : unit_scale_type, unit_scaling_init
 use MOM_unit_scaling,          only : unit_scaling_end, fix_restart_unit_scaling
 use MOM_variables,             only : surface, allocate_surface_state, deallocate_surface_state
@@ -134,6 +133,8 @@ use MOM_ALE,                   only : ale_offline_tracer_final, ALE_main_offline
 
 ! testing
 use MOM_shared_initialization, only : write_ocean_geometry_file
+use MOM_transcribe_grid,       only : rotate_dyngrid
+use MOM_forcing_type,          only : allocate_mech_forcing, rotate_mech_forcing
 
 implicit none ; private
 
@@ -183,8 +184,9 @@ type, public :: MOM_control_struct ; private
   real :: time_in_thermo_cycle !< The running time of the current time-stepping
                     !! cycle in calls that step the thermodynamics [T ~> s].
 
-  type(ocean_grid_type) :: G_in           !< Input grid metric
+  type(ocean_grid_type) :: G_in                   !< Input grid metric
   type(ocean_grid_type), pointer :: G => NULL()   !< Model grid metric
+  logical :: rotate_grid = .false.
 
   type(verticalGrid_type), pointer :: &
     GV => NULL()    !< structure containing vertical grid info
@@ -398,10 +400,10 @@ contains
 !! The action of lateral processes on tracers occur in calls to
 !! advect_tracer and tracer_hordiff.  Vertical mixing and possibly remapping
 !! occur inside of diabatic.
-subroutine step_MOM(forces, fluxes, sfc_state, Time_start, time_int_in, CS, &
+subroutine step_MOM(forces_in, fluxes, sfc_state, Time_start, time_int_in, CS, &
                     Waves, do_dynamics, do_thermodynamics, start_cycle, &
                     end_cycle, cycle_length, reset_therm)
-  type(mech_forcing), intent(inout) :: forces        !< A structure with the driving mechanical forces
+  type(mech_forcing), target, intent(inout) :: forces_in     !< A structure with the driving mechanical forces
   type(forcing),      intent(inout) :: fluxes        !< A structure with pointers to themodynamic,
                                                      !! tracer and mass exchange forcing fields
   type(surface),      intent(inout) :: sfc_state     !< surface ocean state
@@ -479,6 +481,9 @@ subroutine step_MOM(forces, fluxes, sfc_state, Time_start, time_int_in, CS, &
   type(group_pass_type) :: pass_tau_ustar_psurf
   logical :: showCallTree
 
+  ! Testing
+  type(mech_forcing), pointer :: forces
+
   G => CS%G ; GV => CS%GV ; US => CS%US
   is   = G%isc  ; ie   = G%iec  ; js   = G%jsc  ; je   = G%jec ; nz = G%ke
   Isq  = G%IscB ; Ieq  = G%IecB ; Jsq  = G%JscB ; Jeq  = G%JecB
@@ -505,6 +510,19 @@ subroutine step_MOM(forces, fluxes, sfc_state, Time_start, time_int_in, CS, &
 
   showCallTree = callTree_showQuery()
   if (showCallTree) call callTree_enter("step_MOM(), MOM.F90")
+
+  ! Rotate the forces from G_in to G
+  ! TODO: Do not do this every timestep!
+  if (CS%rotate_grid) then
+    ! TODO: Check that forces has not already been allocated?
+    allocate(forces)
+    ! TODO: Remember to deallocate!
+    ! NOTE: rotate_mech_forcing also allocates fields inside `forces`, since we
+    ! cannot know which fields inside of `forces` also need allocation
+    call rotate_mech_forcing(forces_in, CS%G_in, forces, G, 1)
+  else
+    forces => forces_in
+  endif
 
   ! First determine the time step that is consistent with this call and an
   ! integer fraction of time_interval.
@@ -1537,7 +1555,6 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, restart_CSp, &
 
   ! Rotational grid testing
   ! NOTE: reflect_grid could also be supported
-  logical :: rotate_grid  ! true if grid has been rotated from input
   logical :: swap_axes    ! true if X and Y are swapped (e.g. rotation)
   integer :: grid_qturns   ! Number of grid quater-turns
   type(hor_index_type), target :: HI_in, HI_rot   ! Input and dynamic HI
@@ -1945,7 +1962,7 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, restart_CSp, &
 
   ! Grid rotation test
   ! NOTE: rotate_grid is equivalent to grid_qturns % 4 == 0
-  call get_param(param_file, "MOM", "ROTATE_GRID", rotate_grid, &
+  call get_param(param_file, "MOM", "ROTATE_GRID", CS%rotate_grid, &
                  "Enable rotation of the horizontal grid.", default=.false.)
   call get_param(param_file, "MOM", "GRID_QUARTER_TURNS", grid_qturns, &
                  "Angle of grid rotation, in units of quarter-turns.", default=1)
@@ -1968,7 +1985,7 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, restart_CSp, &
 
   ! Copy input grid (G_in) domain to active grid G
   ! Swap axes for quarter and 3-quarter turns
-  if (rotate_grid) then
+  if (CS%rotate_grid) then
     ! TODO: Remember to deallocate!
     allocate(CS%G)
     swap_axes = modulo(grid_qturns, 2) == 1
@@ -1994,7 +2011,7 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, restart_CSp, &
 
   ! Either point to the input grid or create a transformed grid
   ! NOTE: I can probably move this to after MOM_initialize_fixed
-  if (rotate_grid) then
+  if (CS%rotate_grid) then
     call hor_index_init(CS%G%Domain, HI_rot, param_file, &
                         local_indexing=.not.global_indexing)
     HI => HI_rot
@@ -2020,11 +2037,11 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, restart_CSp, &
 
   ! Allocate initialize time-invariant MOM variables.
   call MOM_initialize_fixed(dG_in, US, CS%OBC, param_file, write_geom_files, dirs%output_directory)
-  if (rotate_grid) &
+  if (CS%rotate_grid) &
     call rotate_dyngrid(dG_in, dG, US, grid_qturns)
 
   ! >>> testing
-  if (rotate_grid) &
+  if (CS%rotate_grid) &
     call write_ocean_geometry_file(dG, param_file, dirs%output_directory, &
                                    geom_file='ocean_geometry_rot', US=US)
   ! <<< end testing
@@ -2207,7 +2224,7 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, restart_CSp, &
 
   ! If the grid has not been rotated, then G already points to G_in
   ! TODO: Could use an associated() check here
-  if (rotate_grid) then
+  if (CS%rotate_grid) then
     call MOM_grid_init(G, param_file, US, HI, bathymetry_at_vel=bathy_at_vel)
     call copy_dyngrid_to_MOM_grid(dG, G, US)
     call destroy_dyn_horgrid(dG)

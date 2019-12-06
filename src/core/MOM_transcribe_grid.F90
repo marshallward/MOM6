@@ -14,6 +14,8 @@ use MOM_unit_scaling, only : unit_scale_type
 implicit none ; private
 
 public copy_dyngrid_to_MOM_grid, copy_MOM_grid_to_dyngrid, rotate_dyngrid
+! Probably should move this one to new module
+public rotate_quarter
 
 contains
 
@@ -382,23 +384,14 @@ subroutine rotate_dyngrid(G_in, G, US, turns)
       G%Dopen_v = rotate_quarter(G_in%Dopen_u)
     endif
 
+    ! TODO: Probably wrong; we don't want to relabel lons as lats, only their
+    !       positions on the grid.
     G%gridLonT(:) = G_in%gridLatT(G_in%jeg:G_in%jsg:-1)
     G%gridLatT(:) = G_in%gridLonT(:)
     G%gridLonB(:) = G_in%gridLatB(G_in%jeg:(G_in%jsg-1):-1)
     G%gridLatB(:) = G_in%gridLonB(:)
 
-    !! Derived grids (from set_derived_dyn_horgrid)
-    !G%IdxT = rotate_quarter(G_in%IdxT)
-    !G%IdyT = rotate_quarter(G_in%IdyT)
-    !G%IareaT = rotate_quarter(G_in%IareaT)
-    !G%IdxCu = rotate_quarter(G_in%IdxCu)
-    !G%IdyCu = rotate_quarter(G_in%IdyCu)
-    !G%IdxCv = rotate_quarter(G_in%IdxCv)
-    !G%IdyCv = rotate_quarter(G_in%IdyCv)
-    !G%IdxBu = rotate_quarter(G_in%IdxBu)
-    !G%IdyBu = rotate_quarter(G_in%IdyBu)
-    !G%IareaBu = rotate_quarter(G_in%IareaBu)
-
+    ! TODO: I no longer think all of these should be flipped
     G%x_axis_units = G_in%y_axis_units
     G%y_axis_units = G_in%x_axis_units
     G%south_lat = G_in%west_lon
@@ -413,10 +406,12 @@ subroutine rotate_dyngrid(G_in, G, US, turns)
   G%Rad_Earth = G_in%Rad_Earth
   G%max_depth = G_in%max_depth
 
-  ! Either do this or copy the derived grids, still not sure...
   call set_derived_dyn_horgrid(G, US)
 
 end subroutine rotate_dyngrid
+
+! TODO: move rotation ops to generic module?
+! (Shared by grids and forcings now...)
 
 function rotate_quarter(A_in, clockwise) result(A)
   real, intent(in)  :: A_in(:,:)
@@ -433,9 +428,9 @@ function rotate_quarter(A_in, clockwise) result(A)
   n = size(A_in, 2)
 
   ! +90deg: B(i,j) = A(n-j,i)
-  !                = transpose + row reverse
+  !                = transpose, then row reverse
   ! -90deg: B(i,j) = A(j,m-i)
-  !                = row reverse + transpose
+  !                = row reverse, then transpose
 
   if (.not. ccw) then
     A = transpose(A_in(m:1:-1, :))

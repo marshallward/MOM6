@@ -21,6 +21,9 @@ use coupler_types_mod, only : coupler_2d_bc_type, coupler_type_spawn
 use coupler_types_mod, only : coupler_type_increment_data, coupler_type_initialized
 use coupler_types_mod, only : coupler_type_copy_data, coupler_type_destructor
 
+! Testing
+use MOM_transcribe_grid, only : rotate_quarter
+
 implicit none ; private
 
 #include <MOM_memory.h>
@@ -34,6 +37,7 @@ public register_forcing_type_diags, allocate_forcing_type, deallocate_forcing_ty
 public copy_common_forcing_fields, allocate_mech_forcing, deallocate_mech_forcing
 public set_derived_forcing_fields, copy_back_forcing_fields
 public set_net_mass_forcing, get_net_mass_forcing
+public rotate_mech_forcing
 
 ! A note on unit descriptions in comments: MOM6 uses units that can be rescaled for dimensional
 ! consistency testing. These are noted in comments with units like Z, H, L, and T, along with
@@ -2983,6 +2987,71 @@ subroutine deallocate_mech_forcing(forces)
 
 end subroutine deallocate_mech_forcing
 
+
+subroutine rotate_mech_forcing(forces_in, G_in, forces, G, turns)
+  !< Create a rotated forces for a given forcing and grid transformation
+  type(mech_forcing), intent(in)  :: forces_in  !< Input forcing struct
+  type(ocean_grid_type), intent(in) :: G_in     !< Input grid metric
+  type(mech_forcing), intent(inout) :: forces     !< Rotated forcing struct
+  type(ocean_grid_type), intent(in) :: G        !< Rotated grid metric
+  integer, intent(in) :: turns
+
+  ! Active forces_in fields
+  logical :: do_stress, do_ustar, do_shelf, do_press, do_iceberg
+
+  ! TODO: Check that forces is not already allocated
+  do_stress = associated(forces_in%taux) &
+      .and. associated(forces_in%tauy)
+  do_ustar = associated(forces_in%ustar)
+  do_shelf = associated(forces_in%rigidity_ice_u) &
+      .and. associated(forces_in%rigidity_ice_v) &
+      .and. associated(forces_in%frac_shelf_u) &
+      .and. associated(forces_in%frac_shelf_v)
+  do_press = associated(forces_in%p_surf) &
+      .and. associated(forces_in%p_surf_full) &
+      .and. associated(forces_in%net_mass_src)
+  do_iceberg = associated(forces_in%area_berg) &
+      .and. associated(forces_in%mass_berg)
+
+  call allocate_mech_forcing(G, forces, do_stress, do_ustar, do_shelf, &
+                             do_press, do_iceberg)
+
+  ! TODO: Currently hard-coded to do +90°, but ought to support general turns
+  if (do_stress) then
+    ! Probably need an explicit loop due to the (-) operation and NaNs...
+    forces%taux = rotate_quarter(-forces_in%tauy(:,:))
+    forces%tauy = rotate_quarter(forces_in%taux)
+  endif
+
+  if (do_ustar) &
+    forces%ustar = rotate_quarter(forces_in%ustar)
+
+  if (do_shelf) then
+    forces%rigidity_ice_u = rotate_quarter(forces_in%rigidity_ice_v)
+    forces%rigidity_ice_v = rotate_quarter(forces_in%rigidity_ice_u)
+    forces%frac_shelf_u = rotate_quarter(forces_in%frac_shelf_v)
+    forces%frac_shelf_v = rotate_quarter(forces_in%frac_shelf_u)
+  endif
+
+  if (do_press) then
+    ! NOTE: p_surf_SSH either points to p_surf or p_surf_full
+    forces%p_surf = rotate_quarter(forces_in%p_surf)
+    forces%p_surf_full = rotate_quarter(forces_in%p_surf_full)
+    forces%net_mass_src = rotate_quarter(forces_in%net_mass_src)
+  endif
+
+  if (do_iceberg) then
+    forces%area_berg = rotate_quarter(forces_in%area_berg)
+    forces%mass_berg = rotate_quarter(forces_in%mass_berg)
+  endif
+
+  ! Copy fields
+  forces%dt_force_accum = forces_in%dt_force_accum
+  forces%net_mass_src_set = forces_in%net_mass_src_set
+  forces%accumulate_p_surf = forces_in%accumulate_p_surf
+  forces%accumulate_rigidity = forces_in%accumulate_rigidity
+  forces%initialized = forces_in%initialized
+end subroutine rotate_mech_forcing
 
 !> \namespace mom_forcing_type
 !!
