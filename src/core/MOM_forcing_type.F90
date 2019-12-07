@@ -37,7 +37,7 @@ public register_forcing_type_diags, allocate_forcing_type, deallocate_forcing_ty
 public copy_common_forcing_fields, allocate_mech_forcing, deallocate_mech_forcing
 public set_derived_forcing_fields, copy_back_forcing_fields
 public set_net_mass_forcing, get_net_mass_forcing
-public rotate_mech_forcing
+public rotate_forcing, rotate_mech_forcing
 
 ! A note on unit descriptions in comments: MOM6 uses units that can be rescaled for dimensional
 ! consistency testing. These are noted in comments with units like Z, H, L, and T, along with
@@ -2990,10 +2990,10 @@ end subroutine deallocate_mech_forcing
 
 subroutine rotate_forcing(fluxes_in, G_in, fluxes, G, turns)
   !< Create a rotated forces for a given forcing and grid transformation
-  type(mech_forcing), intent(in)  :: forces_in  !< Input forcing struct
-  type(ocean_grid_type), intent(in) :: G_in     !< Input grid metric
-  type(mech_forcing), intent(inout) :: forces     !< Rotated forcing struct
-  type(ocean_grid_type), intent(in) :: G        !< Rotated grid metric
+  type(forcing), intent(in)  :: fluxes_in     !< Input forcing struct
+  type(ocean_grid_type), intent(in) :: G_in   !< Input grid metric
+  type(forcing), intent(inout) :: fluxes      !< Rotated forcing struct
+  type(ocean_grid_type), intent(in) :: G      !< Rotated grid metric
   integer, intent(in) :: turns
 
   logical :: do_ustar, do_water, do_heat, do_salt, do_press, do_shelf, do_iceberg
@@ -3004,9 +3004,13 @@ subroutine rotate_forcing(fluxes_in, G_in, fluxes, G, turns)
   do_water = associated(fluxes_in%evap)
   do_heat = associated(fluxes_in%seaice_melt_heat)
   do_salt = associated(fluxes_in%salt_flux)
-  do_press = associated(fluxes_in%press)
+  do_press = associated(fluxes_in%p_surf)
   do_shelf = associated(fluxes_in%frac_shelf_h)
   do_iceberg = associated(fluxes_in%ustar_berg)
+
+
+  call allocate_forcing_type(G, fluxes, do_water, do_heat, do_ustar, &
+                             do_press, do_shelf, do_iceberg, do_salt)
 
   if (do_ustar) then
     fluxes%ustar = rotate_quarter(fluxes_in%ustar)
@@ -3042,18 +3046,54 @@ subroutine rotate_forcing(fluxes_in, G_in, fluxes, G, turns)
   endif
 
   if (do_heat .and. do_water) then
-    !...
+    fluxes%heat_content_cond = rotate_quarter(fluxes_in%heat_content_cond)
+    fluxes%heat_content_icemelt = rotate_quarter(fluxes_in%heat_content_icemelt)
+    fluxes%heat_content_lprec = rotate_quarter(fluxes_in%heat_content_lprec)
+    fluxes%heat_content_fprec = rotate_quarter(fluxes_in%heat_content_fprec)
+    fluxes%heat_content_vprec = rotate_quarter(fluxes_in%heat_content_vprec)
+    fluxes%heat_content_lrunoff = rotate_quarter(fluxes_in%heat_content_lrunoff)
+    fluxes%heat_content_frunoff = rotate_quarter(fluxes_in%heat_content_frunoff)
+    fluxes%heat_content_massout = rotate_quarter(fluxes_in%heat_content_massout)
+    fluxes%heat_content_massin = rotate_quarter(fluxes_in%heat_content_massin)
+  endif
+
+  if (do_press) then
+    fluxes%p_surf = rotate_quarter(fluxes_in%p_surf)
   endif
 
   if (do_shelf) then
-    !...
+    fluxes%frac_shelf_h = rotate_quarter(fluxes_in%frac_shelf_h)
+    fluxes%evap = rotate_quarter(fluxes_in%evap)
+    fluxes%evap = rotate_quarter(fluxes_in%evap)
   endif
 
   if (do_iceberg) then
-    !...
+    fluxes%evap = rotate_quarter(fluxes_in%evap)
+    fluxes%evap = rotate_quarter(fluxes_in%evap)
+    fluxes%evap = rotate_quarter(fluxes_in%evap)
   endif
 
-  ! Scalars?
+  ! There are a lot more fields here, not sure how to accommodate them...
+
+  ! Scalars and flags
+  fluxes%accumulate_p_surf = fluxes_in%accumulate_p_surf
+
+  fluxes%vPrecGlobalAdj = fluxes_in%vPrecGlobalAdj
+  fluxes%saltFluxGlobalAdj = fluxes_in%saltFluxGlobalAdj
+  fluxes%netFWGlobalAdj = fluxes_in%netFWGlobalAdj
+  fluxes%vPrecGlobalScl = fluxes_in%vPrecGlobalScl
+  fluxes%saltFluxGlobalScl = fluxes_in%saltFluxGlobalScl
+  fluxes%netFWGlobalScl = fluxes_in%netFWGlobalScl
+
+  fluxes%fluxes_used = fluxes_in%fluxes_used
+  fluxes%dt_buoy_accum = fluxes_in%dt_buoy_accum
+
+  fluxes%C_p = fluxes_in%C_p
+
+  ! tr_fluxes??
+
+  fluxes%num_msg = fluxes_in%num_msg
+  fluxes%max_msg = fluxes_in%max_msg
 
 end subroutine rotate_forcing
 

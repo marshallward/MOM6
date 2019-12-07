@@ -134,7 +134,7 @@ use MOM_ALE,                   only : ale_offline_tracer_final, ALE_main_offline
 ! testing
 use MOM_shared_initialization, only : write_ocean_geometry_file
 use MOM_transcribe_grid,       only : rotate_dyngrid
-use MOM_forcing_type,          only : allocate_mech_forcing, rotate_mech_forcing
+use MOM_forcing_type,          only : rotate_forcing, rotate_mech_forcing
 
 implicit none ; private
 
@@ -400,11 +400,11 @@ contains
 !! The action of lateral processes on tracers occur in calls to
 !! advect_tracer and tracer_hordiff.  Vertical mixing and possibly remapping
 !! occur inside of diabatic.
-subroutine step_MOM(forces_in, fluxes, sfc_state, Time_start, time_int_in, CS, &
+subroutine step_MOM(forces_in, fluxes_in, sfc_state, Time_start, time_int_in, CS, &
                     Waves, do_dynamics, do_thermodynamics, start_cycle, &
                     end_cycle, cycle_length, reset_therm)
-  type(mech_forcing), target, intent(inout) :: forces_in     !< A structure with the driving mechanical forces
-  type(forcing),      intent(inout) :: fluxes        !< A structure with pointers to themodynamic,
+  type(mech_forcing), target, intent(inout) :: forces_in !< A structure with the driving mechanical forces
+  type(forcing), target, intent(inout) :: fluxes_in  !< A structure with pointers to themodynamic,
                                                      !! tracer and mass exchange forcing fields
   type(surface),      intent(inout) :: sfc_state     !< surface ocean state
   type(time_type),    intent(in)    :: Time_start    !< starting time of a segment, as a time type
@@ -483,6 +483,7 @@ subroutine step_MOM(forces_in, fluxes, sfc_state, Time_start, time_int_in, CS, &
 
   ! Testing
   type(mech_forcing), pointer :: forces
+  type(forcing), pointer :: fluxes
 
   G => CS%G ; GV => CS%GV ; US => CS%US
   is   = G%isc  ; ie   = G%iec  ; js   = G%jsc  ; je   = G%jec ; nz = G%ke
@@ -516,12 +517,15 @@ subroutine step_MOM(forces_in, fluxes, sfc_state, Time_start, time_int_in, CS, &
   if (CS%rotate_grid) then
     ! TODO: Check that forces has not already been allocated?
     allocate(forces)
+    allocate(fluxes)
     ! TODO: Remember to deallocate!
-    ! NOTE: rotate_mech_forcing also allocates fields inside `forces`, since we
+    ! NOTE: rotate_*_forcing also allocates fields inside `forces`, since we
     ! cannot know which fields inside of `forces` also need allocation
     call rotate_mech_forcing(forces_in, CS%G_in, forces, G, 1)
+    call rotate_forcing(fluxes_in, CS%G_in, fluxes, G, 1)
   else
     forces => forces_in
+    fluxes => fluxes_in
   endif
 
   ! First determine the time step that is consistent with this call and an
@@ -2814,7 +2818,7 @@ subroutine extract_surface_state(CS, sfc_state)
   character(240) :: msg
 
   call callTree_enter("extract_surface_state(), MOM.F90")
-  G => CS%G ; GV => CS%GV ; US => CS%US
+  G => CS%G_in ; GV => CS%GV ; US => CS%US
   is  = G%isc ; ie  = G%iec ; js  = G%jsc ; je  = G%jec ; nz = GV%ke
   isd = G%isd ; ied = G%ied ; jsd = G%jsd ; jed = G%jed
   iscB = G%iscB ; iecB = G%iecB; jscB = G%jscB ; jecB = G%jecB
