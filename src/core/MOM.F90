@@ -135,6 +135,7 @@ use MOM_ALE,                   only : ale_offline_tracer_final, ALE_main_offline
 use MOM_shared_initialization, only : write_ocean_geometry_file
 use MOM_transcribe_grid,       only : rotate_dyngrid
 use MOM_forcing_type,          only : rotate_forcing, rotate_mech_forcing
+use MOM_variables,             only : rotate_surface_state
 
 implicit none ; private
 
@@ -515,7 +516,7 @@ subroutine step_MOM(forces_in, fluxes_in, sfc_state, Time_start, time_int_in, CS
   ! Rotate the forces from G_in to G
   ! TODO: Do not do this every timestep!
   if (CS%rotate_grid) then
-    ! TODO: Check that forces has not already been allocated?
+    ! TODO: Check that these have not already been allocated?
     allocate(forces)
     allocate(fluxes)
     ! TODO: Remember to deallocate!
@@ -523,6 +524,10 @@ subroutine step_MOM(forces_in, fluxes_in, sfc_state, Time_start, time_int_in, CS
     ! cannot know which fields inside of `forces` also need allocation
     call rotate_mech_forcing(forces_in, CS%G_in, forces, G, 1)
     call rotate_forcing(fluxes_in, CS%G_in, fluxes, G, 1)
+
+    ! This is solely to sync the fluxes_used flag between the types.
+    ! For now I do this to sync the flags, but there may be a simpler way.
+    fluxes%fluxes_in => fluxes_in
   else
     forces => forces_in
     fluxes => fluxes_in
@@ -861,21 +866,23 @@ subroutine step_MOM(forces_in, fluxes_in, sfc_state, Time_start, time_int_in, CS
   if (showCallTree) call callTree_waypoint("calling extract_surface_state (step_MOM)")
   call extract_surface_state(CS, sfc_state)
 
-  ! Do diagnostics that only occur at the end of a complete forcing step.
-  if (cycle_end) then
-    call cpu_clock_begin(id_clock_diagnostics)
-    if (CS%time_in_cycle > 0.0) then
-      call enable_averages(CS%time_in_cycle, Time_local, CS%diag)
-      call post_surface_dyn_diags(CS%sfc_IDs, G, CS%diag, sfc_state, ssh)
-    endif
-    if (CS%time_in_thermo_cycle > 0.0) then
-      call enable_averages(CS%time_in_thermo_cycle, Time_local, CS%diag)
-      call post_surface_thermo_diags(CS%sfc_IDs, G, GV, US, CS%diag, CS%time_in_thermo_cycle, &
-                                    sfc_state, CS%tv, ssh, CS%ave_ssh_ibc)
-    endif
-    call disable_averaging(CS%diag)
-    call cpu_clock_end(id_clock_diagnostics)
-  endif
+  !<<< Disable diag output for now
+  !! Do diagnostics that only occur at the end of a complete forcing step.
+  !if (cycle_end) then
+  !  call cpu_clock_begin(id_clock_diagnostics)
+  !  if (CS%time_in_cycle > 0.0) then
+  !    call enable_averages(CS%time_in_cycle, Time_local, CS%diag)
+  !    call post_surface_dyn_diags(CS%sfc_IDs, G, CS%diag, sfc_state, ssh)
+  !  endif
+  !  if (CS%time_in_thermo_cycle > 0.0) then
+  !    call enable_averages(CS%time_in_thermo_cycle, Time_local, CS%diag)
+  !    call post_surface_thermo_diags(CS%sfc_IDs, G, GV, US, CS%diag, CS%time_in_thermo_cycle, &
+  !                                  sfc_state, CS%tv, ssh, CS%ave_ssh_ibc)
+  !  endif
+  !  call disable_averaging(CS%diag)
+  !  call cpu_clock_end(id_clock_diagnostics)
+  !endif
+  !>>>
 
   ! Accumulate the surface fluxes for assessing conservation
   if (do_thermo .and. fluxes%fluxes_used) &
@@ -1222,6 +1229,8 @@ subroutine step_MOM_thermo(CS, G, GV, US, u, v, h, tv, fluxes, dtdia, &
     call diabatic(u, v, h, tv, CS%Hml, fluxes, CS%visc, CS%ADp, CS%CDp, &
                   dtdia, Time_end_thermo, G, GV, US, CS%diabatic_CSp, Waves=Waves)
     fluxes%fluxes_used = .true.
+    if (associated(fluxes%fluxes_in)) &
+      fluxes%fluxes_in%fluxes_used = .true.
 
     if (showCallTree) call callTree_waypoint("finished diabatic (step_MOM_thermo)")
 
@@ -1306,6 +1315,9 @@ subroutine step_MOM_thermo(CS, G, GV, US, u, v, h, tv, fluxes, dtdia, &
     call cpu_clock_begin(id_clock_diabatic)
     call adiabatic(h, tv, fluxes, US%T_to_s*dtdia, G, GV, CS%diabatic_CSp)
     fluxes%fluxes_used = .true.
+    if (associated(fluxes%fluxes_in)) &
+      fluxes%fluxes_in%fluxes_used = .true.
+
     call cpu_clock_end(id_clock_diabatic)
 
     if (associated(tv%T)) then
@@ -1518,6 +1530,8 @@ subroutine step_offline(forces, fluxes, sfc_state, Time_start, time_interval, CS
   call pass_var(CS%h, G%Domain)
 
   fluxes%fluxes_used = .true.
+  if (associated(fluxes%fluxes_in)) &
+    fluxes%fluxes_in%fluxes_used = .true.
 
   call cpu_clock_end(id_clock_offline_tracer)
 
@@ -2788,16 +2802,17 @@ end subroutine adjust_ssh_for_p_atm
 !> Set the surface (return) properties of the ocean model by
 !! setting the appropriate fields in sfc_state.  Unused fields
 !! are set to NULL or are unallocated.
-subroutine extract_surface_state(CS, sfc_state)
-  type(MOM_control_struct), pointer       :: CS !< Master MOM control structure
-  type(surface),            intent(inout) :: sfc_state !< transparent ocean surface state
-                                                !! structure shared with the calling routine
-                                                !! data in this structure is intent out.
+subroutine extract_surface_state(CS, sfc_state_in)
+  type(MOM_control_struct), pointer    :: CS !< Master MOM control structure
+  type(surface), target, intent(inout) :: sfc_state_in !< transparent ocean surface state
+                                             !! structure shared with the calling routine
+                                             !! data in this structure is intent out.
 
   ! local
   real :: hu, hv  ! Thicknesses interpolated to velocity points [H ~> m or kg m-2]
   type(ocean_grid_type),   pointer :: G => NULL() !< pointer to a structure containing
                                       !! metrics and related information
+  type(ocean_grid_type),   pointer :: G_in => NULL() !< Input grid metric
   type(verticalGrid_type), pointer :: GV => NULL() !< structure containing vertical grid info
   type(unit_scale_type),   pointer :: US => NULL() !< structure containing various unit conversion factors
   real, dimension(:,:,:),  pointer :: &
@@ -2817,8 +2832,11 @@ subroutine extract_surface_state(CS, sfc_state)
   logical :: localError
   character(240) :: msg
 
+  ! Testing
+  type(surface), pointer :: sfc_state   !< surface state on the model grid
+
   call callTree_enter("extract_surface_state(), MOM.F90")
-  G => CS%G_in ; GV => CS%GV ; US => CS%US
+  G => CS%G ; G_in => CS%G_in ; GV => CS%GV ; US => CS%US
   is  = G%isc ; ie  = G%iec ; js  = G%jsc ; je  = G%jec ; nz = GV%ke
   isd = G%isd ; ied = G%ied ; jsd = G%jsd ; jed = G%jed
   iscB = G%iscB ; iecB = G%iecB; jscB = G%jscB ; jecB = G%jecB
@@ -2830,7 +2848,13 @@ subroutine extract_surface_state(CS, sfc_state)
   if (.not.sfc_state%arrays_allocated) then
     !  Consider using a run-time flag to determine whether to do the vertical
     ! integrals, since the 3-d sums are not negligible in cost.
-    call allocate_surface_state(sfc_state, G, use_temperature, do_integrals=.true.)
+    call allocate_surface_state(sfc_state_in, G_in, use_temperature, do_integrals=.true.)
+    if (CS%rotate_grid) then
+       allocate(sfc_state)
+       call allocate_surface_state(sfc_state, G, use_temperature, do_integrals=.true.)
+    else
+       sfc_state => sfc_state_in
+    endif
   endif
   sfc_state%frazil => CS%tv%frazil
   sfc_state%T_is_conT = CS%tv%T_is_conT
@@ -3143,6 +3167,14 @@ subroutine extract_surface_state(CS, sfc_state)
           'locations detected with extreme surface values!'
       call MOM_error(FATAL, trim(msg))
     endif
+  endif
+
+  ! TODO: Rotate sfc_state back onto the input grid, sfc_state_in
+  ! NOTE: Unlike grid, forcing, and fluxes, we compute these on the rotated grid
+  ! XXX: Hard-coded to -90° for now
+  if (CS%rotate_grid) then
+    call rotate_surface_state(sfc_state, G, sfc_state_in, G_in, -1)
+    ! deallocate sfc_state?
   endif
 
   if (CS%debug) call MOM_surface_chksum("Post extract_sfc", sfc_state, G)

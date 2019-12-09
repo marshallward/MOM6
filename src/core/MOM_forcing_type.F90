@@ -52,6 +52,9 @@ public rotate_forcing, rotate_mech_forcing
 !! MESO_surface_forcing.F90, which is a special case of solo_driver/MOM_surface_forcing.F90.
 type, public :: forcing
 
+  type(forcing), pointer :: fluxes_in => NULL()   !< Pointer to the unmodified
+                                                  !! fluxes if present
+
   ! surface stress components and turbulent velocity scale
   real, pointer, dimension(:,:) :: &
     ustar         => NULL(), & !< surface friction velocity scale [Z T-1 ~> m s-1].
@@ -3008,7 +3011,6 @@ subroutine rotate_forcing(fluxes_in, G_in, fluxes, G, turns)
   do_shelf = associated(fluxes_in%frac_shelf_h)
   do_iceberg = associated(fluxes_in%ustar_berg)
 
-
   call allocate_forcing_type(G, fluxes, do_water, do_heat, do_ustar, &
                              do_press, do_shelf, do_iceberg, do_salt)
 
@@ -3097,6 +3099,7 @@ subroutine rotate_forcing(fluxes_in, G_in, fluxes, G, turns)
 
 end subroutine rotate_forcing
 
+! TODO: This does not reference G anywhere!
 subroutine rotate_mech_forcing(forces_in, G_in, forces, G, turns)
   !< Create a rotated forces for a given forcing and grid transformation
   type(mech_forcing), intent(in)  :: forces_in  !< Input forcing struct
@@ -3122,6 +3125,7 @@ subroutine rotate_mech_forcing(forces_in, G_in, forces, G, turns)
   do_iceberg = associated(forces_in%area_berg) &
       .and. associated(forces_in%mass_berg)
 
+  ! TODO: Consider moving this outside the function
   call allocate_mech_forcing(G, forces, do_stress, do_ustar, do_shelf, &
                              do_press, do_iceberg)
 

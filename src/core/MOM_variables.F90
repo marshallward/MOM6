@@ -9,6 +9,9 @@ use MOM_error_handler, only : MOM_error, FATAL
 use MOM_grid, only : ocean_grid_type
 use MOM_EOS, only : EOS_type
 
+! Testing
+use MOM_transcribe_grid, only : rotate_quarter
+
 use coupler_types_mod, only : coupler_1d_bc_type, coupler_2d_bc_type
 use coupler_types_mod, only : coupler_type_spawn, coupler_type_destructor
 
@@ -18,6 +21,7 @@ implicit none ; private
 
 public allocate_surface_state, deallocate_surface_state, MOM_thermovar_chksum
 public ocean_grid_type, alloc_BT_cont_type, dealloc_BT_cont_type
+public rotate_surface_state
 
 ! A note on unit descriptions in comments: MOM6 uses units that can be rescaled for dimensional
 ! consistency testing. These are noted in comments with units like Z, H, L, and T, along with
@@ -389,6 +393,70 @@ subroutine deallocate_surface_state(sfc_state)
   sfc_state%arrays_allocated = .false.
 
 end subroutine deallocate_surface_state
+
+subroutine rotate_surface_state(sfc_state_in, G_in, sfc_state, G, turns)
+  type(surface), intent(in) :: sfc_state_in
+  type(ocean_grid_type), intent(in) :: G_in
+  type(surface), intent(inout) :: sfc_state
+  type(ocean_grid_type), intent(in) :: G
+  integer, intent(in) :: turns
+
+  logical :: use_temperature, do_integrals, use_melt_potential, use_iceshelves
+
+  ! NOTE: Many of these are weak tests, since only one is checked
+  use_temperature = allocated(sfc_state_in%SST) &
+      .and. allocated(sfc_state_in%SSS)
+  use_melt_potential = allocated(sfc_state_in%melt_potential)
+  do_integrals = allocated(sfc_state_in%ocean_mass)
+  use_iceshelves = allocated(sfc_state_in%taux_shelf) &
+      .and. allocated(sfc_state_in%tauy_shelf)
+
+  ! Hard-code the -90° turn
+  ! TODO: These are all conditionally present!
+  if (use_temperature) then
+    sfc_state%SST = rotate_quarter(sfc_state_in%SST, clockwise=.true.)
+    sfc_state%SSS = rotate_quarter(sfc_state_in%SSS, clockwise=.true.)
+  else
+    sfc_state%sfc_density = rotate_quarter(sfc_state_in%sfc_density, clockwise=.true.)
+  endif
+
+  sfc_state%Hml = rotate_quarter(sfc_state_in%Hml, clockwise=.true.)
+  sfc_state%u = rotate_quarter(sfc_state_in%v, clockwise=.true.)
+  sfc_state%v = rotate_quarter(-sfc_state_in%u(:,:), clockwise=.true.)
+  sfc_state%sea_lev = rotate_quarter(sfc_state_in%sea_lev, clockwise=.true.)
+
+  if (use_melt_potential) then
+    sfc_state%melt_potential = rotate_quarter(sfc_state_in%melt_potential, clockwise=.true.)
+  endif
+
+  if (do_integrals) then
+    sfc_state%ocean_mass = rotate_quarter(sfc_state_in%ocean_mass, clockwise=.true.)
+    if (use_temperature) then
+      sfc_state%ocean_heat = rotate_quarter(sfc_state_in%ocean_heat, clockwise=.true.)
+      sfc_state%ocean_salt = rotate_quarter(sfc_state_in%ocean_salt, clockwise=.true.)
+      sfc_state%TempxPmE = rotate_quarter(sfc_state_in%SSS, clockwise=.true.)
+      sfc_state%salt_deficit = rotate_quarter(sfc_state_in%salt_deficit, clockwise=.true.)
+      sfc_state%internal_heat = rotate_quarter(sfc_state_in%internal_heat, clockwise=.true.)
+    endif
+  endif
+
+  if (use_iceshelves) then
+    sfc_state%taux_shelf = rotate_quarter(sfc_state_in%tauy_shelf, clockwise=.true.)
+    sfc_state%tauy_shelf = rotate_quarter(-sfc_state_in%taux_shelf(:,:), clockwise=.true.)
+  endif
+
+  ! frazil seems to be handled elsewhere?
+
+  ! Scalar transfers
+  sfc_state%T_is_conT = sfc_state_in%T_is_conT
+  sfc_state%S_is_absS = sfc_state_in%S_is_absS
+
+  ! TODO: tr_fields?? (gas_fields_ocn is used here...)
+
+  ! XXX: I probably shouldn't copy this one...
+  sfc_state%arrays_allocated = sfc_state_in%arrays_allocated
+
+end subroutine rotate_surface_state
 
 !> Allocates the arrays contained within a BT_cont_type and initializes them to 0.
 subroutine alloc_BT_cont_type(BT_cont, G, alloc_faces)
