@@ -1075,7 +1075,7 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, uhD_Eliz, vhD_
               ((e(i,j,K) + e(i,j,K+1)) + (e(i+1,j,K) + e(i+1,j,K+1))) )
         endif
         diag_Work3D_u(I,j,K) = G_scale * &
-          ( uhtot_Eliz(I,j) * drdkDe_u(I,K) - 0.5 * &
+          ( uhtot_Eliz(I,j) * drdkDe_u(I,K)  - 0.5 * &
             ((uhD_Eliz(I,j,k) * drdi_u(I,k)) * &
              0.25*((e(i,j,K) + e(i,j,K+1)) + (e(i+1,j,K) + e(i+1,j,K+1))) + &
             (uhD_Eliz(I,j,k-1) * drdi_u(I,k-1)) * &
