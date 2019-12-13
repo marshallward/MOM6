@@ -92,6 +92,9 @@ type, public :: thickness_diffuse_CS ; private
   integer :: id_sfn_unlim_x = -1, id_sfn_unlim_y = -1, id_sfn_x = -1, id_sfn_y = -1
   integer :: id_sfn_unlim_Eliz_x = -1, id_sfn_unlim_Eliz_y = -1, id_sfn_Eliz_x = -1, id_sfn_Eliz_y = -1
   integer :: id_Work3D_u = -1, id_Work3D_v = -1
+  integer :: id_Work_h = -1, id_Work_h_Eliz = -1
+  integer :: id_Work_u = -1, id_Work_u_Eliz = -1
+  integer :: id_Work_v = -1, id_Work_v_Eliz = -1
   !>@}
 end type thickness_diffuse_CS
 
@@ -591,7 +594,10 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, uhD_Eliz, vhD_
     pres_v        ! Pressure on the interface at the v-point [Pa].
   real :: Work_u(SZIB_(G), SZJ_(G)) ! The work being done by the thickness
   real :: Work_v(SZI_(G), SZJB_(G)) ! diffusion integrated over a cell [W].
-  real :: Work_h        ! The work averaged over an h-cell [W m-2].
+  real :: Work_u_Eliz(SZIB_(G), SZJ_(G)) ! The work being done by the thickness
+  real :: Work_v_Eliz(SZI_(G), SZJB_(G)) ! diffusion integrated over a cell [W].
+  real :: Work_h(SZI_(G), SZJ_(G))       ! The work averaged over an h-cell [W m-2].
+  real :: Work_h_Eliz(SZI_(G), SZJ_(G))        ! The work averaged over an h-cell [W m-2].
   real :: PE_release_h  ! The amount of potential energy released by GM, averaged over an h-cell [m3 s-3].
                         ! The calculation is equal to h * S^2 * N^2 * kappa_GM.
   real :: I4dt          ! 1 / 4 dt [s-1].
@@ -729,8 +735,8 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, uhD_Eliz, vhD_
 !$OMP do
   do j=js,je ; do I=is-1,ie
     uhtot(I,j) = 0.0 ; Work_u(I,j) = 0.0
-    uhtot_Eliz(I,j) = 0.0
-    diag_Work3D_u(I,j,1) = 0.0 ; diag_Work3D_u(I,j,nz+1) = 0.0 
+    uhtot_Eliz(I,j) = 0.0 ; Work_u_Eliz(I,j) = 0.0
+    diag_Work3D_u(I,j,:) = 0.0
     diag_sfn_x(I,j,1) = 0.0 ; diag_sfn_unlim_x(I,j,1) = 0.0
     diag_sfn_x(I,j,nz+1) = 0.0 ; diag_sfn_unlim_x(I,j,nz+1) = 0.0
     diag_sfn_Eliz_x(I,j,1) = 0.0 ; diag_sfn_unlim_Eliz_x(I,j,1) = 0.0
@@ -739,8 +745,8 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, uhD_Eliz, vhD_
 !$OMP do
   do J=js-1,je ; do i=is,ie
     vhtot(i,J) = 0.0 ; Work_v(i,J) = 0.0
-    vhtot_Eliz(i,J) = 0.0
-    diag_Work3D_v(i,J,1) = 0.0 ; diag_Work3D_v(i,J,nz+1) = 0.0
+    vhtot_Eliz(i,J) = 0.0 ; Work_v_Eliz(i,J) = 0.0
+    diag_Work3D_v(i,J,:) = 0.0
     diag_sfn_y(i,J,1) = 0.0 ; diag_sfn_unlim_y(i,J,1) = 0.0
     diag_sfn_y(i,J,nz+1) = 0.0 ; diag_sfn_unlim_y(i,J,nz+1) = 0.0
     diag_sfn_Eliz_y(i,J,1) = 0.0 ; diag_sfn_unlim_Eliz_y(i,J,1) = 0.0
@@ -1062,24 +1068,38 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, uhD_Eliz, vhD_
         uhtot(I,j) = uhtot(I,j) + uhD(I,j,k)
         uhtot_Eliz(I,j) = uhtot_Eliz(I,j) + uhD_Eliz(I,j,k)
 
-        if (find_work) then
+!        if (find_work) then
           !   This is the energy tendency based on the original profiles, and does
           ! not include any nonlinear terms due to a finite time step (which would
           ! involve interactions between the fluxes through the different faces.
           !   A second order centered estimate is used for the density transfered
           ! between water columns.
 
-          Work_u(I,j) = Work_u(I,j) + G_scale * &
-            ( uhtot(I,j) * drdkDe_u(I,K) - &
-              (uhD(I,j,K) * drdi_u(I,K)) * 0.25 * &
-              ((e(i,j,K) + e(i,j,K+1)) + (e(i+1,j,K) + e(i+1,j,K+1))) )
-        endif
+        !  Work_u(I,j) = Work_u(I,j) + G_scale * &
+        !    ( uhtot(I,j) * drdkDe_u(I,K) - &
+        !      (uhD(I,j,K) * drdi_u(I,K)) * 0.25 * &
+        !      ((e(i,j,K) + e(i,j,K+1)) + (e(i+1,j,K) + e(i+1,j,K+1))) )
+!        endif
+        Work_u(I,j) = Work_u(I,j) + G_scale * &
+          ( uhtot(I,j) * drdkDe_u(I,K) - &
+            (uhD(I,j,K) * drdi_u(I,K)) * 0.25 * &
+            ((e(i,j,K) + e(i,j,K+1)) + (e(i+1,j,K) + e(i+1,j,K+1))) )
+
+        Work_u_Eliz(I,j) = Work_u_Eliz(I,j) + G_scale * &
+          ( uhtot_Eliz(I,j) * drdkDe_u(I,K) - &
+            (uhD_Eliz(I,j,K) * drdi_u(I,K)) * 0.25 * &
+            ((e(i,j,K) + e(i,j,K+1)) + (e(i+1,j,K) + e(i+1,j,K+1))) )
+
         diag_Work3D_u(I,j,K) = G_scale * &
-          ( uhtot_Eliz(I,j) * drdkDe_u(I,K)  - 0.5 * &
-            ((uhD_Eliz(I,j,k) * drdi_u(I,k)) * &
-             0.25*((e(i,j,K) + e(i,j,K+1)) + (e(i+1,j,K) + e(i+1,j,K+1))) + &
-            (uhD_Eliz(I,j,k-1) * drdi_u(I,k-1)) * &
-             0.25*((e(i,j,K-1) + e(i,j,K)) + (e(i+1,j,K-1) + e(i+1,j,K))) ) )
+          ( uhtot_Eliz(I,j) * drdkDe_u(I,K) - &
+            (uhD_Eliz(I,j,K) * drdi_u(I,K)) * 0.25 * &
+            ((e(i,j,K) + e(i,j,K+1)) + (e(i+1,j,K) + e(i+1,j,K+1))) )
+        !diag_Work3D_u(I,j,K) = G_scale * &
+        !  ( uhtot_Eliz(I,j) * drdkDe_u(I,K)  - 0.5 * &
+        !    ((uhD_Eliz(I,j,k) * drdi_u(I,k)) * &
+        !     0.25*((e(i,j,K) + e(i,j,K+1)) + (e(i+1,j,K) + e(i+1,j,K+1))) + &
+        !    (uhD_Eliz(I,j,k-1) * drdi_u(I,k-1)) * &
+        !     0.25*((e(i,j,K-1) + e(i,j,K)) + (e(i+1,j,K-1) + e(i+1,j,K))) ) )
 
 
       enddo
@@ -1395,24 +1415,39 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, uhD_Eliz, vhD_
         vhtot(i,J) = vhtot(i,J)  + vhD(i,J,k)
         vhtot_Eliz(i,J) = vhtot_Eliz(i,J)  + vhD_Eliz(i,J,k)
 
-        if (find_work) then
+       ! if (find_work) then
           !   This is the energy tendency based on the original profiles, and does
           ! not include any nonlinear terms due to a finite time step (which would
           ! involve interactions between the fluxes through the different faces.
           !   A second order centered estimate is used for the density transfered
           ! between water columns.
 
-          Work_v(i,J) = Work_v(i,J) + G_scale * &
-            ( vhtot(i,J) * drdkDe_v(i,K) - &
-             (vhD(i,J,K) * drdj_v(i,K)) * 0.25 * &
-             ((e(i,j,K) + e(i,j,K+1)) + (e(i,j+1,K) + e(i,j+1,K+1))) )
-        endif
+       !   Work_v(i,J) = Work_v(i,J) + G_scale * &
+       !     ( vhtot(i,J) * drdkDe_v(i,K) - &
+       !      (vhD(i,J,K) * drdj_v(i,K)) * 0.25 * &
+       !      ((e(i,j,K) + e(i,j,K+1)) + (e(i,j+1,K) + e(i,j+1,K+1))) )
+       ! endif
+
+        Work_v(i,J) = Work_v(i,J) + G_scale * &
+          ( vhtot(i,J) * drdkDe_v(i,K) - &
+           (vhD(i,J,K) * drdj_v(i,K)) * 0.25 * &
+           ((e(i,j,K) + e(i,j,K+1)) + (e(i,j+1,K) + e(i,j+1,K+1))) )
+
+        Work_v_Eliz(i,J) = Work_v_Eliz(i,J) + G_scale * &
+          ( vhtot_Eliz(i,J) * drdkDe_v(i,K) - &
+           (vhD_Eliz(i,J,K) * drdj_v(i,K)) * 0.25 * &
+           ((e(i,j,K) + e(i,j,K+1)) + (e(i,j+1,K) + e(i,j+1,K+1))) )
+
         diag_Work3D_v(i,J,K) = G_scale * &
-          ( vhtot_Eliz(i,J) * drdkDe_v(i,K) - 0.5 * &
-            ((vhD_Eliz(i,J,k) * drdj_v(i,K)) * &
-             0.25*((e(i,j,K) + e(i,j,K+1)) + (e(i,j+1,K) + e(i,j+1,K+1))) + &
-            (vhD_Eliz(i,J,k-1) * drdj_v(i,k-1)) * &
-             0.25*((e(i,j,K-1) + e(i,j,K)) + (e(i,j+1,K-1) + e(i,j+1,K))) ) )
+          ( vhtot_Eliz(i,J) * drdkDe_v(i,K) - &
+           (vhD_Eliz(i,J,K) * drdj_v(i,K)) * 0.25 * &
+           ((e(i,j,K) + e(i,j,K+1)) + (e(i,j+1,K) + e(i,j+1,K+1))) )
+        !diag_Work3D_v(i,J,K) = G_scale * &
+        !  ( vhtot_Eliz(i,J) * drdkDe_v(i,K) - 0.5 * &
+        !    ((vhD_Eliz(i,J,k) * drdj_v(i,K)) * &
+        !     0.25*((e(i,j,K) + e(i,j,K+1)) + (e(i,j+1,K) + e(i,j+1,K+1))) + &
+        !    (vhD_Eliz(i,J,k-1) * drdj_v(i,k-1)) * &
+        !     0.25*((e(i,j,K-1) + e(i,j,K)) + (e(i,j+1,K-1) + e(i,j+1,K))) ) )
 
       enddo
     enddo ! end of k-loop
@@ -1446,7 +1481,12 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, uhD_Eliz, vhD_
         Work_u(I,j) = Work_u(I,j) + G_scale * &
             ( (uhD(I,j,1) * drdiB) * 0.25 * &
               ((e(i,j,1) + e(i,j,2)) + (e(i+1,j,1) + e(i+1,j,2))) )
-
+        Work_u_Eliz(I,j) = Work_u_Eliz(I,j) + G_scale * &
+            ( (uhD_Eliz(I,j,1) * drdiB) * 0.25 * &
+              ((e(i,j,1) + e(i,j,2)) + (e(i+1,j,1) + e(i+1,j,2))) )
+        diag_Work3D_u(I,j,1) =  G_scale * &
+            ( (uhD_Eliz(I,j,1) * drdiB) * 0.25 * &
+              ((e(i,j,1) + e(i,j,2)) + (e(i+1,j,1) + e(i+1,j,2))) )
       enddo
     enddo
 
@@ -1472,6 +1512,14 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, uhD_Eliz, vhD_
         Work_v(i,J) = Work_v(i,J) - G_scale * &
             ( (vhD(i,J,1) * drdjB) * 0.25 * &
               ((e(i,j,1) + e(i,j,2)) + (e(i,j+1,1) + e(i,j+1,2))) )
+
+        Work_v_Eliz(i,J) = Work_v_Eliz(i,J) - G_scale * &
+            ( (vhD_Eliz(i,J,1) * drdjB) * 0.25 * &
+              ((e(i,j,1) + e(i,j,2)) + (e(i,j+1,1) + e(i,j+1,2))) )
+
+        diag_Work3D_v(i,J,1) = G_scale * &
+            ( (vhD_Eliz(i,J,1) * drdjB) * 0.25 * &
+              ((e(i,j,1) + e(i,j,2)) + (e(i,j+1,1) + e(i,j+1,2))) )
       enddo
     enddo
   endif
@@ -1480,18 +1528,20 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, uhD_Eliz, vhD_
   !if (find_work) then ; do j=js,je ; do i=is,ie ; do k=nz,1,-1
   if (find_work) then ; do j=js,je ; do i=is,ie
     ! Note that the units of Work_v and Work_u are W, while Work_h is W m-2.
-    Work_h = 0.5 * G%IareaT(i,j) * &
+    Work_h(i,j) = 0.5 * G%IareaT(i,j) * &
       ((Work_u(I-1,j) + Work_u(I,j)) + (Work_v(i,J-1) + Work_v(i,J)))
+    Work_h_Eliz(i,j) = 0.5 * G%IareaT(i,j) * &
+      ((Work_u_Eliz(I-1,j) + Work_u_Eliz(I,j)) + (Work_v_Eliz(i,J-1) + Work_v_Eliz(i,J)))
     PE_release_h = -0.25*(Kh_u(I,j,k)*(Slope_x_PE(I,j,k)**2) * hN2_x_PE(I,j,k) + &
       Kh_u(I-1,j,k)*(Slope_x_PE(I-1,j,k)**2) * hN2_x_PE(I-1,j,k) + &
       Kh_v(i,J,k)*(Slope_y_PE(i,J,k)**2) * hN2_y_PE(i,J,k) + &
       Kh_v(i,J-1,k)*(Slope_y_PE(i,J-1,k)**2) * hN2_y_PE(i,J-1,k))
-    if (associated(CS%GMwork)) CS%GMwork(i,j) = Work_h
+    if (associated(CS%GMwork)) CS%GMwork(i,j) = Work_h(i,j)
     if (associated(MEKE)) then ; if (associated(MEKE%GM_src)) then
       if (CS%GM_src_alt) then
         MEKE%GM_src(i,j) = MEKE%GM_src(i,j) + PE_release_h
       else
-        MEKE%GM_src(i,j) = MEKE%GM_src(i,j) + Work_h
+        MEKE%GM_src(i,j) = MEKE%GM_src(i,j) + Work_h(i,j)
       endif
     endif ; endif
   !enddo ; enddo ; enddo ; endif
@@ -1509,6 +1559,12 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, uhD_Eliz, vhD_
   if (CS%id_sfn_unlim_Eliz_y > 0) call post_data(CS%id_sfn_unlim_Eliz_y, diag_sfn_unlim_Eliz_y, CS%diag)
   if (CS%id_Work3D_u > 0) call post_data(CS%id_Work3D_u, diag_Work3D_u, CS%diag)
   if (CS%id_Work3D_v > 0) call post_data(CS%id_Work3D_v, diag_Work3D_v, CS%diag)
+  if (CS%id_Work_u > 0) call post_data(CS%id_Work_u, Work_u, CS%diag)
+  if (CS%id_Work_u_Eliz > 0) call post_data(CS%id_Work_u_Eliz, Work_u_Eliz, CS%diag)
+  if (CS%id_Work_v > 0) call post_data(CS%id_Work_v, Work_v, CS%diag)
+  if (CS%id_Work_v_Eliz > 0) call post_data(CS%id_Work_v_Eliz, Work_v_Eliz, CS%diag)
+  if (CS%id_Work_h > 0) call post_data(CS%id_Work_h, Work_h, CS%diag)
+  if (CS%id_Work_h_Eliz > 0) call post_data(CS%id_Work_h_Eliz, Work_h_Eliz, CS%diag)
 end subroutine thickness_diffuse_full
 
 !> Tridiagonal solver for streamfunction at interfaces
@@ -2159,6 +2215,18 @@ subroutine thickness_diffuse_init(Time, G, GV, US, param_file, diag, CDp, CS)
            'Work done at  U-point (ELIZABETH DIFFUSE)', 'W')
   CS%id_Work3D_v = register_diag_field('ocean_model', 'Work3D_v', diag%axesCvi, Time, &
            'Work done at  V-point (ELIZABETH DIFFUSE)', 'W')
+  CS%id_Work_u = register_diag_field('ocean_model', 'Work_u', diag%axesCu1, Time, &
+           'Work done at  U-point', 'W')
+  CS%id_Work_v = register_diag_field('ocean_model', 'Work_v', diag%axesCv1, Time, &
+           'Work done at  V-point', 'W')
+  CS%id_Work_h = register_diag_field('ocean_model', 'Work_h', diag%axesT1, Time, &
+           'Work done at  h-point', 'W')
+  CS%id_Work_u_Eliz = register_diag_field('ocean_model', 'Work_u_Eliz', diag%axesCu1, Time, &
+           'Work done at  U-point (Eliz)', 'W')
+  CS%id_Work_v_Eliz = register_diag_field('ocean_model', 'Work_v_Eliz', diag%axesCv1, Time, &
+           'Work done at  V-point (Eliz)', 'W')
+  CS%id_Work_h_Eliz = register_diag_field('ocean_model', 'Work_h_Eliz', diag%axesT1, Time, &
+           'Work done at  h-point', 'W')
 end subroutine thickness_diffuse_init
 
 !> Copies ubtav and vbtav from private type into arrays
