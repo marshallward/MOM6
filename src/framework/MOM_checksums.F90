@@ -783,7 +783,8 @@ subroutine chksum_u_2d(array, mesg, HI, haloshift, symmetric, omit_corners, &
       aMax = max(aMax, array(I,j))
     enddo ; enddo
     ! This line deliberately uses the h-point computational domain.
-    aMean = reproducing_sum(array(HI%isc:HI%iec,HI%jsc:HI%jec))
+    !aMean = reproducing_sum(array(HI%isc:HI%iec,HI%jsc:HI%jec))
+    aMean = reproducing_sum(array(HI%ispu:HI%iepu,HI%jspu:HI%jepu))
     n = (1 + HI%jec - HI%jsc) * (1 + HI%iec - HI%isc)
     call sum_across_PEs(n)
     call min_across_PEs(aMin)
@@ -937,7 +938,8 @@ subroutine chksum_v_2d(array, mesg, HI, haloshift, symmetric, omit_corners, &
       aMax = max(aMax, array(i,J))
     enddo ; enddo
     ! This line deliberately uses the h-computational domain.
-    aMean = reproducing_sum(array(HI%isc:HI%iec,HI%jsc:HI%jec))
+    !aMean = reproducing_sum(array(HI%isc:HI%iec,HI%jsc:HI%jec))
+    aMean = reproducing_sum(array(HI%ispv:HI%iepv,HI%jspv:HI%jepv))
     n = (1 + HI%jec - HI%jsc) * (1 + HI%iec - HI%isc)
     call sum_across_PEs(n)
     call min_across_PEs(aMin)
@@ -1378,7 +1380,8 @@ subroutine chksum_u_3d(array, mesg, HI, haloshift, symmetric, omit_corners, &
       aMax = max(aMax, array(I,j,k))
     enddo ; enddo ; enddo
     ! This line deliberately uses the h-point computational domain.
-    aMean = reproducing_sum(array(HI%isc:HI%iec,HI%jsc:HI%jec,:))
+    !aMean = reproducing_sum(array(HI%isc:HI%iec,HI%jsc:HI%jec,:))
+    aMean = reproducing_sum(array(HI%ispu:HI%iepu,HI%jspu:HI%jepu,:))
     n = (1 + HI%jec - HI%jsc) * (1 + HI%iec - HI%isc) * size(array,3)
     call sum_across_PEs(n)
     call min_across_PEs(aMin)
@@ -1533,7 +1536,8 @@ subroutine chksum_v_3d(array, mesg, HI, haloshift, symmetric, omit_corners, &
       aMax = max(aMax, array(i,J,k))
     enddo ; enddo ; enddo
     ! This line deliberately uses the h-point computational domain.
-    aMean = reproducing_sum(array(HI%isc:HI%iec,HI%jsc:HI%jec,:))
+    !aMean = reproducing_sum(array(HI%isc:HI%iec,HI%jsc:HI%jec,:))
+    aMean = reproducing_sum(array(HI%ispv:HI%iepv,HI%jspv:HI%jepv,:))
     n = (1 + HI%jec - HI%jsc) * (1 + HI%iec - HI%isc) * size(array,3)
     call sum_across_PEs(n)
     call min_across_PEs(aMin)

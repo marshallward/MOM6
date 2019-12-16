@@ -46,6 +46,13 @@ type, public :: hor_index_type
   integer :: idg_offset !< The offset between the corresponding global and local i-indices.
   integer :: jdg_offset !< The offset between the corresponding global and local j-indices.
   logical :: symmetric  !< True if symmetric memory is used.
+
+  ! TODO: Maybe point to an internal HI type (or a new type) here
+  !   e.g. HI_p%isc
+  integer :: ispu, iepu !< Parity i-index on a transfored u-grid
+  integer :: ispv, iepv !< Parity j-index on a transfored u-grid
+  integer :: jspu, jepu !< Parity i-index on a transfored u-grid
+  integer :: jspv, jepv !< Parity j-index on a transfored u-grid
 end type hor_index_type
 
 !> Copy the contents of one horizontal index type into another
@@ -60,6 +67,9 @@ subroutine hor_index_init(Domain, HI, param_file, local_indexing, index_offset)
   type(param_file_type),  intent(in)    :: param_file !< Parameter file handle
   logical, optional,      intent(in)    :: local_indexing !< If true, all tracer data domains start at 1
   integer, optional,      intent(in)    :: index_offset   !< A fixed additional offset to all indices
+
+  logical :: rotate_grid
+  integer :: turns
 
 ! This include declares and sets the variable "version".
 #include "version_variable.h"
@@ -76,6 +86,12 @@ subroutine hor_index_init(Domain, HI, param_file, local_indexing, index_offset)
   call log_version(param_file, "MOM_hor_index", version, &
                    "Sets the horizontal array index types.")
 
+  ! TODO: Pass as arguments?
+  call get_param(param_file, "MOM", "ROTATE_GRID", rotate_grid, &
+                 default=.false., do_not_log=.true.)
+  call get_param(param_file, "MOM", "GRID_QUARTER_TURNS", turns, &
+                 default=1, do_not_log=.true.)
+
   HI%IscB = HI%isc ; HI%JscB = HI%jsc
   HI%IsdB = HI%isd ; HI%JsdB = HI%jsd
   HI%IsgB = HI%isg ; HI%JsgB = HI%jsg
@@ -87,6 +103,26 @@ subroutine hor_index_init(Domain, HI, param_file, local_indexing, index_offset)
   HI%IecB = HI%iec ; HI%JecB = HI%jec
   HI%IedB = HI%ied ; HI%JedB = HI%jed
   HI%IegB = HI%ieg ; HI%JegB = HI%jeg
+
+  HI%ispu = HI%isc ; HI%jspu = HI%jsc
+  HI%iepu = HI%iec ; HI%jepu = HI%jec
+  HI%ispv = HI%isc ; HI%jspv = HI%jsc
+  HI%iepv = HI%iec ; HI%jepv = HI%jec
+  if (rotate_grid) then
+    ! This can be condensed
+    if (turns == 1) then
+      HI%ispu = HI%isc - 1
+      HI%iepu = HI%iec - 1
+    elseif (turns == 2) then
+      HI%ispu = HI%isc - 1
+      HI%iepu = HI%iec - 1
+      HI%jspv = HI%jsc - 1
+      HI%jepv = HI%jec - 1
+    elseif (turns == 3) then
+      HI%jspv = HI%jsc - 1
+      HI%jepv = HI%jec - 1
+    endif
+  endif
 
 end subroutine hor_index_init
 
@@ -109,6 +145,10 @@ subroutine HIT_assign(HI1, HI2)
   HI1%idg_offset = HI2%idg_offset ; HI1%jdg_offset = HI2%jdg_offset
   HI1%symmetric = HI2%symmetric
 
+  HI1%ispu = HI2%ispu ; HI1%iepu = HI2%iepu
+  HI1%jspu = HI2%jspu ; HI1%jepu = HI2%jepu
+  HI1%ispv = HI2%ispv ; HI1%iepv = HI2%iepv
+  HI1%jspv = HI2%jspv ; HI1%jepv = HI2%jepv
 end subroutine HIT_assign
 
 !> \namespace mom_hor_index

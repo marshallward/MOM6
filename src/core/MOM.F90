@@ -517,8 +517,9 @@ subroutine step_MOM(forces_in, fluxes_in, sfc_state, Time_start, time_int_in, CS
   ! TODO: Do not do this every timestep!
   if (CS%rotate_grid) then
     ! TODO: Check that these have not already been allocated?
-    allocate(forces)
-    allocate(fluxes)
+    if (.not. associated(forces)) allocate(forces)
+    if (.not. associated(fluxes)) allocate(fluxes)
+
     ! TODO: Remember to deallocate!
     ! NOTE: rotate_*_forcing also allocates fields inside `forces`, since we
     ! cannot know which fields inside of `forces` also need allocation
