@@ -597,16 +597,32 @@ subroutine chksum_uv_2d(mesg, arrayU, arrayV, HI, haloshift, symmetric, &
   real,                    optional, intent(in) :: scale     !< A scaling factor for these arrays.
   integer,                 optional, intent(in) :: logunit !< IO unit for checksum logging
 
-  if (present(haloshift)) then
-    call chksum_u_2d(arrayU, 'u '//mesg, HI, haloshift, symmetric, &
-                     omit_corners, scale, logunit=logunit)
-    call chksum_v_2d(arrayV, 'v '//mesg, HI, haloshift, symmetric, &
-                     omit_corners, scale, logunit=logunit)
+  if (modulo(HI%turns, 2) == 0) then
+    ! TODO: scale <- -scale for 180° turn
+    if (present(haloshift)) then
+      call chksum_u_2d(arrayU, 'u '//mesg, HI, haloshift, symmetric, &
+                       omit_corners, scale, logunit=logunit)
+      call chksum_v_2d(arrayV, 'v '//mesg, HI, haloshift, symmetric, &
+                       omit_corners, scale, logunit=logunit)
+    else
+      call chksum_u_2d(arrayU, 'u '//mesg, HI, symmetric=symmetric, &
+                       logunit=logunit)
+      call chksum_v_2d(arrayV, 'v '//mesg, HI, symmetric=symmetric, &
+                       logunit=logunit)
+    endif
   else
-    call chksum_u_2d(arrayU, 'u '//mesg, HI, symmetric=symmetric, &
-                     logunit=logunit)
-    call chksum_v_2d(arrayV, 'v '//mesg, HI, symmetric=symmetric, &
-                     logunit=logunit)
+    ! TODO: -90° turn
+    if (present(haloshift)) then
+      call chksum_v_2d(arrayV, 'u '//mesg, HI, haloshift, symmetric, &
+                       omit_corners, scale, logunit=logunit)
+      call chksum_u_2d(arrayU, 'v '//mesg, HI, haloshift, symmetric, &
+                       omit_corners, scale, logunit=logunit)
+    else
+      call chksum_v_2d(-arrayV, 'u '//mesg, HI, symmetric=symmetric, &
+                       logunit=logunit)
+      call chksum_u_2d(arrayU, 'v '//mesg, HI, symmetric=symmetric, &
+                       logunit=logunit)
+    endif
   endif
 
 end subroutine chksum_uv_2d
@@ -660,6 +676,7 @@ subroutine chksum_u_2d(array, mesg, HI, haloshift, symmetric, omit_corners, &
   integer :: bc0, bcSW, bcSE, bcNW, bcNE, hshift
   integer :: bcN, bcS, bcE, bcW
   logical :: do_corners, sym, sym_stats
+  character(len=8) :: uv_tag
 
   if (checkForNaNs) then
     if (is_NaN(array(HI%IscB:HI%IecB,HI%jsc:HI%jec))) &
@@ -672,6 +689,9 @@ subroutine chksum_u_2d(array, mesg, HI, haloshift, symmetric, omit_corners, &
   iounit = error_unit; if(present(logunit)) iounit = logunit
   sym_stats = .false. ; if (present(symmetric)) sym_stats = symmetric
   if (present(haloshift)) then ; if (haloshift > 0) sym_stats = .true. ; endif
+
+  uv_tag = 'u-point:'
+  if (modulo(HI%turns, 2) == 1) uv_tag = 'v-point:'
 
   if (calculateStatistics) then
     if (present(scale)) then
@@ -689,7 +709,7 @@ subroutine chksum_u_2d(array, mesg, HI, haloshift, symmetric, omit_corners, &
     endif
 
     if (is_root_pe()) &
-      call chk_sum_msg("u-point:", aMean, aMin, aMax, mesg, iounit)
+      call chk_sum_msg(uv_tag, aMean, aMin, aMax, mesg, iounit)
   endif
 
   if (.not.writeChksums) return
@@ -711,7 +731,7 @@ subroutine chksum_u_2d(array, mesg, HI, haloshift, symmetric, omit_corners, &
   sym = .false. ; if (present(symmetric)) sym = symmetric
 
   if ((hshift==0) .and. .not.sym) then
-    if (is_root_pe()) call chk_sum_msg("u-point:", bc0, mesg, iounit)
+    if (is_root_pe()) call chk_sum_msg(uv_tag, bc0, mesg, iounit)
     return
   endif
 
@@ -719,7 +739,7 @@ subroutine chksum_u_2d(array, mesg, HI, haloshift, symmetric, omit_corners, &
 
   if (hshift==0) then
     bcW = subchk(array, HI, -hshift-1, 0, scaling)
-    if (is_root_pe()) call chk_sum_msg_W("u-point:", bc0, bcW, mesg, iounit)
+    if (is_root_pe()) call chk_sum_msg_W(uv_tag, bc0, bcW, mesg, iounit)
   elseif (do_corners) then
     if (sym) then
       bcSW = subchk(array, HI, -hshift-1, -hshift, scaling)
@@ -732,7 +752,7 @@ subroutine chksum_u_2d(array, mesg, HI, haloshift, symmetric, omit_corners, &
     bcNE = subchk(array, HI, hshift, hshift, scaling)
 
     if (is_root_pe()) &
-      call chk_sum_msg("u-point:", bc0, bcSW, bcSE, bcNW, bcNE, mesg, iounit)
+      call chk_sum_msg(uv_tag, bc0, bcSW, bcSE, bcNW, bcNE, mesg, iounit)
   else
     bcS = subchk(array, HI, 0, -hshift, scaling)
     bcE = subchk(array, HI, hshift, 0, scaling)
@@ -744,7 +764,7 @@ subroutine chksum_u_2d(array, mesg, HI, haloshift, symmetric, omit_corners, &
     bcN = subchk(array, HI, 0, hshift, scaling)
 
     if (is_root_pe()) &
-      call chk_sum_msg_NSEW("u-point:", bc0, bcN, bcS, bcE, bcW, mesg, iounit)
+      call chk_sum_msg_NSEW(uv_tag, bc0, bcN, bcS, bcE, bcW, mesg, iounit)
   endif
 
   contains
@@ -815,6 +835,7 @@ subroutine chksum_v_2d(array, mesg, HI, haloshift, symmetric, omit_corners, &
   integer :: bc0, bcSW, bcSE, bcNW, bcNE, hshift
   integer :: bcN, bcS, bcE, bcW
   logical :: do_corners, sym, sym_stats
+  character(len=8) :: uv_tag
 
   if (checkForNaNs) then
     if (is_NaN(array(HI%isc:HI%iec,HI%JscB:HI%JecB))) &
@@ -827,6 +848,9 @@ subroutine chksum_v_2d(array, mesg, HI, haloshift, symmetric, omit_corners, &
   iounit = error_unit; if(present(logunit)) iounit = logunit
   sym_stats = .false. ; if (present(symmetric)) sym_stats = symmetric
   if (present(haloshift)) then ; if (haloshift > 0) sym_stats = .true. ; endif
+
+  uv_tag = 'v-point:'
+  if (modulo(HI%turns, 2) == 1) uv_tag = 'u-point:'
 
   if (calculateStatistics) then
     if (present(scale)) then
@@ -844,7 +868,7 @@ subroutine chksum_v_2d(array, mesg, HI, haloshift, symmetric, omit_corners, &
     endif
 
     if (is_root_pe()) &
-      call chk_sum_msg("v-point:", aMean, aMin, aMax, mesg, iounit)
+      call chk_sum_msg(uv_tag, aMean, aMin, aMax, mesg, iounit)
   endif
 
   if (.not.writeChksums) return
@@ -866,7 +890,7 @@ subroutine chksum_v_2d(array, mesg, HI, haloshift, symmetric, omit_corners, &
   sym = .false. ; if (present(symmetric)) sym = symmetric
 
   if ((hshift==0) .and. .not.sym) then
-    if (is_root_pe()) call chk_sum_msg("v-point:", bc0, mesg, iounit)
+    if (is_root_pe()) call chk_sum_msg(uv_tag, bc0, mesg, iounit)
     return
   endif
 
@@ -874,7 +898,7 @@ subroutine chksum_v_2d(array, mesg, HI, haloshift, symmetric, omit_corners, &
 
   if (hshift==0) then
     bcS = subchk(array, HI, 0, -hshift-1, scaling)
-    if (is_root_pe()) call chk_sum_msg_S("v-point:", bc0, bcS, mesg, iounit)
+    if (is_root_pe()) call chk_sum_msg_S(uv_tag, bc0, bcS, mesg, iounit)
   elseif (do_corners) then
     if (sym) then
       bcSW = subchk(array, HI, -hshift, -hshift-1, scaling)
@@ -887,7 +911,7 @@ subroutine chksum_v_2d(array, mesg, HI, haloshift, symmetric, omit_corners, &
     bcNE = subchk(array, HI, hshift, hshift, scaling)
 
     if (is_root_pe()) &
-      call chk_sum_msg("v-point:", bc0, bcSW, bcSE, bcNW, bcNE, mesg, iounit)
+      call chk_sum_msg(uv_tag, bc0, bcSW, bcSE, bcNW, bcNE, mesg, iounit)
   else
     if (sym) then
       bcS = subchk(array, HI, 0, -hshift-1, scaling)
@@ -899,7 +923,7 @@ subroutine chksum_v_2d(array, mesg, HI, haloshift, symmetric, omit_corners, &
     bcN = subchk(array, HI, 0, hshift, scaling)
 
     if (is_root_pe()) &
-      call chk_sum_msg_NSEW("v-point:", bc0, bcN, bcS, bcE, bcW, mesg, iounit)
+      call chk_sum_msg_NSEW(uv_tag, bc0, bcN, bcS, bcE, bcW, mesg, iounit)
   endif
 
   contains

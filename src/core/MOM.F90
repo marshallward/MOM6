@@ -1983,6 +1983,7 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, restart_CSp, &
   ! NOTE: rotate_grid is equivalent to grid_qturns % 4 == 0
   call get_param(param_file, "MOM", "ROTATE_GRID", CS%rotate_grid, &
                  "Enable rotation of the horizontal grid.", default=.false.)
+  ! TODO: Rename this; we rotate the whole domain, not just the grid
   call get_param(param_file, "MOM", "GRID_QUARTER_TURNS", grid_qturns, &
                  "Angle of grid rotation, in units of quarter-turns.", default=1)
 
@@ -2032,7 +2033,8 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, restart_CSp, &
   ! NOTE: I can probably move this to after MOM_initialize_fixed
   if (CS%rotate_grid) then
     call hor_index_init(CS%G%Domain, HI_rot, param_file, &
-                        local_indexing=.not.global_indexing)
+                        local_indexing=.not.global_indexing, &
+                        turns=grid_qturns)
     HI => HI_rot
 
     call create_dyn_horgrid(dG, HI_rot, bathymetry_at_vel=bathy_at_vel)

@@ -46,9 +46,11 @@ type, public :: hor_index_type
   integer :: idg_offset !< The offset between the corresponding global and local i-indices.
   integer :: jdg_offset !< The offset between the corresponding global and local j-indices.
   logical :: symmetric  !< True if symmetric memory is used.
+  integer :: turns      !< Number of quarter-turn rotations
 
   ! TODO: Maybe point to an internal HI type (or a new type) here
   !   e.g. HI_p%isc
+  ! TODO: Leaning towards complete removal of these, and offsetting in chksums
   integer :: ispu, iepu !< Parity i-index on a transfored u-grid
   integer :: ispv, iepv !< Parity j-index on a transfored u-grid
   integer :: jspu, jepu !< Parity i-index on a transfored u-grid
@@ -61,15 +63,15 @@ interface assignment(=); module procedure HIT_assign ; end interface
 contains
 
 !> Sets various index values in a hor_index_type.
-subroutine hor_index_init(Domain, HI, param_file, local_indexing, index_offset)
+subroutine hor_index_init(Domain, HI, param_file, local_indexing, &
+                          index_offset, turns)
   type(MOM_domain_type),  intent(in)    :: Domain     !< The MOM domain from which to extract information.
   type(hor_index_type),   intent(inout) :: HI         !< A horizontal index type to populate with data
   type(param_file_type),  intent(in)    :: param_file !< Parameter file handle
   logical, optional,      intent(in)    :: local_indexing !< If true, all tracer data domains start at 1
   integer, optional,      intent(in)    :: index_offset   !< A fixed additional offset to all indices
 
-  logical :: rotate_grid
-  integer :: turns
+  integer, optional, intent(in) :: turns    !< Number of domain quarter-turns
 
 ! This include declares and sets the variable "version".
 #include "version_variable.h"
@@ -85,12 +87,6 @@ subroutine hor_index_init(Domain, HI, param_file, local_indexing, index_offset)
   ! Read all relevant parameters and write them to the model log.
   call log_version(param_file, "MOM_hor_index", version, &
                    "Sets the horizontal array index types.")
-
-  ! TODO: Pass as arguments?
-  call get_param(param_file, "MOM", "ROTATE_GRID", rotate_grid, &
-                 default=.false., do_not_log=.true.)
-  call get_param(param_file, "MOM", "GRID_QUARTER_TURNS", turns, &
-                 default=1, do_not_log=.true.)
 
   HI%IscB = HI%isc ; HI%JscB = HI%jsc
   HI%IsdB = HI%isd ; HI%JsdB = HI%jsd
@@ -108,8 +104,12 @@ subroutine hor_index_init(Domain, HI, param_file, local_indexing, index_offset)
   HI%iepu = HI%iec ; HI%jepu = HI%jec
   HI%ispv = HI%isc ; HI%jspv = HI%jsc
   HI%iepv = HI%iec ; HI%jepv = HI%jec
-  if (rotate_grid) then
-    ! This can be condensed
+
+  HI%turns = 0
+  if (present(turns)) then
+    HI%turns = turns
+
+    ! TODO: Don't use these; just offset them inside of the checksums
     if (turns == 1) then
       HI%ispu = HI%isc - 1
       HI%iepu = HI%iec - 1
@@ -144,7 +144,9 @@ subroutine HIT_assign(HI1, HI2)
 
   HI1%idg_offset = HI2%idg_offset ; HI1%jdg_offset = HI2%jdg_offset
   HI1%symmetric = HI2%symmetric
+  HI1%turns = HI2%turns
 
+  ! TODO: We will remove these eventually
   HI1%ispu = HI2%ispu ; HI1%iepu = HI2%iepu
   HI1%jspu = HI2%jspu ; HI1%jepu = HI2%jepu
   HI1%ispv = HI2%ispv ; HI1%iepv = HI2%iepv
