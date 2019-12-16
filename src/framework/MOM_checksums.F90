@@ -259,6 +259,7 @@ subroutine chksum_h_2d(array, mesg, HI, haloshift, omit_corners, scale, logunit)
   real :: aMean, aMin, aMax
   integer :: bc0, bcSW, bcSE, bcNW, bcNE, hshift
   integer :: bcN, bcS, bcE, bcW
+  integer :: bc_swap
   logical :: do_corners
 
   if (checkForNaNs) then
@@ -318,9 +319,21 @@ subroutine chksum_h_2d(array, mesg, HI, haloshift, omit_corners, scale, logunit)
     bcNW = subchk(array, HI, -hshift, hshift, scaling)
     bcNE = subchk(array, HI, hshift, hshift, scaling)
 
+    ! TODO: Move to function?
+    ! TODO: Support more rotations!
+    ! Permute the rotated entries back to the original domain
+    if (HI%turns == 1) then
+      bc_swap = bcSW
+      bcSW = bcSE
+      bcSE = bcNE
+      bcNE = bcNW
+      bcNW = bc_swap
+    endif
+
     if (is_root_pe()) &
       call chk_sum_msg("h-point:", bc0, bcSW, bcSE, bcNW, bcNE, mesg, iounit)
   else
+    ! TODO: Permute the NSEW checksums
     bcS = subchk(array, HI, 0, -hshift, scaling)
     bcE = subchk(array, HI, hshift, 0, scaling)
     bcW = subchk(array, HI, -hshift, 0, scaling)
@@ -615,12 +628,12 @@ subroutine chksum_uv_2d(mesg, arrayU, arrayV, HI, haloshift, symmetric, &
     if (present(haloshift)) then
       call chksum_v_2d(arrayV, 'u '//mesg, HI, haloshift, symmetric, &
                        omit_corners, scale, logunit=logunit)
-      call chksum_u_2d(arrayU, 'v '//mesg, HI, haloshift, symmetric, &
+      call chksum_u_2d(-arrayU, 'v '//mesg, HI, haloshift, symmetric, &
                        omit_corners, scale, logunit=logunit)
     else
-      call chksum_v_2d(-arrayV, 'u '//mesg, HI, symmetric=symmetric, &
+      call chksum_v_2d(arrayV, 'u '//mesg, HI, symmetric=symmetric, &
                        logunit=logunit)
-      call chksum_u_2d(arrayU, 'v '//mesg, HI, symmetric=symmetric, &
+      call chksum_u_2d(-arrayU, 'v '//mesg, HI, symmetric=symmetric, &
                        logunit=logunit)
     endif
   endif
@@ -990,6 +1003,7 @@ subroutine chksum_h_3d(array, mesg, HI, haloshift, omit_corners, scale, logunit)
   real :: aMean, aMin, aMax
   integer :: bc0, bcSW, bcSE, bcNW, bcNE, hshift
   integer :: bcN, bcS, bcE, bcW
+  integer :: bc_swap
   logical :: do_corners
 
   if (checkForNaNs) then
@@ -1050,6 +1064,18 @@ subroutine chksum_h_3d(array, mesg, HI, haloshift, omit_corners, scale, logunit)
     bcSE = subchk(array, HI, hshift, -hshift, scaling)
     bcNW = subchk(array, HI, -hshift, hshift, scaling)
     bcNE = subchk(array, HI, hshift, hshift, scaling)
+
+    ! TODO: Move to function?
+    ! TODO: Support more rotations!
+    ! Permute the rotated entries back to the original domain
+    ! e.g. local bcNW would be bcSW on the unrotated grid
+    if (HI%turns == 1) then
+      bc_swap = bcSW
+      bcSW = bcSE
+      bcSE = bcNE
+      bcNE = bcNW
+      bcNW = bc_swap
+    endif
 
     if (is_root_pe()) &
       call chk_sum_msg("h-point:", bc0, bcSW, bcSE, bcNW, bcNE, mesg, iounit)
