@@ -3018,8 +3018,9 @@ subroutine btcalc(h, G, GV, CS, h_u, h_v, may_use_default, OBC)
   enddo ; endif
 
   if (CS%debug) then
-    call uvchksum("btcalc frhat[uv]", CS%frhatu, CS%frhatv, G%HI, 0, .true., &
-                  .true., scalar_pair=.true.)
+    call uvchksum("btcalc frhat[uv]", CS%frhatu, CS%frhatv, G%HI, &
+                  haloshift=0, symmetric=.true., omit_corners=.true., &
+                  scalar_pair=.true.)
     if (present(h_u) .and. present(h_v)) &
       call uvchksum("btcalc h_[uv]", h_u, h_v, G%HI, 0, .true., .true., scale=GV%H_to_m)
     call hchksum(h, "btcalc h",G%HI, haloshift=1, scale=GV%H_to_m)

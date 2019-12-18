@@ -615,6 +615,7 @@ subroutine chksum_uv_2d(mesg, arrayU, arrayV, HI, haloshift, symmetric, &
   logical :: vector_pair
   integer :: turns
 
+  ! TODO: This preamble code may be moveable to an interface function
   uscale = 1.0; vscale = 1.0
   if (present(scale)) then
     uscale = scale ; vscale = scale
@@ -628,6 +629,9 @@ subroutine chksum_uv_2d(mesg, arrayU, arrayV, HI, haloshift, symmetric, &
     ! TODO: Fix all the turns
     if (turns == 1) vscale = -vscale
   endif
+
+  ! TODO: Maybe use pointers to combine the two if-blocks
+  ! e.g. u_in => array[UV], v_in => array_[VU]
 
   if (modulo(HI%turns, 2) == 0) then
     if (present(haloshift)) then
@@ -739,6 +743,8 @@ subroutine chksum_u_2d(array, mesg, HI, haloshift, symmetric, omit_corners, &
   integer :: bcN, bcS, bcE, bcW
   logical :: do_corners, sym, sym_stats
   character(len=8) :: uv_tag
+  integer :: turns
+  integer :: di, dj
 
   if (checkForNaNs) then
     if (is_NaN(array(HI%IscB:HI%IecB,HI%jsc:HI%jec))) &
@@ -751,9 +757,10 @@ subroutine chksum_u_2d(array, mesg, HI, haloshift, symmetric, omit_corners, &
   iounit = error_unit; if(present(logunit)) iounit = logunit
   sym_stats = .false. ; if (present(symmetric)) sym_stats = symmetric
   if (present(haloshift)) then ; if (haloshift > 0) sym_stats = .true. ; endif
+  turns = modulo(HI%turns, 4)
 
   uv_tag = 'u-point:'
-  if (modulo(HI%turns, 2) == 1) uv_tag = 'v-point:'
+  if (modulo(turns, 2) == 1) uv_tag = 'v-point:'
 
   if (calculateStatistics) then
     if (present(scale)) then
@@ -788,7 +795,9 @@ subroutine chksum_u_2d(array, mesg, HI, haloshift, symmetric, omit_corners, &
     call chksum_error(FATAL,'Error in chksum_u_2d '//trim(mesg))
   endif
 
-  bc0 = subchk(array, HI, 0, 0, scaling)
+  ! Under rotation, shift compute domain to match the unrotated compute domain
+  di = 0 ; if (turns == 1 .or. turns == 2) di = -1
+  bc0 = subchk(array, HI, di, 0, scaling)
 
   sym = .false. ; if (present(symmetric)) sym = symmetric
 
@@ -800,8 +809,12 @@ subroutine chksum_u_2d(array, mesg, HI, haloshift, symmetric, omit_corners, &
   do_corners = .true. ; if (present(omit_corners)) do_corners = .not.omit_corners
 
   if (hshift==0) then
-    bcW = subchk(array, HI, -hshift-1, 0, scaling)
-    if (is_root_pe()) call chk_sum_msg_W(uv_tag, bc0, bcW, mesg, iounit)
+    di = 0; if (turns == 0 .or. turns == 3) di = -1
+    bcW = subchk(array, HI, di, 0, scaling)
+    if (is_root_pe()) then
+      if (modulo(turns, 2) == 0) call chk_sum_msg_W(uv_tag, bc0, bcW, mesg, iounit)
+      if (modulo(turns, 2) == 1) call chk_sum_msg_S(uv_tag, bc0, bcW, mesg, iounit)
+    endif
   elseif (do_corners) then
     if (sym) then
       bcSW = subchk(array, HI, -hshift-1, -hshift, scaling)
@@ -898,6 +911,8 @@ subroutine chksum_v_2d(array, mesg, HI, haloshift, symmetric, omit_corners, &
   integer :: bcN, bcS, bcE, bcW
   logical :: do_corners, sym, sym_stats
   character(len=8) :: uv_tag
+  integer :: turns
+  integer :: di, dj
 
   if (checkForNaNs) then
     if (is_NaN(array(HI%isc:HI%iec,HI%JscB:HI%JecB))) &
@@ -910,9 +925,10 @@ subroutine chksum_v_2d(array, mesg, HI, haloshift, symmetric, omit_corners, &
   iounit = error_unit; if(present(logunit)) iounit = logunit
   sym_stats = .false. ; if (present(symmetric)) sym_stats = symmetric
   if (present(haloshift)) then ; if (haloshift > 0) sym_stats = .true. ; endif
+  turns = modulo(HI%turns, 4)
 
   uv_tag = 'v-point:'
-  if (modulo(HI%turns, 2) == 1) uv_tag = 'u-point:'
+  if (modulo(turns, 2) == 1) uv_tag = 'u-point:'
 
   if (calculateStatistics) then
     if (present(scale)) then
@@ -947,7 +963,9 @@ subroutine chksum_v_2d(array, mesg, HI, haloshift, symmetric, omit_corners, &
     call chksum_error(FATAL,'Error in chksum_v_2d '//trim(mesg))
   endif
 
-  bc0 = subchk(array, HI, 0, 0, scaling)
+  ! Under rotation, shift compute domain to match the unrotated compute domain
+  dj = 0 ; if (turns == 2 .or. turns == 3) dj = -1
+  bc0 = subchk(array, HI, 0, dj, scaling)
 
   sym = .false. ; if (present(symmetric)) sym = symmetric
 
@@ -958,9 +976,14 @@ subroutine chksum_v_2d(array, mesg, HI, haloshift, symmetric, omit_corners, &
 
   do_corners = .true. ; if (present(omit_corners)) do_corners = .not.omit_corners
 
+  ! TODO: No support for do_corners, NSEW, or general turns!
   if (hshift==0) then
-    bcS = subchk(array, HI, 0, -hshift-1, scaling)
-    if (is_root_pe()) call chk_sum_msg_S(uv_tag, bc0, bcS, mesg, iounit)
+    dj = 0 ; if (turns == 0 .or. turns == 1) dj = -1
+    bcS = subchk(array, HI, 0, dj, scaling)
+    if (is_root_pe()) then
+      if (modulo(turns, 2) == 0) call chk_sum_msg_S(uv_tag, bc0, bcS, mesg, iounit)
+      if (modulo(turns, 2) == 1) call chk_sum_msg_W(uv_tag, bc0, bcS, mesg, iounit)
+    endif
   elseif (do_corners) then
     if (sym) then
       bcSW = subchk(array, HI, -hshift, -hshift-1, scaling)
@@ -1357,6 +1380,8 @@ subroutine chksum_u_3d(array, mesg, HI, haloshift, symmetric, omit_corners, &
   integer :: bcN, bcS, bcE, bcW
   logical :: do_corners, sym, sym_stats
   character(len=8) :: uv_tag
+  integer :: turns
+  integer :: di, dj
 
   if (checkForNaNs) then
     if (is_NaN(array(HI%IscB:HI%IecB,HI%jsc:HI%jec,:))) &
@@ -1369,6 +1394,7 @@ subroutine chksum_u_3d(array, mesg, HI, haloshift, symmetric, omit_corners, &
   iounit = error_unit; if(present(logunit)) iounit = logunit
   sym_stats = .false. ; if (present(symmetric)) sym_stats = symmetric
   if (present(haloshift)) then ; if (haloshift > 0) sym_stats = .true. ; endif
+  turns = modulo(HI%turns, 4)
 
   uv_tag = 'u-point:'
   if (modulo(HI%turns, 2) == 1) uv_tag = 'v-point:'
@@ -1406,7 +1432,9 @@ subroutine chksum_u_3d(array, mesg, HI, haloshift, symmetric, omit_corners, &
     call chksum_error(FATAL,'Error in chksum_u_3d '//trim(mesg))
   endif
 
-  bc0 = subchk(array, HI, 0, 0, scaling)
+  ! Under rotation, shift compute domain to match the unrotated compute domain
+  di = 0 ; if (turns == 1 .or. turns == 2) di = -1
+  bc0 = subchk(array, HI, di, 0, scaling)
 
   sym = .false. ; if (present(symmetric)) sym = symmetric
 
@@ -1417,9 +1445,14 @@ subroutine chksum_u_3d(array, mesg, HI, haloshift, symmetric, omit_corners, &
 
   do_corners = .true. ; if (present(omit_corners)) do_corners = .not.omit_corners
 
+  ! TODO: No support for do_corners, NSEW, or general turns!
   if (hshift==0) then
-    bcW = subchk(array, HI, -hshift-1, 0, scaling)
-    if (is_root_pe()) call chk_sum_msg_W(uv_tag, bc0, bcW, mesg, iounit)
+    di = 0 ; if (turns == 0 .or. turns == 3) di = -1
+    bcW = subchk(array, HI, di, 0, scaling)
+    if (is_root_pe()) then
+      if (modulo(turns, 2) == 0) call chk_sum_msg_W(uv_tag, bc0, bcW, mesg, iounit)
+      if (modulo(turns, 2) == 1) call chk_sum_msg_S(uv_tag, bc0, bcW, mesg, iounit)
+    endif
   elseif (do_corners) then
     if (sym) then
       bcSW = subchk(array, HI, -hshift-1, -hshift, scaling)
@@ -1516,6 +1549,8 @@ subroutine chksum_v_3d(array, mesg, HI, haloshift, symmetric, omit_corners, &
   real :: aMean, aMin, aMax
   logical :: do_corners, sym, sym_stats
   character(len=8) :: uv_tag
+  integer :: turns
+  integer :: di, dj
 
   if (checkForNaNs) then
     if (is_NaN(array(HI%isc:HI%iec,HI%JscB:HI%JecB,:))) &
@@ -1528,9 +1563,10 @@ subroutine chksum_v_3d(array, mesg, HI, haloshift, symmetric, omit_corners, &
   iounit = error_unit; if(present(logunit)) iounit = logunit
   sym_stats = .false. ; if (present(symmetric)) sym_stats = symmetric
   if (present(haloshift)) then ; if (haloshift > 0) sym_stats = .true. ; endif
+  turns = modulo(HI%turns, 4)
 
   uv_tag = 'v-point:'
-  if (modulo(HI%turns, 2) == 1) uv_tag = 'u-point:'
+  if (modulo(turns, 2) == 1) uv_tag = 'u-point:'
 
   if (calculateStatistics) then
     if (present(scale)) then
@@ -1565,7 +1601,9 @@ subroutine chksum_v_3d(array, mesg, HI, haloshift, symmetric, omit_corners, &
     call chksum_error(FATAL,'Error in chksum_v_3d '//trim(mesg))
   endif
 
-  bc0 = subchk(array, HI, 0, 0, scaling)
+  ! Under rotation, shift compute domain to match the unrotated compute domain
+  dj = 0 ; if (turns == 2 .or. turns == 3) dj = -1
+  bc0 = subchk(array, HI, 0, dj, scaling)
 
   sym = .false. ; if (present(symmetric)) sym = symmetric
 
@@ -1577,8 +1615,12 @@ subroutine chksum_v_3d(array, mesg, HI, haloshift, symmetric, omit_corners, &
   do_corners = .true. ; if (present(omit_corners)) do_corners = .not.omit_corners
 
   if (hshift==0) then
-    bcS = subchk(array, HI, 0, -hshift-1, scaling)
-    if (is_root_pe()) call chk_sum_msg_S(uv_tag, bc0, bcS, mesg, iounit)
+    dj = 0 ; if (turns == 0 .or. turns == 1) dj = -1
+    bcS = subchk(array, HI, 0, dj, scaling)
+    if (is_root_pe()) then
+      if (modulo(turns, 2) == 0) call chk_sum_msg_S(uv_tag, bc0, bcS, mesg, iounit)
+      if (modulo(turns, 2) == 1) call chk_sum_msg_W(uv_tag, bc0, bcS, mesg, iounit)
+    endif
   elseif (do_corners) then
     if (sym) then
       bcSW = subchk(array, HI, -hshift, -hshift-1, scaling)
