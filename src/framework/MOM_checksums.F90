@@ -1382,6 +1382,7 @@ subroutine chksum_u_3d(array, mesg, HI, haloshift, symmetric, omit_corners, &
   character(len=8) :: uv_tag
   integer :: turns
   integer :: di, dj
+  integer :: bc_swap
 
   if (checkForNaNs) then
     if (is_NaN(array(HI%IscB:HI%IecB,HI%jsc:HI%jec,:))) &
@@ -1445,7 +1446,6 @@ subroutine chksum_u_3d(array, mesg, HI, haloshift, symmetric, omit_corners, &
 
   do_corners = .true. ; if (present(omit_corners)) do_corners = .not.omit_corners
 
-  ! TODO: No support for do_corners, NSEW, or general turns!
   if (hshift==0) then
     di = 0 ; if (turns == 0 .or. turns == 3) di = -1
     bcW = subchk(array, HI, di, 0, scaling)
@@ -1454,15 +1454,26 @@ subroutine chksum_u_3d(array, mesg, HI, haloshift, symmetric, omit_corners, &
       if (modulo(turns, 2) == 1) call chk_sum_msg_S(uv_tag, bc0, bcW, mesg, iounit)
     endif
   elseif (do_corners) then
+    di = 0 ; if (turns == 1 .or. turns == 2) di = -1
     if (sym) then
       bcSW = subchk(array, HI, -hshift-1, -hshift, scaling)
       bcNW = subchk(array, HI, -hshift-1, hshift, scaling)
     else
-      bcSW = subchk(array, HI, -hshift, -hshift, scaling)
-      bcNW = subchk(array, HI, -hshift, hshift, scaling)
+      bcSW = subchk(array, HI, -hshift+di, -hshift, scaling)
+      bcNW = subchk(array, HI, -hshift+di, hshift, scaling)
     endif
-    bcSE = subchk(array, HI, hshift, -hshift, scaling)
-    bcNE = subchk(array, HI, hshift, hshift, scaling)
+    bcSE = subchk(array, HI, hshift+di, -hshift, scaling)
+    bcNE = subchk(array, HI, hshift+di, hshift, scaling)
+
+    ! TODO: Generalize this for turns, and possibly integrate into the calls
+    ! above.  This is a temporary fix
+    if (turns == 1) then
+      bc_swap = bcSW
+      bcSW = bcSE
+      bcSE = bcNE
+      bcNE = bcNW
+      bcNW = bc_swap
+    endif
 
     if (is_root_pe()) &
       call chk_sum_msg(uv_tag, bc0, bcSW, bcSE, bcNW, bcNE, mesg, iounit)
@@ -1551,6 +1562,7 @@ subroutine chksum_v_3d(array, mesg, HI, haloshift, symmetric, omit_corners, &
   character(len=8) :: uv_tag
   integer :: turns
   integer :: di, dj
+  integer :: bc_swap
 
   if (checkForNaNs) then
     if (is_NaN(array(HI%isc:HI%iec,HI%JscB:HI%JecB,:))) &
@@ -1622,15 +1634,25 @@ subroutine chksum_v_3d(array, mesg, HI, haloshift, symmetric, omit_corners, &
       if (modulo(turns, 2) == 1) call chk_sum_msg_W(uv_tag, bc0, bcS, mesg, iounit)
     endif
   elseif (do_corners) then
+    dj = 0 ; if (turns == 2 .or. turns == 3) dj = -1
     if (sym) then
       bcSW = subchk(array, HI, -hshift, -hshift-1, scaling)
       bcSE = subchk(array, HI, hshift, -hshift-1, scaling)
     else
-      bcSW = subchk(array, HI, -hshift, -hshift, scaling)
-      bcSE = subchk(array, HI, hshift, -hshift, scaling)
+      bcSW = subchk(array, HI, -hshift, -hshift+dj, scaling)
+      bcSE = subchk(array, HI, hshift, -hshift+dj, scaling)
     endif
-    bcNW = subchk(array, HI, -hshift, hshift, scaling)
-    bcNE = subchk(array, HI, hshift, hshift, scaling)
+    bcNW = subchk(array, HI, -hshift, hshift+dj, scaling)
+    bcNE = subchk(array, HI, hshift, hshift+dj, scaling)
+
+    ! TODO: Generalize for all rotations; integrate into subchk calls above
+    if (turns == 1) then
+      bc_swap = bcSW
+      bcSW = bcSE
+      bcSE = bcNE
+      bcNE = bcNW
+      bcNW = bc_swap
+    endif
 
     if (is_root_pe()) &
       call chk_sum_msg(uv_tag, bc0, bcSW, bcSE, bcNW, bcNE, mesg, iounit)
