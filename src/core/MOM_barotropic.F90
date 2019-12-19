@@ -1470,11 +1470,15 @@ subroutine btstep(U_in, V_in, eta_in, dt, bc_accel_u, bc_accel_v, forces, pbce, 
     if (.not. use_BT_cont) then
       call uvchksum("BT Dat[uv]", Datu, Datv, CS%debug_BT_HI, haloshift=1, scale=US%L_to_m*GV%H_to_m)
     endif
-    call uvchksum("BT wt_[uv]", wt_u, wt_v, G%HI, 0, .true., .true.)
-    call uvchksum("BT frhat[uv]", CS%frhatu, CS%frhatv, G%HI, 0, .true., .true.)
+    call uvchksum("BT wt_[uv]", wt_u, wt_v, G%HI, haloshift=0, &
+                  symmetric=.true., omit_corners=.true., scalar_pair=.true.)
+    call uvchksum("BT frhat[uv]", CS%frhatu, CS%frhatv, G%HI, haloshift=0, &
+                  symmetric=.true., omit_corners=.true., scalar_pair=.true.)
     call uvchksum("BT bc_accel_[uv]", bc_accel_u, bc_accel_v, G%HI, haloshift=0, scale=US%L_T2_to_m_s2)
-    call uvchksum("BT IDat[uv]", CS%IDatu, CS%IDatv, G%HI, haloshift=0, scale=US%m_to_Z)
-    call uvchksum("BT visc_rem_[uv]", visc_rem_u, visc_rem_v, G%HI, haloshift=1)
+    call uvchksum("BT IDat[uv]", CS%IDatu, CS%IDatv, G%HI, haloshift=0, &
+                  scale=US%m_to_Z, scalar_pair=.true.)
+    call uvchksum("BT visc_rem_[uv]", visc_rem_u, visc_rem_v, G%HI, &
+                  haloshift=1, scalar_pair=.true.)
   endif
 
   if (query_averaging_enabled(CS%diag)) then
@@ -3022,7 +3026,9 @@ subroutine btcalc(h, G, GV, CS, h_u, h_v, may_use_default, OBC)
                   haloshift=0, symmetric=.true., omit_corners=.true., &
                   scalar_pair=.true.)
     if (present(h_u) .and. present(h_v)) &
-      call uvchksum("btcalc h_[uv]", h_u, h_v, G%HI, 0, .true., .true., scale=GV%H_to_m)
+      call uvchksum("btcalc h_[uv]", h_u, h_v, G%HI, haloshift=0, &
+                    symmetric=.true., omit_corners=.true., scale=GV%H_to_m, &
+                    scalar_pair=.true.)
     call hchksum(h, "btcalc h",G%HI, haloshift=1, scale=GV%H_to_m)
   endif
 

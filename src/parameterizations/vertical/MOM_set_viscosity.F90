@@ -1682,8 +1682,8 @@ subroutine set_viscous_ML(u, v, h, tv, forces, visc, dt, G, GV, US, CS, symmetri
 
   if (CS%debug) then
     if (associated(visc%nkml_visc_u) .and. associated(visc%nkml_visc_v)) &
-      call uvchksum("nkml_visc_[uv]", visc%nkml_visc_u, &
-                    visc%nkml_visc_v, G%HI,haloshift=0)
+      call uvchksum("nkml_visc_[uv]", visc%nkml_visc_u, visc%nkml_visc_v, &
+                    G%HI, haloshift=0, scalar_pair=.true.)
   endif
   if (CS%id_nkml_visc_u > 0) &
     call post_data(CS%id_nkml_visc_u, visc%nkml_visc_u, CS%diag)
