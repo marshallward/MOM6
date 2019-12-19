@@ -627,6 +627,7 @@ subroutine chksum_uv_2d(mesg, arrayU, arrayV, HI, haloshift, symmetric, &
   turns = modulo(HI%turns, 4)
   if (vector_pair) then
     ! TODO: Fix all the turns
+    ! TODO: I think this should be uscale...
     if (turns == 1) vscale = -vscale
   endif
 
@@ -737,7 +738,7 @@ subroutine chksum_u_2d(array, mesg, HI, haloshift, symmetric, omit_corners, &
   real, allocatable, dimension(:,:) :: rescaled_array
   real :: scaling
   integer :: iounit !< Log IO unit
-  integer :: i, j, Is
+  integer :: i, j, Is, Ie
   real :: aMean, aMin, aMax
   integer :: bc0, bcSW, bcSE, bcNW, bcNE, hshift
   integer :: bcN, bcS, bcE, bcW
@@ -745,6 +746,7 @@ subroutine chksum_u_2d(array, mesg, HI, haloshift, symmetric, omit_corners, &
   character(len=8) :: uv_tag
   integer :: turns
   integer :: di, dj
+  integer :: bc_swap
 
   if (checkForNaNs) then
     if (is_NaN(array(HI%IscB:HI%IecB,HI%jsc:HI%jec))) &
@@ -763,18 +765,22 @@ subroutine chksum_u_2d(array, mesg, HI, haloshift, symmetric, omit_corners, &
   if (modulo(turns, 2) == 1) uv_tag = 'v-point:'
 
   if (calculateStatistics) then
+    di = 0 ; if (turns == 1 .or. turns == 2) di = -1
     if (present(scale)) then
       allocate( rescaled_array(LBOUND(array,1):UBOUND(array,1), &
                                LBOUND(array,2):UBOUND(array,2)) )
       rescaled_array(:,:) = 0.0
-      Is = HI%isc ; if (sym_stats) Is = HI%isc-1
-      do j=HI%jsc,HI%jec ; do I=Is,HI%IecB
+
+      Is = HI%isc + di; if (sym_stats) Is = HI%isc - 1
+      Ie = HI%iecB + di ; if (sym_stats) Ie = HI%iecB
+
+      do j=HI%jsc,HI%jec ; do I=Is,Ie
         rescaled_array(I,j) = scale*array(I,j)
       enddo ; enddo
-      call subStats(HI, rescaled_array, sym_stats, aMean, aMin, aMax)
+      call subStats(HI, rescaled_array, di, sym_stats, aMean, aMin, aMax)
       deallocate(rescaled_array)
     else
-      call subStats(HI, array, sym_stats, aMean, aMin, aMax)
+      call subStats(HI, array, di, sym_stats, aMean, aMin, aMax)
     endif
 
     if (is_root_pe()) &
@@ -816,15 +822,27 @@ subroutine chksum_u_2d(array, mesg, HI, haloshift, symmetric, omit_corners, &
       if (modulo(turns, 2) == 1) call chk_sum_msg_S(uv_tag, bc0, bcW, mesg, iounit)
     endif
   elseif (do_corners) then
+    di = 0 ; if (turns == 1 .or. turns == 2) di = -1
     if (sym) then
       bcSW = subchk(array, HI, -hshift-1, -hshift, scaling)
       bcNW = subchk(array, HI, -hshift-1, hshift, scaling)
     else
-      bcSW = subchk(array, HI, -hshift, -hshift, scaling)
-      bcNW = subchk(array, HI, -hshift, hshift, scaling)
+      bcSW = subchk(array, HI, -hshift+di, -hshift, scaling)
+      bcNW = subchk(array, HI, -hshift+di, hshift, scaling)
     endif
-    bcSE = subchk(array, HI, hshift, -hshift, scaling)
-    bcNE = subchk(array, HI, hshift, hshift, scaling)
+    ! TODO: This is wrong; no di for symmetric (?)
+    bcSE = subchk(array, HI, hshift+di, -hshift, scaling)
+    bcNE = subchk(array, HI, hshift+di, hshift, scaling)
+
+    ! TODO: Generalize this for turns, and possibly integrate into the calls
+    ! above.  This is a temporary fix
+    if (turns == 1) then
+      bc_swap = bcSW
+      bcSW = bcSE
+      bcSE = bcNE
+      bcNE = bcNW
+      bcNW = bc_swap
+    endif
 
     if (is_root_pe()) &
       call chk_sum_msg(uv_tag, bc0, bcSW, bcSE, bcNW, bcNE, mesg, iounit)
@@ -861,25 +879,26 @@ subroutine chksum_u_2d(array, mesg, HI, haloshift, symmetric, omit_corners, &
     subchk=mod(subchk, bc_modulus)
   end function subchk
 
-  subroutine subStats(HI, array, sym_stats, aMean, aMin, aMax)
+  subroutine subStats(HI, array, di, sym_stats, aMean, aMin, aMax)
     type(hor_index_type), intent(in) ::  HI     !< A horizontal index type
     real, dimension(HI%IsdB:,HI%jsd:), intent(in) :: array !< The array to be checksummed
+    integer, intent(in) :: di
     logical,          intent(in) :: sym_stats !< If true, evaluate the statistics on the
                                               !! full symmetric computational domain.
     real, intent(out) :: aMean, aMin, aMax
 
-    integer :: i, j, n, IsB
+    integer :: i, j, n, IsB, IeB
 
-    IsB = HI%isc ; if (sym_stats) IsB = HI%isc-1
+    IsB = HI%isc + di ; if (sym_stats) IsB = HI%isc - 1
+    IeB = HI%IecB + di ; if (sym_stats) IeB = HI%IecB
 
-    aMin = array(HI%isc,HI%jsc) ; aMax = aMin
-    do j=HI%jsc,HI%jec ; do I=IsB,HI%IecB
+    aMin = array(IsB,HI%jsc) ; aMax = aMin
+    do j=HI%jsc,HI%jec ; do I=IsB,IeB
       aMin = min(aMin, array(I,j))
       aMax = max(aMax, array(I,j))
     enddo ; enddo
     ! This line deliberately uses the h-point computational domain.
-    !aMean = reproducing_sum(array(HI%isc:HI%iec,HI%jsc:HI%jec))
-    aMean = reproducing_sum(array(HI%ispu:HI%iepu,HI%jspu:HI%jepu))
+    aMean = reproducing_sum(array(HI%isc+di:HI%iec+di,HI%jsc:HI%jec))
     n = (1 + HI%jec - HI%jsc) * (1 + HI%iec - HI%isc)
     call sum_across_PEs(n)
     call min_across_PEs(aMin)
@@ -913,6 +932,7 @@ subroutine chksum_v_2d(array, mesg, HI, haloshift, symmetric, omit_corners, &
   character(len=8) :: uv_tag
   integer :: turns
   integer :: di, dj
+  integer :: bc_swap
 
   if (checkForNaNs) then
     if (is_NaN(array(HI%isc:HI%iec,HI%JscB:HI%JecB))) &
@@ -994,6 +1014,16 @@ subroutine chksum_v_2d(array, mesg, HI, haloshift, symmetric, omit_corners, &
     endif
     bcNW = subchk(array, HI, -hshift, hshift, scaling)
     bcNE = subchk(array, HI, hshift, hshift, scaling)
+
+    ! TODO: Generalize for all rotations; integrate into subchk calls above
+    ! TODO: Should I be doing this here?  Or should I just be permuting u?
+    if (turns == 1) then
+      bc_swap = bcSW
+      bcSW = bcSE
+      bcSE = bcNE
+      bcNE = bcNW
+      bcNW = bc_swap
+    endif
 
     if (is_root_pe()) &
       call chk_sum_msg(uv_tag, bc0, bcSW, bcSE, bcNW, bcNE, mesg, iounit)
@@ -1407,7 +1437,7 @@ subroutine chksum_u_3d(array, mesg, HI, haloshift, symmetric, omit_corners, &
                                LBOUND(array,2):UBOUND(array,2), &
                                LBOUND(array,3):UBOUND(array,3)) )
       rescaled_array(:,:,:) = 0.0
-      !Is = HI%isc ; if (sym_stats) Is = HI%isc-1
+
       Is = HI%isc + di ; if (sym_stats) Is = HI%isc - 1
       Ie = HI%iecB + di ; if (sym_stats) Ie = HI%iecB
 
@@ -1462,12 +1492,14 @@ subroutine chksum_u_3d(array, mesg, HI, haloshift, symmetric, omit_corners, &
     if (sym) then
       bcSW = subchk(array, HI, -hshift-1, -hshift, scaling)
       bcNW = subchk(array, HI, -hshift-1, hshift, scaling)
+      bcSE = subchk(array, HI, hshift, -hshift, scaling)
+      bcNE = subchk(array, HI, hshift, hshift, scaling)
     else
       bcSW = subchk(array, HI, -hshift+di, -hshift, scaling)
       bcNW = subchk(array, HI, -hshift+di, hshift, scaling)
+      bcSE = subchk(array, HI, hshift+di, -hshift, scaling)
+      bcNE = subchk(array, HI, hshift+di, hshift, scaling)
     endif
-    bcSE = subchk(array, HI, hshift+di, -hshift, scaling)
-    bcNE = subchk(array, HI, hshift+di, hshift, scaling)
 
     ! TODO: Generalize this for turns, and possibly integrate into the calls
     ! above.  This is a temporary fix
