@@ -1374,7 +1374,7 @@ subroutine chksum_u_3d(array, mesg, HI, haloshift, symmetric, omit_corners, &
   real, allocatable, dimension(:,:,:) :: rescaled_array
   real :: scaling
   integer :: iounit !< Log IO unit
-  integer :: i, j, k, Is
+  integer :: i, j, k, Is, Ie
   real :: aMean, aMin, aMax
   integer :: bc0, bcSW, bcSE, bcNW, bcNE, hshift
   integer :: bcN, bcS, bcE, bcW
@@ -1407,8 +1407,11 @@ subroutine chksum_u_3d(array, mesg, HI, haloshift, symmetric, omit_corners, &
                                LBOUND(array,2):UBOUND(array,2), &
                                LBOUND(array,3):UBOUND(array,3)) )
       rescaled_array(:,:,:) = 0.0
-      Is = HI%isc ; if (sym_stats) Is = HI%isc-1
-      do k=1,size(array,3) ; do j=HI%jsc,HI%jec ; do I=Is+di,HI%IecB+di
+      !Is = HI%isc ; if (sym_stats) Is = HI%isc-1
+      Is = HI%isc + di ; if (sym_stats) Is = HI%isc - 1
+      Ie = HI%iecB + di ; if (sym_stats) Ie = HI%iecB
+
+      do k=1,size(array,3) ; do j=HI%jsc,HI%jec ; do I=Is,Ie
         rescaled_array(I,j,k) = scale*array(I,j,k)
       enddo ; enddo ; enddo
       call subStats(HI, rescaled_array, di, sym_stats, aMean, aMin, aMax)
@@ -1519,15 +1522,20 @@ subroutine chksum_u_3d(array, mesg, HI, haloshift, symmetric, omit_corners, &
                                               !! full symmetric computational domain.
     real, intent(out) :: aMean, aMin, aMax
 
-    integer :: i, j, k, n, IsB
+    integer :: i, j, k, n, IsB, IeB
 
-    IsB = HI%isc ; if (sym_stats) IsB = HI%isc-1
+    ! NOTE: di is not strictly necessary as an input, since it can be
+    ! inferred from HI%turns
 
-    aMin = array(HI%isc,HI%jsc,1) ; aMax = aMin
-    do k=LBOUND(array,3),UBOUND(array,3) ; do j=HI%jsc,HI%jec ; do I=IsB+di,HI%IecB+di
+    IsB = HI%isc + di ; if (sym_stats) IsB = HI%isc - 1
+    IeB = HI%IecB + di ; if (sym_stats) IeB = HI%IecB
+
+    aMin = array(IsB,HI%jsc,1) ; aMax = aMin
+    do k=LBOUND(array,3),UBOUND(array,3) ; do j=HI%jsc,HI%jec ; do I=IsB,IeB
       aMin = min(aMin, array(I,j,k))
       aMax = max(aMax, array(I,j,k))
     enddo ; enddo ; enddo
+
     ! This line deliberately uses the h-point computational domain.
     aMean = reproducing_sum(array(HI%isc+di:HI%iec+di,HI%jsc:HI%jec,:))
     n = (1 + HI%jec - HI%jsc) * (1 + HI%iec - HI%isc) * size(array,3)
