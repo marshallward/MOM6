@@ -2010,6 +2010,8 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, restart_CSp, &
     allocate(CS%G)
     swap_axes = modulo(grid_qturns, 2) == 1
     call clone_MOM_domain(CS%G_in%Domain, CS%G%Domain, swap_axes=swap_axes)
+
+    first_direction = modulo(first_direction + grid_qturns, 2)
   else
     CS%G => CS%G_in
   endif
