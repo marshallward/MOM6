@@ -4090,6 +4090,8 @@ subroutine barotropic_init(u, v, h, eta, Time, G, GV, US, param_file, diag, CS, 
     CS%debug_BT_HI%jspv=G%HI%jspv
     CS%debug_BT_HI%iepv=G%HI%iepv
     CS%debug_BT_HI%jepv=G%HI%jepv
+    ! Turn!
+    CS%debug_BT_HI%turns = G%HI%turns
   endif
 
   ! IareaT, IdxCu, and IdyCv need to be allocated with wide halos.
