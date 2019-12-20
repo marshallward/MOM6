@@ -642,9 +642,9 @@ subroutine chksum_uv_2d(mesg, arrayU, arrayV, HI, haloshift, symmetric, &
                        omit_corners, scale=vscale, logunit=logunit)
     else
       call chksum_u_2d(arrayU, 'u '//mesg, HI, symmetric=symmetric, &
-                       logunit=logunit)
+                       scale=uscale, logunit=logunit)
       call chksum_v_2d(arrayV, 'v '//mesg, HI, symmetric=symmetric, &
-                       logunit=logunit)
+                       scale=vscale, logunit=logunit)
     endif
   else
     if (present(haloshift)) then
