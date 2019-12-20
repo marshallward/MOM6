@@ -2991,7 +2991,7 @@ subroutine deallocate_mech_forcing(forces)
 end subroutine deallocate_mech_forcing
 
 
-subroutine rotate_forcing(fluxes_in, G_in, fluxes, G, turns)
+subroutine rotate_forcing(fluxes_in, G_in, fluxes, G, turns, do_allocation)
   !< Create a rotated forces for a given forcing and grid transformation
   type(forcing), intent(in)  :: fluxes_in     !< Input forcing struct
   type(ocean_grid_type), intent(in) :: G_in   !< Input grid metric
@@ -2999,7 +2999,17 @@ subroutine rotate_forcing(fluxes_in, G_in, fluxes, G, turns)
   type(ocean_grid_type), intent(in) :: G      !< Rotated grid metric
   integer, intent(in) :: turns
 
-  logical :: do_ustar, do_water, do_heat, do_salt, do_press, do_shelf, do_iceberg
+  ! I don't like this flag...
+  logical, optional, intent(in) :: do_allocation
+
+  logical :: do_ustar, do_water, do_heat, do_salt, do_press, do_shelf, &
+             do_iceberg, do_heat_added
+  logical :: cw     !< Clockwise turn
+
+  cw = .false.
+  if (modulo(turns, 4) == 3) cw = .true.
+
+  ! Obviously does not support modulo(turns, 2) == 0 !
 
   do_ustar = associated(fluxes_in%ustar) &
       .and. associated(fluxes_in%ustar_gustless)
@@ -3011,68 +3021,84 @@ subroutine rotate_forcing(fluxes_in, G_in, fluxes, G, turns)
   do_shelf = associated(fluxes_in%frac_shelf_h)
   do_iceberg = associated(fluxes_in%ustar_berg)
 
-  call allocate_forcing_type(G, fluxes, do_water, do_heat, do_ustar, &
-                             do_press, do_shelf, do_iceberg, do_salt)
+  ! This field seems to be only created by couplers
+  do_heat_added = associated(fluxes_in%heat_added)
+
+  ! TODO: I don't like doing this in here, but I would otherwise need to
+  ! re-compute all of the flags.  Need to rethink this approach.
+  if (present(do_allocation)) then
+    if (do_allocation) then
+      call allocate_forcing_type(G, fluxes, do_water, do_heat, do_ustar, &
+                                 do_press, do_shelf, do_iceberg, do_salt)
+
+      call myAlloc(fluxes%heat_added, G%isd, G%ied, G%jsd, G%jed, &
+                   do_heat_added)
+    endif
+  endif
 
   if (do_ustar) then
-    fluxes%ustar = rotate_quarter(fluxes_in%ustar)
-    fluxes%ustar_gustless = rotate_quarter(fluxes_in%ustar_gustless)
+    fluxes%ustar = rotate_quarter(fluxes_in%ustar, cw)
+    fluxes%ustar_gustless = rotate_quarter(fluxes_in%ustar_gustless, cw)
   endif
 
   if (do_water) then
-    fluxes%evap = rotate_quarter(fluxes_in%evap)
-    fluxes%lprec = rotate_quarter(fluxes_in%lprec)
-    fluxes%fprec = rotate_quarter(fluxes_in%fprec)
-    fluxes%vprec = rotate_quarter(fluxes_in%vprec)
-    fluxes%lrunoff = rotate_quarter(fluxes_in%lrunoff)
-    fluxes%frunoff = rotate_quarter(fluxes_in%frunoff)
-    fluxes%seaice_melt = rotate_quarter(fluxes_in%seaice_melt)
-    fluxes%netMassOut = rotate_quarter(fluxes_in%netMassOut)
-    fluxes%netMassIn = rotate_quarter(fluxes_in%netMassIn)
-    fluxes%netSalt = rotate_quarter(fluxes_in%netSalt)
+    fluxes%evap = rotate_quarter(fluxes_in%evap, cw)
+    fluxes%lprec = rotate_quarter(fluxes_in%lprec, cw)
+    fluxes%fprec = rotate_quarter(fluxes_in%fprec, cw)
+    fluxes%vprec = rotate_quarter(fluxes_in%vprec, cw)
+    fluxes%lrunoff = rotate_quarter(fluxes_in%lrunoff, cw)
+    fluxes%frunoff = rotate_quarter(fluxes_in%frunoff, cw)
+    fluxes%seaice_melt = rotate_quarter(fluxes_in%seaice_melt, cw)
+    fluxes%netMassOut = rotate_quarter(fluxes_in%netMassOut, cw)
+    fluxes%netMassIn = rotate_quarter(fluxes_in%netMassIn, cw)
+    fluxes%netSalt = rotate_quarter(fluxes_in%netSalt, cw)
   endif
 
   if (do_heat) then
-    fluxes%seaice_melt_heat = rotate_quarter(fluxes_in%seaice_melt_heat)
-    fluxes%sw = rotate_quarter(fluxes_in%sw)
-    fluxes%lw = rotate_quarter(fluxes_in%lw)
-    fluxes%latent = rotate_quarter(fluxes_in%latent)
-    fluxes%sens = rotate_quarter(fluxes_in%sens)
-    fluxes%latent_evap_diag = rotate_quarter(fluxes_in%latent_evap_diag)
-    fluxes%latent_fprec_diag = rotate_quarter(fluxes_in%latent_fprec_diag)
-    fluxes%latent_frunoff_diag = rotate_quarter(fluxes_in%latent_frunoff_diag)
+    fluxes%seaice_melt_heat = rotate_quarter(fluxes_in%seaice_melt_heat, cw)
+    fluxes%sw = rotate_quarter(fluxes_in%sw, cw)
+    fluxes%lw = rotate_quarter(fluxes_in%lw, cw)
+    fluxes%latent = rotate_quarter(fluxes_in%latent, cw)
+    fluxes%sens = rotate_quarter(fluxes_in%sens, cw)
+    fluxes%latent_evap_diag = rotate_quarter(fluxes_in%latent_evap_diag, cw)
+    fluxes%latent_fprec_diag = rotate_quarter(fluxes_in%latent_fprec_diag, cw)
+    fluxes%latent_frunoff_diag = rotate_quarter(fluxes_in%latent_frunoff_diag, cw)
   endif
 
   if (do_salt) then
-    fluxes%salt_flux = rotate_quarter(fluxes_in%salt_flux)
+    fluxes%salt_flux = rotate_quarter(fluxes_in%salt_flux, cw)
   endif
 
   if (do_heat .and. do_water) then
-    fluxes%heat_content_cond = rotate_quarter(fluxes_in%heat_content_cond)
-    fluxes%heat_content_icemelt = rotate_quarter(fluxes_in%heat_content_icemelt)
-    fluxes%heat_content_lprec = rotate_quarter(fluxes_in%heat_content_lprec)
-    fluxes%heat_content_fprec = rotate_quarter(fluxes_in%heat_content_fprec)
-    fluxes%heat_content_vprec = rotate_quarter(fluxes_in%heat_content_vprec)
-    fluxes%heat_content_lrunoff = rotate_quarter(fluxes_in%heat_content_lrunoff)
-    fluxes%heat_content_frunoff = rotate_quarter(fluxes_in%heat_content_frunoff)
-    fluxes%heat_content_massout = rotate_quarter(fluxes_in%heat_content_massout)
-    fluxes%heat_content_massin = rotate_quarter(fluxes_in%heat_content_massin)
+    fluxes%heat_content_cond = rotate_quarter(fluxes_in%heat_content_cond, cw)
+    fluxes%heat_content_icemelt = rotate_quarter(fluxes_in%heat_content_icemelt, cw)
+    fluxes%heat_content_lprec = rotate_quarter(fluxes_in%heat_content_lprec, cw)
+    fluxes%heat_content_fprec = rotate_quarter(fluxes_in%heat_content_fprec, cw)
+    fluxes%heat_content_vprec = rotate_quarter(fluxes_in%heat_content_vprec, cw)
+    fluxes%heat_content_lrunoff = rotate_quarter(fluxes_in%heat_content_lrunoff, cw)
+    fluxes%heat_content_frunoff = rotate_quarter(fluxes_in%heat_content_frunoff, cw)
+    fluxes%heat_content_massout = rotate_quarter(fluxes_in%heat_content_massout, cw)
+    fluxes%heat_content_massin = rotate_quarter(fluxes_in%heat_content_massin, cw)
   endif
 
   if (do_press) then
-    fluxes%p_surf = rotate_quarter(fluxes_in%p_surf)
+    fluxes%p_surf = rotate_quarter(fluxes_in%p_surf, cw)
   endif
 
   if (do_shelf) then
-    fluxes%frac_shelf_h = rotate_quarter(fluxes_in%frac_shelf_h)
-    fluxes%evap = rotate_quarter(fluxes_in%evap)
-    fluxes%evap = rotate_quarter(fluxes_in%evap)
+    fluxes%frac_shelf_h = rotate_quarter(fluxes_in%frac_shelf_h, cw)
+    fluxes%evap = rotate_quarter(fluxes_in%evap, cw)
+    fluxes%evap = rotate_quarter(fluxes_in%evap, cw)
   endif
 
   if (do_iceberg) then
-    fluxes%evap = rotate_quarter(fluxes_in%evap)
-    fluxes%evap = rotate_quarter(fluxes_in%evap)
-    fluxes%evap = rotate_quarter(fluxes_in%evap)
+    fluxes%evap = rotate_quarter(fluxes_in%evap, cw)
+    fluxes%evap = rotate_quarter(fluxes_in%evap, cw)
+    fluxes%evap = rotate_quarter(fluxes_in%evap, cw)
+  endif
+
+  if (do_heat_added) then
+    fluxes%heat_added = rotate_quarter(fluxes_in%heat_added, cw)
   endif
 
   ! There are a lot more fields here, not sure how to accommodate them...

@@ -521,10 +521,11 @@ subroutine step_MOM(forces_in, fluxes_in, sfc_state, Time_start, time_int_in, CS
     if (.not. associated(fluxes)) allocate(fluxes)
 
     ! TODO: Remember to deallocate!
-    ! NOTE: rotate_*_forcing also allocates fields inside `forces`, since we
-    ! cannot know which fields inside of `forces` also need allocation
+    ! NOTE: rotate_*forcing also allocates fields inside `forces`, since we
+    ! need to determine which fields inside of `forces` also need allocation
     call rotate_mech_forcing(forces_in, CS%G_in, forces, G, 1)
-    call rotate_forcing(fluxes_in, CS%G_in, fluxes, G, 1)
+    call rotate_forcing(fluxes_in, CS%G_in, fluxes, G, 1, &
+                        do_allocation=associated(fluxes))
 
     ! This is solely to sync the fluxes_used flag between the types.
     ! For now I do this to sync the flags, but there may be a simpler way.
@@ -897,6 +898,11 @@ subroutine step_MOM(forces_in, fluxes_in, sfc_state, Time_start, time_int_in, CS
 
   call cpu_clock_end(id_clock_other)
 
+  ! De-rotate fluxes and copy back to the input, since some parts have changed.
+  ! TODO: This doesn't seem to be doing anything...
+  if (CS%rotate_grid) &
+    call rotate_forcing(fluxes, G, fluxes_in, CS%G_in, -1, do_allocation=.false.)
+
   if (showCallTree) call callTree_leave("step_MOM()")
   call cpu_clock_end(id_clock_ocean)
 
@@ -1230,8 +1236,6 @@ subroutine step_MOM_thermo(CS, G, GV, US, u, v, h, tv, fluxes, dtdia, &
     call diabatic(u, v, h, tv, CS%Hml, fluxes, CS%visc, CS%ADp, CS%CDp, &
                   dtdia, Time_end_thermo, G, GV, US, CS%diabatic_CSp, Waves=Waves)
     fluxes%fluxes_used = .true.
-    if (associated(fluxes%fluxes_in)) &
-      fluxes%fluxes_in%fluxes_used = .true.
 
     if (showCallTree) call callTree_waypoint("finished diabatic (step_MOM_thermo)")
 
@@ -1316,8 +1320,6 @@ subroutine step_MOM_thermo(CS, G, GV, US, u, v, h, tv, fluxes, dtdia, &
     call cpu_clock_begin(id_clock_diabatic)
     call adiabatic(h, tv, fluxes, US%T_to_s*dtdia, G, GV, CS%diabatic_CSp)
     fluxes%fluxes_used = .true.
-    if (associated(fluxes%fluxes_in)) &
-      fluxes%fluxes_in%fluxes_used = .true.
 
     call cpu_clock_end(id_clock_diabatic)
 
@@ -1531,8 +1533,6 @@ subroutine step_offline(forces, fluxes, sfc_state, Time_start, time_interval, CS
   call pass_var(CS%h, G%Domain)
 
   fluxes%fluxes_used = .true.
-  if (associated(fluxes%fluxes_in)) &
-    fluxes%fluxes_in%fluxes_used = .true.
 
   call cpu_clock_end(id_clock_offline_tracer)
 
