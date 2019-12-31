@@ -196,7 +196,7 @@ end subroutine zchksum
 
 !> Checksums on a pair of 2d arrays staggered at tracer points.
 subroutine chksum_pair_h_2d(mesg, arrayA, arrayB, HI, haloshift, omit_corners, &
-                            scale, logunit)
+                            scale, logunit, scalar_pair)
   character(len=*),                 intent(in) :: mesg !< Identifying messages
   type(hor_index_type),             intent(in) :: HI     !< A horizontal index type
   real, dimension(HI%isd:,HI%jsd:), intent(in) :: arrayA !< The first array to be checksummed
@@ -205,22 +205,53 @@ subroutine chksum_pair_h_2d(mesg, arrayA, arrayB, HI, haloshift, omit_corners, &
   logical,                optional, intent(in) :: omit_corners !< If true, avoid checking diagonal shifts
   real,                   optional, intent(in) :: scale     !< A scaling factor for this array.
   integer,                optional, intent(in) :: logunit !< IO unit for checksum logging
+  logical,                optional, intent(in) :: scalar_pair !< If true, then the arrays describe
+                                                              !! a scalar, rather than vector
+  real :: uscale, vscale
+  logical :: vector_pair
+  integer :: turns
 
-  if (present(haloshift)) then
-    call chksum_h_2d(arrayA, 'x '//mesg, HI, haloshift, omit_corners, &
-                     scale=scale, logunit=logunit)
-    call chksum_h_2d(arrayB, 'y '//mesg, HI, haloshift, omit_corners, &
-                     scale=scale, logunit=logunit)
-  else
-    call chksum_h_2d(arrayA, 'x '//mesg, HI, scale=scale, logunit=logunit)
-    call chksum_h_2d(arrayB, 'y '//mesg, HI, scale=scale, logunit=logunit)
+  ! TODO: This preamble code may be moveable to an interface function
+  uscale = 1.0; vscale = 1.0
+  if (present(scale)) then
+    uscale = scale ; vscale = scale
   endif
 
+  vector_pair = .true.
+  if (present(scalar_pair)) vector_pair = .not. scalar_pair
+
+  turns = modulo(HI%turns, 4)
+  if (vector_pair) then
+    ! TODO: Fix all the turns
+    if (turns == 1) uscale = -uscale
+  endif
+
+  if (modulo(HI%turns, 2) == 0) then
+    if (present(haloshift)) then
+      call chksum_h_2d(arrayA, 'x '//mesg, HI, haloshift, omit_corners, &
+                       scale=uscale, logunit=logunit)
+      call chksum_h_2d(arrayB, 'y '//mesg, HI, haloshift, omit_corners, &
+                       scale=vscale, logunit=logunit)
+    else
+      call chksum_h_2d(arrayA, 'x '//mesg, HI, scale=uscale, logunit=logunit)
+      call chksum_h_2d(arrayB, 'y '//mesg, HI, scale=vscale, logunit=logunit)
+    endif
+  else
+    if (present(haloshift)) then
+      call chksum_h_2d(arrayB, 'x '//mesg, HI, haloshift, omit_corners, &
+                       scale=vscale, logunit=logunit)
+      call chksum_h_2d(arrayA, 'y '//mesg, HI, haloshift, omit_corners, &
+                       scale=uscale, logunit=logunit)
+    else
+      call chksum_h_2d(arrayB, 'x '//mesg, HI, scale=vscale, logunit=logunit)
+      call chksum_h_2d(arrayA, 'y '//mesg, HI, scale=uscale, logunit=logunit)
+    endif
+  endif
 end subroutine chksum_pair_h_2d
 
 !> Checksums on a pair of 3d arrays staggered at tracer points.
 subroutine chksum_pair_h_3d(mesg, arrayA, arrayB, HI, haloshift, omit_corners, &
-                            scale, logunit)
+                            scale, logunit, scalar_pair)
   character(len=*),                    intent(in) :: mesg !< Identifying messages
   type(hor_index_type),                intent(in) :: HI   !< A horizontal index type
   real, dimension(HI%isd:,HI%jsd:, :), intent(in) :: arrayA !< The first array to be checksummed
@@ -230,16 +261,48 @@ subroutine chksum_pair_h_3d(mesg, arrayA, arrayB, HI, haloshift, omit_corners, &
   real,                      optional, intent(in) :: scale     !< A scaling factor for this array.
   integer,                   optional, intent(in) :: logunit !< IO unit for checksum logging
 
-  if (present(haloshift)) then
-    call chksum_h_3d(arrayA, 'x '//mesg, HI, haloshift, omit_corners, &
-                     scale=scale, logunit=logunit)
-    call chksum_h_3d(arrayB, 'y '//mesg, HI, haloshift, omit_corners, &
-                     scale=scale, logunit=logunit)
-  else
-    call chksum_h_3d(arrayA, 'x '//mesg, HI, scale=scale, logunit=logunit)
-    call chksum_h_3d(arrayB, 'y '//mesg, HI, scale=scale, logunit=logunit)
+  logical,                optional, intent(in) :: scalar_pair !< If true, then the arrays describe
+                                                              !! a scalar, rather than vector
+  real :: uscale, vscale
+  logical :: vector_pair
+  integer :: turns
+
+  ! TODO: This preamble code may be moveable to an interface function
+  uscale = 1.0; vscale = 1.0
+  if (present(scale)) then
+    uscale = scale ; vscale = scale
   endif
 
+  vector_pair = .true.
+  if (present(scalar_pair)) vector_pair = .not. scalar_pair
+
+  turns = modulo(HI%turns, 4)
+  if (vector_pair) then
+    ! TODO: Fix all the turns
+    if (turns == 1) uscale = -uscale
+  endif
+
+  if (modulo(HI%turns, 2) == 0) then
+    if (present(haloshift)) then
+      call chksum_h_3d(arrayA, 'x '//mesg, HI, haloshift, omit_corners, &
+                       scale=uscale, logunit=logunit)
+      call chksum_h_3d(arrayB, 'y '//mesg, HI, haloshift, omit_corners, &
+                       scale=vscale, logunit=logunit)
+    else
+      call chksum_h_3d(arrayA, 'x '//mesg, HI, scale=uscale, logunit=logunit)
+      call chksum_h_3d(arrayB, 'y '//mesg, HI, scale=vscale, logunit=logunit)
+    endif
+  else
+    if (present(haloshift)) then
+      call chksum_h_3d(arrayB, 'x '//mesg, HI, haloshift, omit_corners, &
+                       scale=vscale, logunit=logunit)
+      call chksum_h_3d(arrayA, 'y '//mesg, HI, haloshift, omit_corners, &
+                       scale=uscale, logunit=logunit)
+    else
+      call chksum_h_3d(arrayB, 'x '//mesg, HI, scale=vscale, logunit=logunit)
+      call chksum_h_3d(arrayA, 'y '//mesg, HI, scale=uscale, logunit=logunit)
+    endif
+  endif
 end subroutine chksum_pair_h_3d
 
 !> Checksums a 2d array staggered at tracer points.

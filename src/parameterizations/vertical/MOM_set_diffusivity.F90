@@ -7,7 +7,7 @@ use MOM_cpu_clock,           only : cpu_clock_id, cpu_clock_begin, cpu_clock_end
 use MOM_cpu_clock,           only : CLOCK_MODULE_DRIVER, CLOCK_MODULE, CLOCK_ROUTINE
 use MOM_diag_mediator,       only : diag_ctrl, time_type
 use MOM_diag_mediator,       only : post_data, register_diag_field
-use MOM_debugging,           only : hchksum, uvchksum, Bchksum
+use MOM_debugging,           only : hchksum, uvchksum, Bchksum, hchksum_pair
 use MOM_EOS,                 only : calculate_density, calculate_density_derivs
 use MOM_error_handler,       only : MOM_error, is_root_pe, FATAL, WARNING, NOTE
 use MOM_error_handler,       only : callTree_showQuery
@@ -344,8 +344,9 @@ subroutine set_diffusivity(u, v, h, u_h, v_h, tv, fluxes, optics, visc, dt, &
 
   if (CS%useKappaShear) then
     if (CS%debug) then
-      call hchksum(u_h, "before calc_KS u_h",G%HI)
-      call hchksum(v_h, "before calc_KS v_h",G%HI)
+      !call hchksum(u_h, "before calc_KS u_h",G%HI)
+      !call hchksum(v_h, "before calc_KS v_h",G%HI)
+      call hchksum_pair("before calc_KS [uv]_h", u_h, v_h, G%HI)
     endif
     call cpu_clock_begin(id_clock_kappaShear)
     if (CS%Vertex_shear) then
