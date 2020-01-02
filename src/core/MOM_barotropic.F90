@@ -4081,16 +4081,7 @@ subroutine barotropic_init(u, v, h, eta, Time, G, GV, US, param_file, diag, CS, 
     CS%debug_BT_HI%IedB=CS%iedw
     CS%debug_BT_HI%JsdB=CS%jsdw-1
     CS%debug_BT_HI%JedB=CS%jedw
-    ! Ugh...
-    CS%debug_BT_HI%ispu=G%HI%ispu
-    CS%debug_BT_HI%jspu=G%HI%jspu
-    CS%debug_BT_HI%iepu=G%HI%iepu
-    CS%debug_BT_HI%jepu=G%HI%jepu
-    CS%debug_BT_HI%ispv=G%HI%ispv
-    CS%debug_BT_HI%jspv=G%HI%jspv
-    CS%debug_BT_HI%iepv=G%HI%iepv
-    CS%debug_BT_HI%jepv=G%HI%jepv
-    ! Turn!
+
     CS%debug_BT_HI%turns = G%HI%turns
   endif
 

@@ -987,7 +987,7 @@ subroutine chksum_v_2d(array, mesg, HI, haloshift, symmetric, omit_corners, &
   real, allocatable, dimension(:,:) :: rescaled_array
   real :: scaling
   integer :: iounit !< Log IO unit
-  integer :: i, j, Js
+  integer :: i, j, Js, Je
   real :: aMean, aMin, aMax
   integer :: bc0, bcSW, bcSE, bcNW, bcNE, hshift
   integer :: bcN, bcS, bcE, bcW
@@ -1014,18 +1014,22 @@ subroutine chksum_v_2d(array, mesg, HI, haloshift, symmetric, omit_corners, &
   if (modulo(turns, 2) == 1) uv_tag = 'u-point:'
 
   if (calculateStatistics) then
+    dj = 0 ; if (turns == 2 .or. turns == 3) dj = -1
     if (present(scale)) then
       allocate( rescaled_array(LBOUND(array,1):UBOUND(array,1), &
                                LBOUND(array,2):UBOUND(array,2)) )
       rescaled_array(:,:) = 0.0
-      Js = HI%jsc ; if (sym_stats) Js = HI%jsc-1
-      do J=Js,HI%JecB ; do i=HI%isc,HI%iec
+
+      Js = HI%jsc + dj; if (sym_stats) Js = HI%jsc - 1
+      Je = HI%JecB + dj; if (sym_stats) Je = HI%JecB
+
+      do J=Js,Je ; do i=HI%isc,HI%iec
         rescaled_array(i,J) = scale*array(i,J)
       enddo ; enddo
-      call subStats(HI, rescaled_array, sym_stats, aMean, aMin, aMax)
+      call subStats(HI, rescaled_array, dj, sym_stats, aMean, aMin, aMax)
       deallocate(rescaled_array)
     else
-      call subStats(HI, array, sym_stats, aMean, aMin, aMax)
+      call subStats(HI, array, dj, sym_stats, aMean, aMin, aMax)
     endif
 
     if (is_root_pe()) &
@@ -1123,25 +1127,27 @@ subroutine chksum_v_2d(array, mesg, HI, haloshift, symmetric, omit_corners, &
     subchk=mod(subchk, bc_modulus)
   end function subchk
 
-  subroutine subStats(HI, array, sym_stats, aMean, aMin, aMax)
+  subroutine subStats(HI, array, dj, sym_stats, aMean, aMin, aMax)
     type(hor_index_type), intent(in) ::  HI     !< A horizontal index type
     real, dimension(HI%isd:,HI%JsdB:), intent(in) :: array !< The array to be checksummed
-    logical,          intent(in) :: sym_stats !< If true, evaluate the statistics on the
-                                              !! full symmetric computational domain.
+    integer, intent(in) :: dj         !< j-direction offset
+    logical, intent(in) :: sym_stats  !< If true, evaluate the statistics on the
+                                      !! the full symmetric computational domain.
     real, intent(out) :: aMean, aMin, aMax
 
-    integer :: i, j, n, JsB
+    integer :: i, j, n, JsB, JeB
 
-    JsB = HI%jsc ; if (sym_stats) JsB = HI%jsc-1
+    !JsB = HI%jsc ; if (sym_stats) JsB = HI%jsc-1
+    JsB = HI%jsc + dj; if (sym_stats) JsB = HI%jsc - 1
+    JeB = HI%JecB + dj; if (sym_stats) JeB = HI%JecB
 
-    aMin = array(HI%isc,HI%jsc) ; aMax = aMin
-    do J=JsB,HI%JecB ; do i=HI%isc,HI%iec
+    aMin = array(HI%isc,JsB) ; aMax = aMin
+    do J=JsB,JeB ; do i=HI%isc,HI%iec
       aMin = min(aMin, array(i,J))
       aMax = max(aMax, array(i,J))
     enddo ; enddo
     ! This line deliberately uses the h-computational domain.
-    !aMean = reproducing_sum(array(HI%isc:HI%iec,HI%jsc:HI%jec))
-    aMean = reproducing_sum(array(HI%ispv:HI%iepv,HI%jspv:HI%jepv))
+    aMean = reproducing_sum(array(HI%isc:HI%iec,HI%jsc+dj:HI%jec+dj))
     n = (1 + HI%jec - HI%jsc) * (1 + HI%iec - HI%isc)
     call sum_across_PEs(n)
     call min_across_PEs(aMin)
@@ -1658,7 +1664,7 @@ subroutine chksum_v_3d(array, mesg, HI, haloshift, symmetric, omit_corners, &
   real, allocatable, dimension(:,:,:) :: rescaled_array
   real :: scaling
   integer :: iounit !< Log IO unit
-  integer :: i, j, k, Js
+  integer :: i, j, k, Js, Je
   integer :: bc0, bcSW, bcSE, bcNW, bcNE, hshift
   integer :: bcN, bcS, bcE, bcW
   real :: aMean, aMin, aMax
@@ -1685,19 +1691,23 @@ subroutine chksum_v_3d(array, mesg, HI, haloshift, symmetric, omit_corners, &
   if (modulo(turns, 2) == 1) uv_tag = 'u-point:'
 
   if (calculateStatistics) then
+    dj = 0 ; if (turns == 2 .or. turns == 3) dj = -1
     if (present(scale)) then
       allocate( rescaled_array(LBOUND(array,1):UBOUND(array,1), &
                                LBOUND(array,2):UBOUND(array,2), &
                                LBOUND(array,3):UBOUND(array,3)) )
       rescaled_array(:,:,:) = 0.0
-      Js = HI%jsc ; if (sym_stats) Js = HI%jsc-1
-      do k=1,size(array,3) ; do J=Js,HI%JecB ; do i=HI%isc,HI%iec
+
+      Js = HI%jsc + dj; if (sym_stats) Js = HI%jsc - 1
+      Je = HI%JecB + dj; if (sym_stats) Je = HI%JecB
+
+      do k=1,size(array,3) ; do J=Js,Je ; do i=HI%isc,HI%iec
         rescaled_array(i,J,k) = scale*array(i,J,k)
       enddo ; enddo ; enddo
-      call subStats(HI, rescaled_array, sym_stats, aMean, aMin, aMax)
+      call subStats(HI, rescaled_array, dj, sym_stats, aMean, aMin, aMax)
       deallocate(rescaled_array)
     else
-      call subStats(HI, array, sym_stats, aMean, aMin, aMax)
+      call subStats(HI, array, dj, sym_stats, aMean, aMin, aMax)
     endif
     if (is_root_pe()) &
       call chk_sum_msg(uv_tag, aMean, aMin, aMax, mesg, iounit)
@@ -1794,25 +1804,26 @@ subroutine chksum_v_3d(array, mesg, HI, haloshift, symmetric, omit_corners, &
   end function subchk
 
   !subroutine subStats(HI, array, mesg, sym_stats)
-  subroutine subStats(HI, array, sym_stats, aMean, aMin, aMax)
+  subroutine subStats(HI, array, dj, sym_stats, aMean, aMin, aMax)
     type(hor_index_type), intent(in) ::  HI     !< A horizontal index type
     real, dimension(HI%isd:,HI%JsdB:,:), intent(in) :: array !< The array to be checksummed
-    logical,          intent(in) :: sym_stats !< If true, evaluate the statistics on the
-                                              !! full symmetric computational domain.
+    integer, intent(in) :: dj
+    logical, intent(in) :: sym_stats  !< If true, evaluate the statistics on the
+                                      !! full symmetric computational domain.
     real, intent(out) :: aMean, aMin, aMax    !< Mean/min/max of array over domain
 
-    integer :: i, j, k, n, JsB
+    integer :: i, j, k, n, JsB, JeB
 
-    JsB = HI%jsc ; if (sym_stats) JsB = HI%jsc-1
+    JsB = HI%jsc + dj; if (sym_stats) JsB = HI%jsc - 1
+    JeB = HI%JecB + dj; if (sym_stats) JeB = HI%JecB
 
-    aMin = array(HI%isc,HI%jsc,1) ; aMax = aMin
-    do k=LBOUND(array,3),UBOUND(array,3) ; do J=JsB,HI%JecB ; do i=HI%isc,HI%iec
+    aMin = array(HI%isc,JsB,1) ; aMax = aMin
+    do k=LBOUND(array,3),UBOUND(array,3) ; do J=JsB,JeB ; do i=HI%isc,HI%iec
       aMin = min(aMin, array(i,J,k))
       aMax = max(aMax, array(i,J,k))
     enddo ; enddo ; enddo
     ! This line deliberately uses the h-point computational domain.
-    !aMean = reproducing_sum(array(HI%isc:HI%iec,HI%jsc:HI%jec,:))
-    aMean = reproducing_sum(array(HI%ispv:HI%iepv,HI%jspv:HI%jepv,:))
+    aMean = reproducing_sum(array(HI%isc:HI%iec,HI%jsc+dj:HI%jec+dj,:))
     n = (1 + HI%jec - HI%jsc) * (1 + HI%iec - HI%isc) * size(array,3)
     call sum_across_PEs(n)
     call min_across_PEs(aMin)

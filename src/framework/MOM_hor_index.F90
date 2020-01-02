@@ -48,13 +48,13 @@ type, public :: hor_index_type
   logical :: symmetric  !< True if symmetric memory is used.
   integer :: turns      !< Number of quarter-turn rotations
 
-  ! TODO: Maybe point to an internal HI type (or a new type) here
-  !   e.g. HI_p%isc
-  ! TODO: Leaning towards complete removal of these, and offsetting in chksums
-  integer :: ispu, iepu !< Parity i-index on a transfored u-grid
-  integer :: ispv, iepv !< Parity j-index on a transfored u-grid
-  integer :: jspu, jepu !< Parity i-index on a transfored u-grid
-  integer :: jspv, jepv !< Parity j-index on a transfored u-grid
+  !! TODO: Maybe point to an internal HI type (or a new type) here
+  !!   e.g. HI_p%isc
+  !! TODO: Leaning towards complete removal of these, and offsetting in chksums
+  !integer :: ispu, iepu !< Parity i-index on a transfored u-grid
+  !integer :: ispv, iepv !< Parity j-index on a transfored u-grid
+  !integer :: jspu, jepu !< Parity i-index on a transfored u-grid
+  !integer :: jspv, jepv !< Parity j-index on a transfored u-grid
 end type hor_index_type
 
 !> Copy the contents of one horizontal index type into another
@@ -100,30 +100,8 @@ subroutine hor_index_init(Domain, HI, param_file, local_indexing, &
   HI%IedB = HI%ied ; HI%JedB = HI%jed
   HI%IegB = HI%ieg ; HI%JegB = HI%jeg
 
-  HI%ispu = HI%isc ; HI%jspu = HI%jsc
-  HI%iepu = HI%iec ; HI%jepu = HI%jec
-  HI%ispv = HI%isc ; HI%jspv = HI%jsc
-  HI%iepv = HI%iec ; HI%jepv = HI%jec
-
   HI%turns = 0
-  if (present(turns)) then
-    HI%turns = turns
-
-    ! TODO: Don't use these; just offset them inside of the checksums
-    if (turns == 1) then
-      HI%ispu = HI%isc - 1
-      HI%iepu = HI%iec - 1
-    elseif (turns == 2) then
-      HI%ispu = HI%isc - 1
-      HI%iepu = HI%iec - 1
-      HI%jspv = HI%jsc - 1
-      HI%jepv = HI%jec - 1
-    elseif (turns == 3) then
-      HI%jspv = HI%jsc - 1
-      HI%jepv = HI%jec - 1
-    endif
-  endif
-
+  if (present(turns)) HI%turns = turns
 end subroutine hor_index_init
 
 !> HIT_assign copies one hor_index_type into another.  It is accessed via an
@@ -145,12 +123,6 @@ subroutine HIT_assign(HI1, HI2)
   HI1%idg_offset = HI2%idg_offset ; HI1%jdg_offset = HI2%jdg_offset
   HI1%symmetric = HI2%symmetric
   HI1%turns = HI2%turns
-
-  ! TODO: We will remove these eventually
-  HI1%ispu = HI2%ispu ; HI1%iepu = HI2%iepu
-  HI1%jspu = HI2%jspu ; HI1%jepu = HI2%jepu
-  HI1%ispv = HI2%ispv ; HI1%iepv = HI2%iepv
-  HI1%jspv = HI2%jspv ; HI1%jepv = HI2%jepv
 end subroutine HIT_assign
 
 !> \namespace mom_hor_index
