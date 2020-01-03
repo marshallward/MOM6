@@ -136,6 +136,7 @@ use MOM_shared_initialization, only : write_ocean_geometry_file
 use MOM_transcribe_grid,       only : rotate_dyngrid
 use MOM_forcing_type,          only : rotate_forcing, rotate_mech_forcing
 use MOM_variables,             only : rotate_surface_state
+use MOM_transcribe_grid,       only : rotate_quarter
 
 implicit none ; private
 
@@ -1573,10 +1574,17 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, restart_CSp, &
 
   ! Rotational grid testing
   ! NOTE: reflect_grid could also be supported
+  type(ocean_grid_type),  pointer :: G_in => NULL() ! Pointer to the input grid
   logical :: swap_axes    ! true if X and Y are swapped (e.g. rotation)
   integer :: grid_qturns   ! Number of grid quater-turns
   type(hor_index_type), target :: HI_in, HI_rot   ! Input and dynamic HI
   type(dyn_horgrid_type), pointer :: dG_in
+
+  ! TODO: remove preprocessing?
+  ! I really need a "init state" type, but this will do for now
+  real, allocatable, dimension(:,:,:) :: h_in, T_in, S_in
+  real, allocatable, dimension(:,:,:) :: u_in
+  real, allocatable, dimension(:,:,:) :: v_in
 
   ! This include declares and sets the variable "version".
 # include "version_variable.h"
@@ -1992,13 +2000,14 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, restart_CSp, &
 #else
   symmetric = .false.
 #endif
+  G_in => CS%G_in
 #ifdef STATIC_MEMORY_
-  call MOM_domains_init(CS%G_in%domain, param_file, symmetric=symmetric, &
+  call MOM_domains_init(G_in%domain, param_file, symmetric=symmetric, &
             static_memory=.true., NIHALO=NIHALO_, NJHALO=NJHALO_, &
             NIGLOBAL=NIGLOBAL_, NJGLOBAL=NJGLOBAL_, NIPROC=NIPROC_, &
             NJPROC=NJPROC_)
 #else
-  call MOM_domains_init(CS%G_in%domain, param_file, symmetric=symmetric, &
+  call MOM_domains_init(G_in%domain, param_file, symmetric=symmetric, &
                         domain_name="MOM_in")
 #endif
 
@@ -2008,7 +2017,7 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, restart_CSp, &
     ! TODO: Remember to deallocate!
     allocate(CS%G)
     swap_axes = modulo(grid_qturns, 2) == 1
-    call clone_MOM_domain(CS%G_in%Domain, CS%G%Domain, swap_axes=swap_axes)
+    call clone_MOM_domain(G_in%Domain, CS%G%Domain, swap_axes=swap_axes)
 
     first_direction = modulo(first_direction + grid_qturns, 2)
   else
@@ -2025,10 +2034,10 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, restart_CSp, &
   call MOM_io_init(param_file)
 
   ! Create HI and dG on the input grid
-  call hor_index_init(CS%G_in%Domain, HI_in, param_file, &
+  call hor_index_init(G_in%Domain, HI_in, param_file, &
                       local_indexing=.not.global_indexing)
   call create_dyn_horgrid(dG_in, HI_in, bathymetry_at_vel=bathy_at_vel)
-  call clone_MOM_domain(CS%G_in%Domain, dG_in%Domain)
+  call clone_MOM_domain(G_in%Domain, dG_in%Domain)
 
   ! Either point to the input grid or create a transformed grid
   ! NOTE: I can probably move this to after MOM_initialize_fixed
@@ -2251,8 +2260,8 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, restart_CSp, &
     call copy_dyngrid_to_MOM_grid(dG, G, US)
     call destroy_dyn_horgrid(dG)
   endif
-  call MOM_grid_init(CS%G_in, param_file, US, HI_in, bathymetry_at_vel=bathy_at_vel)
-  call copy_dyngrid_to_MOM_grid(dG_in, CS%G_in, US)
+  call MOM_grid_init(G_in, param_file, US, HI_in, bathymetry_at_vel=bathy_at_vel)
+  call copy_dyngrid_to_MOM_grid(dG_in, G_in, US)
   call destroy_dyn_horgrid(dG_in)
 
   ! Set a few remaining fields that are specific to the ocean grid type.
@@ -2265,9 +2274,31 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, restart_CSp, &
   ! Consider removing this later?
   G%ke = GV%ke ; G%g_Earth = GV%mks_g_Earth
 
-  call MOM_initialize_state(CS%u, CS%v, CS%h, CS%tv, Time, G, GV, US, param_file, &
-                            dirs, restart_CSp, CS%ALE_CSp, CS%tracer_Reg, &
-                            CS%sponge_CSp, CS%ALE_sponge_CSp, CS%OBC, Time_in)
+  ! TODO: T, S, ...?
+  if (CS%rotate_grid) then
+    allocate(u_in(G_in%IsdB:G_in%IedB, G_in%jsd:G_in%jed, nz))
+    allocate(v_in(G_in%isd:G_in%ied, G_in%JsdB:G_in%JedB, nz))
+    allocate(h_in(G_in%isd:G_in%ied, G_in%jsd:G_in%jed, nz))
+
+    u_in(:,:,:) = 0.0
+    v_in(:,:,:) = 0.0
+    h_in(:,:,:) = GV%Angstrom_H
+
+    call MOM_initialize_state(u_in, v_in, h_in, CS%tv, Time, G, GV, US, param_file, &
+                              dirs, restart_CSp, CS%ALE_CSp, CS%tracer_Reg, &
+                              CS%sponge_CSp, CS%ALE_sponge_CSp, CS%OBC, Time_in)
+
+    call rotate_initial_state(u_in, v_in, h_in, G_in, CS%u, CS%v, CS%h, G, grid_qturns)
+
+    deallocate(u_in)
+    deallocate(v_in)
+    deallocate(h_in)
+  else
+    call MOM_initialize_state(CS%u, CS%v, CS%h, CS%tv, Time, G, GV, US, param_file, &
+                              dirs, restart_CSp, CS%ALE_CSp, CS%tracer_Reg, &
+                              CS%sponge_CSp, CS%ALE_sponge_CSp, CS%OBC, Time_in)
+  endif
+
   call cpu_clock_end(id_clock_MOM_init)
   call callTree_waypoint("returned from MOM_initialize_state() (initialize_MOM)")
 
@@ -3188,6 +3219,29 @@ subroutine extract_surface_state(CS, sfc_state_in)
 
   call callTree_leave("extract_surface_sfc_state()")
 end subroutine extract_surface_state
+
+subroutine rotate_initial_state(u_in, v_in, h_in, G_in, u, v, h, G, turns)
+  real, dimension(:,:,:), intent(in) :: u_in, v_in, h_in
+  type(ocean_grid_type), intent(in) :: G_in
+  ! TODO: out or inout?
+  real, dimension(:,:,:), intent(inout) :: u, v, h
+  type(ocean_grid_type), intent(in) :: G
+  integer, intent(in) :: turns
+
+  integer :: k, nk
+
+  ! TODO: Will eventually get 3d versions of rotate_quarter...
+  nk = size(u, 3)
+
+  ! XXX: Testing 90° turns for now
+  if (modulo(turns, 4) == 1) then
+    do k = 1, nk
+      u(:,:,k) = rotate_quarter(-v_in(:,:,k))
+      v(:,:,k) = rotate_quarter(u_in(:,:,k))
+      h(:,:,k) = rotate_quarter(h_in(:,:,k))
+    enddo
+  endif
+end subroutine rotate_initial_state
 
 !> Return true if all phases of step_MOM are at the same point in time.
 function MOM_state_is_synchronized(CS, adv_dyn) result(in_synch)
