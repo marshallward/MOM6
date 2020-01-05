@@ -1582,9 +1582,8 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, restart_CSp, &
 
   ! TODO: remove preprocessing?
   ! I really need a "init state" type, but this will do for now
-  real, allocatable, dimension(:,:,:) :: h_in, T_in, S_in
-  real, allocatable, dimension(:,:,:) :: u_in
-  real, allocatable, dimension(:,:,:) :: v_in
+  real, allocatable, dimension(:,:,:) :: u_in, v_in, h_in
+  real, allocatable, dimension(:,:,:), target :: T_in, S_in
 
   ! This include declares and sets the variable "version".
 # include "version_variable.h"
@@ -2274,25 +2273,40 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, restart_CSp, &
   ! Consider removing this later?
   G%ke = GV%ke ; G%g_Earth = GV%mks_g_Earth
 
-  ! TODO: T, S, ...?
+  ! TODO: frazil, TempxPmE, ...?
   if (CS%rotate_grid) then
+    G_in%ke = GV%ke ; G_in%g_Earth = GV%mks_g_Earth
+
     allocate(u_in(G_in%IsdB:G_in%IedB, G_in%jsd:G_in%jed, nz))
     allocate(v_in(G_in%isd:G_in%ied, G_in%JsdB:G_in%JedB, nz))
     allocate(h_in(G_in%isd:G_in%ied, G_in%jsd:G_in%jed, nz))
+    allocate(T_in(G_in%isd:G_in%ied, G_in%jsd:G_in%jed, nz))
+    allocate(S_in(G_in%isd:G_in%ied, G_in%jsd:G_in%jed, nz))
 
     u_in(:,:,:) = 0.0
     v_in(:,:,:) = 0.0
     h_in(:,:,:) = GV%Angstrom_H
+    T_in(:,:,:) = 0.0
+    S_in(:,:,:) = 0.0
 
-    call MOM_initialize_state(u_in, v_in, h_in, CS%tv, Time, G, GV, US, param_file, &
+    CS%tv%T => T_in
+    CS%tv%S => S_in
+    call MOM_initialize_state(u_in, v_in, h_in, CS%tv, Time, G_in, GV, US, param_file, &
                               dirs, restart_CSp, CS%ALE_CSp, CS%tracer_Reg, &
                               CS%sponge_CSp, CS%ALE_sponge_CSp, CS%OBC, Time_in)
+    CS%tv%T => CS%T
+    CS%tv%S => CS%S
 
-    call rotate_initial_state(u_in, v_in, h_in, G_in, CS%u, CS%v, CS%h, G, grid_qturns)
+    ! TODO: Ridiculous number of arguments...
+    call rotate_initial_state(u_in, v_in, h_in, T_in, S_in, G_in, &
+                              CS%u, CS%v, CS%h, CS%T, CS%S, G, &
+                              grid_qturns)
 
     deallocate(u_in)
     deallocate(v_in)
     deallocate(h_in)
+    deallocate(T_in)
+    deallocate(S_in)
   else
     call MOM_initialize_state(CS%u, CS%v, CS%h, CS%tv, Time, G, GV, US, param_file, &
                               dirs, restart_CSp, CS%ALE_CSp, CS%tracer_Reg, &
@@ -2871,7 +2885,7 @@ subroutine extract_surface_state(CS, sfc_state_in)
   character(240) :: msg
 
   ! Testing
-  type(surface), pointer :: sfc_state   !< surface state on the model grid
+  type(surface), pointer :: sfc_state => NULL()  !< surface state on the model grid
 
   call callTree_enter("extract_surface_state(), MOM.F90")
   G => CS%G ; G_in => CS%G_in ; GV => CS%GV ; US => CS%US
@@ -2883,7 +2897,7 @@ subroutine extract_surface_state(CS, sfc_state_in)
 
   use_temperature = associated(CS%tv%T)
 
-  if (.not.sfc_state%arrays_allocated) then
+  if (.not.sfc_state_in%arrays_allocated) then
     !  Consider using a run-time flag to determine whether to do the vertical
     ! integrals, since the 3-d sums are not negligible in cost.
     call allocate_surface_state(sfc_state_in, G_in, use_temperature, do_integrals=.true.)
@@ -3220,11 +3234,11 @@ subroutine extract_surface_state(CS, sfc_state_in)
   call callTree_leave("extract_surface_sfc_state()")
 end subroutine extract_surface_state
 
-subroutine rotate_initial_state(u_in, v_in, h_in, G_in, u, v, h, G, turns)
-  real, dimension(:,:,:), intent(in) :: u_in, v_in, h_in
+subroutine rotate_initial_state(u_in, v_in, h_in, T_in, S_in, G_in, &
+                                u, v, h, T, S, G, turns)
+  real, dimension(:,:,:), intent(in) :: u_in, v_in, h_in, T_in, S_in
   type(ocean_grid_type), intent(in) :: G_in
-  ! TODO: out or inout?
-  real, dimension(:,:,:), intent(inout) :: u, v, h
+  real, dimension(:,:,:), intent(out) :: u, v, h, T, S
   type(ocean_grid_type), intent(in) :: G
   integer, intent(in) :: turns
 
@@ -3239,6 +3253,8 @@ subroutine rotate_initial_state(u_in, v_in, h_in, G_in, u, v, h, G, turns)
       u(:,:,k) = rotate_quarter(-v_in(:,:,k))
       v(:,:,k) = rotate_quarter(u_in(:,:,k))
       h(:,:,k) = rotate_quarter(h_in(:,:,k))
+      T(:,:,k) = rotate_quarter(T_in(:,:,k))
+      S(:,:,k) = rotate_quarter(S_in(:,:,k))
     enddo
   endif
 end subroutine rotate_initial_state
