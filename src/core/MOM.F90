@@ -1585,6 +1585,10 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, restart_CSp, &
   real, allocatable, dimension(:,:,:) :: u_in, v_in, h_in
   real, allocatable, dimension(:,:,:), target :: T_in, S_in
 
+  ! T and S are conditionally allocated, and `associated()` is used in some
+  ! places as a thermodynamics test (O_o).
+  !real, allocatable, dimension(:,:,:), target :: T_in, S_in
+
   ! This include declares and sets the variable "version".
 # include "version_variable.h"
 
@@ -2280,33 +2284,41 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, restart_CSp, &
     allocate(u_in(G_in%IsdB:G_in%IedB, G_in%jsd:G_in%jed, nz))
     allocate(v_in(G_in%isd:G_in%ied, G_in%JsdB:G_in%JedB, nz))
     allocate(h_in(G_in%isd:G_in%ied, G_in%jsd:G_in%jed, nz))
-    allocate(T_in(G_in%isd:G_in%ied, G_in%jsd:G_in%jed, nz))
-    allocate(S_in(G_in%isd:G_in%ied, G_in%jsd:G_in%jed, nz))
-
     u_in(:,:,:) = 0.0
     v_in(:,:,:) = 0.0
     h_in(:,:,:) = GV%Angstrom_H
-    T_in(:,:,:) = 0.0
-    S_in(:,:,:) = 0.0
 
-    CS%tv%T => T_in
-    CS%tv%S => S_in
+    if (use_temperature) then
+      allocate(T_in(G_in%isd:G_in%ied, G_in%jsd:G_in%jed, nz))
+      allocate(S_in(G_in%isd:G_in%ied, G_in%jsd:G_in%jed, nz))
+      T_in(:,:,:) = 0.0
+      S_in(:,:,:) = 0.0
+
+      CS%tv%T => T_in
+      CS%tv%S => S_in
+    endif
+
     call MOM_initialize_state(u_in, v_in, h_in, CS%tv, Time, G_in, GV, US, param_file, &
                               dirs, restart_CSp, CS%ALE_CSp, CS%tracer_Reg, &
                               CS%sponge_CSp, CS%ALE_sponge_CSp, CS%OBC, Time_in)
-    CS%tv%T => CS%T
-    CS%tv%S => CS%S
+
+    if (use_temperature) then
+      CS%tv%T => CS%T
+      CS%tv%S => CS%S
+    endif
 
     ! TODO: Ridiculous number of arguments...
     call rotate_initial_state(u_in, v_in, h_in, T_in, S_in, G_in, &
                               CS%u, CS%v, CS%h, CS%T, CS%S, G, &
-                              grid_qturns)
+                              use_temperature, grid_qturns)
 
     deallocate(u_in)
     deallocate(v_in)
     deallocate(h_in)
-    deallocate(T_in)
-    deallocate(S_in)
+    if (use_temperature) then
+      deallocate(T_in)
+      deallocate(S_in)
+    endif
   else
     call MOM_initialize_state(CS%u, CS%v, CS%h, CS%tv, Time, G, GV, US, param_file, &
                               dirs, restart_CSp, CS%ALE_CSp, CS%tracer_Reg, &
@@ -3235,11 +3247,12 @@ subroutine extract_surface_state(CS, sfc_state_in)
 end subroutine extract_surface_state
 
 subroutine rotate_initial_state(u_in, v_in, h_in, T_in, S_in, G_in, &
-                                u, v, h, T, S, G, turns)
+                                u, v, h, T, S, G, use_temperature, turns)
   real, dimension(:,:,:), intent(in) :: u_in, v_in, h_in, T_in, S_in
   type(ocean_grid_type), intent(in) :: G_in
   real, dimension(:,:,:), intent(out) :: u, v, h, T, S
   type(ocean_grid_type), intent(in) :: G
+  logical, intent(in) :: use_temperature
   integer, intent(in) :: turns
 
   integer :: k, nk
@@ -3253,8 +3266,10 @@ subroutine rotate_initial_state(u_in, v_in, h_in, T_in, S_in, G_in, &
       u(:,:,k) = rotate_quarter(-v_in(:,:,k))
       v(:,:,k) = rotate_quarter(u_in(:,:,k))
       h(:,:,k) = rotate_quarter(h_in(:,:,k))
-      T(:,:,k) = rotate_quarter(T_in(:,:,k))
-      S(:,:,k) = rotate_quarter(S_in(:,:,k))
+      if (use_temperature) then
+        T(:,:,k) = rotate_quarter(T_in(:,:,k))
+        S(:,:,k) = rotate_quarter(S_in(:,:,k))
+      endif
     enddo
   endif
 end subroutine rotate_initial_state
