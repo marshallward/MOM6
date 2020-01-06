@@ -714,12 +714,13 @@ subroutine write_energy(u, v, h, tv, day, n, G, GV, US, CS, tracer_CSp, OBC, dt_
   endif
 
 ! Calculate the maximum CFL numbers.
+! NOTE: abs() is applied to non-negative velocities to eliminate negative zeros
   max_CFL(1:2) = 0.0
   do k=1,nz ; do j=js,je ; do I=Isq,Ieq
     if (u(I,j,k) < 0.0) then
       CFL_trans = (-u(I,j,k) * CS%dt_in_T) * (G%dy_Cu(I,j) * G%IareaT(i+1,j))
     else
-      CFL_trans = (u(I,j,k) * CS%dt_in_T) * (G%dy_Cu(I,j) * G%IareaT(i,j))
+      CFL_trans = (abs(u(I,j,k)) * CS%dt_in_T) * (G%dy_Cu(I,j) * G%IareaT(i,j))
     endif
     CFL_lin = abs(u(I,j,k) * CS%dt_in_T) * G%IdxCu(I,j)
     max_CFL(1) = max(max_CFL(1), CFL_trans)
@@ -729,7 +730,7 @@ subroutine write_energy(u, v, h, tv, day, n, G, GV, US, CS, tracer_CSp, OBC, dt_
     if (v(i,J,k) < 0.0) then
       CFL_trans = (-v(i,J,k) * CS%dt_in_T) * (G%dx_Cv(i,J) * G%IareaT(i,j+1))
     else
-      CFL_trans = (v(i,J,k) * CS%dt_in_T) * (G%dx_Cv(i,J) * G%IareaT(i,j))
+      CFL_trans = (abs(v(i,J,k)) * CS%dt_in_T) * (G%dx_Cv(i,J) * G%IareaT(i,j))
     endif
     CFL_lin = abs(v(i,J,k) * CS%dt_in_T) * G%IdyCv(i,J)
     max_CFL(1) = max(max_CFL(1), CFL_trans)
