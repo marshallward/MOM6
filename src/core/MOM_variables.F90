@@ -10,7 +10,7 @@ use MOM_grid, only : ocean_grid_type
 use MOM_EOS, only : EOS_type
 
 ! Testing
-use MOM_transcribe_grid, only : rotate_quarter
+use MOM_array_transform, only : rotate_quarter
 
 use coupler_types_mod, only : coupler_1d_bc_type, coupler_2d_bc_type
 use coupler_types_mod, only : coupler_type_spawn, coupler_type_destructor

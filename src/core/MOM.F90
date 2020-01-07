@@ -1,6 +1,7 @@
 !> The central module of the MOM6 ocean model
 module MOM
 
+
 ! This file is part of MOM6. See LICENSE.md for the license.
 
 ! Infrastructure modules
@@ -136,7 +137,8 @@ use MOM_shared_initialization, only : write_ocean_geometry_file
 use MOM_transcribe_grid,       only : rotate_dyngrid
 use MOM_forcing_type,          only : rotate_forcing, rotate_mech_forcing
 use MOM_variables,             only : rotate_surface_state
-use MOM_transcribe_grid,       only : rotate_quarter
+use MOM_array_transform,        only : rotate_quarter
+use MOM_open_boundary,         only : rotate_OBC
 
 implicit none ; private
 
@@ -1584,6 +1586,7 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, restart_CSp, &
   ! I really need a "init state" type, but this will do for now
   real, allocatable, dimension(:,:,:) :: u_in, v_in, h_in
   real, allocatable, dimension(:,:,:), target :: T_in, S_in
+  type(ocean_OBC_type), pointer :: OBC_in => NULL()
 
   ! T and S are conditionally allocated, and `associated()` is used in some
   ! places as a thermodynamics test (O_o).
@@ -2053,6 +2056,12 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, restart_CSp, &
     call create_dyn_horgrid(dG, HI_rot, bathymetry_at_vel=bathy_at_vel)
     call clone_MOM_domain(CS%G%Domain, dG%Domain)
   else
+    ! TODO: I can get away with dG => dG_in here since both are stack variables
+    !   but the general pattern probably should be (internal) => (model)
+    !   since the usually it's the model variable which needs to persist
+    !   outside of stack.
+    ! (Dangerously, both will probably work since most Fortran compilers will
+    !  toss everything onto the heap with fixed addresses!)
     HI => HI_in
     dG => dG_in
   endif
@@ -2070,9 +2079,16 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, restart_CSp, &
   call MOM_timing_init(CS)
 
   ! Allocate initialize time-invariant MOM variables.
-  call MOM_initialize_fixed(dG_in, US, CS%OBC, param_file, write_geom_files, dirs%output_directory)
-  if (CS%rotate_grid) &
+
+  call MOM_initialize_fixed(dG_in, US, OBC_in, param_file, write_geom_files, &
+                            dirs%output_directory)
+
+  if (CS%rotate_grid) then
     call rotate_dyngrid(dG_in, dG, US, grid_qturns)
+    call rotate_OBC(OBC_in, dG_in, CS%OBC, dG, grid_qturns)
+  else
+    CS%OBC => OBC_in
+  endif
 
   ! >>> testing
   if (CS%rotate_grid) &

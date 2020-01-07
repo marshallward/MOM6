@@ -28,6 +28,8 @@ use MOM_unit_scaling,         only : unit_scale_type
 use MOM_variables,            only : thermo_var_ptrs
 use MOM_verticalGrid,         only : verticalGrid_type
 
+use MOM_array_transform, only : rotate_quarter
+
 implicit none ; private
 
 #include <MOM_memory.h>
@@ -54,6 +56,7 @@ public register_temp_salt_segments
 public fill_temp_salt_segments
 public open_boundary_register_restarts
 public update_segment_tracer_reservoirs
+public rotate_OBC
 
 integer, parameter, public :: OBC_NONE = 0      !< Indicates the use of no open boundary
 integer, parameter, public :: OBC_SIMPLE = 1    !< Indicates the use of a simple inflow open boundary
@@ -4702,6 +4705,77 @@ subroutine adjustSegmentEtaToFitBathymetry(G, GV, US, segment,fld)
 
 
 end subroutine adjustSegmentEtaToFitBathymetry
+
+subroutine rotate_OBC(OBC_in, G_in, OBC, G, turns)
+  type(ocean_OBC_type), pointer, intent(in) :: OBC_in
+  type(dyn_horgrid_type),  intent(in) :: G_in
+  type(ocean_OBC_type), pointer, intent(out) :: OBC
+  type(dyn_horgrid_type),  intent(in) :: G
+  integer, intent(in) :: turns
+
+  if (.not. associated(OBC_in)) return
+  allocate(OBC)
+
+  ! Scalar and logical transfer
+  OBC%number_of_segments = OBC_in%number_of_segments
+  OBC%ke = OBC_in%ke
+  OBC%open_u_BCs_exist_globally = OBC_in%open_u_BCs_exist_globally
+  OBC%open_v_BCs_exist_globally = OBC_in%open_v_BCs_exist_globally
+  OBC%Flather_u_BCs_exist_globally = OBC_in%Flather_u_BCs_exist_globally
+  OBC%Flather_v_BCs_exist_globally = OBC_in%Flather_v_BCs_exist_globally
+  OBC%oblique_BCs_exist_globally = OBC_in%oblique_BCs_exist_globally
+  OBC%nudged_u_BCs_exist_globally = OBC_in%nudged_u_BCs_exist_globally
+  OBC%nudged_v_BCs_exist_globally = OBC_in%nudged_v_BCs_exist_globally
+  OBC%specified_u_BCs_exist_globally= OBC_in%specified_u_BCs_exist_globally
+  OBC%specified_v_BCs_exist_globally= OBC_in%specified_v_BCs_exist_globally
+  OBC%radiation_BCs_exist_globally = OBC_in%radiation_BCs_exist_globally
+  OBC%user_BCs_set_globally = OBC_in%user_BCs_set_globally
+  OBC%update_OBC = OBC_in%update_OBC
+  OBC%needs_IO_for_data = OBC_in%needs_IO_for_data
+  OBC%zero_vorticity = OBC_in%zero_vorticity
+  OBC%freeslip_vorticity = OBC_in%freeslip_vorticity
+  OBC%computed_vorticity = OBC_in%computed_vorticity
+  OBC%specified_vorticity = OBC_in%specified_vorticity
+  OBC%zero_strain = OBC_in%zero_strain
+  OBC%freeslip_strain = OBC_in%freeslip_strain
+  OBC%computed_strain = OBC_in%computed_strain
+  OBC%specified_strain = OBC_in%specified_strain
+  OBC%zero_biharmonic = OBC_in%zero_biharmonic
+  OBC%brushcutter_mode = OBC_in%brushcutter_mode
+  OBC%g_Earth = OBC_in%g_Earth
+
+  ! 1D arrays, need to be swapped?
+  OBC%tracer_x_reservoirs_used => OBC_in%tracer_x_reservoirs_used
+  OBC%tracer_y_reservoirs_used => OBC_in%tracer_y_reservoirs_used
+
+  OBC%ntr = OBC_in%ntr
+
+  OBC%segment => OBC_in%segment
+  OBC%segnum_u => OBC_in%segnum_u
+  OBC%segnum_v => OBC_in%segnum_v
+  !OBC%segnum_u = rotate_quarter(OBC_in%segnum_v)
+  !OBC%segnum_v = rotate_quarter(OBC_in%segnum_u)
+
+  OBC%gamma_uv = OBC_in%gamma_uv
+  OBC%rx_max = OBC_in%rx_max
+  OBC%OBC_pe = OBC_in%OBC_pe
+
+  OBC%remap_CS => OBC_in%remap_CS
+  OBC%OBC_Reg => OBC_in%OBC_Reg
+
+  OBC%rx_normal => OBC_in%rx_normal
+  OBC%ry_normal => OBC_in%ry_normal
+  OBC%rx_oblique => OBC_in%rx_oblique
+  OBC%ry_oblique => OBC_in%ry_oblique
+  OBC%cff_normal => OBC_in%cff_normal
+
+  OBC%tres_x => OBC_in%tres_x
+  OBC%tres_y => OBC_in%tres_y
+
+  OBC%silly_h = OBC_in%silly_h
+  OBC%silly_u = OBC_in%silly_u
+
+end subroutine rotate_OBC
 
 !> \namespace mom_open_boundary
 !! This module implements some aspects of internal open boundary

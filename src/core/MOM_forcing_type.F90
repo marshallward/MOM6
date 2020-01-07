@@ -23,7 +23,7 @@ use coupler_types_mod, only : coupler_type_increment_data, coupler_type_initiali
 use coupler_types_mod, only : coupler_type_copy_data, coupler_type_destructor
 
 ! Testing
-use MOM_transcribe_grid, only : rotate_quarter
+use MOM_array_transform, only : rotate_quarter
 
 implicit none ; private
 

@@ -11,11 +11,12 @@ use MOM_error_handler, only : MOM_error, MOM_mesg, FATAL, WARNING
 use MOM_grid, only : ocean_grid_type, set_derived_metrics
 use MOM_unit_scaling, only : unit_scale_type
 
+use MOM_array_transform, only : rotate_quarter
+
 implicit none ; private
 
 public copy_dyngrid_to_MOM_grid, copy_MOM_grid_to_dyngrid, rotate_dyngrid
 ! Probably should move this one to new module
-public rotate_quarter
 
 contains
 
@@ -316,10 +317,6 @@ subroutine rotate_dyngrid(G_in, G, US, turns)
   integer :: jsc, jec, jscB, jecB
   integer :: qturn
 
-
-
-  !<<< Everything below here is garbage copypasta
-
   !! Check that the grids conform.
   ! TODO: Fix this up for rotation
   !if ((isd > oG%isc) .or. (ied < oG%ied) .or. (jsd > oG%jsc) .or. (jed > oG%jed)) &
@@ -409,55 +406,5 @@ subroutine rotate_dyngrid(G_in, G, US, turns)
   call set_derived_dyn_horgrid(G, US)
 
 end subroutine rotate_dyngrid
-
-! TODO: move rotation ops to generic module?
-! (Shared by grids and forcings now...)
-
-function rotate_quarter(A_in, clockwise) result(A)
-  real, intent(in)  :: A_in(:,:)
-  logical, intent(in), optional :: clockwise
-  real :: A(size(A_in, 2), size(A_in, 1))
-
-  logical :: ccw    ! True if turn is counterclockwise (positive)
-  integer :: m, n   ! Input array shape
-
-  ccw = .true.
-  if (present(clockwise)) ccw = .not. clockwise
-
-  m = size(A_in, 1)
-  n = size(A_in, 2)
-
-  ! +90deg: B(i,j) = A(n-j,i)
-  !                = transpose, then row reverse
-  ! -90deg: B(i,j) = A(j,m-i)
-  !                = row reverse, then transpose
-
-  if (.not. ccw) then
-    A = transpose(A_in(m:1:-1, :))
-  else
-    A = transpose(A_in)
-  endif
-
-  if (ccw) &
-    A(:,:) = A(n:1:-1, :)
-
-end function rotate_quarter
-
-function rotate_half(A_in) result(A)
-  real, intent(in)  :: A_in(:,:)
-  real :: A(size(A_in, 1), size(A_in, 2))
-
-  integer :: m, n   ! Input array shape
-
-  m = size(A_in, 1)
-  n = size(A_in, 2)
-
-  ! 180deg: B(i,j) = A(m-i,n-j)
-  !                = row reversal + column reversal
-
-  A(:,:) = A_in(m:1:-1, :)
-  A(:,:) = A(:, n:1:-1)
-
-end function rotate_half
 
 end module MOM_transcribe_grid
