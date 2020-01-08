@@ -4792,25 +4792,54 @@ subroutine rotate_OBC_segment(segment_in, G_in, segment, G, turns)
   type(dyn_horgrid_type),  intent(in) :: G
   integer, intent(in) :: turns
 
-  ! Does this copy all fields?
-  ! Maybe I don't want to do this with the allocatables...
-  segment = segment_in
+  ! Transfer configuration flags
+  segment%Flather = segment_in%Flather
+  segment%radiation = segment_in%radiation
+  segment%radiation_tan = segment_in%radiation_tan
+  segment%radiation_grad = segment_in%radiation_grad
+  segment%oblique = segment_in%oblique
+  segment%oblique_tan = segment_in%oblique_tan
+  segment%oblique_grad = segment_in%oblique_grad
+  segment%nudged = segment_in%nudged
+  segment%nudged_tan = segment_in%nudged_tan
+  segment%nudged_grad = segment_in%nudged_grad
+  segment%specified = segment_in%specified
+  segment%specified_tan = segment_in%specified_tan
+  segment%specified_grad = segment_in%specified_grad
+  segment%open = segment_in%open
+  segment%gradient = segment_in%gradient
+  segment%values_needed = segment_in%values_needed
 
-  ! Hardcoded for 90 degrees...
-  ! TODO: Make a list of these values in a permutable form
-  ! TODO: How to handle is_E_or_W_2?  I'd need to do the index check...
+  ! Exchange u and v flags
+  segment%u_values_needed = segment_in%v_values_needed
+  segment%v_values_needed = segment_in%u_values_needed
+
+  segment%t_values_needed = segment_in%t_values_needed
+  segment%s_values_needed = segment_in%s_values_needed
+  segment%z_values_needed = segment_in%z_values_needed
+  segment%g_values_needed = segment_in%g_values_needed
+  segment%Velocity_nudging_timescale_in = segment_in%Velocity_nudging_timescale_in
+  segment%Velocity_nudging_timescale_out= segment_in%Velocity_nudging_timescale_out
+  segment%num_fields = segment_in%num_fields
+
+  ! Rotate segment indices
+  ! TODO: segment%HI, segment%[IJ][se]_obc
+  call rotate_segment_indices(segment)
+
+  ! Re-orient the directional flags
+  ! TODO: This is hardcoded for 90 degrees
   select case(segment_in%direction)
     case(OBC_DIRECTION_N)
       segment%direction = OBC_DIRECTION_W
-      segment%is_E_or_W = segment_in%is_N_or_S
-      segment%is_E_or_W_2 = segment_in%is_E_or_W
+      segment%is_E_or_W_2 = segment_in%is_N_or_S
+      segment%is_E_or_W = segment_in%is_N_or_S .and. segment_in%on_pe
     case(OBC_DIRECTION_W)
       segment%direction = OBC_DIRECTION_S
       segment%is_N_or_S = segment_in%is_E_or_W
     case(OBC_DIRECTION_S)
       segment%direction = OBC_DIRECTION_E
-      segment%is_E_or_W = segment_in%is_N_or_S
-      segment%is_E_or_W_2 = segment_in%is_E_or_W
+      segment%is_E_or_W_2 = segment_in%is_N_or_S
+      segment%is_E_or_W = segment_in%is_N_or_S .and. segment_in%on_pe
     case(OBC_DIRECTION_E)
       segment%direction = OBC_DIRECTION_N
       segment%is_N_or_S = segment_in%is_E_or_W
@@ -4818,15 +4847,12 @@ subroutine rotate_OBC_segment(segment_in, G_in, segment, G, turns)
       segment%direction = OBC_NONE
   end select
 
-  ! Swap index of segment
-  segment%Is_obc = segment_in%Js_obc
-  segment%Ie_obc = segment_in%Je_obc
-  segment%Js_obc = segment_in%Is_obc
-  segment%Je_obc = segment_in%Ie_obc
-
-  ! segment_data?
-
+  ! What else?
 end subroutine rotate_OBC_segment
+
+subroutine rotate_OBC_segment_indices(segment)
+  
+end subroutine rotate_OBC_segment_indices
 
 !> \namespace mom_open_boundary
 !! This module implements some aspects of internal open boundary
