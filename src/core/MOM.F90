@@ -2316,7 +2316,7 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, restart_CSp, &
 
     call MOM_initialize_state(u_in, v_in, h_in, CS%tv, Time, G_in, GV, US, param_file, &
                               dirs, restart_CSp, CS%ALE_CSp, CS%tracer_Reg, &
-                              CS%sponge_CSp, CS%ALE_sponge_CSp, CS%OBC, Time_in)
+                              CS%sponge_CSp, CS%ALE_sponge_CSp, OBC_in, Time_in)
 
     if (use_temperature) then
       CS%tv%T => CS%T
@@ -2327,6 +2327,8 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, restart_CSp, &
     call rotate_initial_state(u_in, v_in, h_in, T_in, S_in, G_in, &
                               CS%u, CS%v, CS%h, CS%T, CS%S, G, &
                               use_temperature, grid_qturns)
+
+    ! TODO: Rotate OBC_in to OBC?
 
     deallocate(u_in)
     deallocate(v_in)

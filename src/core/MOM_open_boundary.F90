@@ -4756,6 +4756,7 @@ subroutine rotate_OBC(OBC_in, G_in, OBC, G, turns)
   allocate(OBC%segment(0:OBC%number_of_segments))
   do l = 0, OBC%number_of_segments
     call rotate_OBC_segment(OBC_in%segment(l), G_in, OBC%segment(l), G, turns)
+    call allocate_OBC_segment_data(OBC, OBC%segment(l))
   enddo
 
   ! 2D map of segments
@@ -4792,6 +4793,7 @@ subroutine rotate_OBC_segment(segment_in, G_in, segment, G, turns)
   integer, intent(in) :: turns
 
   ! Does this copy all fields?
+  ! Maybe I don't want to do this with the allocatables...
   segment = segment_in
 
   ! Hardcoded for 90 degrees...
@@ -4816,8 +4818,11 @@ subroutine rotate_OBC_segment(segment_in, G_in, segment, G, turns)
       segment%direction = OBC_NONE
   end select
 
-
-  ! Swap I[se]_obc/J[se]_obc?
+  ! Swap index of segment
+  segment%Is_obc = segment_in%Js_obc
+  segment%Ie_obc = segment_in%Je_obc
+  segment%Js_obc = segment_in%Is_obc
+  segment%Je_obc = segment_in%Ie_obc
 
   ! segment_data?
 
