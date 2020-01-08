@@ -4713,6 +4713,8 @@ subroutine rotate_OBC(OBC_in, G_in, OBC, G, turns)
   type(dyn_horgrid_type),  intent(in) :: G
   integer, intent(in) :: turns
 
+  integer :: l
+
   if (.not. associated(OBC_in)) return
   allocate(OBC)
 
@@ -4750,11 +4752,17 @@ subroutine rotate_OBC(OBC_in, G_in, OBC, G, turns)
 
   OBC%ntr = OBC_in%ntr
 
-  OBC%segment => OBC_in%segment
-  OBC%segnum_u => OBC_in%segnum_u
-  OBC%segnum_v => OBC_in%segnum_v
-  !OBC%segnum_u = rotate_quarter(OBC_in%segnum_v)
-  !OBC%segnum_v = rotate_quarter(OBC_in%segnum_u)
+  ! Segment rotation
+  allocate(OBC%segment(0:OBC%number_of_segments))
+  do l = 0, OBC%number_of_segments
+    call rotate_OBC_segment(OBC_in%segment(l), G_in, OBC%segment(l), G, turns)
+  enddo
+
+  ! 2D map of segments
+  allocate(OBC%segnum_u(G%IsdB:G%IedB,G%jsd:G%jed)) ; OBC%segnum_u(:,:) = OBC_NONE
+  allocate(OBC%segnum_v(G%isd:G%ied,G%JsdB:G%JedB)) ; OBC%segnum_v(:,:) = OBC_NONE
+  OBC%segnum_u = rotate_quarter(OBC_in%segnum_v)
+  OBC%segnum_v = rotate_quarter(OBC_in%segnum_u)
 
   OBC%gamma_uv = OBC_in%gamma_uv
   OBC%rx_max = OBC_in%rx_max
@@ -4774,8 +4782,46 @@ subroutine rotate_OBC(OBC_in, G_in, OBC, G, turns)
 
   OBC%silly_h = OBC_in%silly_h
   OBC%silly_u = OBC_in%silly_u
-
 end subroutine rotate_OBC
+
+subroutine rotate_OBC_segment(segment_in, G_in, segment, G, turns)
+  type(OBC_segment_type), intent(in) :: segment_in
+  type(dyn_horgrid_type),  intent(in) :: G_in
+  type(OBC_segment_type), intent(out) :: segment
+  type(dyn_horgrid_type),  intent(in) :: G
+  integer, intent(in) :: turns
+
+  ! Does this copy all fields?
+  segment = segment_in
+
+  ! Hardcoded for 90 degrees...
+  ! TODO: Make a list of these values in a permutable form
+  ! TODO: How to handle is_E_or_W_2?  I'd need to do the index check...
+  select case(segment_in%direction)
+    case(OBC_DIRECTION_N)
+      segment%direction = OBC_DIRECTION_W
+      segment%is_E_or_W = segment_in%is_N_or_S
+      segment%is_E_or_W_2 = segment_in%is_E_or_W
+    case(OBC_DIRECTION_W)
+      segment%direction = OBC_DIRECTION_S
+      segment%is_N_or_S = segment_in%is_E_or_W
+    case(OBC_DIRECTION_S)
+      segment%direction = OBC_DIRECTION_E
+      segment%is_E_or_W = segment_in%is_N_or_S
+      segment%is_E_or_W_2 = segment_in%is_E_or_W
+    case(OBC_DIRECTION_E)
+      segment%direction = OBC_DIRECTION_N
+      segment%is_N_or_S = segment_in%is_E_or_W
+    case(OBC_NONE)  ! default?
+      segment%direction = OBC_NONE
+  end select
+
+
+  ! Swap I[se]_obc/J[se]_obc?
+
+  ! segment_data?
+
+end subroutine rotate_OBC_segment
 
 !> \namespace mom_open_boundary
 !! This module implements some aspects of internal open boundary
