@@ -7,11 +7,14 @@ public rotate_array
 public rotate_quarter, rotate_half  ! Hopefully won't need these...
 
 interface rotate_array
-  module procedure rotate_array_real, rotate_array_integer
+  module procedure rotate_array_real_2d
+  module procedure rotate_array_real_3d
+  module procedure rotate_array_integer
 end interface rotate_array
 
 interface rotate_quarter
-  module procedure rotate_quarter_real, rotate_quarter_integer
+  module procedure rotate_quarter_real
+  module procedure rotate_quarter_integer
 end interface rotate_quarter
 
 interface rotate_half
@@ -20,9 +23,22 @@ end interface rotate_half
 
 contains
 
-subroutine rotate_array_real(A, A_in, turns)
-  real, intent(in) :: A_in(:,:)
+subroutine rotate_array_real_3d(A, A_in, turns)
+  real, intent(out) :: A(:,:,:)
+  real, intent(in) :: A_in(:,:,:)
+  integer, intent(in) :: turns
+
+  integer :: k
+
+  do k = lbound(A_in, 3), ubound(A_in, 3)
+    call rotate_array(A(:,:,k), A_in(:,:,k), turns)
+  enddo
+end subroutine rotate_array_real_3d
+
+
+subroutine rotate_array_real_2d(A, A_in, turns)
   real, intent(out) :: A(:,:)
+  real, intent(in) :: A_in(:,:)
   integer, intent(in) :: turns
 
   select case (modulo(turns, 4))
@@ -35,12 +51,12 @@ subroutine rotate_array_real(A, A_in, turns)
     case(3)
       A = rotate_quarter(A_in, clockwise=.true.)
   end select
-end subroutine rotate_array_real
+end subroutine rotate_array_real_2d
 
 
 subroutine rotate_array_integer(A, A_in, turns)
-  integer, intent(in) :: A_in(:,:)
   integer, intent(out) :: A(:,:)
+  integer, intent(in) :: A_in(:,:)
   integer, intent(in) :: turns
 
   select case (modulo(turns, 4))

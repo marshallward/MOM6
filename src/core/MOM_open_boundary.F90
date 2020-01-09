@@ -29,6 +29,7 @@ use MOM_variables,            only : thermo_var_ptrs
 use MOM_verticalGrid,         only : verticalGrid_type
 
 use MOM_array_transform, only : rotate_quarter
+use MOM_array_transform, only : rotate_array
 
 implicit none ; private
 
@@ -56,7 +57,7 @@ public register_temp_salt_segments
 public fill_temp_salt_segments
 public open_boundary_register_restarts
 public update_segment_tracer_reservoirs
-public rotate_OBC
+public rotate_OBC_init, rotate_OBC_state
 
 integer, parameter, public :: OBC_NONE = 0      !< Indicates the use of no open boundary
 integer, parameter, public :: OBC_SIMPLE = 1    !< Indicates the use of a simple inflow open boundary
@@ -4706,7 +4707,8 @@ subroutine adjustSegmentEtaToFitBathymetry(G, GV, US, segment,fld)
 
 end subroutine adjustSegmentEtaToFitBathymetry
 
-subroutine rotate_OBC(OBC_in, G_in, OBC, G, turns)
+!> This is more of a rotate initialization than an actual rotate
+subroutine rotate_OBC_init(OBC_in, G_in, OBC, G, turns)
   type(ocean_OBC_type), pointer, intent(in) :: OBC_in
   type(dyn_horgrid_type),  intent(in) :: G_in
   type(ocean_OBC_type), pointer, intent(out) :: OBC
@@ -4715,6 +4717,7 @@ subroutine rotate_OBC(OBC_in, G_in, OBC, G, turns)
 
   integer :: l
 
+  ! TODO: Should this check be outside the function?
   if (.not. associated(OBC_in)) return
   allocate(OBC)
 
@@ -4755,16 +4758,17 @@ subroutine rotate_OBC(OBC_in, G_in, OBC, G, turns)
   ! Segment rotation
   allocate(OBC%segment(0:OBC%number_of_segments))
   do l = 0, OBC%number_of_segments
-    call rotate_OBC_segment(OBC_in%segment(l), G_in, OBC%segment(l), G, turns)
+    call rotate_OBC_segment_init(OBC_in%segment(l), G_in, OBC%segment(l), G, turns)
     call allocate_OBC_segment_data(OBC, OBC%segment(l))
   enddo
 
   ! 2D map of segments
-  allocate(OBC%segnum_u(G%IsdB:G%IedB,G%jsd:G%jed)) ; OBC%segnum_u(:,:) = OBC_NONE
-  allocate(OBC%segnum_v(G%isd:G%ied,G%JsdB:G%JedB)) ; OBC%segnum_v(:,:) = OBC_NONE
+  allocate(OBC%segnum_u(G%IsdB:G%IedB,G%jsd:G%jed))
+  allocate(OBC%segnum_v(G%isd:G%ied,G%JsdB:G%JedB))
   OBC%segnum_u = rotate_quarter(OBC_in%segnum_v)
   OBC%segnum_v = rotate_quarter(OBC_in%segnum_u)
 
+  ! TODO: Re-allocate these on new grids?
   OBC%gamma_uv = OBC_in%gamma_uv
   OBC%rx_max = OBC_in%rx_max
   OBC%OBC_pe = OBC_in%OBC_pe
@@ -4780,12 +4784,13 @@ subroutine rotate_OBC(OBC_in, G_in, OBC, G, turns)
 
   OBC%tres_x => OBC_in%tres_x
   OBC%tres_y => OBC_in%tres_y
+  ! TODO: end array handling
 
   OBC%silly_h = OBC_in%silly_h
   OBC%silly_u = OBC_in%silly_u
-end subroutine rotate_OBC
+end subroutine rotate_OBC_init
 
-subroutine rotate_OBC_segment(segment_in, G_in, segment, G, turns)
+subroutine rotate_OBC_segment_init(segment_in, G_in, segment, G, turns)
   type(OBC_segment_type), intent(in) :: segment_in
   type(dyn_horgrid_type),  intent(in) :: G_in
   type(OBC_segment_type), intent(out) :: segment
@@ -4818,9 +4823,13 @@ subroutine rotate_OBC_segment(segment_in, G_in, segment, G, turns)
   segment%s_values_needed = segment_in%s_values_needed
   segment%z_values_needed = segment_in%z_values_needed
   segment%g_values_needed = segment_in%g_values_needed
+
+  segment%on_pe = segment_in%on_pe
+
   segment%Velocity_nudging_timescale_in = segment_in%Velocity_nudging_timescale_in
   segment%Velocity_nudging_timescale_out= segment_in%Velocity_nudging_timescale_out
   segment%num_fields = segment_in%num_fields
+  ! TODO: segment%field?
 
   ! Rotate segment indices
   ! TODO: segment%HI, segment%[IJ][se]_obc
@@ -4847,8 +4856,11 @@ subroutine rotate_OBC_segment(segment_in, G_in, segment, G, turns)
       segment%direction = OBC_NONE
   end select
 
+  segment%temp_segment_data_exists = segment_in%temp_segment_data_exists
+  segment%salt_segment_data_exists = segment_in%salt_segment_data_exists
+
   ! What else?
-end subroutine rotate_OBC_segment
+end subroutine rotate_OBC_segment_init
 
 subroutine rotate_OBC_segment_indices(segment_in, G_in, segment)
   type(OBC_segment_type), intent(in) :: segment_in
@@ -4856,6 +4868,8 @@ subroutine rotate_OBC_segment_indices(segment_in, G_in, segment)
   type(OBC_segment_type), intent(out) :: segment
 
   ! Global indices
+  ! TODO: This is all hard-coded for 90 degrees
+  ! (and to be honest I'm not even sure it's right or free of off-by-ones)
   segment%HI%IsgB = G_in%JegB - segment_in%HI%JsgB
   segment%HI%IegB = G_in%JegB - segment_in%HI%JegB
   segment%HI%isg = G_in%jeg - segment_in%HI%jsg
@@ -4888,12 +4902,57 @@ subroutine rotate_OBC_segment_indices(segment_in, G_in, segment)
   segment%HI%jec = segment_in%HI%iec
 
   ! NOTE: These are probably unset if segment%on_pe is false
-  segment%Is_obc = G_in%JegB - segment_in%Js_obc
-  segment%Ie_obc = G_in%JsgB - segment_in%Je_obc
+  segment%Is_obc = G_in%JedB - segment_in%Js_obc
+  segment%Ie_obc = G_in%JedB - segment_in%Je_obc
   segment%Js_obc = segment_in%Is_obc
   segment%Je_obc = segment_in%Ie_obc
 
 end subroutine rotate_OBC_segment_indices
+
+
+subroutine rotate_OBC_state(OBC_in, OBC, turns)
+  type(ocean_OBC_type), pointer, intent(in) :: OBC_in
+  type(ocean_OBC_type), pointer, intent(out) :: OBC
+  integer, intent(in) :: turns
+
+  integer :: l
+
+  ! TODO: Surely much more to do here...
+  do l = 0, OBC%number_of_segments
+    call rotate_OBC_segment_data(OBC_in%segment(l), OBC%segment(l), turns)
+  enddo
+end subroutine rotate_OBC_state
+
+
+subroutine rotate_OBC_segment_data(segment_in, segment, turns)
+  type(OBC_segment_type), intent(in) :: segment_in
+  type(OBC_segment_type), intent(out) :: segment
+  integer, intent(in) :: turns
+
+  if (.not. segment%is_E_or_W .or. .not. segment%is_N_or_S) return
+
+  call rotate_array(segment%Cg, segment_in%Cg, turns)
+  call rotate_array(segment%Htot, segment_in%Htot, turns)
+  call rotate_array(segment%h, segment_in%h, turns)
+  call rotate_array(segment%normal_vel, segment_in%normal_vel, turns)
+  call rotate_array(segment%tangential_vel, segment_in%tangential_vel, turns)
+  call rotate_array(segment%tangential_grad, segment_in%tangential_grad, turns)
+  call rotate_array(segment%normal_trans, segment_in%normal_trans, turns)
+  call rotate_array(segment%normal_vel_bt, segment_in%normal_vel_bt, turns)
+  call rotate_array(segment%eta, segment_in%eta, turns)
+  call rotate_array(segment%grad_normal, segment_in%grad_normal, turns)
+  call rotate_array(segment%grad_tan, segment_in%grad_tan, turns)
+  call rotate_array(segment%grad_gradient, segment_in%grad_gradient, turns)
+  call rotate_array(segment%rx_norm_rad, segment_in%rx_norm_rad, turns)
+  call rotate_array(segment%ry_norm_rad, segment_in%ry_norm_rad, turns)
+  call rotate_array(segment%rx_norm_obl, segment_in%rx_norm_obl, turns)
+  call rotate_array(segment%ry_norm_obl, segment_in%ry_norm_obl, turns)
+  call rotate_array(segment%cff_normal, segment_in%cff_normal, turns)
+  call rotate_array(segment%nudged_normal_vel, segment_in%nudged_normal_vel, turns)
+  call rotate_array(segment%nudged_tangential_vel, segment_in%nudged_tangential_vel, turns)
+  call rotate_array(segment%nudged_tangential_grad, segment_in%nudged_tangential_grad, turns)
+
+end subroutine rotate_OBC_segment_data
 
 !> \namespace mom_open_boundary
 !! This module implements some aspects of internal open boundary

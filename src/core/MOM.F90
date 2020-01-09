@@ -137,8 +137,8 @@ use MOM_shared_initialization, only : write_ocean_geometry_file
 use MOM_transcribe_grid,       only : rotate_dyngrid
 use MOM_forcing_type,          only : rotate_forcing, rotate_mech_forcing
 use MOM_variables,             only : rotate_surface_state
-use MOM_array_transform,        only : rotate_quarter
-use MOM_open_boundary,         only : rotate_OBC
+use MOM_array_transform,       only : rotate_array
+use MOM_open_boundary,         only : rotate_OBC_init, rotate_OBC_state
 
 implicit none ; private
 
@@ -2085,7 +2085,7 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, restart_CSp, &
 
   if (CS%rotate_grid) then
     call rotate_dyngrid(dG_in, dG, US, grid_qturns)
-    call rotate_OBC(OBC_in, dG_in, CS%OBC, dG, grid_qturns)
+    call rotate_OBC_init(OBC_in, dG_in, CS%OBC, dG, grid_qturns)
   else
     CS%OBC => OBC_in
   endif
@@ -2329,6 +2329,8 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, restart_CSp, &
                               use_temperature, grid_qturns)
 
     ! TODO: Rotate OBC_in to OBC?
+    if (associated(OBC_in)) &
+      call rotate_OBC_state(OBC_in, CS%OBC, grid_qturns)
 
     deallocate(u_in)
     deallocate(v_in)
@@ -2342,6 +2344,12 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, restart_CSp, &
                               dirs, restart_CSp, CS%ALE_CSp, CS%tracer_Reg, &
                               CS%sponge_CSp, CS%ALE_sponge_CSp, CS%OBC, Time_in)
   endif
+
+  ! Inspect the segments
+  do i = 0, CS%OBC%number_of_segments
+    print *, "segment", i, CS%OBC%segment(i)%Is_obc, CS%OBC%segment(i)%Ie_obc, &
+        CS%OBC%segment(i)%Js_obc, CS%OBC%segment(i)%Je_obc
+  enddo
 
   call cpu_clock_end(id_clock_MOM_init)
   call callTree_waypoint("returned from MOM_initialize_state() (initialize_MOM)")
@@ -3272,23 +3280,14 @@ subroutine rotate_initial_state(u_in, v_in, h_in, T_in, S_in, G_in, &
   type(ocean_grid_type), intent(in) :: G
   logical, intent(in) :: use_temperature
   integer, intent(in) :: turns
+  ! TODO: Define something like ocean_init_state to pack these fields
 
-  integer :: k, nk
-
-  ! TODO: Will eventually get 3d versions of rotate_quarter...
-  nk = size(u, 3)
-
-  ! XXX: Testing 90° turns for now
-  if (modulo(turns, 4) == 1) then
-    do k = 1, nk
-      u(:,:,k) = rotate_quarter(-v_in(:,:,k))
-      v(:,:,k) = rotate_quarter(u_in(:,:,k))
-      h(:,:,k) = rotate_quarter(h_in(:,:,k))
-      if (use_temperature) then
-        T(:,:,k) = rotate_quarter(T_in(:,:,k))
-        S(:,:,k) = rotate_quarter(S_in(:,:,k))
-      endif
-    enddo
+  call rotate_array(u, -v_in, turns)
+  call rotate_array(v, u_in, turns)
+  call rotate_array(h, h_in, turns)
+  if (use_temperature) then
+    call rotate_array(T, T_in, turns)
+    call rotate_array(S, S_in, turns)
   endif
 end subroutine rotate_initial_state
 
