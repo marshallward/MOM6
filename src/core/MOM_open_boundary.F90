@@ -4824,7 +4824,7 @@ subroutine rotate_OBC_segment(segment_in, G_in, segment, G, turns)
 
   ! Rotate segment indices
   ! TODO: segment%HI, segment%[IJ][se]_obc
-  call rotate_segment_indices(segment)
+  call rotate_OBC_segment_indices(segment_in, G_in, segment)
 
   ! Re-orient the directional flags
   ! TODO: This is hardcoded for 90 degrees
@@ -4850,8 +4850,49 @@ subroutine rotate_OBC_segment(segment_in, G_in, segment, G, turns)
   ! What else?
 end subroutine rotate_OBC_segment
 
-subroutine rotate_OBC_segment_indices(segment)
-  
+subroutine rotate_OBC_segment_indices(segment_in, G_in, segment)
+  type(OBC_segment_type), intent(in) :: segment_in
+  type(dyn_horgrid_type), intent(in) :: G_in
+  type(OBC_segment_type), intent(out) :: segment
+
+  ! Global indices
+  segment%HI%IsgB = G_in%JegB - segment_in%HI%JsgB
+  segment%HI%IegB = G_in%JegB - segment_in%HI%JegB
+  segment%HI%isg = G_in%jeg - segment_in%HI%jsg
+  segment%HI%ieg = G_in%jeg - segment_in%HI%jeg
+
+  segment%HI%JsgB = segment_in%HI%IsgB
+  segment%HI%JegB = segment_in%HI%IegB
+  segment%HI%jsg = segment_in%HI%isg
+  segment%HI%jeg = segment_in%HI%ieg
+
+  ! Local indices
+  segment%HI%IsdB = G_in%JedB - segment_in%HI%JsdB
+  segment%HI%IedB = G_in%JedB - segment_in%HI%JedB
+  segment%HI%isd = G_in%jed - segment_in%HI%jsd
+  segment%HI%ied = G_in%jed - segment_in%HI%jed
+
+  segment%HI%IscB = G_in%JedB - segment_in%HI%JscB
+  segment%HI%IecB = G_in%JedB - segment_in%HI%JecB
+  segment%HI%isc = G_in%jed - segment_in%HI%jsc
+  segment%HI%iec = G_in%jed - segment_in%HI%jec
+
+  segment%HI%JsdB = segment_in%HI%IsdB
+  segment%HI%JedB = segment_in%HI%IedB
+  segment%HI%jsd = segment_in%HI%isd
+  segment%HI%jed = segment_in%HI%ied
+
+  segment%HI%JscB = segment_in%HI%IscB
+  segment%HI%JecB = segment_in%HI%IecB
+  segment%HI%jsc = segment_in%HI%isc
+  segment%HI%jec = segment_in%HI%iec
+
+  ! NOTE: These are probably unset if segment%on_pe is false
+  segment%Is_obc = G_in%JegB - segment_in%Js_obc
+  segment%Ie_obc = G_in%JsgB - segment_in%Je_obc
+  segment%Js_obc = segment_in%Is_obc
+  segment%Je_obc = segment_in%Ie_obc
+
 end subroutine rotate_OBC_segment_indices
 
 !> \namespace mom_open_boundary

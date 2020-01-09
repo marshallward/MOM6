@@ -15,7 +15,6 @@ interface rotate_quarter
 end interface rotate_quarter
 
 interface rotate_half
-  !module procedure rotate_half_real
   module procedure rotate_half_real, rotate_half_integer
 end interface rotate_half
 
