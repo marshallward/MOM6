@@ -1,4 +1,4 @@
-!> The central module of the MOM6 ocean model
+!!> The central module of the MOM6 ocean model
 module MOM
 
 
@@ -138,7 +138,7 @@ use MOM_transcribe_grid,       only : rotate_dyngrid
 use MOM_forcing_type,          only : rotate_forcing, rotate_mech_forcing
 use MOM_variables,             only : rotate_surface_state
 use MOM_array_transform,       only : rotate_array
-use MOM_open_boundary,         only : rotate_OBC_init, rotate_OBC_state
+use MOM_open_boundary,         only : rotate_OBC_config, rotate_OBC_state
 
 implicit none ; private
 
@@ -2085,10 +2085,31 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, restart_CSp, &
 
   if (CS%rotate_grid) then
     call rotate_dyngrid(dG_in, dG, US, grid_qturns)
-    call rotate_OBC_init(OBC_in, dG_in, CS%OBC, dG, grid_qturns)
+    call rotate_OBC_config(OBC_in, dG_in, CS%OBC, dG, grid_qturns)
   else
     CS%OBC => OBC_in
   endif
+
+  do i = 0,CS%OBC%number_of_segments
+    print *, "---------------"
+    print *, "segment:", i
+    print *, CS%OBC%segment(i)%HI
+    print *, "segment: [IJ]sgB", CS%OBC%segment(i)%HI%IsgB, CS%OBC%segment(i)%HI%JsgB
+    print *, "segment: [IJ]egB", CS%OBC%segment(i)%HI%IegB, CS%OBC%segment(i)%HI%JegB
+    print *, "segment: [ij]sg", CS%OBC%segment(i)%HI%isg, CS%OBC%segment(i)%HI%jsg
+    print *, "segment: [ij]eg", CS%OBC%segment(i)%HI%ieg, CS%OBC%segment(i)%HI%jeg
+
+    print *, "segment: [IJ]sdB", CS%OBC%segment(i)%HI%IsdB, CS%OBC%segment(i)%HI%JsdB
+    print *, "segment: [IJ]edB", CS%OBC%segment(i)%HI%IedB, CS%OBC%segment(i)%HI%JedB
+    print *, "segment: [ij]sd", CS%OBC%segment(i)%HI%isd, CS%OBC%segment(i)%HI%jsd
+    print *, "segment: [ij]ed", CS%OBC%segment(i)%HI%ied, CS%OBC%segment(i)%HI%jed
+
+    print *, "segment: [IJ]scB", CS%OBC%segment(i)%HI%IscB, CS%OBC%segment(i)%HI%JscB
+    print *, "segment: [IJ]ecB", CS%OBC%segment(i)%HI%IecB, CS%OBC%segment(i)%HI%JecB
+    print *, "segment: [ij]sc", CS%OBC%segment(i)%HI%isc, CS%OBC%segment(i)%HI%jsc
+    print *, "segment: [ij]ec", CS%OBC%segment(i)%HI%iec, CS%OBC%segment(i)%HI%jec
+    print *, "---------------"
+  enddo
 
   ! >>> testing
   if (CS%rotate_grid) &
@@ -2277,6 +2298,7 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, restart_CSp, &
   if (CS%rotate_grid) then
     call MOM_grid_init(G, param_file, US, HI, bathymetry_at_vel=bathy_at_vel)
     call copy_dyngrid_to_MOM_grid(dG, G, US)
+    ! TODO: Don't destroy for test_copy_grid (or whatever)
     call destroy_dyn_horgrid(dG)
   endif
   call MOM_grid_init(G_in, param_file, US, HI_in, bathymetry_at_vel=bathy_at_vel)
@@ -2324,11 +2346,11 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, restart_CSp, &
     endif
 
     ! TODO: Ridiculous number of arguments...
+    ! Inspect the segments
     call rotate_initial_state(u_in, v_in, h_in, T_in, S_in, G_in, &
                               CS%u, CS%v, CS%h, CS%T, CS%S, G, &
                               use_temperature, grid_qturns)
 
-    ! TODO: Rotate OBC_in to OBC?
     if (associated(OBC_in)) &
       call rotate_OBC_state(OBC_in, CS%OBC, grid_qturns)
 
