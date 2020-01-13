@@ -257,10 +257,8 @@ type, public :: vertvisc_type
   real, pointer, dimension(:,:,:) :: TKE_turb => NULL()
                 !< The turbulent kinetic energy per unit mass at the interfaces [Z2 T-2 ~> m2 s-2].
                 !! This may be at the tracer or corner points
-  real, pointer, dimension(:,:,:) :: Work3D_u_original => NULL()
+  real, pointer, dimension(:,:,:) :: Work3D_h_Eliz => NULL()
                 !< Work done by slumping in the x-direction for the SI parameterization [W m-2].
-  real, pointer, dimension(:,:,:) :: Work3D_v_original => NULL()
-                !< Work done by slumping in the y-direction for the SI parameterization [W m-2].
   logical :: add_Kv_slow !< If True, add Kv_slow when calculating the 'coupling coefficient' (a_cpl)
                          !! at the interfaces in find_coupling_coef.
 end type vertvisc_type

@@ -1687,6 +1687,7 @@ subroutine set_visc_register_restarts(HI, GV, param_file, visc, restart_CS)
   logical :: use_kappa_shear, KS_at_vertex
   logical :: adiabatic, useKPP, useEPBL
   logical :: use_CVMix_shear, MLE_use_PBL_MLD, use_CVMix_conv
+  logical :: ELIZABETH_DIFFUSE
   integer :: isd, ied, jsd, jed, nz
   real :: hfreeze !< If hfreeze > 0 [m], melt potential will be computed.
   character(len=40)  :: mdl = "MOM_set_visc"  ! This module's name.
@@ -1712,7 +1713,12 @@ subroutine set_visc_register_restarts(HI, GV, param_file, visc, restart_CS)
                  "layer scheme to determine the diffusivity and viscosity "//&
                  "in the surface boundary layer.", default=.false., do_not_log=.true.)
   endif
-
+  call get_param(param_file, mdl, "ELIZABETH_DIFFUSE", ELIZABETH_DIFFUSE, &
+                 "If true, uses the symmetric instability parameterization \n"//&
+                 "(Yankovsky et al., 2019).", default=.false., do_not_log=.true.)
+  if (ELIZABETH_DIFFUSE) then
+    call safe_alloc_ptr(visc%Work3D_h_Eliz, isd, ied, jsd, jed, nz+1)
+  endif
   if (use_kappa_shear .or. useKPP .or. useEPBL .or. use_CVMix_shear .or. use_CVMix_conv) then
     call safe_alloc_ptr(visc%Kd_shear, isd, ied, jsd, jed, nz+1)
     call register_restart_field(visc%Kd_shear, "Kd_shear", .false., restart_CS, &
@@ -2107,6 +2113,7 @@ subroutine set_visc_end(visc, CS)
   if (associated(visc%tbl_thick_shelf_v)) deallocate(visc%tbl_thick_shelf_v)
   if (associated(visc%kv_tbl_shelf_u)) deallocate(visc%kv_tbl_shelf_u)
   if (associated(visc%kv_tbl_shelf_v)) deallocate(visc%kv_tbl_shelf_v)
+  if (associated(visc%Work3D_h_Eliz)) deallocate(visc%Work3D_h_Eliz)
 
   deallocate(CS)
 end subroutine set_visc_end

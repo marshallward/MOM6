@@ -260,7 +260,8 @@ subroutine set_diffusivity(u, v, h, u_h, v_h, tv, fluxes, optics, visc, dt_in_T,
   real :: I_Rho0        ! inverse of Boussinesq density [m3 kg-1]
   real :: dissip        ! local variable for dissipation calculations [Z2 kg m-3 T-3 ~> W m-3]
   real :: Omega2        ! squared absolute rotation rate [T-2 ~> s-2]
-
+  real :: Kd_Eliz        ! diffusivity to add in a layer from SI parameterization [Z2 T-1 ~> m2 s-1].
+  real :: Kd_Eliz_o        ! dummy variable for  diffusivity to add in a layer from SI parameterization [Z2 T-1 ~> m2 s-1].
   logical   :: use_EOS      ! If true, compute density from T/S using equation of state.
   integer   :: kb(SZI_(G))  ! The index of the lightest layer denser than the
                             ! buffer layer, or -1 without a bulk mixed layer.
@@ -498,6 +499,22 @@ subroutine set_diffusivity(u, v, h, u_h, v_h, tv, fluxes, optics, visc, dt_in_T,
       endif
     endif
 
+!Work3D_h_Eliz has units  W/m2, needs to be divided  by rho_o (Boussinesq limit)
+    if (associated(visc%Work3D_h_Eliz)) then
+        do k=nz,1,-1 ; do i=is,ie
+          Kd_Eliz_o  = I_Rho0 * 0.5 * (visc%Work3D_h_Eliz(i,j,K)+visc%Work3D_h_Eliz(i,j,K+1))
+          if (Kd_Eliz_o<0) Kd_Eliz_o = 0.0
+          Kd_Eliz  = TKE_to_Kd(i,k) * Kd_Eliz_o
+
+          if (CS%Kd_max >= 0.0) Kd_Eliz = min(Kd_Eliz, CS%Kd_max)
+          Kd_lay(i,j,k) = Kd_lay(i,j,k) + Kd_Eliz
+
+          if (present(Kd_int)) then
+            Kd_int(i,j,K)   = Kd_int(i,j,K)   + 0.5 * Kd_Eliz
+            Kd_int(i,j,K+1) = Kd_int(i,j,K+1) + 0.5 * Kd_Eliz
+          endif
+        enddo ; enddo
+    endif
     if (CS%limit_dissipation) then
       ! This calculates the dissipation ONLY from Kd calculated in this routine
       ! dissip has units of W/m3 (= kg/m3 * m2/s * 1/s2)
@@ -505,7 +522,7 @@ subroutine set_diffusivity(u, v, h, u_h, v_h, tv, fluxes, optics, visc, dt_in_T,
       !   2) a dissipation proportional to N (aka Gargett) and
       !   3) dissipation corresponding to a (nearly) constant diffusivity.
       do k=2,nz-1 ; do i=is,ie
-        dissip = max( CS%dissip_min, &   ! Const. floor on dissip.
+        dissip = max( CS%dissip_min,  &   ! Const. floor on dissip.
                       CS%dissip_N0 + CS%dissip_N1 * sqrt(N2_lay(i,k)), & ! Floor aka Gargett
                       CS%dissip_N2 * N2_lay(i,k)) ! Floor of Kd_min*rho0/F_Ri
         Kd_lay(i,j,k) = max(Kd_lay(i,j,k) , &  ! Apply floor to Kd
