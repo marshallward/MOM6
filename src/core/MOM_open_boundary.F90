@@ -825,9 +825,43 @@ subroutine setup_segment_indices(G, seg, Is_obc, Ie_obc, Js_obc, Je_obc)
 
   ! Global space I*_obc but sorted
   seg%HI%IsgB = Isg ; seg%HI%IegB = Ieg
-  seg%HI%isg = Isg+1 ; seg%HI%ieg = Ieg
+  !seg%HI%isg = Isg+1 ; seg%HI%ieg = Ieg
   seg%HI%JsgB = Jsg ; seg%HI%JegB = Jeg
-  seg%HI%jsg = Jsg+1 ; seg%HI%Jeg = Jeg
+  !seg%HI%jsg = Jsg+1 ; seg%HI%Jeg = Jeg
+
+  ! TODO: This is wrong!  These offsets are for [IJ][se]_obc!
+  ! TODO: Set [ij][se]g from [IJ][se]_obc, then reorder both global indices
+  if (Is_obc > Ie_obc) then
+    ! Northern boundary
+    seg%HI%isg = Isg
+    seg%HI%jsg = Jsg
+    seg%HI%ieg = Ieg + 1
+    seg%HI%jeg = Jeg
+  endif
+
+  if (Is_obc < Ie_obc) then
+    ! Southern boundary
+    seg%HI%isg = Isg + 1
+    seg%HI%jsg = Jsg + 1
+    seg%HI%ieg = Ieg
+    seg%HI%jeg = Jeg + 1
+  endif
+
+  if (Js_obc < Je_obc) then
+    ! Eastern boundary
+    seg%HI%isg = Isg
+    seg%HI%jsg = Jsg + 1
+    seg%HI%ieg = Ieg
+    seg%HI%jeg = Jeg
+  endif
+
+  if (Js_obc > Je_obc) then
+    ! Western boundary
+    seg%HI%isg = Isg + 1
+    seg%HI%jsg = Jsg
+    seg%HI%ieg = Ieg + 1
+    seg%HI%jeg = Jeg + 1
+  endif
 
   ! Move into local index space
   Isg = Isg - G%idg_offset
