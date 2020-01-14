@@ -2346,12 +2346,6 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, restart_CSp, &
                               CS%sponge_CSp, CS%ALE_sponge_CSp, CS%OBC, Time_in)
   endif
 
-  ! Inspect the segments
-  do i = 0, CS%OBC%number_of_segments
-    print *, "segment", i, CS%OBC%segment(i)%Is_obc, CS%OBC%segment(i)%Ie_obc, &
-        CS%OBC%segment(i)%Js_obc, CS%OBC%segment(i)%Je_obc
-  enddo
-
   call cpu_clock_end(id_clock_MOM_init)
   call callTree_waypoint("returned from MOM_initialize_state() (initialize_MOM)")
 
