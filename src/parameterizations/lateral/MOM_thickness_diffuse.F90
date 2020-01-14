@@ -91,8 +91,6 @@ type, public :: thickness_diffuse_CS ; private
   integer :: id_slope_x = -1, id_slope_y = -1
   integer :: id_sfn_unlim_x = -1, id_sfn_unlim_y = -1, id_sfn_x = -1, id_sfn_y = -1
   integer :: id_sfn_unlim_Eliz_x = -1, id_sfn_unlim_Eliz_y = -1, id_sfn_Eliz_x = -1, id_sfn_Eliz_y = -1
-  integer :: id_Work3D_u = -1, id_Work3D_v = -1
-  integer :: id_Work3D_u1 = -1, id_Work3D_u2 = -1, id_Work3D_v1 = -1, id_Work3D_v2 = -1
   integer :: id_Work3D_u_original = -1, id_Work3D_v_original = -1, id_Work3D_h_Eliz = -1
   integer :: id_Work_h = -1, id_Work_h_Eliz = -1
   integer :: id_Work_u = -1, id_Work_u_Eliz = -1
@@ -671,12 +669,6 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, uhD_Eliz, vhD_
   real :: G_rho0        ! g/Rho0 [m5 Z-1 s-2 ~> m4 s-2].
   real :: N2_floor      ! A floor for N2 to avoid degeneracy in the elliptic solver
                         ! times unit conversion factors [s-2 m2 Z-2 ~> s-2]
-  real, dimension(SZIB_(G), SZJ_(G), SZK_(G)+1) :: diag_Work3D_u ! Diagnostics
-  real, dimension(SZI_(G), SZJB_(G), SZK_(G)+1) :: diag_Work3D_v ! Diagnostics
-  real, dimension(SZIB_(G), SZJ_(G), SZK_(G)+1) :: diag_Work3D_u1 ! Diagnostics
-  real, dimension(SZI_(G), SZJB_(G), SZK_(G)+1) :: diag_Work3D_v1 ! Diagnostics
-  real, dimension(SZIB_(G), SZJ_(G), SZK_(G)+1) :: diag_Work3D_u2 ! Diagnostics
-  real, dimension(SZI_(G), SZJB_(G), SZK_(G)+1) :: diag_Work3D_v2 ! Diagnostics
   real, dimension(SZIB_(G), SZJ_(G), SZK_(G)+1) :: Work3D_u_original ! Diagnostics
   real, dimension(SZI_(G), SZJB_(G), SZK_(G)+1) :: Work3D_v_original ! Diagnostics
   real, dimension(SZI_(G), SZJ_(G), SZK_(G)+1) :: Work3D_h_Eliz ! Diagnostics
@@ -751,9 +743,6 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, uhD_Eliz, vhD_
   do j=js,je ; do I=is-1,ie
     uhtot(I,j) = 0.0 ; Work_u(I,j) = 0.0
     uhtot_Eliz(I,j) = 0.0 ; Work_u_Eliz(I,j) = 0.0
-    diag_Work3D_u(I,j,:) = 0.0
-    diag_Work3D_u1(I,j,:) = 0.0
-    diag_Work3D_u2(I,j,:) = 0.0
     Work3D_u_original(I,j,:) = 0.0
     diag_sfn_x(I,j,1) = 0.0 ; diag_sfn_unlim_x(I,j,1) = 0.0
     diag_sfn_x(I,j,nz+1) = 0.0 ; diag_sfn_unlim_x(I,j,nz+1) = 0.0
@@ -764,9 +753,6 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, uhD_Eliz, vhD_
   do J=js-1,je ; do i=is,ie
     vhtot(i,J) = 0.0 ; Work_v(i,J) = 0.0
     vhtot_Eliz(i,J) = 0.0 ; Work_v_Eliz(i,J) = 0.0
-    diag_Work3D_v(i,J,:) = 0.0
-    diag_Work3D_v1(i,J,:) = 0.0
-    diag_Work3D_v2(i,J,:) = 0.0
     Work3D_v_original(i,J,:) = 0.0
     diag_sfn_y(i,J,1) = 0.0 ; diag_sfn_unlim_y(i,J,1) = 0.0
     diag_sfn_y(i,J,nz+1) = 0.0 ; diag_sfn_unlim_y(i,J,nz+1) = 0.0
@@ -1110,16 +1096,6 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, uhD_Eliz, vhD_
             (uhD_Eliz(I,j,k) * drdi_u(I,k)) * 0.25 * &
             ((e(i,j,K) + e(i,j,K+1)) + (e(i+1,j,K) + e(i+1,j,K+1))) )
         !same but 3D structure:
-        diag_Work3D_u(I,j,K) = G_scale * &
-          ( uhtot_Eliz(I,j) * drdkDe_u(I,K) - &
-            (uhD_Eliz(I,j,k) * drdi_u(I,k)) * 0.25 * &
-            ((e(i,j,K) + e(i,j,K+1)) + (e(i+1,j,K) + e(i+1,j,K+1))) )
-        diag_Work3D_u1(I,j,K) = G_scale * &
-          ( uhtot_Eliz(I,j) * drdkDe_u(I,K))
-        diag_Work3D_u2(I,j,k) = G_scale * &
-          ( - (uhD_Eliz(I,j,k) * drdi_u(I,k)) * 0.25 * &
-            ((e(i,j,K) + e(i,j,K+1)) + (e(i+1,j,K) + e(i+1,j,K+1))) )
-
         tmp_work_layer =  ((uhD_Eliz(I,j,k) * drdi_u(I,k)) * &
              0.25 * ((e(i,j,K) + e(i,j,K+1)) + (e(i+1,j,K) + e(i+1,j,K+1)))) 
         Work3D_u_original(I,j,K) = G_scale * &
@@ -1460,24 +1436,11 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, uhD_Eliz, vhD_
            (vhD_Eliz(i,J,k) * drdj_v(i,k)) * 0.25 * &
            ((e(i,j,K) + e(i,j,K+1)) + (e(i,j+1,K) + e(i,j+1,K+1))) )
 
-        diag_Work3D_v1(i,J,K) = G_scale * &
-          ( vhtot_Eliz(i,J) * drdkDe_v(i,K))
-
-        diag_Work3D_v2(i,J,k) = G_scale * &
-          ( - (vhD_Eliz(i,J,k) * drdj_v(i,k)) * 0.25 * &
-           ((e(i,j,K) + e(i,j,K+1)) + (e(i,j+1,K) + e(i,j+1,K+1))) )
-
-        diag_Work3D_v(i,J,K) = G_scale * &
-          ( vhtot_Eliz(i,J) * drdkDe_v(i,K) - &
-           (vhD_Eliz(i,J,k) * drdj_v(i,k)) * 0.25 * &
-           ((e(i,j,K) + e(i,j,K+1)) + (e(i,j+1,K) + e(i,j+1,K+1))) )
-
         tmp_work_layer =  ((vhD_Eliz(i,J,k) * drdj_v(i,k)) * &
              0.25 * ((e(i,j,K) + e(i,j,K+1)) + (e(i,j+1,K) + e(i,j+1,K+1))))
         Work3D_v_original(i,J,K) = G_scale * &
           ( vhtot_Eliz(i,J) * drdkDe_v(i,K)  - 0.5 * tmp_work_layer )
         Work3D_v_original(i,J,K+1) = Work3D_v_original(i,J,K+1) - 0.5 * G_scale * tmp_work_layer
-        !if (Work3D_v_original(i,J,K)>0) Work3D_v_original(i,J,K) = 0.0
 
       enddo
     enddo ! end of k-loop
@@ -1514,17 +1477,12 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, uhD_Eliz, vhD_
         Work_u_Eliz(I,j) = Work_u_Eliz(I,j) - G_scale * &
             ( (uhD_Eliz(I,j,1) * drdiB) * 0.25 * &
               ((e(i,j,1) + e(i,j,2)) + (e(i+1,j,1) + e(i+1,j,2))) )
-        diag_Work3D_u(I,j,1) =  -G_scale * &
-            ( (uhD_Eliz(I,j,1) * drdiB) * 0.25 * &
-              ((e(i,j,1) + e(i,j,2)) + (e(i+1,j,1) + e(i+1,j,2))) )
 
         tmp_work_layer =  ((uhD_Eliz(I,j,1) * drdiB) * &
              0.25 * ((e(i,j,1) + e(i,j,2)) + (e(i+1,j,1) + e(i+1,j,2))))
         Work3D_u_original(I,j,1) = G_scale * &
           ( - 0.5 * tmp_work_layer )
         Work3D_u_original(I,j,2) = Work3D_u_original(I,j,2) - 0.5 * G_scale * tmp_work_layer
-        !if (Work3D_u_original(I,j,1)>0) Work3D_u_original(I,j,1) = 0.0
-        !if (Work3D_u_original(I,j,2)>0) Work3D_u_original(I,j,2) = 0.0
 
       enddo
     enddo
@@ -1553,10 +1511,6 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, uhD_Eliz, vhD_
               ((e(i,j,1) + e(i,j,2)) + (e(i,j+1,1) + e(i,j+1,2))) )
 
         Work_v_Eliz(i,J) = Work_v_Eliz(i,J) - G_scale * &
-            ( (vhD_Eliz(i,J,1) * drdjB) * 0.25 * &
-              ((e(i,j,1) + e(i,j,2)) + (e(i,j+1,1) + e(i,j+1,2))) )
-
-        diag_Work3D_v(i,J,1) = -G_scale * &
             ( (vhD_Eliz(i,J,1) * drdjB) * 0.25 * &
               ((e(i,j,1) + e(i,j,2)) + (e(i,j+1,1) + e(i,j+1,2))) )
 
@@ -1609,12 +1563,6 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, uhD_Eliz, vhD_
   if (CS%id_sfn_unlim_y > 0) call post_data(CS%id_sfn_unlim_y, diag_sfn_unlim_y, CS%diag)
   if (CS%id_sfn_unlim_Eliz_x > 0) call post_data(CS%id_sfn_unlim_Eliz_x, diag_sfn_unlim_Eliz_x, CS%diag)
   if (CS%id_sfn_unlim_Eliz_y > 0) call post_data(CS%id_sfn_unlim_Eliz_y, diag_sfn_unlim_Eliz_y, CS%diag)
-  if (CS%id_Work3D_u > 0) call post_data(CS%id_Work3D_u, diag_Work3D_u, CS%diag)
-  if (CS%id_Work3D_v > 0) call post_data(CS%id_Work3D_v, diag_Work3D_v, CS%diag)
-  if (CS%id_Work3D_u1 > 0) call post_data(CS%id_Work3D_u1, diag_Work3D_u1, CS%diag)
-  if (CS%id_Work3D_v1 > 0) call post_data(CS%id_Work3D_v1, diag_Work3D_v1, CS%diag)
-  if (CS%id_Work3D_u2 > 0) call post_data(CS%id_Work3D_u2, diag_Work3D_u2, CS%diag)
-  if (CS%id_Work3D_v2 > 0) call post_data(CS%id_Work3D_v2, diag_Work3D_v2, CS%diag)
   if (CS%id_Work3D_u_original > 0) call post_data(CS%id_Work3D_u_original, Work3D_u_original, CS%diag)
   if (CS%id_Work3D_v_original > 0) call post_data(CS%id_Work3D_v_original, Work3D_v_original, CS%diag)
   if (CS%id_Work3D_h_Eliz > 0) call post_data(CS%id_Work3D_h_Eliz, Work3D_h_Eliz, CS%diag)
@@ -2270,18 +2218,6 @@ subroutine thickness_diffuse_init(Time, G, GV, US, param_file, diag, CDp, CS)
   CS%id_sfn_unlim_Eliz_y =  register_diag_field('ocean_model', 'Eliz_sfn_unlim_y', diag%axesCvi, Time, &
            'Parameterized Meridional Overturning Streamfunction before limiting/smoothing', &
            'm3 s-1', conversion=US%Z_to_m)
-  CS%id_Work3D_u = register_diag_field('ocean_model', 'Work3D_u', diag%axesCui, Time, &
-           'Work done at  U-point (ELIZABETH DIFFUSE)', 'W')
-  CS%id_Work3D_v = register_diag_field('ocean_model', 'Work3D_v', diag%axesCvi, Time, &
-           'Work done at  V-point (ELIZABETH DIFFUSE)', 'W')
-  CS%id_Work3D_u1 = register_diag_field('ocean_model', 'Work3D_u1', diag%axesCui, Time, &
-           'Work done at  U-point (ELIZABETH DIFFUSE)', 'W')
-  CS%id_Work3D_v1 = register_diag_field('ocean_model', 'Work3D_v1', diag%axesCvi, Time, &
-           'Work done at  V-point (ELIZABETH DIFFUSE)', 'W')
-  CS%id_Work3D_u2 = register_diag_field('ocean_model', 'Work3D_u2', diag%axesCui, Time, &
-           'Work done at  U-point (ELIZABETH DIFFUSE)', 'W')
-  CS%id_Work3D_v2 = register_diag_field('ocean_model', 'Work3D_v2', diag%axesCvi, Time, &
-           'Work done at  V-point (ELIZABETH DIFFUSE)', 'W')
   CS%id_Work3D_u_original = register_diag_field('ocean_model', 'Work3D_u_original', diag%axesCui, Time, &
            'Work done at  U-point (ELIZABETH DIFFUSE)', 'W')
   CS%id_Work3D_v_original = register_diag_field('ocean_model', 'Work3D_v_original', diag%axesCvi, Time, &
