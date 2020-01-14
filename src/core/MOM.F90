@@ -2090,27 +2090,6 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, restart_CSp, &
     CS%OBC => OBC_in
   endif
 
-  do i = 0,CS%OBC%number_of_segments
-    print *, "---------------"
-    print *, "segment:", i
-    print *, CS%OBC%segment(i)%HI
-    print *, "segment: [IJ]sgB", CS%OBC%segment(i)%HI%IsgB, CS%OBC%segment(i)%HI%JsgB
-    print *, "segment: [IJ]egB", CS%OBC%segment(i)%HI%IegB, CS%OBC%segment(i)%HI%JegB
-    print *, "segment: [ij]sg", CS%OBC%segment(i)%HI%isg, CS%OBC%segment(i)%HI%jsg
-    print *, "segment: [ij]eg", CS%OBC%segment(i)%HI%ieg, CS%OBC%segment(i)%HI%jeg
-
-    print *, "segment: [IJ]sdB", CS%OBC%segment(i)%HI%IsdB, CS%OBC%segment(i)%HI%JsdB
-    print *, "segment: [IJ]edB", CS%OBC%segment(i)%HI%IedB, CS%OBC%segment(i)%HI%JedB
-    print *, "segment: [ij]sd", CS%OBC%segment(i)%HI%isd, CS%OBC%segment(i)%HI%jsd
-    print *, "segment: [ij]ed", CS%OBC%segment(i)%HI%ied, CS%OBC%segment(i)%HI%jed
-
-    print *, "segment: [IJ]scB", CS%OBC%segment(i)%HI%IscB, CS%OBC%segment(i)%HI%JscB
-    print *, "segment: [IJ]ecB", CS%OBC%segment(i)%HI%IecB, CS%OBC%segment(i)%HI%JecB
-    print *, "segment: [ij]sc", CS%OBC%segment(i)%HI%isc, CS%OBC%segment(i)%HI%jsc
-    print *, "segment: [ij]ec", CS%OBC%segment(i)%HI%iec, CS%OBC%segment(i)%HI%jec
-    print *, "---------------"
-  enddo
-
   ! >>> testing
   if (CS%rotate_grid) &
     call write_ocean_geometry_file(dG, param_file, dirs%output_directory, &

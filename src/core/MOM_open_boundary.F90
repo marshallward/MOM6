@@ -809,87 +809,114 @@ subroutine setup_segment_indices(G, seg, Is_obc, Ie_obc, Js_obc, Je_obc)
   integer, intent(in) :: Js_obc !< Q-point global j-index of start of segment
   integer, intent(in) :: Je_obc !< Q-point global j-index of end of segment
   ! Local variables
-  integer :: Isg,Ieg,Jsg,Jeg
+  integer :: IsgB, IegB, JsgB, JegB
+  integer :: isg, ieg, jsg, jeg
 
   ! Isg, Ieg will be I*_obc in global space
-  if (Ie_obc<Is_obc) then
-    Isg=Ie_obc;Ieg=Is_obc
+  if (Ie_obc < Is_obc) then
+    IsgB = Ie_obc
+    IegB = Is_obc
   else
-    Isg=Is_obc;Ieg=Ie_obc
-  endif
-  if (Je_obc<Js_obc) then
-    Jsg=Je_obc;Jeg=Js_obc
-  else
-    Jsg=Js_obc;Jeg=Je_obc
+    IsgB = Is_obc
+    IegB = Ie_obc
   endif
 
-  ! Global space I*_obc but sorted
-  seg%HI%IsgB = Isg ; seg%HI%IegB = Ieg
-  !seg%HI%isg = Isg+1 ; seg%HI%ieg = Ieg
-  seg%HI%JsgB = Jsg ; seg%HI%JegB = Jeg
-  !seg%HI%jsg = Jsg+1 ; seg%HI%Jeg = Jeg
+  if (Je_obc < Js_obc) then
+    JsgB = Je_obc
+    JegB = Js_obc
+  else
+    JsgB = Js_obc
+    JegB = Je_obc
+  endif
 
-  ! TODO: This is wrong!  These offsets are for [IJ][se]_obc!
-  ! TODO: Set [ij][se]g from [IJ][se]_obc, then reorder both global indices
+  ! h-points are defined along the interior of the segment q-points
+  ! NOTE: [IJ][se]g have already been swapped to ascending order
+  !
+  ! x-x----------------x-x
+  ! | |        N       | |
+  ! x-x                x-x
+  !   |                  |
+  !   |        S         |
+  ! x-x----------------x-x
+  ! | |                | |
+  ! x-x                x-x
+  !
+
   if (Is_obc > Ie_obc) then
     ! Northern boundary
-    seg%HI%isg = Isg
-    seg%HI%jsg = Jsg
-    seg%HI%ieg = Ieg + 1
-    seg%HI%jeg = Jeg
+    isg = IsgB + 1
+    jsg = JsgB
+    ieg = IegB
+    jeg = JegB
   endif
 
   if (Is_obc < Ie_obc) then
     ! Southern boundary
-    seg%HI%isg = Isg + 1
-    seg%HI%jsg = Jsg + 1
-    seg%HI%ieg = Ieg
-    seg%HI%jeg = Jeg + 1
+    isg = IsgB + 1
+    jsg = JsgB + 1
+    ieg = IegB
+    jeg = JegB + 1
   endif
 
   if (Js_obc < Je_obc) then
     ! Eastern boundary
-    seg%HI%isg = Isg
-    seg%HI%jsg = Jsg + 1
-    seg%HI%ieg = Ieg
-    seg%HI%jeg = Jeg
+    isg = IsgB
+    jsg = JsgB + 1
+    ieg = IegB
+    jeg = JegB
   endif
 
   if (Js_obc > Je_obc) then
     ! Western boundary
-    seg%HI%isg = Isg + 1
-    seg%HI%jsg = Jsg
-    seg%HI%ieg = Ieg + 1
-    seg%HI%jeg = Jeg + 1
+    isg = IsgB + 1
+    jsg = JsgB + 1
+    ieg = IegB + 1
+    jeg = JegB
   endif
 
+  ! Global space I*_obc but sorted
+  seg%HI%IsgB = IsgB
+  seg%HI%JegB = JegB
+  seg%HI%IegB = IegB
+  seg%HI%JsgB = JsgB
+
+  seg%HI%isg = isg
+  seg%HI%jsg = jsg
+  seg%HI%ieg = ieg
+  seg%HI%jeg = jeg
+
   ! Move into local index space
-  Isg = Isg - G%idg_offset
-  Jsg = Jsg - G%jdg_offset
-  Ieg = Ieg - G%idg_offset
-  Jeg = Jeg - G%jdg_offset
+  IsgB = IsgB - G%idg_offset
+  JsgB = JsgB - G%jdg_offset
+  IegB = IegB - G%idg_offset
+  JegB = JegB - G%jdg_offset
+
+  isg = isg - G%idg_offset
+  jsg = jsg - G%jdg_offset
+  ieg = ieg - G%idg_offset
+  jeg = jeg - G%jdg_offset
 
   ! This is the i-extent of the segment on this PE.
   ! The values are nonsense if the segment is not on this PE.
-  seg%HI%IsdB = min( max(Isg, G%HI%IsdB), G%HI%IedB)
-  seg%HI%IedB = min( max(Ieg, G%HI%IsdB), G%HI%IedB)
-  seg%HI%isd = min( max(Isg+1, G%HI%isd), G%HI%ied)
-  seg%HI%ied = min( max(Ieg, G%HI%isd), G%HI%ied)
-  seg%HI%IscB = min( max(Isg, G%HI%IscB), G%HI%IecB)
-  seg%HI%IecB = min( max(Ieg, G%HI%IscB), G%HI%IecB)
-  seg%HI%isc = min( max(Isg+1, G%HI%isc), G%HI%iec)
-  seg%HI%iec = min( max(Ieg, G%HI%isc), G%HI%iec)
+  seg%HI%IsdB = min( max(IsgB, G%HI%IsdB), G%HI%IedB)
+  seg%HI%IedB = min( max(IegB, G%HI%IsdB), G%HI%IedB)
+  seg%HI%isd = min( max(isg, G%HI%isd), G%HI%ied)
+  seg%HI%ied = min( max(ieg, G%HI%isd), G%HI%ied)
+  seg%HI%IscB = min( max(IsgB, G%HI%IscB), G%HI%IecB)
+  seg%HI%IecB = min( max(IegB, G%HI%IscB), G%HI%IecB)
+  seg%HI%isc = min( max(isg, G%HI%isc), G%HI%iec)
+  seg%HI%iec = min( max(ieg, G%HI%isc), G%HI%iec)
 
   ! This is the j-extent of the segment on this PE.
   ! The values are nonsense if the segment is not on this PE.
-  seg%HI%JsdB = min( max(Jsg, G%HI%JsdB), G%HI%JedB)
-  seg%HI%JedB = min( max(Jeg, G%HI%JsdB), G%HI%JedB)
-  seg%HI%jsd = min( max(Jsg+1, G%HI%jsd), G%HI%jed)
-  seg%HI%jed = min( max(Jeg, G%HI%jsd), G%HI%jed)
-  seg%HI%JscB = min( max(Jsg, G%HI%JscB), G%HI%JecB)
-  seg%HI%JecB = min( max(Jeg, G%HI%JscB), G%HI%JecB)
-  seg%HI%jsc = min( max(Jsg+1, G%HI%jsc), G%HI%jec)
-  seg%HI%jec = min( max(Jeg, G%HI%jsc), G%HI%jec)
+  seg%HI%JsdB = min( max(JsgB, G%HI%JsdB), G%HI%JedB)
+  seg%HI%JedB = min( max(JegB, G%HI%JsdB), G%HI%JedB)
+  seg%HI%jsd = min( max(jsg, G%HI%jsd), G%HI%jed)
+  seg%HI%jed = min( max(jeg, G%HI%jsd), G%HI%jed)
+  seg%HI%JscB = min( max(JsgB, G%HI%JscB), G%HI%JecB)
+  seg%HI%JecB = min( max(JegB, G%HI%JscB), G%HI%JecB)
+  seg%HI%jsc = min( max(jsg, G%HI%jsc), G%HI%jec)
+  seg%HI%jec = min( max(jeg, G%HI%jsc), G%HI%jec)
 
 end subroutine setup_segment_indices
 
@@ -4745,7 +4772,7 @@ end subroutine adjustSegmentEtaToFitBathymetry
 subroutine rotate_OBC_config(OBC_in, G_in, OBC, G, turns)
   type(ocean_OBC_type), pointer, intent(in) :: OBC_in
   type(dyn_horgrid_type),  intent(in) :: G_in
-  type(ocean_OBC_type), pointer, intent(out) :: OBC
+  type(ocean_OBC_type), pointer, intent(inout) :: OBC
   type(dyn_horgrid_type),  intent(in) :: G
   integer, intent(in) :: turns
 
@@ -4758,15 +4785,15 @@ subroutine rotate_OBC_config(OBC_in, G_in, OBC, G, turns)
   ! Scalar and logical transfer
   OBC%number_of_segments = OBC_in%number_of_segments
   OBC%ke = OBC_in%ke
-  OBC%open_u_BCs_exist_globally = OBC_in%open_u_BCs_exist_globally
-  OBC%open_v_BCs_exist_globally = OBC_in%open_v_BCs_exist_globally
-  OBC%Flather_u_BCs_exist_globally = OBC_in%Flather_u_BCs_exist_globally
-  OBC%Flather_v_BCs_exist_globally = OBC_in%Flather_v_BCs_exist_globally
+  OBC%open_u_BCs_exist_globally = OBC_in%open_v_BCs_exist_globally
+  OBC%open_v_BCs_exist_globally = OBC_in%open_u_BCs_exist_globally
+  OBC%Flather_u_BCs_exist_globally = OBC_in%Flather_v_BCs_exist_globally
+  OBC%Flather_v_BCs_exist_globally = OBC_in%Flather_u_BCs_exist_globally
   OBC%oblique_BCs_exist_globally = OBC_in%oblique_BCs_exist_globally
-  OBC%nudged_u_BCs_exist_globally = OBC_in%nudged_u_BCs_exist_globally
-  OBC%nudged_v_BCs_exist_globally = OBC_in%nudged_v_BCs_exist_globally
-  OBC%specified_u_BCs_exist_globally= OBC_in%specified_u_BCs_exist_globally
-  OBC%specified_v_BCs_exist_globally= OBC_in%specified_v_BCs_exist_globally
+  OBC%nudged_u_BCs_exist_globally = OBC_in%nudged_v_BCs_exist_globally
+  OBC%nudged_v_BCs_exist_globally = OBC_in%nudged_u_BCs_exist_globally
+  OBC%specified_u_BCs_exist_globally= OBC_in%specified_v_BCs_exist_globally
+  OBC%specified_v_BCs_exist_globally= OBC_in%specified_u_BCs_exist_globally
   OBC%radiation_BCs_exist_globally = OBC_in%radiation_BCs_exist_globally
   OBC%user_BCs_set_globally = OBC_in%user_BCs_set_globally
   OBC%update_OBC = OBC_in%update_OBC
@@ -4784,8 +4811,8 @@ subroutine rotate_OBC_config(OBC_in, G_in, OBC, G, turns)
   OBC%g_Earth = OBC_in%g_Earth
 
   ! 1D arrays, need to be swapped?
-  OBC%tracer_x_reservoirs_used => OBC_in%tracer_x_reservoirs_used
-  OBC%tracer_y_reservoirs_used => OBC_in%tracer_y_reservoirs_used
+  OBC%tracer_x_reservoirs_used => OBC_in%tracer_y_reservoirs_used
+  OBC%tracer_y_reservoirs_used => OBC_in%tracer_x_reservoirs_used
 
   OBC%ntr = OBC_in%ntr
 
@@ -4827,7 +4854,7 @@ end subroutine rotate_OBC_config
 subroutine rotate_OBC_segment_config(segment_in, G_in, segment, G, turns)
   type(OBC_segment_type), intent(in) :: segment_in
   type(dyn_horgrid_type),  intent(in) :: G_in
-  type(OBC_segment_type), intent(out) :: segment
+  type(OBC_segment_type), intent(inout) :: segment
   type(dyn_horgrid_type),  intent(in) :: G
   integer, intent(in) :: turns
 
@@ -4899,7 +4926,7 @@ end subroutine rotate_OBC_segment_config
 subroutine rotate_OBC_segment_indices(segment_in, G_in, segment)
   type(OBC_segment_type), intent(in) :: segment_in
   type(dyn_horgrid_type), intent(in) :: G_in
-  type(OBC_segment_type), intent(out) :: segment
+  type(OBC_segment_type), intent(inout) :: segment
 
   ! TODO: I may be able to use setup_segment_indices here using [IJ][se]_obc
   !       which would also fix up the ordering
@@ -4907,34 +4934,34 @@ subroutine rotate_OBC_segment_indices(segment_in, G_in, segment)
   ! Global indices
   ! TODO: This is all hard-coded for 90 degrees
   ! (and to be honest I'm not even sure it's right or free of off-by-ones)
-  segment%HI%IsgB = G_in%JegB - segment_in%HI%JsgB
-  segment%HI%IegB = G_in%JegB - segment_in%HI%JegB
+  segment%HI%IegB = G_in%JegB - segment_in%HI%JsgB
+  segment%HI%IsgB = G_in%JegB - segment_in%HI%JegB
   segment%HI%JsgB = segment_in%HI%IsgB
   segment%HI%JegB = segment_in%HI%IegB
 
-  segment%HI%isg = G_in%jeg - segment_in%HI%jsg
-  segment%HI%ieg = G_in%jeg - segment_in%HI%jeg
+  segment%HI%ieg = G_in%jeg - segment_in%HI%jsg + 1
+  segment%HI%isg = G_in%jeg - segment_in%HI%jeg + 1
   segment%HI%jsg = segment_in%HI%isg
   segment%HI%jeg = segment_in%HI%ieg
 
   ! Local indices
-  segment%HI%IsdB = G_in%JedB - segment_in%HI%JsdB
-  segment%HI%IedB = G_in%JedB - segment_in%HI%JedB
-  segment%HI%isd = G_in%jed - segment_in%HI%jsd
-  segment%HI%ied = G_in%jed - segment_in%HI%jed
-
-  segment%HI%IscB = G_in%JedB - segment_in%HI%JscB
-  segment%HI%IecB = G_in%JedB - segment_in%HI%JecB
-  segment%HI%isc = G_in%jed - segment_in%HI%jsc
-  segment%HI%iec = G_in%jed - segment_in%HI%jec
-
+  segment%HI%IedB = G_in%JedB - segment_in%HI%JsdB
+  segment%HI%IsdB = G_in%JedB - segment_in%HI%JedB
   segment%HI%JsdB = segment_in%HI%IsdB
   segment%HI%JedB = segment_in%HI%IedB
+
+  segment%HI%ied = G_in%jed - segment_in%HI%jsd + 1
+  segment%HI%isd = G_in%jed - segment_in%HI%jed + 1
   segment%HI%jsd = segment_in%HI%isd
   segment%HI%jed = segment_in%HI%ied
 
+  segment%HI%IecB = G_in%JedB - segment_in%HI%JscB
+  segment%HI%IscB = G_in%JedB - segment_in%HI%JecB
   segment%HI%JscB = segment_in%HI%IscB
   segment%HI%JecB = segment_in%HI%IecB
+
+  segment%HI%iec = G_in%jed - segment_in%HI%jsc + 1
+  segment%HI%isc = G_in%jed - segment_in%HI%jec + 1
   segment%HI%jsc = segment_in%HI%isc
   segment%HI%jec = segment_in%HI%iec
 
