@@ -136,6 +136,7 @@ use MOM_ALE,                   only : ale_offline_tracer_final, ALE_main_offline
 use MOM_shared_initialization, only : write_ocean_geometry_file
 use MOM_transcribe_grid,       only : rotate_dyngrid
 use MOM_forcing_type,          only : rotate_forcing, rotate_mech_forcing
+use MOM_forcing_type,          only : deallocate_mech_forcing, deallocate_forcing_type
 use MOM_variables,             only : rotate_surface_state
 use MOM_array_transform,       only : rotate_array
 use MOM_open_boundary,         only : rotate_OBC_config, rotate_OBC_state
@@ -520,9 +521,10 @@ subroutine step_MOM(forces_in, fluxes_in, sfc_state, Time_start, time_int_in, CS
   ! Rotate the forces from G_in to G
   ! TODO: Do not do this every timestep!
   if (CS%rotate_grid) then
-    ! TODO: Check that these have not already been allocated?
-    if (.not. associated(forces)) allocate(forces)
-    if (.not. associated(fluxes)) allocate(fluxes)
+    ! TODO: We ought not need to re-allocate every step
+    !       We may want to store these inside forces_in
+    allocate(forces)
+    allocate(fluxes)
 
     ! TODO: Remember to deallocate!
     ! NOTE: rotate_*forcing also allocates fields inside `forces`, since we
@@ -904,8 +906,16 @@ subroutine step_MOM(forces_in, fluxes_in, sfc_state, Time_start, time_int_in, CS
 
   ! De-rotate fluxes and copy back to the input, since some parts have changed.
   ! TODO: This doesn't seem to be doing anything...
-  if (CS%rotate_grid) &
+  if (CS%rotate_grid) then
     call rotate_forcing(fluxes, G, fluxes_in, CS%G_in, -1, do_allocation=.false.)
+
+    ! TODO: This is wasteful...
+    call deallocate_mech_forcing(forces)
+    deallocate(forces)
+
+    call deallocate_forcing_type(fluxes)
+    deallocate(fluxes)
+  endif
 
   if (showCallTree) call callTree_leave("step_MOM()")
   call cpu_clock_end(id_clock_ocean)
@@ -1580,7 +1590,7 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, restart_CSp, &
   logical :: swap_axes    ! true if X and Y are swapped (e.g. rotation)
   integer :: grid_qturns   ! Number of grid quater-turns
   type(hor_index_type), target :: HI_in, HI_rot   ! Input and dynamic HI
-  type(dyn_horgrid_type), pointer :: dG_in
+  type(dyn_horgrid_type), pointer :: dG_in => NULL()
 
   ! TODO: remove preprocessing?
   ! I really need a "init state" type, but this will do for now

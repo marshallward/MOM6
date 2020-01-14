@@ -1636,6 +1636,7 @@ subroutine clone_MD_to_MD(MD_in, MOM_dom, min_halo, halo_size, symmetric, &
 ! Save the extra data for creating other domains of different resolution that overlay this domain
   MOM_dom%symmetric = MD_in%symmetric
   MOM_dom%nonblocking_updates = MD_in%nonblocking_updates
+  MOM_dom%thin_halo_updates = MD_in%thin_halo_updates
 
   if (do_swap_axes) then
     MOM_dom%niglobal = MD_in%njglobal ; MOM_dom%njglobal = MD_in%niglobal
