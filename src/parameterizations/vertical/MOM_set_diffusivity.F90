@@ -165,6 +165,7 @@ type, public :: set_diffusivity_CS ; private
   integer :: id_maxTKE     = -1, id_TKE_to_Kd   = -1, id_Kd_user    = -1
   integer :: id_Kd_layer   = -1, id_Kd_BBL      = -1, id_N2         = -1
   integer :: id_Kd_Work    = -1, id_KT_extra    = -1, id_KS_extra   = -1
+  integer :: id_diag_Eliz_0 = -1, id_diag_Eliz_1 = -1
   !!@}
 
 end type set_diffusivity_CS
@@ -232,6 +233,8 @@ subroutine set_diffusivity(u, v, h, u_h, v_h, tv, fluxes, optics, visc, dt_in_T,
                    optional, intent(out)   :: Kd_int !< Diapycnal diffusivity at each interface [Z2 T-1 ~> m2 s-1].
 
   ! local variables
+  real, dimension(SZI_(G),SZJ_(G),SZK_(G)) :: &
+    diag_Eliz_0, diag_Eliz_1  !Diagnostics for my diffusivity calculation
   real, dimension(SZI_(G)) :: &
     N2_bot        ! bottom squared buoyancy frequency [T-2 ~> s-2]
 
@@ -298,6 +301,8 @@ subroutine set_diffusivity(u, v, h, u_h, v_h, tv, fluxes, optics, visc, dt_in_T,
 
   ! Set Kd_lay, Kd_int and Kv_slow to constant values.
   ! If nothing else is specified, this will be the value used.
+  diag_Eliz_0(:,:,:) = 0.0
+  diag_Eliz_1(:,:,:) = 0.0
   Kd_lay(:,:,:) = CS%Kd
   Kd_int(:,:,:) = CS%Kd
   if (associated(visc%Kv_slow)) visc%Kv_slow(:,:,:) = CS%Kv
@@ -503,8 +508,11 @@ subroutine set_diffusivity(u, v, h, u_h, v_h, tv, fluxes, optics, visc, dt_in_T,
     if (associated(visc%Work3D_h_Eliz)) then
         do k=nz,1,-1 ; do i=is,ie
           Kd_Eliz_o  = I_Rho0 * 0.5 * (visc%Work3D_h_Eliz(i,j,K)+visc%Work3D_h_Eliz(i,j,K+1))
+          diag_Eliz_0(i,j,k) = Kd_Eliz_o
           if (Kd_Eliz_o<0) Kd_Eliz_o = 0.0
+         
           Kd_Eliz  = TKE_to_Kd(i,k) * Kd_Eliz_o
+          diag_Eliz_1(i,j,k) = Kd_Eliz
 
           if (CS%Kd_max >= 0.0) Kd_Eliz = min(Kd_Eliz, CS%Kd_max)
           Kd_lay(i,j,k) = Kd_lay(i,j,k) + Kd_Eliz
@@ -610,7 +618,8 @@ subroutine set_diffusivity(u, v, h, u_h, v_h, tv, fluxes, optics, visc, dt_in_T,
     call post_data(CS%CVMix_ddiff_csp%id_R_rho, CS%CVMix_ddiff_csp%R_rho, CS%CVMix_ddiff_csp%diag)
 
   if (CS%id_Kd_layer > 0) call post_data(CS%id_Kd_layer, Kd_lay, CS%diag)
-
+  if (CS%id_diag_Eliz_0 > 0) call post_data(CS%id_diag_Eliz_0, diag_Eliz_0, CS%diag)
+  if (CS%id_diag_Eliz_1 > 0) call post_data(CS%id_diag_Eliz_1, diag_Eliz_1, CS%diag)
   ! tidal mixing
   call post_tidal_diagnostics(G,GV,h,CS%tm_csp)
 
@@ -2147,7 +2156,11 @@ subroutine set_diffusivity_init(Time, G, GV, US, param_file, diag, CS, int_tide_
   CS%id_Kd_layer = register_diag_field('ocean_model', 'Kd_layer', diag%axesTL, Time, &
       'Diapycnal diffusivity of layers (as set)', 'm2 s-1', &
       conversion=US%Z2_T_to_m2_s)
-
+  CS%id_diag_Eliz_0 = register_diag_field('ocean_model', 'diag_Eliz_0', diag%axesTL, Time, &
+      'TKE', 'W/m2')
+  CS%id_diag_Eliz_1 = register_diag_field('ocean_model', 'diag_Eliz_1', diag%axesTL, Time, &
+      'Diapycnal diffusivity of layers (as set)', 'm2 s-1', &
+      conversion=US%Z2_T_to_m2_s)
 
   if (CS%tm_csp%Int_tide_dissipation .or. CS%tm_csp%Lee_wave_dissipation .or. &
       CS%tm_csp%Lowmode_itidal_dissipation) then

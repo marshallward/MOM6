@@ -1534,7 +1534,7 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, uhD_Eliz, vhD_
 !Computing 3D work at h-points that will be passed to calculating a diffusivity in MOM_set_diffusivity.F90:
     Work3D_h_Eliz(i,j,K) = -0.5 * G%IareaT(i,j) * & !switch sign to make release of work positive (for diffusivity computation)
      ((Work3D_u_original(I-1,j,K) + Work3D_u_original(I,j,K)) + (Work3D_v_original(i,J-1,K) + Work3D_v_original(i,J,K)))
-    if (Work3D_h_Eliz(i,j,K)<0) Work3D_h_Eliz(i,j,K)=0.0
+    !if (Work3D_h_Eliz(i,j,K)<0) Work3D_h_Eliz(i,j,K)=0.0
 
     PE_release_h = -0.25*(Kh_u(I,j,k)*(Slope_x_PE(I,j,k)**2) * hN2_x_PE(I,j,k) + &
       Kh_u(I-1,j,k)*(Slope_x_PE(I-1,j,k)**2) * hN2_x_PE(I-1,j,k) + &

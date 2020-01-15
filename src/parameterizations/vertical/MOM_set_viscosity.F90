@@ -1713,12 +1713,16 @@ subroutine set_visc_register_restarts(HI, GV, param_file, visc, restart_CS)
                  "layer scheme to determine the diffusivity and viscosity "//&
                  "in the surface boundary layer.", default=.false., do_not_log=.true.)
   endif
+
   call get_param(param_file, mdl, "ELIZABETH_DIFFUSE", ELIZABETH_DIFFUSE, &
                  "If true, uses the symmetric instability parameterization \n"//&
                  "(Yankovsky et al., 2019).", default=.false., do_not_log=.true.)
   if (ELIZABETH_DIFFUSE) then
     call safe_alloc_ptr(visc%Work3D_h_Eliz, isd, ied, jsd, jed, nz+1)
+    call register_restart_field(visc%Work3D_h_Eliz, "Work3D_h_Eliz", .false., restart_CS, &
+                  "3D Work done by slumping", "W", z_grid='i')
   endif
+
   if (use_kappa_shear .or. useKPP .or. useEPBL .or. use_CVMix_shear .or. use_CVMix_conv) then
     call safe_alloc_ptr(visc%Kd_shear, isd, ied, jsd, jed, nz+1)
     call register_restart_field(visc%Kd_shear, "Kd_shear", .false., restart_CS, &
