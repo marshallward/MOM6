@@ -48,13 +48,8 @@ type, public :: hor_index_type
   logical :: symmetric  !< True if symmetric memory is used.
   integer :: turns      !< Number of quarter-turn rotations
 
-  !! TODO: Maybe point to an internal HI type (or a new type) here
-  !!   e.g. HI_p%isc
-  !! TODO: Leaning towards complete removal of these, and offsetting in chksums
-  !integer :: ispu, iepu !< Parity i-index on a transfored u-grid
-  !integer :: ispv, iepv !< Parity j-index on a transfored u-grid
-  !integer :: jspu, jepu !< Parity i-index on a transfored u-grid
-  !integer :: jspv, jepv !< Parity j-index on a transfored u-grid
+  ! NOTE: turns is added here to pass the grid rotation state into the checksum
+  ! functions.  I would like to find a better way to do this if possible.
 end type hor_index_type
 
 !> Copy the contents of one horizontal index type into another
