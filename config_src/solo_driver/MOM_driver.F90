@@ -57,7 +57,7 @@ program MOM_main
   use MOM_time_manager,    only : NO_CALENDAR
   use MOM_tracer_flow_control, only : tracer_flow_control_CS
   use MOM_unit_scaling,    only : unit_scale_type
-  use MOM_variables,       only : vertvisc_type, surface
+  use MOM_variables,       only : surface
   use MOM_verticalGrid,    only : verticalGrid_type
   use MOM_write_cputime,   only : write_cputime, MOM_write_cputime_init
   use MOM_write_cputime,   only : write_cputime_start_clock, write_cputime_CS
@@ -84,8 +84,6 @@ program MOM_main
   ! at the ocean surface.
   type(forcing) :: fluxes
   ! A structure containing pointers to the ocean surface state fields.
-  type(vertvisc_type)  :: visc
-  ! Structure containing vertical viscosities, bottom boundary layer properies, and related fields.
   type(surface) :: sfc_state
   ! A pointer to a structure containing metrics and related information.
   type(ocean_grid_type), pointer :: grid
@@ -506,7 +504,7 @@ program MOM_main
     if (offline_tracer_mode) then
       call step_offline(forces, fluxes, sfc_state, Time1, dt_forcing, MOM_CSp)
     elseif (single_step_call) then
-      call step_MOM(forces, visc, fluxes, sfc_state, Time1, dt_forcing, MOM_CSp, Waves=Waves_CSP)
+      call step_MOM(forces, fluxes, sfc_state, Time1, dt_forcing, MOM_CSp, Waves=Waves_CSP)
     else
       n_max = 1 ; if (dt_forcing > dt) n_max = ceiling(dt_forcing/dt - 0.001)
       dt_dyn = dt_forcing / real(n_max)
@@ -519,16 +517,16 @@ program MOM_main
         if (diabatic_first) then
           if (modulo(n-1,nts)==0) then
             dtdia = dt_dyn*min(ntstep,n_max-(n-1))
-            call step_MOM(forces, visc, fluxes, sfc_state, Time2, dtdia, MOM_CSp, &
+            call step_MOM(forces, fluxes, sfc_state, Time2, dtdia, MOM_CSp, &
                           do_dynamics=.false., do_thermodynamics=.true., &
                           start_cycle=(n==1), end_cycle=.false., cycle_length=dt_forcing)
           endif
 
-          call step_MOM(forces, visc, fluxes, sfc_state, Time2, dt_dyn, MOM_CSp, &
+          call step_MOM(forces, fluxes, sfc_state, Time2, dt_dyn, MOM_CSp, &
                         do_dynamics=.true., do_thermodynamics=.false., &
                         start_cycle=.false., end_cycle=(n==n_max), cycle_length=dt_forcing)
         else
-          call step_MOM(forces, visc, fluxes, sfc_state, Time2, dt_dyn, MOM_CSp, &
+          call step_MOM(forces, fluxes, sfc_state, Time2, dt_dyn, MOM_CSp, &
                         do_dynamics=.true., do_thermodynamics=.false., &
                         start_cycle=(n==1), end_cycle=.false., cycle_length=dt_forcing)
 
@@ -537,7 +535,7 @@ program MOM_main
             ! Back up Time2 to the start of the thermodynamic segment.
             if (n > n_last_thermo+1) &
               Time2 = Time2 - real_to_time(dtdia - dt_dyn)
-            call step_MOM(forces, visc, fluxes, sfc_state, Time2, dtdia, MOM_CSp, &
+            call step_MOM(forces, fluxes, sfc_state, Time2, dtdia, MOM_CSp, &
                           do_dynamics=.false., do_thermodynamics=.true., &
                           start_cycle=.false., end_cycle=(n==n_max), cycle_length=dt_forcing)
             n_last_thermo = n
