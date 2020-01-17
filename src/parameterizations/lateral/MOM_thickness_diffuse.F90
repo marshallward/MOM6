@@ -62,7 +62,8 @@ type, public :: thickness_diffuse_CS ; private
   integer :: nkml                !< number of layers within mixed layer
   logical :: debug               !< write verbose checksums for debugging purposes
   logical :: ELIZABETH_DIFFUSE   !< If true, apply thickness diffusivity parameterizing symmetric instability
-                                 !!(Written by Elizabeth Yankovsky, 2019)
+                                 !!(Written by Elizabeth Yankovsky, 2020)
+  real    :: Eliz_frac_TKE_to_Kd !< Fraction of TKE used to calculate diffusivity (0-1).
   logical :: use_GME_thickness_diffuse !< If true, passes GM coefficients to MOM_hor_visc for use
                                  !! with GME closure.
   logical :: MEKE_GEOMETRIC      !< If true, uses the GM coefficient formulation from the GEOMETRIC
@@ -1524,32 +1525,57 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, uhD_Eliz, vhD_
   endif
 
 
-  if (find_work) then ; do j=js,je ; do i=is,ie ; do k=nz,1,-1
+  if (find_work) then ; do j=js,je ; do i=is,ie 
     ! Note that the units of Work_v and Work_u are W, while Work_h is W m-2.
     Work_h(i,j) = 0.5 * G%IareaT(i,j) * &
       ((Work_u(I-1,j) + Work_u(I,j)) + (Work_v(i,J-1) + Work_v(i,J)))
     Work_h_Eliz(i,j) = 0.5 * G%IareaT(i,j) * &
       ((Work_u_Eliz(I-1,j) + Work_u_Eliz(I,j)) + (Work_v_Eliz(i,J-1) + Work_v_Eliz(i,J)))
-
+    enddo; enddo 
+    do k=nz,1,-1; do j=js,je ; do i=is,ie
 !Computing 3D work at h-points that will be passed to calculating a diffusivity in MOM_set_diffusivity.F90:
-    Work3D_h_Eliz(i,j,K) = -0.5 * G%IareaT(i,j) * & !switch sign to make release of work positive (for diffusivity computation)
-     ((Work3D_u_original(I-1,j,K) + Work3D_u_original(I,j,K)) + (Work3D_v_original(i,J-1,K) + Work3D_v_original(i,J,K)))
-    !if (Work3D_h_Eliz(i,j,K)<0) Work3D_h_Eliz(i,j,K)=0.0
+      Work3D_h_Eliz(i,j,K) = -0.5 * CS%Eliz_frac_TKE_to_Kd * G%IareaT(i,j) * & !switch sign to make release of work positive
+      ((Work3D_u_original(I-1,j,K) + Work3D_u_original(I,j,K)) + (Work3D_v_original(i,J-1,K) + Work3D_v_original(i,J,K)))
+      if (Work_h_Eliz(i,j)>0) Work3D_h_Eliz(i,j,K)=0.0
 
-    PE_release_h = -0.25*(Kh_u(I,j,k)*(Slope_x_PE(I,j,k)**2) * hN2_x_PE(I,j,k) + &
+      PE_release_h = -0.25*(Kh_u(I,j,k)*(Slope_x_PE(I,j,k)**2) * hN2_x_PE(I,j,k) + &
       Kh_u(I-1,j,k)*(Slope_x_PE(I-1,j,k)**2) * hN2_x_PE(I-1,j,k) + &
       Kh_v(i,J,k)*(Slope_y_PE(i,J,k)**2) * hN2_y_PE(i,J,k) + &
       Kh_v(i,J-1,k)*(Slope_y_PE(i,J-1,k)**2) * hN2_y_PE(i,J-1,k))
-    if (associated(CS%GMwork)) CS%GMwork(i,j) = Work_h(i,j)
+    enddo; enddo; enddo
+
+    if (associated(CS%GMwork)) then
+      do j=js,je; do i=is,ie
+         CS%GMwork(i,j) = Work_h(i,j)
+      enddo; enddo
+    endif
+
     if (associated(MEKE)) then ; if (associated(MEKE%GM_src)) then
-      if (CS%GM_src_alt) then
-        MEKE%GM_src(i,j) = MEKE%GM_src(i,j) + PE_release_h
-      else
-        MEKE%GM_src(i,j) = MEKE%GM_src(i,j) + Work_h(i,j)
-      endif
-    endif ; endif
-  !enddo ; enddo ; enddo ; endif
-  enddo ; enddo ; enddo ; endif
+        if (CS%GM_src_alt) then
+           do j=js,je ; do i=is,ie
+             MEKE%GM_src(i,j) = MEKE%GM_src(i,j) + PE_release_h
+           enddo; enddo
+        else
+           do j=js,je ; do i=is,ie
+             MEKE%GM_src(i,j) = MEKE%GM_src(i,j) + Work_h(i,j)
+           enddo; enddo
+        endif
+    endif; endif
+  endif
+
+
+!      if (associated(CS%GMwork)) CS%GMwork(i,j) = Work_h(i,j)
+!      if (associated(MEKE)) then ; if (associated(MEKE%GM_src)) then
+!        if (CS%GM_src_alt) then
+!          MEKE%GM_src(i,j) = MEKE%GM_src(i,j) + PE_release_h
+!        else
+!          MEKE%GM_src(i,j) = MEKE%GM_src(i,j) + Work_h(i,j)
+!        endif
+!      endif ; endif
+!  !enddo ; enddo ; enddo ; endif
+!    enddo ; enddo ; 
+!  endif
+
 
   visc%Work3D_h_Eliz = Work3D_h_Eliz
 
@@ -2122,9 +2148,16 @@ subroutine thickness_diffuse_init(Time, G, GV, US, param_file, diag, CDp, CS)
   call get_param(param_file, mdl, "DEBUG", CS%debug, &
                  "If true, write out verbose debugging data.", &
                  default=.false., debuggingParam=.true.)
+
   call get_param(param_file, mdl, "ELIZABETH_DIFFUSE", CS%ELIZABETH_DIFFUSE, &
                  "If true, uses the symmetric instability parameterization \n"//&
-                 "(Yankovsky et al., 2019).", default=.false.)
+                 "(Yankovsky et al., 2020).", default=.false.)
+  CS%Eliz_frac_TKE_to_Kd  = 0.0
+  if (CS%ELIZABETH_DIFFUSE) &
+    call get_param(param_file, mdl, "Eliz_frac_TKE_to_Kd",CS%Eliz_frac_TKE_to_Kd, &
+                   "Fraction of TKE used to calculate diffusivity (0-1).", units="nondim", &
+                   default=1.0)
+
   call get_param(param_file, mdl, "MEKE_GM_SRC_ALT", CS%GM_src_alt, &
                  "If true, use the GM energy conversion form S^2*N^2*kappa rather \n"//&
                  "than the streamfunction for the GM source term.", default=.false.)
