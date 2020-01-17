@@ -2204,8 +2204,8 @@ end subroutine copy_back_forcing_fields
 
 !> Offer mechanical forcing fields for diagnostics for those
 !! fields registered as part of register_forcing_type_diags.
-subroutine mech_forcing_diags(forces, dt, G, time_end, diag, handles)
-  type(mech_forcing),    intent(in)    :: forces   !< A structure with the driving mechanical forces
+subroutine mech_forcing_diags(forces_in, dt, G, time_end, diag, handles)
+  type(mech_forcing), target, intent(in)    :: forces_in !< A structure with the driving mechanical forces
   real,                  intent(in)    :: dt       !< time step for the forcing [s]
   type(ocean_grid_type), intent(in)    :: G        !< grid type
   type(time_type),       intent(in)    :: time_end !< The end time of the diagnostic interval.
@@ -2213,6 +2213,17 @@ subroutine mech_forcing_diags(forces, dt, G, time_end, diag, handles)
   type(forcing_diags),   intent(inout) :: handles  !< diagnostic id for diag_manager
 
   integer :: i,j,is,ie,js,je
+
+  type(mech_forcing), pointer :: forces
+  integer :: turns
+
+  ! NOTE: diag ought to be using the rotated grid!
+  turns = diag%G%HI%turns
+  if (turns /= 0) then
+    call rotate_mech_forcing(forces_in, G, forces, diag%G, turns)
+  else
+    forces => forces_in
+  endif
 
   call cpu_clock_begin(handles%id_clock_forcing)
 
@@ -2235,6 +2246,12 @@ subroutine mech_forcing_diags(forces, dt, G, time_end, diag, handles)
   ! endif
 
   call disable_averaging(diag)
+
+  if (turns /= 0) then
+    call deallocate_mech_forcing(forces)
+    deallocate(forces)
+  endif
+
   call cpu_clock_end(handles%id_clock_forcing)
 end subroutine mech_forcing_diags
 
