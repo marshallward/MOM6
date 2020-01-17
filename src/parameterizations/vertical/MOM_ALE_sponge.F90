@@ -247,10 +247,11 @@ subroutine initialize_ALE_sponge_fixed(Iresttime, G, param_file, CS, data_h, nz_
     ! u points
     CS%num_col_u = 0 ; !CS%fldno_u = 0
     do j=CS%jsc,CS%jec; do I=CS%iscB,CS%iecB
-       data_hu(I,j,:) = 0.5 * (data_h(i,j,:) + data_h(i+1,j,:))
        Iresttime_u(I,j) = 0.5 * (Iresttime(i,j) + Iresttime(i+1,j))
-       if ((Iresttime_u(I,j)>0.0) .and. (G%mask2dCu(I,j)>0)) &
+       if ((Iresttime_u(I,j)>0.0) .and. (G%mask2dCu(I,j)>0)) then
+          data_hu(I,j,:) = 0.5 * (data_h(i,j,:) + data_h(i+1,j,:))
           CS%num_col_u = CS%num_col_u + 1
+       endif
     enddo ; enddo
 
     if (CS%num_col_u > 0) then
@@ -284,10 +285,11 @@ subroutine initialize_ALE_sponge_fixed(Iresttime, G, param_file, CS, data_h, nz_
     ! v points
     CS%num_col_v = 0 ; !CS%fldno_v = 0
     do J=CS%jscB,CS%jecB; do i=CS%isc,CS%iec
-      data_hv(i,J,:) = 0.5 * (data_h(i,j,:) + data_h(i,j+1,:))
       Iresttime_v(i,J) = 0.5 * (Iresttime(i,j) + Iresttime(i,j+1))
-      if ((Iresttime_v(i,J)>0.0) .and. (G%mask2dCv(i,J)>0)) &
+      if ((Iresttime_v(i,J)>0.0) .and. (G%mask2dCv(i,J)>0)) then
+        data_hv(i,J,:) = 0.5 * (data_h(i,j,:) + data_h(i,j+1,:))
         CS%num_col_v = CS%num_col_v + 1
+      endif
     enddo ; enddo
 
     if (CS%num_col_v > 0) then
