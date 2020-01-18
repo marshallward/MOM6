@@ -2217,16 +2217,16 @@ subroutine mech_forcing_diags(forces_in, dt, G, time_end, diag, handles)
   type(mech_forcing), pointer :: forces
   integer :: turns
 
-  ! NOTE: diag ought to be using the rotated grid!
+  call cpu_clock_begin(handles%id_clock_forcing)
+
   turns = diag%G%HI%turns
+
   if (turns /= 0) then
     allocate(forces)
     call rotate_mech_forcing(forces_in, G, forces, diag%G, turns)
   else
     forces => forces_in
   endif
-
-  call cpu_clock_begin(handles%id_clock_forcing)
 
   is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec
   call enable_averaging(dt, time_end, diag)
@@ -2259,8 +2259,8 @@ end subroutine mech_forcing_diags
 
 !> Offer buoyancy forcing fields for diagnostics for those
 !! fields registered as part of register_forcing_type_diags.
-subroutine forcing_diagnostics(fluxes, sfc_state, G, US, time_end, diag, handles)
-  type(forcing),         intent(in)    :: fluxes    !< A structure containing thermodynamic forcing fields
+subroutine forcing_diagnostics(fluxes_in, sfc_state, G, US, time_end, diag, handles)
+  type(forcing), target, intent(in)    :: fluxes_in !< A structure containing thermodynamic forcing fields
   type(surface),         intent(in)    :: sfc_state !< A structure containing fields that
                                                     !! describe the surface state of the ocean.
   type(ocean_grid_type), intent(in)    :: G         !< grid type
@@ -2270,7 +2270,8 @@ subroutine forcing_diagnostics(fluxes, sfc_state, G, US, time_end, diag, handles
   type(forcing_diags),   intent(inout) :: handles   !< diagnostic ids
 
   ! local
-  real, dimension(SZI_(G),SZJ_(G)) :: res
+  !real, dimension(SZI_(G),SZJ_(G)) :: res
+  real, dimension(SZI_(diag%G),SZJ_(diag%G)) :: res
   real :: total_transport ! for diagnosing integrated boundary transport
   real :: ave_flux        ! for diagnosing averaged   boundary flux
   real :: C_p             ! seawater heat capacity (J/(deg K * kg))
@@ -2279,7 +2280,21 @@ subroutine forcing_diagnostics(fluxes, sfc_state, G, US, time_end, diag, handles
   real :: ppt2mks         ! conversion between ppt and mks
   integer :: i,j,is,ie,js,je
 
+  ! Testing
+  type(forcing), pointer :: fluxes
+  integer :: turns
+
   call cpu_clock_begin(handles%id_clock_forcing)
+
+  turns = diag%G%HI%turns
+
+  if (turns /= 0) then
+    allocate(fluxes)
+    call rotate_forcing(fluxes_in, G, fluxes, diag%G, turns, &
+                        do_allocation=.true.)
+  else
+    fluxes => fluxes_in
+  endif
 
   C_p     = fluxes%C_p
   RZ_T_conversion = US%R_to_kg_m3*US%Z_to_m*US%s_to_T
@@ -2826,6 +2841,11 @@ subroutine forcing_diagnostics(fluxes, sfc_state, G, US, time_end, diag, handles
 
   ! endif  ! query_averaging_enabled
   call disable_averaging(diag)
+
+  if (turns /= 0) then
+    call deallocate_forcing_type(fluxes)
+    deallocate(fluxes)
+  endif
 
   call cpu_clock_end(handles%id_clock_forcing)
 end subroutine forcing_diagnostics
