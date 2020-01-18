@@ -2220,6 +2220,7 @@ subroutine mech_forcing_diags(forces_in, dt, G, time_end, diag, handles)
   ! NOTE: diag ought to be using the rotated grid!
   turns = diag%G%HI%turns
   if (turns /= 0) then
+    allocate(forces)
     call rotate_mech_forcing(forces_in, G, forces, diag%G, turns)
   else
     forces => forces_in
