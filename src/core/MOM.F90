@@ -2811,6 +2811,7 @@ subroutine set_restart_fields(GV, US, param_file, CS, restart_CSp)
   flux_units = get_flux_units(GV)
 
   ! Probably a better way to get `turns`
+  turns = 0
   if (CS%rotate_grid) then
     call get_param(param_file, '', "GRID_QUARTER_TURNS", turns, &
                    default=1, do_not_log=.true.)

@@ -526,11 +526,14 @@ subroutine chksum_B_2d(array, mesg, HI, haloshift, symmetric, omit_corners, &
   real, allocatable, dimension(:,:) :: rescaled_array
   real :: scaling
   integer :: iounit !< Log IO unit
-  integer :: i, j, Is, Js
+  integer :: i, j, Is, Ie, Js, Je
   real :: aMean, aMin, aMax
   integer :: bc0, bcSW, bcSE, bcNW, bcNE, hshift
   integer :: bcN, bcS, bcE, bcW
   logical :: do_corners, sym, sym_stats
+  ! testing
+  integer :: turns
+  integer :: di, dj
 
   if (checkForNaNs) then
     if (is_NaN(array(HI%IscB:HI%IecB,HI%JscB:HI%JecB))) &
@@ -543,21 +546,28 @@ subroutine chksum_B_2d(array, mesg, HI, haloshift, symmetric, omit_corners, &
   iounit = error_unit; if(present(logunit)) iounit = logunit
   sym_stats = .false. ; if (present(symmetric)) sym_stats = symmetric
   if (present(haloshift)) then ; if (haloshift > 0) sym_stats = .true. ; endif
+  turns = modulo(HI%turns, 4)
 
   if (calculateStatistics) then
+    di = 0 ; if (turns == 1 .or. turns == 2) di = -1
+    dj = 0 ; if (turns == 2 .or. turns == 3) dj = -1
     if (present(scale)) then
       allocate( rescaled_array(LBOUND(array,1):UBOUND(array,1), &
                                LBOUND(array,2):UBOUND(array,2)) )
       rescaled_array(:,:) = 0.0
-      Is = HI%isc ; if (sym_stats) Is = HI%isc-1
-      Js = HI%jsc ; if (sym_stats) Js = HI%jsc-1
-      do J=Js,HI%JecB ; do I=Is,HI%IecB
+
+      Is = HI%isc + di ; if (sym_stats) Is = HI%isc - 1
+      Ie = HI%iecB + di ; if (sym_stats) Ie = HI%iecB
+      Js = HI%jsc + dj ; if (sym_stats) Js = HI%jsc - 1
+      Je = HI%JecB + dj ; if (sym_stats) Je = HI%JecB
+
+      do J=Js,Je ; do I=Is,Ie
         rescaled_array(I,J) = scale*array(I,J)
       enddo ; enddo
-      call subStats(HI, rescaled_array, sym_stats, aMean, aMin, aMax)
+      call subStats(HI, rescaled_array, di, dj, sym_stats, aMean, aMin, aMax)
       deallocate(rescaled_array)
     else
-      call subStats(HI, array, sym_stats, aMean, aMin, aMax)
+      call subStats(HI, array, di, dj, sym_stats, aMean, aMin, aMax)
     endif
     if (is_root_pe()) &
       call chk_sum_msg("B-point:", aMean, aMin, aMax, mesg, iounit)
@@ -631,25 +641,29 @@ subroutine chksum_B_2d(array, mesg, HI, haloshift, symmetric, omit_corners, &
     subchk=mod(subchk, bc_modulus)
   end function subchk
 
-  subroutine subStats(HI, array, sym_stats, aMean, aMin, aMax)
+  subroutine subStats(HI, array, di, dj, sym_stats, aMean, aMin, aMax)
     type(hor_index_type), intent(in) ::  HI     !< A horizontal index type
     real, dimension(HI%IsdB:,HI%JsdB:), intent(in) :: array !< The array to be checksummed
+    integer, intent(in) :: di    !< i- direction array shift for this checksum
+    integer, intent(in) :: dj    !< j- direction array shift for this checksum
     logical,          intent(in) :: sym_stats !< If true, evaluate the statistics on the
                                               !! full symmetric computational domain.
     real, intent(out) :: aMean, aMin, aMax
 
-    integer :: i, j, n, IsB, JsB
+    integer :: i, j, n, IsB, IeB, JsB, JeB
 
-    IsB = HI%isc ; if (sym_stats) IsB = HI%isc-1
-    JsB = HI%jsc ; if (sym_stats) JsB = HI%jsc-1
+    IsB = HI%isc + di ; if (sym_stats) IsB = HI%isc - 1
+    IeB = HI%IecB + di ; if (sym_stats) IeB = HI%IecB
+    JsB = HI%jsc + dj; if (sym_stats) JsB = HI%jsc - 1
+    JeB = HI%JecB + dj; if (sym_stats) JeB = HI%JecB
 
     aMin = array(HI%isc,HI%jsc) ; aMax = aMin
-    do J=JsB,HI%JecB ; do I=IsB,HI%IecB
+    do J=JsB,JeB ; do I=IsB,IeB
       aMin = min(aMin, array(I,J))
       aMax = max(aMax, array(I,J))
     enddo ; enddo
     ! This line deliberately uses the h-point computational domain.
-    aMean = reproducing_sum(array(HI%isc:HI%iec,HI%jsc:HI%jec))
+    aMean = reproducing_sum(array(HI%isc+di:HI%iec+di,HI%jsc+dj:HI%jec+dj))
     n = (1 + HI%jec - HI%jsc) * (1 + HI%iec - HI%isc)
     call sum_across_PEs(n)
     call min_across_PEs(aMin)
@@ -1137,7 +1151,6 @@ subroutine chksum_v_2d(array, mesg, HI, haloshift, symmetric, omit_corners, &
 
     integer :: i, j, n, JsB, JeB
 
-    !JsB = HI%jsc ; if (sym_stats) JsB = HI%jsc-1
     JsB = HI%jsc + dj; if (sym_stats) JsB = HI%jsc - 1
     JeB = HI%JecB + dj; if (sym_stats) JeB = HI%JecB
 
@@ -1318,11 +1331,14 @@ subroutine chksum_B_3d(array, mesg, HI, haloshift, symmetric, omit_corners, &
   real, allocatable, dimension(:,:,:) :: rescaled_array
   real :: scaling
   integer :: iounit !< Log IO unit
-  integer :: i, j, k, Is, Js
+  integer :: i, j, k, Is, Ie, Js, Je
   real :: aMean, aMin, aMax
   integer :: bc0, bcSW, bcSE, bcNW, bcNE, hshift
   integer :: bcN, bcS, bcE, bcW
   logical :: do_corners, sym, sym_stats
+  ! testing
+  integer :: turns
+  integer :: di, dj
 
   if (checkForNaNs) then
     if (is_NaN(array(HI%IscB:HI%IecB,HI%JscB:HI%JecB,:))) &
@@ -1335,22 +1351,29 @@ subroutine chksum_B_3d(array, mesg, HI, haloshift, symmetric, omit_corners, &
   iounit = error_unit; if(present(logunit)) iounit = logunit
   sym_stats = .false. ; if (present(symmetric)) sym_stats = symmetric
   if (present(haloshift)) then ; if (haloshift > 0) sym_stats = .true. ; endif
+  turns = modulo(HI%turns, 4)
 
   if (calculateStatistics) then
+    di = 0 ; if (turns == 1 .or. turns == 2) di = -1
+    dj = 0 ; if (turns == 2 .or. turns == 3) dj = -1
     if (present(scale)) then
       allocate( rescaled_array(LBOUND(array,1):UBOUND(array,1), &
                                LBOUND(array,2):UBOUND(array,2), &
                                LBOUND(array,3):UBOUND(array,3)) )
       rescaled_array(:,:,:) = 0.0
-      Is = HI%isc ; if (sym_stats) Is = HI%isc-1
-      Js = HI%jsc ; if (sym_stats) Js = HI%jsc-1
-      do k=1,size(array,3) ; do J=Js,HI%JecB ; do I=Is,HI%IecB
+
+      Is = HI%isc + di ; if (sym_stats) Is = HI%isc - 1
+      Ie = HI%iecB + di ; if (sym_stats) Ie = HI%iecB
+      Js = HI%jsc + dj ; if (sym_stats) Js = HI%jsc - 1
+      Je = HI%JecB + dj ; if (sym_stats) Je = HI%JecB
+
+      do k=1,size(array,3) ; do J=Js,Je ; do I=Is,Ie
         rescaled_array(I,J,k) = scale*array(I,J,k)
       enddo ; enddo ; enddo
-      call subStats(HI, rescaled_array, sym_stats, aMean, aMin, aMax)
+      call subStats(HI, rescaled_array, di, dj, sym_stats, aMean, aMin, aMax)
       deallocate(rescaled_array)
     else
-      call subStats(HI, array, sym_stats, aMean, aMin, aMax)
+      call subStats(HI, array, di, dj, sym_stats, aMean, aMin, aMax)
     endif
 
     if (is_root_pe()) &
@@ -1430,24 +1453,28 @@ subroutine chksum_B_3d(array, mesg, HI, haloshift, symmetric, omit_corners, &
     subchk=mod(subchk, bc_modulus)
   end function subchk
 
-  subroutine subStats(HI, array, sym_stats, aMean, aMin, aMax)
+  subroutine subStats(HI, array, di, dj, sym_stats, aMean, aMin, aMax)
     type(hor_index_type), intent(in) ::  HI     !< A horizontal index type
     real, dimension(HI%IsdB:,HI%JsdB:,:), intent(in) :: array !< The array to be checksummed
+    integer, intent(in) :: di    !< i- direction array shift for this checksum
+    integer, intent(in) :: dj    !< j- direction array shift for this checksum
     logical,          intent(in) :: sym_stats !< If true, evaluate the statistics on the
                                               !! full symmetric computational domain.
     real, intent(out) :: aMean, aMin, aMax
 
-    integer :: i, j, k, n, IsB, JsB
+    integer :: i, j, k, n, IsB, IeB, JsB, JeB
 
-    IsB = HI%isc ; if (sym_stats) IsB = HI%isc-1
-    JsB = HI%jsc ; if (sym_stats) JsB = HI%jsc-1
+    IsB = HI%isc + di ; if (sym_stats) IsB = HI%isc - 1
+    IeB = HI%IecB + di ; if (sym_stats) IeB = HI%IecB
+    JsB = HI%jsc + dj; if (sym_stats) JsB = HI%jsc - 1
+    JeB = HI%JecB + dj; if (sym_stats) JeB = HI%JecB
 
     aMin = array(HI%isc,HI%jsc,1) ; aMax = aMin
-    do k=LBOUND(array,3),UBOUND(array,3) ; do J=JsB,HI%JecB ; do I=IsB,HI%IecB
+    do k=LBOUND(array,3),UBOUND(array,3) ; do J=JsB,JeB ; do I=IsB,IeB
       aMin = min(aMin, array(I,J,k))
       aMax = max(aMax, array(I,J,k))
     enddo ; enddo ; enddo
-    aMean = reproducing_sum(array(HI%isc:HI%iec,HI%jsc:HI%jec,:))
+    aMean = reproducing_sum(array(HI%isc+di:HI%iec+di,HI%jsc+dj:HI%jec+dj,:))
     n = (1 + HI%jec - HI%jsc) * (1 + HI%iec - HI%isc) * size(array,3)
     call sum_across_PEs(n)
     call min_across_PEs(aMin)

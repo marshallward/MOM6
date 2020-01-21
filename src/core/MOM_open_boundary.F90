@@ -4503,6 +4503,12 @@ subroutine open_boundary_register_restarts(HI, GV, OBC, Reg, param_file, restart
   character(len=100) :: mesg
   type(OBC_segment_type), pointer :: segment=>NULL()
 
+  ! Testing
+  real, dimension(:,:,:), pointer :: rx_normal_res, ry_normal_res
+  real, dimension(:,:,:), pointer :: rx_oblique_res, ry_oblique_res
+  real, dimension(:,:,:,:), pointer :: tres_x_res, tres_y_res
+  integer :: turns
+
   if (.not. associated(OBC)) &
        call MOM_error(FATAL, "open_boundary_register_restarts: Called with "//&
                       "uninitialized OBC control structure")
@@ -4516,29 +4522,49 @@ subroutine open_boundary_register_restarts(HI, GV, OBC, Reg, param_file, restart
        call MOM_error(FATAL, "open_boundary_register_restarts: Restart "//&
                       "arrays were previously allocated")
 
+  turns = HI%turns
+  if (turns /= 0) then
+    rx_normal_res => OBC%ry_normal
+    ry_normal_res => OBC%rx_normal
+    rx_oblique_res => OBC%ry_oblique
+    ry_oblique_res => OBC%rx_oblique
+    tres_x_res => tres_y_res
+    tres_y_res => tres_x_res
+  else
+    rx_normal_res => OBC%rx_normal
+    ry_normal_res => OBC%ry_normal
+    rx_oblique_res => OBC%rx_oblique
+    ry_oblique_res => OBC%ry_oblique
+    tres_x_res => tres_x_res
+    tres_y_res => tres_y_res
+  endif
+
   ! *** This is a temporary work around for restarts with OBC segments.
   ! This implementation uses 3D arrays solely for restarts. We need
   ! to be able to add 2D ( x,z or y,z ) data to restarts to avoid using
   ! so much memory and disk space. ***
   if (OBC%radiation_BCs_exist_globally) then
     allocate(OBC%rx_normal(HI%isdB:HI%iedB,HI%jsd:HI%jed,GV%ke))
-    OBC%rx_normal(:,:,:) = 0.0
-    vd = var_desc("rx_normal", "m s-1", "Normal Phase Speed for EW radiation OBCs", 'u', 'L')
-    call register_restart_field(OBC%rx_normal, vd, .false., restart_CSp)
     allocate(OBC%ry_normal(HI%isd:HI%ied,HI%jsdB:HI%jedB,GV%ke))
+    OBC%rx_normal(:,:,:) = 0.0
     OBC%ry_normal(:,:,:) = 0.0
+
+    vd = var_desc("rx_normal", "m s-1", "Normal Phase Speed for EW radiation OBCs", 'u', 'L')
+    call register_restart_field(rx_normal_res, vd, .false., restart_CSp)
     vd = var_desc("ry_normal", "m s-1", "Normal Phase Speed for NS radiation OBCs", 'v', 'L')
-    call register_restart_field(OBC%ry_normal, vd, .false., restart_CSp)
+    call register_restart_field(ry_normal_res, vd, .false., restart_CSp)
   endif
   if (OBC%oblique_BCs_exist_globally) then
     allocate(OBC%rx_oblique(HI%isdB:HI%iedB,HI%jsd:HI%jed,GV%ke))
-    OBC%rx_oblique(:,:,:) = 0.0
-    vd = var_desc("rx_oblique", "m2 s-2", "Radiation Speed Squared for EW oblique OBCs", 'u', 'L')
-    call register_restart_field(OBC%rx_oblique, vd, .false., restart_CSp)
     allocate(OBC%ry_oblique(HI%isd:HI%ied,HI%jsdB:HI%jedB,GV%ke))
+    OBC%rx_oblique(:,:,:) = 0.0
     OBC%ry_oblique(:,:,:) = 0.0
+
+    vd = var_desc("rx_oblique", "m2 s-2", "Radiation Speed Squared for EW oblique OBCs", 'u', 'L')
+    call register_restart_field(rx_oblique_res, vd, .false., restart_CSp)
     vd = var_desc("ry_oblique", "m2 s-2", "Radiation Speed Squared for NS oblique OBCs", 'v', 'L')
-    call register_restart_field(OBC%ry_oblique, vd, .false., restart_CSp)
+    call register_restart_field(ry_oblique_res, vd, .false., restart_CSp)
+
     allocate(OBC%cff_normal(HI%IsdB:HI%IedB,HI%jsdB:HI%jedB,GV%ke))
     OBC%cff_normal(:,:,:) = 0.0
     vd = var_desc("cff_normal", "m2 s-2", "denominator for oblique OBCs", 'q', 'L')
