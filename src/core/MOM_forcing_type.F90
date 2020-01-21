@@ -2259,11 +2259,11 @@ end subroutine mech_forcing_diags
 
 !> Offer buoyancy forcing fields for diagnostics for those
 !! fields registered as part of register_forcing_type_diags.
-subroutine forcing_diagnostics(fluxes_in, sfc_state, G, US, time_end, diag, handles)
+subroutine forcing_diagnostics(fluxes_in, sfc_state, G_in, US, time_end, diag, handles)
   type(forcing), target, intent(in)    :: fluxes_in !< A structure containing thermodynamic forcing fields
   type(surface),         intent(in)    :: sfc_state !< A structure containing fields that
                                                     !! describe the surface state of the ocean.
-  type(ocean_grid_type), intent(in)    :: G         !< grid type
+  type(ocean_grid_type), target, intent(in) :: G_in      !< grid type
   type(unit_scale_type), intent(in)    :: US        !< A dimensional unit scaling type
   type(time_type),       intent(in)    :: time_end  !< The end time of the diagnostic interval.
   type(diag_ctrl),       intent(inout) :: diag      !< diagnostic regulator
@@ -2281,6 +2281,7 @@ subroutine forcing_diagnostics(fluxes_in, sfc_state, G, US, time_end, diag, hand
   integer :: i,j,is,ie,js,je
 
   ! Testing
+  type(ocean_grid_type), pointer :: G
   type(forcing), pointer :: fluxes
   integer :: turns
 
@@ -2289,10 +2290,12 @@ subroutine forcing_diagnostics(fluxes_in, sfc_state, G, US, time_end, diag, hand
   turns = diag%G%HI%turns
 
   if (turns /= 0) then
+    G => diag%G
     allocate(fluxes)
-    call rotate_forcing(fluxes_in, G, fluxes, diag%G, turns, &
+    call rotate_forcing(fluxes_in, G_in, fluxes, G, turns, &
                         do_allocation=.true.)
   else
+    G => G_in
     fluxes => fluxes_in
   endif
 
