@@ -8,7 +8,7 @@ use MOM_string_functions, only : uppercase
 
 use regrid_edge_values, only : edge_values_explicit_h2, edge_values_explicit_h4
 use regrid_edge_values, only : edge_values_implicit_h4, edge_values_implicit_h6
-use regrid_edge_slopes, only : edge_slopes_implicit_h3, edge_slopes_implicit_h5
+use regrid_edge_values, only : edge_slopes_implicit_h3, edge_slopes_implicit_h5
 
 use PLM_functions, only : PLM_reconstruction, PLM_boundary_extrapolation
 use PPM_functions, only : PPM_reconstruction, PPM_boundary_extrapolation
@@ -103,7 +103,7 @@ subroutine regridding_set_ppolys(CS, densities, n0, h0, ppoly0_E, ppoly0_S, &
 
     case ( INTERPOLATION_P1M_H2 )
       degree = DEGREE_1
-      call edge_values_explicit_h2( n0, h0, densities, ppoly0_E, h_neglect_edge )
+      call edge_values_explicit_h2( n0, h0, densities, ppoly0_E )
       call P1M_interpolation( n0, h0, densities, ppoly0_E, ppoly0_coefs, h_neglect )
       if (extrapolate) then
         call P1M_boundary_extrapolation( n0, h0, densities, ppoly0_E, ppoly0_coefs )
@@ -114,7 +114,7 @@ subroutine regridding_set_ppolys(CS, densities, n0, h0, ppoly0_E, ppoly0_S, &
       if ( n0 >= 4 ) then
         call edge_values_explicit_h4( n0, h0, densities, ppoly0_E, h_neglect_edge )
       else
-        call edge_values_explicit_h2( n0, h0, densities, ppoly0_E, h_neglect_edge )
+        call edge_values_explicit_h2( n0, h0, densities, ppoly0_E )
       endif
       call P1M_interpolation( n0, h0, densities, ppoly0_E, ppoly0_coefs, h_neglect )
       if (extrapolate) then
@@ -126,7 +126,7 @@ subroutine regridding_set_ppolys(CS, densities, n0, h0, ppoly0_E, ppoly0_S, &
       if ( n0 >= 4 ) then
         call edge_values_implicit_h4( n0, h0, densities, ppoly0_E, h_neglect_edge )
       else
-        call edge_values_explicit_h2( n0, h0, densities, ppoly0_E, h_neglect_edge )
+        call edge_values_explicit_h2( n0, h0, densities, ppoly0_E )
       endif
       call P1M_interpolation( n0, h0, densities, ppoly0_E, ppoly0_coefs, h_neglect )
       if (extrapolate) then
@@ -151,7 +151,7 @@ subroutine regridding_set_ppolys(CS, densities, n0, h0, ppoly0_E, ppoly0_S, &
         endif
       else
         degree = DEGREE_1
-        call edge_values_explicit_h2( n0, h0, densities, ppoly0_E, h_neglect_edge )
+        call edge_values_explicit_h2( n0, h0, densities, ppoly0_E )
         call P1M_interpolation( n0, h0, densities, ppoly0_E, ppoly0_coefs, h_neglect )
         if (extrapolate) then
           call P1M_boundary_extrapolation( n0, h0, densities, ppoly0_E, ppoly0_coefs )
@@ -169,7 +169,7 @@ subroutine regridding_set_ppolys(CS, densities, n0, h0, ppoly0_E, ppoly0_S, &
         endif
       else
         degree = DEGREE_1
-        call edge_values_explicit_h2( n0, h0, densities, ppoly0_E, h_neglect_edge )
+        call edge_values_explicit_h2( n0, h0, densities, ppoly0_E)
         call P1M_interpolation( n0, h0, densities, ppoly0_E, ppoly0_coefs, h_neglect )
         if (extrapolate) then
           call P1M_boundary_extrapolation( n0, h0, densities, ppoly0_E, ppoly0_coefs )
@@ -189,7 +189,7 @@ subroutine regridding_set_ppolys(CS, densities, n0, h0, ppoly0_E, ppoly0_S, &
         endif
       else
         degree = DEGREE_1
-        call edge_values_explicit_h2( n0, h0, densities, ppoly0_E, h_neglect_edge )
+        call edge_values_explicit_h2( n0, h0, densities, ppoly0_E)
         call P1M_interpolation( n0, h0, densities, ppoly0_E, ppoly0_coefs, h_neglect )
         if (extrapolate) then
           call P1M_boundary_extrapolation( n0, h0, densities, ppoly0_E, ppoly0_coefs )
@@ -209,7 +209,7 @@ subroutine regridding_set_ppolys(CS, densities, n0, h0, ppoly0_E, ppoly0_S, &
         endif
       else
         degree = DEGREE_1
-        call edge_values_explicit_h2( n0, h0, densities, ppoly0_E, h_neglect_edge )
+        call edge_values_explicit_h2( n0, h0, densities, ppoly0_E)
         call P1M_interpolation( n0, h0, densities, ppoly0_E, ppoly0_coefs, h_neglect )
         if (extrapolate) then
           call P1M_boundary_extrapolation( n0, h0, densities, ppoly0_E, ppoly0_coefs )
@@ -229,7 +229,7 @@ subroutine regridding_set_ppolys(CS, densities, n0, h0, ppoly0_E, ppoly0_S, &
         endif
       else
         degree = DEGREE_1
-        call edge_values_explicit_h2( n0, h0, densities, ppoly0_E, h_neglect_edge )
+        call edge_values_explicit_h2( n0, h0, densities, ppoly0_E)
         call P1M_interpolation( n0, h0, densities, ppoly0_E, ppoly0_coefs, h_neglect )
         if (extrapolate) then
           call P1M_boundary_extrapolation( n0, h0, densities, ppoly0_E, ppoly0_coefs )
@@ -249,7 +249,7 @@ subroutine regridding_set_ppolys(CS, densities, n0, h0, ppoly0_E, ppoly0_S, &
         endif
       else
         degree = DEGREE_1
-        call edge_values_explicit_h2( n0, h0, densities, ppoly0_E, h_neglect_edge )
+        call edge_values_explicit_h2( n0, h0, densities, ppoly0_E)
         call P1M_interpolation( n0, h0, densities, ppoly0_E, ppoly0_coefs, h_neglect )
         if (extrapolate) then
           call P1M_boundary_extrapolation( n0, h0, densities, ppoly0_E, ppoly0_coefs )
