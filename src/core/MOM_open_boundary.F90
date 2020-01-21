@@ -4523,21 +4523,6 @@ subroutine open_boundary_register_restarts(HI, GV, OBC, Reg, param_file, restart
                       "arrays were previously allocated")
 
   turns = HI%turns
-  if (turns /= 0) then
-    rx_normal_res => OBC%ry_normal
-    ry_normal_res => OBC%rx_normal
-    rx_oblique_res => OBC%ry_oblique
-    ry_oblique_res => OBC%rx_oblique
-    tres_x_res => tres_y_res
-    tres_y_res => tres_x_res
-  else
-    rx_normal_res => OBC%rx_normal
-    ry_normal_res => OBC%ry_normal
-    rx_oblique_res => OBC%rx_oblique
-    ry_oblique_res => OBC%ry_oblique
-    tres_x_res => tres_x_res
-    tres_y_res => tres_y_res
-  endif
 
   ! *** This is a temporary work around for restarts with OBC segments.
   ! This implementation uses 3D arrays solely for restarts. We need
@@ -4549,16 +4534,33 @@ subroutine open_boundary_register_restarts(HI, GV, OBC, Reg, param_file, restart
     OBC%rx_normal(:,:,:) = 0.0
     OBC%ry_normal(:,:,:) = 0.0
 
+    if (turns /= 0) then
+      rx_normal_res => OBC%ry_normal
+      ry_normal_res => OBC%rx_normal
+    else
+      rx_normal_res => OBC%rx_normal
+      ry_normal_res => OBC%ry_normal
+    endif
+
     vd = var_desc("rx_normal", "m s-1", "Normal Phase Speed for EW radiation OBCs", 'u', 'L')
     call register_restart_field(rx_normal_res, vd, .false., restart_CSp)
     vd = var_desc("ry_normal", "m s-1", "Normal Phase Speed for NS radiation OBCs", 'v', 'L')
     call register_restart_field(ry_normal_res, vd, .false., restart_CSp)
   endif
+
   if (OBC%oblique_BCs_exist_globally) then
     allocate(OBC%rx_oblique(HI%isdB:HI%iedB,HI%jsd:HI%jed,GV%ke))
     allocate(OBC%ry_oblique(HI%isd:HI%ied,HI%jsdB:HI%jedB,GV%ke))
     OBC%rx_oblique(:,:,:) = 0.0
     OBC%ry_oblique(:,:,:) = 0.0
+
+    if (turns /= 0) then
+      rx_oblique_res => OBC%ry_oblique
+      ry_oblique_res => OBC%rx_oblique
+    else
+      rx_oblique_res => OBC%rx_oblique
+      ry_oblique_res => OBC%ry_oblique
+    endif
 
     vd = var_desc("rx_oblique", "m2 s-2", "Radiation Speed Squared for EW oblique OBCs", 'u', 'L')
     call register_restart_field(rx_oblique_res, vd, .false., restart_CSp)

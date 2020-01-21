@@ -587,7 +587,9 @@ subroutine chksum_B_2d(array, mesg, HI, haloshift, symmetric, omit_corners, &
     call chksum_error(FATAL,'Error in chksum_B_2d '//trim(mesg))
   endif
 
-  bc0 = subchk(array, HI, 0, 0, scaling)
+  di = 0 ; if (turns == 1 .or. turns == 2) di = -1
+  dj = 0 ; if (turns == 2 .or. turns == 3) dj = -1
+  bc0 = subchk(array, HI, di, dj, scaling)
 
   sym = .false. ; if (present(symmetric)) sym = symmetric
 
@@ -1394,7 +1396,9 @@ subroutine chksum_B_3d(array, mesg, HI, haloshift, symmetric, omit_corners, &
     call chksum_error(FATAL,'Error in chksum_B_3d '//trim(mesg))
   endif
 
-  bc0 = subchk(array, HI, 0, 0, scaling)
+  di = 0 ; if (turns == 1 .or. turns == 2) di = -1
+  dj = 0 ; if (turns == 2 .or. turns == 3) dj = -1
+  bc0 = subchk(array, HI, di, dj, scaling)
 
   sym = .false. ; if (present(symmetric)) sym = symmetric
 
