@@ -20,6 +20,9 @@ use MOM_verticalGrid, only : verticalGrid_type
 use mpp_mod,         only:  mpp_chksum,mpp_pe
 use mpp_io_mod,      only:  mpp_attribute_exist, mpp_get_atts
 
+! testing
+use MOM_array_transform, only: rotate_array
+
 implicit none ; private
 
 public restart_init, restart_end, restore_state, register_restart_field
@@ -101,6 +104,9 @@ type, public :: MOM_restart_CS ; private
   type(p4d), pointer :: var_ptr4d(:) => NULL()
   !!@}
   integer :: max_fields !< The maximum number of restart fields
+
+  ! Testing
+  integer :: turns  !< Number of grid rotations
 end type MOM_restart_CS
 
 !> Register fields for restarts
@@ -816,6 +822,13 @@ subroutine save_restart(directory, time, G, CS, time_stamped, filename, GV)
   integer(kind=8) :: check_val(CS%max_fields,1)
   integer :: isL, ieL, jsL, jeL, pos
 
+  ! Testing
+  integer :: turns
+  real, pointer :: field_2d(:,:), field_3d(:,:,:), field_4d(:,:,:,:)
+
+  ! Testing
+  turns = CS%turns
+
   if (.not.associated(CS)) call MOM_error(FATAL, "MOM_restart " // &
       "save_restart: Module must be initialized before it is used.")
   if (CS%novars > CS%max_fields) call restart_error(CS)
@@ -951,16 +964,43 @@ subroutine save_restart(directory, time, G, CS, time_stamped, filename, GV)
     endif
 
     do m=start_var,next_var-1
-
+      ! TODO: Make a function to get array bounds...
       if (associated(CS%var_ptr3d(m)%p)) then
-        call write_field(unit,fields(m-start_var+1), G%Domain%mpp_domain, &
-                         CS%var_ptr3d(m)%p, restart_time)
+        if (turns /= 0) then
+          allocate(field_3d( &
+            lbound(CS%var_ptr3d(m)%p,2):ubound(CS%var_ptr3d(m)%p,2), &
+            lbound(CS%var_ptr3d(m)%p,1):ubound(CS%var_ptr3d(m)%p,1), &
+            lbound(CS%var_ptr3d(m)%p,3):ubound(CS%var_ptr3d(m)%p,3)))
+          call rotate_array(field_3d, CS%var_ptr3d(m)%p, -turns)
+        else
+          field_3d => CS%var_ptr3d(m)%p
+        endif
+        call write_field(unit, fields(m-start_var+1), G%Domain%mpp_domain, &
+                         field_3d, restart_time)
       elseif (associated(CS%var_ptr2d(m)%p)) then
-        call write_field(unit,fields(m-start_var+1), G%Domain%mpp_domain, &
-                         CS%var_ptr2d(m)%p, restart_time)
+        if (turns /= 0) then
+          allocate(field_2d( &
+            lbound(CS%var_ptr2d(m)%p,2):ubound(CS%var_ptr2d(m)%p,2), &
+            lbound(CS%var_ptr2d(m)%p,1):ubound(CS%var_ptr2d(m)%p,1)))
+          call rotate_array(field_2d, CS%var_ptr2d(m)%p, -turns)
+        else
+          field_2d => CS%var_ptr2d(m)%p
+        endif
+        call write_field(unit, fields(m-start_var+1), G%Domain%mpp_domain, &
+                         field_2d, restart_time)
       elseif (associated(CS%var_ptr4d(m)%p)) then
-        call write_field(unit,fields(m-start_var+1), G%Domain%mpp_domain, &
-                         CS%var_ptr4d(m)%p, restart_time)
+        if (turns /= 0) then
+          allocate(field_4d( &
+            lbound(CS%var_ptr4d(m)%p,2):ubound(CS%var_ptr4d(m)%p,2), &
+            lbound(CS%var_ptr4d(m)%p,1):ubound(CS%var_ptr4d(m)%p,1), &
+            lbound(CS%var_ptr4d(m)%p,3):ubound(CS%var_ptr4d(m)%p,3), &
+            lbound(CS%var_ptr4d(m)%p,4):ubound(CS%var_ptr4d(m)%p,4)))
+          call rotate_array(field_4d, CS%var_ptr4d(m)%p, -turns)
+        else
+          field_4d => CS%var_ptr4d(m)%p
+        endif
+        call write_field(unit, fields(m-start_var+1), G%Domain%mpp_domain, &
+                         field_4d, restart_time)
       elseif (associated(CS%var_ptr1d(m)%p)) then
         call write_field(unit, fields(m-start_var+1), CS%var_ptr1d(m)%p, &
                          restart_time)
@@ -1463,6 +1503,11 @@ subroutine restart_init(param_file, CS, restart_root)
                  "made from a run with a different mask_table than the current run, "//&
                  "in which case the checksums will not match and cause crash.",&
                  default=.true.)
+
+  ! Maybe not the best place to do this?
+  ! TODO: Check ROTATE_GRID...
+  call get_param(param_file, mdl, "GRID_QUARTER_TURNS", CS%turns, &
+                 do_not_log=.true.)
 
   allocate(CS%restart_field(CS%max_fields))
   allocate(CS%restart_obsolete(CS%max_fields))

@@ -889,6 +889,12 @@ subroutine register_restarts_dyn_split_RK2(HI, GV, param_file, CS, restart_CS, u
   character(len=48)  :: thickness_units, flux_units
 
   integer :: isd, ied, jsd, jed, nz, IsdB, IedB, JsdB, JedB
+
+  ! Testing
+  integer :: turns
+  real, dimension(:,:,:), pointer :: u_av_res, v_av_res
+  real, dimension(:,:,:), pointer :: uh_res, vh_res, diffu_res, diffv_res
+
   isd  = HI%isd  ; ied  = HI%ied  ; jsd  = HI%jsd  ; jed  = HI%jed ; nz = GV%ke
   IsdB = HI%IsdB ; IedB = HI%IedB ; JsdB = HI%JsdB ; JedB = HI%JedB
 
@@ -899,6 +905,8 @@ subroutine register_restarts_dyn_split_RK2(HI, GV, param_file, CS, restart_CS, u
     return
   endif
   allocate(CS)
+
+  turns = HI%turns  !< I think?  Might be the wrong grid...
 
   ALLOC_(CS%diffu(IsdB:IedB,jsd:jed,nz)) ; CS%diffu(:,:,:) = 0.0
   ALLOC_(CS%diffv(isd:ied,JsdB:JedB,nz)) ; CS%diffv(:,:,:) = 0.0
@@ -915,6 +923,23 @@ subroutine register_restarts_dyn_split_RK2(HI, GV, param_file, CS, restart_CS, u
   thickness_units = get_thickness_units(GV)
   flux_units = get_flux_units(GV)
 
+  ! Set up the output pointers:
+  if (modulo(turns, 2) /= 0) then
+    u_av_res => CS%v_av
+    v_av_res => CS%u_av
+    uh_res => vh
+    vh_res => uh
+    diffu_res => CS%diffv
+    diffv_res => CS%diffu
+  else
+    u_av_res => CS%u_av
+    v_av_res => CS%v_av
+    uh_res => uh
+    vh_res => vh
+    diffu_res => CS%diffu
+    diffv_res => CS%diffv
+  endif
+
   if (GV%Boussinesq) then
     vd = var_desc("sfc",thickness_units,"Free surface Height",'h','1')
   else
@@ -923,25 +948,25 @@ subroutine register_restarts_dyn_split_RK2(HI, GV, param_file, CS, restart_CS, u
   call register_restart_field(CS%eta, vd, .false., restart_CS)
 
   vd = var_desc("u2","m s-1","Auxiliary Zonal velocity",'u','L')
-  call register_restart_field(CS%u_av, vd, .false., restart_CS)
+  call register_restart_field(u_av_res, vd, .false., restart_CS)
 
   vd = var_desc("v2","m s-1","Auxiliary Meridional velocity",'v','L')
-  call register_restart_field(CS%v_av, vd, .false., restart_CS)
+  call register_restart_field(v_av_res, vd, .false., restart_CS)
 
   vd = var_desc("h2",thickness_units,"Auxiliary Layer Thickness",'h','L')
   call register_restart_field(CS%h_av, vd, .false., restart_CS)
 
   vd = var_desc("uh",flux_units,"Zonal thickness flux",'u','L')
-  call register_restart_field(uh, vd, .false., restart_CS)
+  call register_restart_field(uh_res, vd, .false., restart_CS)
 
   vd = var_desc("vh",flux_units,"Meridional thickness flux",'v','L')
-  call register_restart_field(vh, vd, .false., restart_CS)
+  call register_restart_field(vh_res, vd, .false., restart_CS)
 
   vd = var_desc("diffu","m s-2","Zonal horizontal viscous acceleration",'u','L')
-  call register_restart_field(CS%diffu, vd, .false., restart_CS)
+  call register_restart_field(diffu_res, vd, .false., restart_CS)
 
   vd = var_desc("diffv","m s-2","Meridional horizontal viscous acceleration",'v','L')
-  call register_restart_field(CS%diffv, vd, .false., restart_CS)
+  call register_restart_field(diffv_res, vd, .false., restart_CS)
 
   call register_barotropic_restarts(HI, GV, param_file, CS%barotropic_CSp, &
                                     restart_CS)

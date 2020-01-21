@@ -535,6 +535,7 @@ subroutine step_MOM(forces_in, fluxes_in, sfc_state, Time_start, time_int_in, CS
 
     ! This is solely to sync the fluxes_used flag between the types.
     ! For now I do this to sync the flags, but there may be a simpler way.
+    ! TODO: This now seems unnecessary, may be able to remove it.
     fluxes%fluxes_in => fluxes_in
   else
     forces => forces_in
@@ -2704,7 +2705,7 @@ subroutine finish_MOM_initialization(Time, dirs, CS, restart_CSp)
     call register_restart_field(z_interface, "eta", .true., restart_CSp_tmp, &
                                 "Interface heights", "meter", z_grid='i')
 
-    call save_restart(dirs%output_directory, Time, G, &
+    call save_restart(dirs%output_directory, Time, CS%G_in, &
                       restart_CSp_tmp, filename=CS%IC_file, GV=GV)
     deallocate(z_interface)
     deallocate(restart_CSp_tmp)
@@ -2795,16 +2796,33 @@ subroutine set_restart_fields(GV, US, param_file, CS, restart_CSp)
   type(verticalGrid_type),  intent(inout) :: GV         !< ocean vertical grid structure
   type(unit_scale_type),    intent(inout) :: US         !< A dimensional unit scaling type
   type(param_file_type),    intent(in) :: param_file    !< opened file for parsing to get parameters
-  type(MOM_control_struct), intent(in) :: CS            !< control structure set up by inialize_MOM
+  type(MOM_control_struct), target, intent(in) :: CS    !< control structure set up by inialize_MOM
   type(MOM_restart_CS),     pointer    :: restart_CSp   !< pointer to the restart control
                                                         !! structure that will be used for MOM.
   ! Local variables
   logical :: use_ice_shelf ! Needed to determine whether to add CS%Hml to restarts
   character(len=48) :: thickness_units, flux_units
 
+  ! Testing
+  real, dimension(:,:,:), pointer :: u_res, v_res
+  integer :: turns
 
   thickness_units = get_thickness_units(GV)
   flux_units = get_flux_units(GV)
+
+  ! Probably a better way to get `turns`
+  if (CS%rotate_grid) then
+    call get_param(param_file, '', "GRID_QUARTER_TURNS", turns, &
+                   default=1, do_not_log=.true.)
+  endif
+
+  if (modulo(turns, 2) /= 0) then
+    u_res => CS%v
+    v_res => CS%u
+  else
+    u_res => CS%u
+    v_res => CS%v
+  endif
 
   if (associated(CS%tv%T)) &
     call register_restart_field(CS%tv%T, "Temp", .true., restart_CSp, &
@@ -2816,10 +2834,10 @@ subroutine set_restart_fields(GV, US, param_file, CS, restart_CSp)
   call register_restart_field(CS%h, "h", .true., restart_CSp, &
                               "Layer Thickness", thickness_units)
 
-  call register_restart_field(CS%u, "u", .true., restart_CSp, &
+  call register_restart_field(u_res, "u", .true., restart_CSp, &
                               "Zonal velocity", "m s-1", hor_grid='Cu')
 
-  call register_restart_field(CS%v, "v", .true., restart_CSp, &
+  call register_restart_field(v_res, "v", .true., restart_CSp, &
                               "Meridional velocity", "m s-1", hor_grid='Cv')
 
   if (associated(CS%tv%frazil)) &

@@ -4448,6 +4448,13 @@ subroutine register_barotropic_restarts(HI, GV, param_file, CS, restart_CS)
   type(vardesc) :: vd(3)
   real :: slow_rate
   integer :: isd, ied, jsd, jed, IsdB, IedB, JsdB, JedB
+
+  ! Testing
+  real, dimension(:,:), pointer :: ubtav_res, vbtav_res
+  real, dimension(:,:), pointer :: ubt_IC_res, vbt_IC_res
+  real, dimension(:,:), pointer :: uhbt_IC_res, vhbt_IC_res
+  integer :: turns
+
   isd = HI%isd ; ied = HI%ied ; jsd = HI%jsd ; jed = HI%jed
   IsdB = HI%IsdB ; IedB = HI%IedB ; JsdB = HI%JsdB ; JedB = HI%JedB
 
@@ -4465,12 +4472,29 @@ subroutine register_barotropic_restarts(HI, GV, param_file, CS, restart_CS)
   ALLOC_(CS%uhbt_IC(IsdB:IedB,jsd:jed))    ; CS%uhbt_IC(:,:) = 0.0
   ALLOC_(CS%vhbt_IC(isd:ied,JsdB:JedB))    ; CS%vhbt_IC(:,:) = 0.0
 
+  turns = HI%turns
+  if (modulo(turns, 2) /= 0) then
+    ubtav_res => CS%vbtav
+    vbtav_res => CS%ubtav
+    ubt_IC_res => CS%vbt_IC
+    vbt_IC_res => CS%ubt_IC
+    uhbt_IC_res => CS%vhbt_IC
+    vhbt_IC_res => CS%uhbt_IC
+  else
+    ubtav_res => CS%ubtav
+    vbtav_res => CS%vbtav
+    ubt_IC_res => CS%ubt_IC
+    vbt_IC_res => CS%vbt_IC
+    uhbt_IC_res => CS%uhbt_IC
+    vhbt_IC_res => CS%vhbt_IC
+  endif
+
   vd(2) = var_desc("ubtav","m s-1","Time mean barotropic zonal velocity", &
                 hor_grid='u', z_grid='1')
   vd(3) = var_desc("vbtav","m s-1","Time mean barotropic meridional velocity",&
                 hor_grid='v', z_grid='1')
-  call register_restart_field(CS%ubtav, vd(2), .false., restart_CS)
-  call register_restart_field(CS%vbtav, vd(3), .false., restart_CS)
+  call register_restart_field(ubtav_res, vd(2), .false., restart_CS)
+  call register_restart_field(vbtav_res, vd(3), .false., restart_CS)
 
   vd(2) = var_desc("ubt_IC", "m s-1", &
               longname="Next initial condition for the barotropic zonal velocity", &
@@ -4478,8 +4502,8 @@ subroutine register_barotropic_restarts(HI, GV, param_file, CS, restart_CS)
   vd(3) = var_desc("vbt_IC", "m s-1", &
               longname="Next initial condition for the barotropic meridional velocity",&
               hor_grid='v', z_grid='1')
-  call register_restart_field(CS%ubt_IC, vd(2), .false., restart_CS)
-  call register_restart_field(CS%vbt_IC, vd(3), .false., restart_CS)
+  call register_restart_field(ubt_IC_res, vd(2), .false., restart_CS)
+  call register_restart_field(vbt_IC_res, vd(3), .false., restart_CS)
 
   if (GV%Boussinesq) then
     vd(2) = var_desc("uhbt_IC", "m3 s-1", &
@@ -4496,8 +4520,8 @@ subroutine register_barotropic_restarts(HI, GV, param_file, CS, restart_CS)
                 longname="Next initial condition for the barotropic meridional transport",&
                 hor_grid='v', z_grid='1')
   endif
-  call register_restart_field(CS%uhbt_IC, vd(2), .false., restart_CS)
-  call register_restart_field(CS%vhbt_IC, vd(3), .false., restart_CS)
+  call register_restart_field(uhbt_IC_res, vd(2), .false., restart_CS)
+  call register_restart_field(vhbt_IC_res, vd(3), .false., restart_CS)
 
   call register_restart_field(CS%dtbt, "DTBT", .false., restart_CS, &
                               longname="Barotropic timestep", units="seconds")

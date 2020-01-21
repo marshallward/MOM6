@@ -9,6 +9,7 @@ public rotate_quarter, rotate_half  ! Hopefully won't need these...
 interface rotate_array
   module procedure rotate_array_real_2d
   module procedure rotate_array_real_3d
+  module procedure rotate_array_real_4d
   module procedure rotate_array_integer
 end interface rotate_array
 
@@ -22,6 +23,19 @@ interface rotate_half
 end interface rotate_half
 
 contains
+
+subroutine rotate_array_real_4d(A, A_in, turns)
+  real, intent(out) :: A(:,:,:,:)
+  real, intent(in) :: A_in(:,:,:,:)
+  integer, intent(in) :: turns
+
+  integer :: n
+
+  do n = lbound(A_in, 4), ubound(A_in, 4)
+    call rotate_array(A(:,:,:,n), A_in(:,:,:,n), turns)
+  enddo
+end subroutine rotate_array_real_4d
+
 
 subroutine rotate_array_real_3d(A, A_in, turns)
   real, intent(out) :: A(:,:,:)
