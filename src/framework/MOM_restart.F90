@@ -1464,6 +1464,8 @@ subroutine restart_init(param_file, CS, restart_root)
                          intent(in) :: restart_root !< A filename root that overrides the value
                                           !! set by RESTARTFILE to enable the use of this module by
                                           !! other components than MOM.
+  ! Testing
+  logical :: rotate_grid
 
 ! This include declares and sets the variable "version".
 #include "version_variable.h"
@@ -1506,8 +1508,14 @@ subroutine restart_init(param_file, CS, restart_root)
 
   ! Maybe not the best place to do this?
   ! TODO: Check ROTATE_GRID...
-  call get_param(param_file, mdl, "GRID_QUARTER_TURNS", CS%turns, &
+  call get_param(param_file, mdl, "ROTATE_GRID", rotate_grid, default=.false., &
                  do_not_log=.true.)
+
+  CS%turns = 0
+  if (rotate_grid) then
+    call get_param(param_file, mdl, "GRID_QUARTER_TURNS", CS%turns, &
+                   default=1, do_not_log=.true.)
+  endif
 
   allocate(CS%restart_field(CS%max_fields))
   allocate(CS%restart_obsolete(CS%max_fields))
