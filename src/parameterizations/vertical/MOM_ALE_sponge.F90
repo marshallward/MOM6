@@ -25,6 +25,9 @@ use MOM_remapping, only : remapping_cs, remapping_core_h, initialize_remapping
 use MOM_unit_scaling, only : unit_scale_type
 use MOM_verticalGrid, only : verticalGrid_type
 
+! Testing
+use MOM_array_transform, only: rotate_array
+
 implicit none ; private
 
 #include <MOM_memory.h>
@@ -54,6 +57,7 @@ end interface
 public set_up_ALE_sponge_field, set_up_ALE_sponge_vel_field
 public get_ALE_sponge_thicknesses, get_ALE_sponge_nz_data
 public initialize_ALE_sponge, apply_ALE_sponge, ALE_sponge_end, init_ALE_sponge_diags
+public rotate_ALE_sponge
 
 ! A note on unit descriptions in comments: MOM6 uses units that can be rescaled for dimensional
 ! consistency testing. These are noted in comments with units like Z, H, L, and T, along with
@@ -962,6 +966,93 @@ subroutine apply_ALE_sponge(h, dt, G, GV, US, CS, Time)
   deallocate(tmp_val2)
 
 end subroutine apply_ALE_sponge
+
+subroutine rotate_ALE_sponge(sponge_in, G_in, sponge, G, turns, param_file)
+  type(ALE_sponge_CS), intent(in) :: sponge_in
+  type(ocean_grid_type), intent(in) :: G_in
+  type(ALE_sponge_CS), pointer :: sponge
+  type(ocean_grid_type), intent(in) :: G
+  integer, intent(in) :: turns
+  type(param_file_type), intent(in) :: param_file
+
+  ! First part: Index construction
+  !
+  !   1. Reconstruct Iresttime(:,:) from sponge_in
+  !   2. rotate Iresttime(:,:)
+  !   3. Call initialize_sponge using new grid and rotated Iresttime(:,:)
+  ! Advantage to this approach:
+  !   1. No explicit swapping of indices
+  !   2. No need to "invert" the indices based on rotation angle
+  ! All the index adjustment should follow from the Iresttime rotation
+
+  real, dimension(:,:), allocatable :: Iresttime_in, Iresttime
+  real, dimension(:,:,:), allocatable :: data_h_in, data_h
+  integer :: c, c_i, c_j
+  integer :: k, nz_data
+  logical :: fixed_sponge
+
+  fixed_sponge = .not. sponge_in%time_varying_sponges
+
+  allocate(Iresttime_in(G_in%isd:G_in%ied, G_in%jsd:G_in%jed))
+  allocate(Iresttime(G%isd:G%ied, G%jsd:G%jed))
+  Iresttime_in(:,:) = 0.0
+
+  if (fixed_sponge) then
+    nz_data = sponge_in%nz_data
+    allocate(data_h_in(G_in%isd:G_in%ied, G_in%jsd:G_in%jed, nz_data))
+    allocate(data_h(G%isd:G%ied, G%jsd:G%jed, nz_data))
+    data_h_in(:,:,:) = 0.
+  endif
+
+  ! Re-populate the 2D Iresttime and data_h arrays on the original grid
+  do c = 1, sponge_in%num_col
+    c_i = sponge_in%col_i(c)
+    c_j = sponge_in%col_j(c)
+    Iresttime_in(c_i, c_j) = sponge_in%Iresttime_col(c)
+    if (fixed_sponge) then
+      do k = 1, nz_data
+        data_h(c_i, c_j, k) = sponge_in%Ref_h%p(k,c)
+      enddo
+    endif
+  enddo
+
+  call rotate_array(Iresttime, Iresttime_in, turns)
+  call rotate_array(data_h, data_h_in, turns)
+
+  ! TODO: This needs to conditionally reconstruct Ref_h and then append the
+  ! arguments for fixed sponges.  For now we just cheat and copy over some data.
+  if (fixed_sponge) then
+    call initialize_ALE_sponge_fixed(Iresttime, G, param_file, sponge, &
+                                     data_h, nz_data)
+  else
+    call initialize_ALE_sponge_varying(Iresttime, G, param_file, sponge)
+  endif
+
+  deallocate(Iresttime_in)
+  deallocate(Iresttime)
+  if (fixed_sponge) then
+    deallocate(data_h_in)
+    deallocate(data_h)
+  endif
+
+  ! Second part: Provide rotated fields for which relaxation is applied
+
+  sponge%fldno = sponge_in%fldno
+
+  ! TODO: make sure these are the rotated fields!
+  sponge%var = sponge_in%var
+  sponge%var_u = sponge_in%var_u
+  sponge%var_v = sponge_in%var_v
+  sponge%Ref_val = sponge_in%Ref_val
+  sponge%Ref_val_u = sponge_in%Ref_val_u
+  sponge%Ref_val_v = sponge_in%Ref_val_v
+
+  ! Is this ever set?
+  sponge%diag => sponge_in%diag
+
+  ! I think initialize_ALE_sponge_* resolves remap_cs
+  !sponge%remap_cs = sponge_in%remap_cs
+end subroutine rotate_ALE_sponge
 
 ! GMM: I could not find where sponge_end is being called, but I am keeping
 !  ALE_sponge_end here so we can add that if needed.

@@ -140,6 +140,8 @@ use MOM_forcing_type,          only : deallocate_mech_forcing, deallocate_forcin
 use MOM_variables,             only : rotate_surface_state
 use MOM_array_transform,       only : rotate_array
 use MOM_open_boundary,         only : rotate_OBC_config, rotate_OBC_state
+use MOM_sponge,                only : rotate_sponge
+use MOM_ALE_sponge,            only : rotate_ALE_sponge
 
 implicit none ; private
 
@@ -1598,6 +1600,8 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, restart_CSp, &
   real, allocatable, dimension(:,:,:) :: u_in, v_in, h_in
   real, allocatable, dimension(:,:,:), target :: T_in, S_in
   type(ocean_OBC_type), pointer :: OBC_in => NULL()
+  type(sponge_CS), pointer :: sponge_in_CSp => NULL()
+  type(ALE_sponge_CS), pointer :: ALE_sponge_in_CSp => NULL()
 
   ! T and S are conditionally allocated, and `associated()` is used in some
   ! places as a thermodynamics test (O_o).
@@ -2328,7 +2332,7 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, restart_CSp, &
 
     call MOM_initialize_state(u_in, v_in, h_in, CS%tv, Time, G_in, GV, US, param_file, &
                               dirs, restart_CSp, CS%ALE_CSp, CS%tracer_Reg, &
-                              CS%sponge_CSp, CS%ALE_sponge_CSp, OBC_in, Time_in)
+                              sponge_in_CSp, ALE_sponge_in_CSp, OBC_in, Time_in)
 
     if (use_temperature) then
       CS%tv%T => CS%T
@@ -2336,10 +2340,22 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, restart_CSp, &
     endif
 
     ! TODO: Ridiculous number of arguments...
-    ! Inspect the segments
     call rotate_initial_state(u_in, v_in, h_in, T_in, S_in, G_in, &
                               CS%u, CS%v, CS%h, CS%T, CS%S, G, &
                               use_temperature, grid_qturns)
+
+    ! TODO: Ths sponge_CSp contain pointers to the original un-rotated fields.
+    ! I need to ensure that we are pointing to the *rotated* fields.  I have
+    ! not done that yet!
+
+    if (associated(sponge_in_CSp)) then
+      allocate(CS%sponge_CSp)
+      call rotate_sponge(sponge_in_CSp, CS%sponge_CSp, grid_qturns)
+    endif
+
+    if (associated(ALE_sponge_in_CSp)) &
+      call rotate_ALE_sponge(ALE_sponge_in_CSp, G_in, CS%ALE_sponge_CSp, G, &
+                             grid_qturns, param_file)
 
     if (associated(OBC_in)) &
       call rotate_OBC_state(OBC_in, CS%OBC, grid_qturns)
