@@ -2344,10 +2344,6 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, restart_CSp, &
                               CS%u, CS%v, CS%h, CS%T, CS%S, G, &
                               use_temperature, grid_qturns)
 
-    ! TODO: Ths sponge_CSp contain pointers to the original un-rotated fields.
-    ! I need to ensure that we are pointing to the *rotated* fields.  I have
-    ! not done that yet!
-
     if (associated(sponge_in_CSp)) then
       allocate(CS%sponge_CSp)
       call rotate_sponge(sponge_in_CSp, CS%sponge_CSp, grid_qturns)

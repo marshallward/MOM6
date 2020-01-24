@@ -985,27 +985,31 @@ subroutine rotate_ALE_sponge(sponge_in, G_in, sponge, G, turns, param_file)
   !   2. No need to "invert" the indices based on rotation angle
   ! All the index adjustment should follow from the Iresttime rotation
 
+  ! TODO: merge data_h and sp_val?
   real, dimension(:,:), allocatable :: Iresttime_in, Iresttime
   real, dimension(:,:,:), allocatable :: data_h_in, data_h
+  real, dimension(:,:,:), allocatable :: sp_val_in, sp_val
+  real, dimension(:,:,:), pointer :: sp_ptr => NULL()
   integer :: c, c_i, c_j
   integer :: k, nz_data
+  integer :: n
   logical :: fixed_sponge
 
   fixed_sponge = .not. sponge_in%time_varying_sponges
+  nz_data = sponge_in%nz_data
 
   allocate(Iresttime_in(G_in%isd:G_in%ied, G_in%jsd:G_in%jed))
   allocate(Iresttime(G%isd:G%ied, G%jsd:G%jed))
   Iresttime_in(:,:) = 0.0
 
   if (fixed_sponge) then
-    nz_data = sponge_in%nz_data
     allocate(data_h_in(G_in%isd:G_in%ied, G_in%jsd:G_in%jed, nz_data))
     allocate(data_h(G%isd:G%ied, G%jsd:G%jed, nz_data))
     data_h_in(:,:,:) = 0.
   endif
 
   ! Re-populate the 2D Iresttime and data_h arrays on the original grid
-  do c = 1, sponge_in%num_col
+  do c = 1, nz_data
     c_i = sponge_in%col_i(c)
     c_j = sponge_in%col_j(c)
     Iresttime_in(c_i, c_j) = sponge_in%Iresttime_col(c)
@@ -1017,11 +1021,8 @@ subroutine rotate_ALE_sponge(sponge_in, G_in, sponge, G, turns, param_file)
   enddo
 
   call rotate_array(Iresttime, Iresttime_in, turns)
-  call rotate_array(data_h, data_h_in, turns)
-
-  ! TODO: This needs to conditionally reconstruct Ref_h and then append the
-  ! arguments for fixed sponges.  For now we just cheat and copy over some data.
   if (fixed_sponge) then
+    call rotate_array(data_h, data_h_in, turns)
     call initialize_ALE_sponge_fixed(Iresttime, G, param_file, sponge, &
                                      data_h, nz_data)
   else
@@ -1039,13 +1040,52 @@ subroutine rotate_ALE_sponge(sponge_in, G_in, sponge, G, turns, param_file)
 
   sponge%fldno = sponge_in%fldno
 
-  ! TODO: make sure these are the rotated fields!
-  sponge%var = sponge_in%var
-  sponge%var_u = sponge_in%var_u
-  sponge%var_v = sponge_in%var_v
-  sponge%Ref_val = sponge_in%Ref_val
-  sponge%Ref_val_u = sponge_in%Ref_val_u
-  sponge%Ref_val_v = sponge_in%Ref_val_v
+  ! TODO: Integrate this into the prior loop?
+  ! TODO: sp_val and data_h could be shared
+  ! TODO: I may not need to do this for time-varying arrays
+  !       (and may need to do it elsewhere)
+  allocate(sp_val_in(G_in%isd:G_in%ied, G_in%jsd:G_in%jed, nz_data))
+  allocate(sp_val(G%isd:G%ied, G%jsd:G%jed, nz_data))
+  do n = 1, sponge_in%fldno
+    ! Assume that tracers are pointers and are remapped in other functions(?)
+    sp_ptr => sponge_in%var(n)%p
+    sp_val_in(:,:,:) = 0.0
+    do c = 1, sponge_in%num_col
+      c_i = sponge_in%col_i(c)
+      c_j = sponge_in%col_j(c)
+      if (fixed_sponge) then
+        do k = 1, nz_data
+          sp_val_in(c_i, c_j, k) = sponge_in%Ref_val(n)%p(k,c)
+        enddo
+      endif
+    enddo
+
+    call rotate_array(sp_val, sp_val_in, turns)
+    ! TODO: time varying sponges
+    if (fixed_sponge) then
+      call set_up_ALE_sponge_field(sp_val, G, sp_ptr, sponge)
+    else
+      ! Not sure how to handle the FMS field IDs, so doing this manually
+      sponge%Ref_val(n)%id = sponge_in%Ref_val(n)%id
+      sponge%Ref_val(n)%nz_data = sponge_in%Ref_val(n)%nz_data
+      sponge%Ref_val(n)%num_tlevs = sponge_in%Ref_val(n)%num_tlevs
+
+      allocate(sponge%Ref_val(n)%p(nz_data, sponge_in%num_col))
+      allocate(sponge%Ref_val(n)%h(nz_data, sponge_in%num_col))
+      sponge%Ref_val(n)%p(:,:) = 0.0
+      sponge%Ref_val(n)%h(:,:) = 0.0
+
+      sponge%var(n)%p => sp_ptr
+    endif
+  enddo
+  deallocate(sp_val_in)
+  deallocate(sp_val)
+
+  ! TODO: u and v points?
+  !sponge%var_u = sponge_in%var_u
+  !sponge%var_v = sponge_in%var_v
+  !sponge%Ref_val_u = sponge_in%Ref_val_u
+  !sponge%Ref_val_v = sponge_in%Ref_val_v
 
   ! Is this ever set?
   sponge%diag => sponge_in%diag
