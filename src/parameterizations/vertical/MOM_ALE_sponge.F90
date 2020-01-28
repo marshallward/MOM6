@@ -1075,6 +1075,11 @@ subroutine rotate_ALE_sponge(sponge_in, G_in, sponge, G, turns, param_file)
       sponge%Ref_val(n)%p(:,:) = 0.0
       sponge%Ref_val(n)%h(:,:) = 0.0
 
+      ! TODO: This is wrong since it will typically contain the pointer to
+      ! the input field (e.g. T_in) rather than the model field (CS%tv%T).
+      ! The result is that the model field will not be updated.
+      !
+      ! I am not yet sure how to resolve this.
       sponge%var(n)%p => sp_ptr
     endif
   enddo

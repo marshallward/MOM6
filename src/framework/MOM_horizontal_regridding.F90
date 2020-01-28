@@ -34,6 +34,9 @@ use mpp_io_mod, only : mpp_get_axis_data
 use mpp_io_mod, only : MPP_SINGLE
 use netcdf
 
+! testing
+use MOM_array_transform, only : rotate_array
+
 implicit none ; private
 
 #include <MOM_memory.h>
@@ -645,6 +648,15 @@ subroutine horiz_interp_and_extrap_tracer_fms_id(fms_id,  Time, conversion, G, t
   real, dimension(SZI_(G),SZJ_(G))  :: good2,fill2
   real, dimension(SZI_(G),SZJ_(G))  :: nlevs
 
+  ! Testing
+  ! TODO: May wrap time_interp_external with a `turns` argument, which
+  ! internally rotates data_in, which would eliminate the need for data_fms_in
+  real, dimension(:,:,:), allocatable  :: data_fms_in   !< Data on the input grid
+  integer :: turns
+
+  ! TODO: Better way to get this...
+  turns = G%HI%turns
+
   is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec
   isd = G%isd ; ied = G%ied ; jsd = G%jsd ; jed = G%jed
   isg = G%isg ; ieg = G%ieg ; jsg = G%jsg ; jeg = G%jeg
@@ -713,12 +725,22 @@ subroutine horiz_interp_and_extrap_tracer_fms_id(fms_id,  Time, conversion, G, t
     call meshgrid(lon_in, lat_in, x_in, y_in)
     lon_out(:,:) = G%geoLonT(:,:)*PI_180
     lat_out(:,:) = G%geoLatT(:,:)*PI_180
+    if (modulo(turns, 2) /= 0) then
+      allocate(data_fms_in(jd,id,kd)) ; data_fms_in(:,:,:)=0.0
+    else
+      allocate(data_fms_in(id,jd,kd)) ; data_fms_in(:,:,:)=0.0
+    endif
     allocate(data_in(id,jd,kd)) ; data_in(:,:,:)=0.0
     allocate(tr_in(id,jd)) ; tr_in(:,:)=0.0
     allocate(tr_inp(id,jdp)) ; tr_inp(:,:)=0.0
     allocate(mask_in(id,jdp)) ; mask_in(:,:)=0.0
     allocate(last_row(id))    ; last_row(:)=0.0
   else
+    if (modulo(turns, 2) /= 0) then
+      allocate(data_fms_in(jsd:jed,isd:ied,kd))
+    else
+      allocate(data_fms_in(isd:ied,jsd:jed,kd))
+    endif
     allocate(data_in(isd:ied,jsd:jed,kd))
   endif
   ! construct level cell boundaries as the mid-point between adjacent centers
@@ -739,7 +761,8 @@ subroutine horiz_interp_and_extrap_tracer_fms_id(fms_id,  Time, conversion, G, t
 
   if (.not.spongeDataOngrid) then
     if (is_root_pe()) &
-      call time_interp_external(fms_id, Time, data_in, verbose=.true.)
+      call time_interp_external(fms_id, Time, data_fms_in, verbose=.true.)
+      call rotate_array(data_in, data_fms_in, turns)
     ! loop through each data level and interpolate to model grid.
     ! after interpolating, fill in points which will be needed
     ! to define the layers
@@ -859,7 +882,8 @@ subroutine horiz_interp_and_extrap_tracer_fms_id(fms_id,  Time, conversion, G, t
 
     enddo ! kd
   else
-      call time_interp_external(fms_id, Time, data_in, verbose=.true.)
+      call time_interp_external(fms_id, Time, data_fms_in, verbose=.true.)
+      call rotate_array(data_in, data_fms_in, turns)
       do k=1,kd
         do j=js,je
           do i=is,ie
