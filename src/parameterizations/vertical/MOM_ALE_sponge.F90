@@ -57,7 +57,7 @@ end interface
 public set_up_ALE_sponge_field, set_up_ALE_sponge_vel_field
 public get_ALE_sponge_thicknesses, get_ALE_sponge_nz_data
 public initialize_ALE_sponge, apply_ALE_sponge, ALE_sponge_end, init_ALE_sponge_diags
-public rotate_ALE_sponge
+public rotate_ALE_sponge, update_ALE_sponge_field
 
 ! A note on unit descriptions in comments: MOM6 uses units that can be rescaled for dimensional
 ! consistency testing. These are noted in comments with units like Z, H, L, and T, along with
@@ -996,20 +996,22 @@ subroutine rotate_ALE_sponge(sponge_in, G_in, sponge, G, turns, param_file)
   logical :: fixed_sponge
 
   fixed_sponge = .not. sponge_in%time_varying_sponges
-  nz_data = sponge_in%nz_data
+  ! NOTE: nz_data is only conditionally set when fixed_sponge is true.
+  !       This is not well-presented here.
 
   allocate(Iresttime_in(G_in%isd:G_in%ied, G_in%jsd:G_in%jed))
   allocate(Iresttime(G%isd:G%ied, G%jsd:G%jed))
   Iresttime_in(:,:) = 0.0
 
   if (fixed_sponge) then
+    nz_data = sponge_in%nz_data
     allocate(data_h_in(G_in%isd:G_in%ied, G_in%jsd:G_in%jed, nz_data))
     allocate(data_h(G%isd:G%ied, G%jsd:G%jed, nz_data))
     data_h_in(:,:,:) = 0.
   endif
 
   ! Re-populate the 2D Iresttime and data_h arrays on the original grid
-  do c = 1, nz_data
+  do c = 1, sponge_in%num_col
     c_i = sponge_in%col_i(c)
     c_j = sponge_in%col_j(c)
     Iresttime_in(c_i, c_j) = sponge_in%Iresttime_col(c)
@@ -1044,8 +1046,11 @@ subroutine rotate_ALE_sponge(sponge_in, G_in, sponge, G, turns, param_file)
   ! TODO: sp_val and data_h could be shared
   ! TODO: I may not need to do this for time-varying arrays
   !       (and may need to do it elsewhere)
-  allocate(sp_val_in(G_in%isd:G_in%ied, G_in%jsd:G_in%jed, nz_data))
-  allocate(sp_val(G%isd:G%ied, G%jsd:G%jed, nz_data))
+  if (fixed_sponge) then
+    allocate(sp_val_in(G_in%isd:G_in%ied, G_in%jsd:G_in%jed, nz_data))
+    allocate(sp_val(G%isd:G%ied, G%jsd:G%jed, nz_data))
+  endif
+
   do n = 1, sponge_in%fldno
     ! Assume that tracers are pointers and are remapped in other functions(?)
     sp_ptr => sponge_in%var(n)%p
@@ -1061,30 +1066,31 @@ subroutine rotate_ALE_sponge(sponge_in, G_in, sponge, G, turns, param_file)
     enddo
 
     call rotate_array(sp_val, sp_val_in, turns)
-    ! TODO: time varying sponges
     if (fixed_sponge) then
       call set_up_ALE_sponge_field(sp_val, G, sp_ptr, sponge)
     else
       ! Not sure how to handle the FMS field IDs, so doing this manually
       sponge%Ref_val(n)%id = sponge_in%Ref_val(n)%id
-      sponge%Ref_val(n)%nz_data = sponge_in%Ref_val(n)%nz_data
       sponge%Ref_val(n)%num_tlevs = sponge_in%Ref_val(n)%num_tlevs
+
+      nz_data = sponge_in%Ref_val(n)%nz_data
+      sponge%Ref_val(n)%nz_data = nz_data
 
       allocate(sponge%Ref_val(n)%p(nz_data, sponge_in%num_col))
       allocate(sponge%Ref_val(n)%h(nz_data, sponge_in%num_col))
       sponge%Ref_val(n)%p(:,:) = 0.0
       sponge%Ref_val(n)%h(:,:) = 0.0
 
-      ! TODO: This is wrong since it will typically contain the pointer to
-      ! the input field (e.g. T_in) rather than the model field (CS%tv%T).
-      ! The result is that the model field will not be updated.
-      !
-      ! I am not yet sure how to resolve this.
+      ! NOTE: This pointer to rotated field is later replaced with the rotated field
+      ! TODO: Find a way to do it here
       sponge%var(n)%p => sp_ptr
     endif
   enddo
-  deallocate(sp_val_in)
-  deallocate(sp_val)
+
+  if (fixed_sponge) then
+    deallocate(sp_val_in)
+    deallocate(sp_val)
+  endif
 
   ! TODO: u and v points?
   !sponge%var_u = sponge_in%var_u
@@ -1098,6 +1104,24 @@ subroutine rotate_ALE_sponge(sponge_in, G_in, sponge, G, turns, param_file)
   ! I think initialize_ALE_sponge_* resolves remap_cs
   !sponge%remap_cs = sponge_in%remap_cs
 end subroutine rotate_ALE_sponge
+
+! TODO: I don't like this function, but can't think of another way to do it
+!       at the moment.
+subroutine update_ALE_sponge_field(sponge, p_old, p_new)
+  type(ALE_sponge_CS), pointer :: sponge
+  real, dimension(:,:,:), target, intent(in) :: p_old
+  real, dimension(:,:,:), target, intent(in) :: p_new
+
+  integer :: n
+
+  ! TODO: Need to correct T and S pointers...
+  ! TODO: What if we don't find it?
+  do n = 1, sponge%fldno
+    if (associated(sponge%var(n)%p, p_old)) &
+      sponge%var(n)%p => p_new
+  enddo
+end subroutine update_ALE_sponge_field
+
 
 ! GMM: I could not find where sponge_end is being called, but I am keeping
 !  ALE_sponge_end here so we can add that if needed.
