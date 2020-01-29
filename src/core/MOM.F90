@@ -1,4 +1,4 @@
-!!> The central module of the MOM6 ocean model
+!> The central module of the MOM6 ocean model
 module MOM
 
 
@@ -140,8 +140,8 @@ use MOM_forcing_type,          only : deallocate_mech_forcing, deallocate_forcin
 use MOM_variables,             only : rotate_surface_state
 use MOM_array_transform,       only : rotate_array
 use MOM_open_boundary,         only : rotate_OBC_config, rotate_OBC_state
-use MOM_sponge,                only : rotate_sponge
-use MOM_ALE_sponge,            only : rotate_ALE_sponge
+!use MOM_sponge,                only : rotate_sponge
+use MOM_ALE_sponge,            only : rotate_ALE_sponge, update_ALE_sponge_field
 
 implicit none ; private
 
@@ -2344,18 +2344,18 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, restart_CSp, &
                               CS%u, CS%v, CS%h, CS%T, CS%S, G, &
                               use_temperature, grid_qturns)
 
-    ! TODO: Ths sponge_CSp contain pointers to the original un-rotated fields.
-    ! I need to ensure that we are pointing to the *rotated* fields.  I have
-    ! not done that yet!
+    ! TODO: Skip for now...
+    !if (associated(sponge_in_CSp)) then
+    !  allocate(CS%sponge_CSp)
+    !  call rotate_sponge(sponge_in_CSp, CS%sponge_CSp, grid_qturns)
+    !endif
 
-    if (associated(sponge_in_CSp)) then
-      allocate(CS%sponge_CSp)
-      call rotate_sponge(sponge_in_CSp, CS%sponge_CSp, grid_qturns)
-    endif
-
-    if (associated(ALE_sponge_in_CSp)) &
+    if (associated(ALE_sponge_in_CSp)) then
       call rotate_ALE_sponge(ALE_sponge_in_CSp, G_in, CS%ALE_sponge_CSp, G, &
                              grid_qturns, param_file)
+      call update_ALE_sponge_field(CS%ALE_sponge_CSp, T_in, CS%T)
+      call update_ALE_sponge_field(CS%ALE_sponge_CSp, S_in, CS%S)
+    endif
 
     if (associated(OBC_in)) &
       call rotate_OBC_state(OBC_in, CS%OBC, grid_qturns)
