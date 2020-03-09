@@ -56,7 +56,7 @@ subroutine bound_edge_values( N, h, u, edge_val, h_neglect, answers_2018 )
   logical :: use_2018_answers  ! If true use older, less acccurate expressions.
   integer :: k, km1, kp1   ! Loop index and the values to either side.
 
-  use_2018_answers = .false. ; if (present(answers_2018)) use_2018_answers = answers_2018
+  use_2018_answers = .true. ; if (present(answers_2018)) use_2018_answers = answers_2018
   if (use_2018_answers) then
     hNeglect = hNeglect_dflt ; if (present(h_neglect)) hNeglect = h_neglect
   endif
@@ -247,7 +247,8 @@ subroutine edge_values_explicit_h4( N, h, u, edge_val, h_neglect, answers_2018 )
   integer               :: i, j
   logical   :: use_2018_answers  ! If true use older, less acccurate expressions.
 
-  use_2018_answers = .false. ; if (present(answers_2018)) use_2018_answers = answers_2018
+  use_2018_answers = .true. ; if (present(answers_2018)) use_2018_answers = answers_2018
+  use_2018_answers = .true. ; if (present(answers_2018)) use_2018_answers = answers_2018
   if (use_2018_answers) then
     hNeglect = hNeglect_edge_dflt ; if (present(h_neglect)) hNeglect = h_neglect
   else
@@ -419,7 +420,7 @@ subroutine edge_values_implicit_h4( N, h, u, edge_val, h_neglect, answers_2018 )
   real      :: hNeglect          ! A negligible thickness [H]
   logical   :: use_2018_answers  ! If true use older, less acccurate expressions.
 
-  use_2018_answers = .false. ; if (present(answers_2018)) use_2018_answers = answers_2018
+  use_2018_answers = .true. ; if (present(answers_2018)) use_2018_answers = answers_2018
   if (use_2018_answers) then
     hNeglect = hNeglect_edge_dflt ; if (present(h_neglect)) hNeglect = h_neglect
   else
@@ -732,7 +733,7 @@ subroutine edge_slopes_implicit_h3( N, h, u, edge_slopes, h_neglect, answers_201
 
   hNeglect = hNeglect_dflt ; if (present(h_neglect))  hNeglect = h_neglect
   hNeglect3 = hNeglect**3
-  use_2018_answers = .false. ; if (present(answers_2018)) use_2018_answers = answers_2018
+  use_2018_answers = .true. ; if (present(answers_2018)) use_2018_answers = answers_2018
 
   ! Loop on cells (except last one)
   do i = 1,N-1

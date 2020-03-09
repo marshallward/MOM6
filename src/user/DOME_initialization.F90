@@ -157,13 +157,14 @@ subroutine DOME_initialize_sponges(G, GV, US, tv, PF, CSp)
   type(sponge_CS),       pointer    :: CSp  !< A pointer that is set to point to the control
                                             !! structure for this module.
 
-  real :: eta(SZI_(G),SZJ_(G),SZK_(G)+1) ! A temporary array for eta.
+  real :: eta(SZI_(G),SZJ_(G),SZK_(G)+1) ! A temporary array for eta [Z ~> m].
   real :: temp(SZI_(G),SZJ_(G),SZK_(G))  ! A temporary array for other variables. !
-  real :: Idamp(SZI_(G),SZJ_(G))    ! The inverse damping rate [s-1].
+  real :: Idamp(SZI_(G),SZJ_(G))    ! The inverse damping rate [T-1 ~> s-1].
 
   real :: H0(SZK_(G))  ! Interface heights [Z ~> m].
-  real :: min_depth
-  real :: damp, e_dense, damp_new
+  real :: min_depth    ! The minimum depth at which to apply damping [Z ~> m]
+  real :: damp, damp_new ! Damping rates in the sponge [days]
+  real :: e_dense      ! The depth of the densest interfaces [Z ~> m]
   character(len=40)  :: mdl = "DOME_initialize_sponges" ! This subroutine's name.
   integer :: i, j, k, is, ie, js, je, isd, ied, jsd, jed, nz
 
@@ -186,17 +187,18 @@ subroutine DOME_initialize_sponges(G, GV, US, tv, PF, CSp)
   do i=is,ie; do j=js,je
     if (G%geoLonT(i,j) < 100.0) then ; damp = 10.0
     elseif (G%geoLonT(i,j) < 200.0) then
-      damp = 10.0*(200.0-G%geoLonT(i,j))/100.0
+      damp = 10.0 * (200.0-G%geoLonT(i,j))/100.0
     else ; damp=0.0
     endif
 
     if (G%geoLonT(i,j) > 1400.0) then ; damp_new = 10.0
     elseif (G%geoLonT(i,j) > 1300.0) then
-       damp_new = 10.0*(G%geoLonT(i,j)-1300.0)/100.0
+       damp_new = 10.0 * (G%geoLonT(i,j)-1300.0)/100.0
     else ; damp_new = 0.0
     endif
 
-    if (damp <= damp_new) damp=damp_new
+    if (damp <= damp_new) damp = damp_new
+    damp = US%T_to_s*damp
 
     ! These will be stretched inside of apply_sponge, so they can be in
     ! depth space for Boussinesq or non-Boussinesq models.
@@ -212,7 +214,7 @@ subroutine DOME_initialize_sponges(G, GV, US, tv, PF, CSp)
     eta(i,j,nz+1) = -G%bathyT(i,j)
 
     if (G%bathyT(i,j) > min_depth) then
-      Idamp(i,j) = damp/86400.0
+      Idamp(i,j) = damp / 86400.0
     else ; Idamp(i,j) = 0.0 ; endif
   enddo ; enddo
 
@@ -260,16 +262,16 @@ subroutine DOME_set_OBC_data(OBC, tv, G, GV, US, param_file, tr_Reg)
   ! The following variables are used to set the target temperature and salinity.
   real :: T0(SZK_(G)), S0(SZK_(G))
   real :: pres(SZK_(G))      ! An array of the reference pressure [Pa].
-  real :: drho_dT(SZK_(G))   ! Derivative of density with temperature [kg m-3 degC-1].
-  real :: drho_dS(SZK_(G))   ! Derivative of density with salinity [kg m-3 ppt-1].
-  real :: rho_guess(SZK_(G)) ! Potential density at T0 & S0 [kg m-3].
+  real :: drho_dT(SZK_(G))   ! Derivative of density with temperature [R degC-1 ~> kg m-3 degC-1].
+  real :: drho_dS(SZK_(G))   ! Derivative of density with salinity [R ppt-1 ~> kg m-3 ppt-1].
+  real :: rho_guess(SZK_(G)) ! Potential density at T0 & S0 [R ~> kg m-3].
   ! The following variables are used to set up the transport in the DOME example.
   real :: tr_0, y1, y2, tr_k, rst, rsb, rc, v_k, lon_im1
   real :: D_edge            ! The thickness [Z ~> m], of the dense fluid at the
                             ! inner edge of the inflow.
   real :: g_prime_tot       ! The reduced gravity across all layers [L2 Z-1 T-2 ~> m s-2].
   real :: Def_Rad           ! The deformation radius, based on fluid of
-                            ! thickness D_edge, in the same units as lat.
+                            ! thickness D_edge, in the same units as lat [m].
   real :: Ri_trans          ! The shear Richardson number in the transition
                             ! region of the specified shear profile.
   character(len=40)  :: mdl = "DOME_set_OBC_data" ! This subroutine's name.
@@ -290,18 +292,30 @@ subroutine DOME_set_OBC_data(OBC, tv, G, GV, US, param_file, tr_Reg)
 
   if (.not.associated(OBC)) return
 
-  g_prime_tot = (GV%g_Earth / GV%Rho0)*2.0
+  g_prime_tot = (GV%g_Earth / GV%Rho0) * 2.0*US%kg_m3_to_R
   Def_Rad = US%L_to_m*sqrt(D_edge*g_prime_tot) / (1.0e-4*US%T_to_s * 1000.0)
-  tr_0 = (-D_edge*sqrt(D_edge*g_prime_tot)*0.5e3*US%s_to_T*US%L_to_m*Def_Rad) * GV%Z_to_H
+  tr_0 = (-D_edge*sqrt(D_edge*g_prime_tot)*0.5e3*US%m_to_L*Def_Rad) * GV%Z_to_H
 
   if (OBC%number_of_segments /= 1) then
     call MOM_error(WARNING, 'Error in DOME OBC segment setup', .true.)
     return   !!! Need a better error message here
   endif
+
+  NTR = tr_Reg%NTR
+
+  ! Stash this information away for the messy tracer restarts.
+  OBC%ntr = NTR
+  if (.not. associated(OBC%tracer_x_reservoirs_used)) then
+    allocate(OBC%tracer_x_reservoirs_used(NTR))
+    allocate(OBC%tracer_y_reservoirs_used(NTR))
+    OBC%tracer_x_reservoirs_used(:) = .false.
+    OBC%tracer_y_reservoirs_used(:) = .false.
+    OBC%tracer_y_reservoirs_used(1) = .true.
+  endif
+
   segment => OBC%segment(1)
   if (.not. segment%on_pe) return
 
-  NTR = tr_Reg%NTR
   allocate(segment%field(NTR))
 
   do k=1,nz
@@ -317,7 +331,7 @@ subroutine DOME_set_OBC_data(OBC, tv, G, GV, US, param_file, tr_Reg)
     y2 = (2.0*Ri_trans*rsb + Ri_trans + 2.0)/(2.0 - Ri_trans)
     tr_k = tr_0 * (2.0/(Ri_trans*(2.0-Ri_trans))) * &
            ((log(y1)+1.0)/y1 - (log(y2)+1.0)/y2)
-    v_k = -US%L_T_to_m_s*sqrt(D_edge*g_prime_tot)*log((2.0 + Ri_trans*(1.0 + 2.0*rc)) / &
+    v_k = -sqrt(D_edge*g_prime_tot)*log((2.0 + Ri_trans*(1.0 + 2.0*rc)) / &
                                         (2.0 - Ri_trans))
     if (k == nz)  tr_k = tr_k + tr_0 * (2.0/(Ri_trans*(2.0+Ri_trans))) * &
                                        log((2.0+Ri_trans)/(2.0-Ri_trans))
@@ -345,13 +359,13 @@ subroutine DOME_set_OBC_data(OBC, tv, G, GV, US, param_file, tr_Reg)
     ! target density and a salinity of 35 psu.  This code is taken from
     ! USER_initialize_temp_sal.
     pres(:) = tv%P_Ref ; S0(:) = 35.0 ; T0(1) = 25.0
-    call calculate_density(T0(1),S0(1),pres(1),rho_guess(1),tv%eqn_of_state)
-    call calculate_density_derivs(T0,S0,pres,drho_dT,drho_dS,1,1,tv%eqn_of_state)
+    call calculate_density(T0(1),S0(1),pres(1),rho_guess(1),tv%eqn_of_state, scale=US%kg_m3_to_R)
+    call calculate_density_derivs(T0,S0,pres,drho_dT,drho_dS,1,1,tv%eqn_of_state, scale=US%kg_m3_to_R)
 
     do k=1,nz ; T0(k) = T0(1) + (GV%Rlay(k)-rho_guess(1)) / drho_dT(1) ; enddo
     do itt=1,6
-      call calculate_density(T0,S0,pres,rho_guess,1,nz,tv%eqn_of_state)
-      call calculate_density_derivs(T0,S0,pres,drho_dT,drho_dS,1,nz,tv%eqn_of_state)
+      call calculate_density(T0,S0,pres,rho_guess,1,nz,tv%eqn_of_state, scale=US%kg_m3_to_R)
+      call calculate_density_derivs(T0,S0,pres,drho_dT,drho_dS,1,nz,tv%eqn_of_state, scale=US%kg_m3_to_R)
       do k=1,nz ; T0(k) = T0(k) + (GV%Rlay(k)-rho_guess(k)) / drho_dT(k) ; enddo
     enddo
 

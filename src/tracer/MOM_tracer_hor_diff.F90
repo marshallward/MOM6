@@ -23,6 +23,7 @@ use MOM_neutral_diffusion,     only : neutral_diffusion_init, neutral_diffusion_
 use MOM_neutral_diffusion,     only : neutral_diffusion_CS
 use MOM_neutral_diffusion,     only : neutral_diffusion_calc_coeffs, neutral_diffusion
 use MOM_tracer_registry,       only : tracer_registry_type, tracer_type, MOM_tracer_chksum
+use MOM_unit_scaling,          only : unit_scale_type
 use MOM_variables,             only : thermo_var_ptrs
 use MOM_verticalGrid,          only : verticalGrid_type
 
@@ -34,11 +35,10 @@ public tracer_hordiff, tracer_hor_diff_init, tracer_hor_diff_end
 
 !> The ocntrol structure for along-layer and epineutral tracer diffusion
 type, public :: tracer_hor_diff_CS ; private
-  real    :: dt             !< The baroclinic dynamics time step [s].
-  real    :: KhTr           !< The along-isopycnal tracer diffusivity [m2 s-1].
-  real    :: KhTr_Slope_Cff !< The non-dimensional coefficient in KhTr formula
-  real    :: KhTr_min       !< Minimum along-isopycnal tracer diffusivity [m2 s-1].
-  real    :: KhTr_max       !< Maximum along-isopycnal tracer diffusivity [m2 s-1].
+  real    :: KhTr           !< The along-isopycnal tracer diffusivity [L2 T-1 ~> m2 s-1].
+  real    :: KhTr_Slope_Cff !< The non-dimensional coefficient in KhTr formula [nondim]
+  real    :: KhTr_min       !< Minimum along-isopycnal tracer diffusivity [L2 T-1 ~> m2 s-1].
+  real    :: KhTr_max       !< Maximum along-isopycnal tracer diffusivity [L2 T-1 ~> m2 s-1].
   real    :: KhTr_passivity_coeff !< Passivity coefficient that scales Rd/dx (default = 0)
                                   !! where passivity is the ratio between along-isopycnal
                                   !! tracer mixing and thickness mixing [nondim]
@@ -56,6 +56,8 @@ type, public :: tracer_hor_diff_CS ; private
                                   !! the CFL limit is not violated.
   logical :: use_neutral_diffusion !< If true, use the neutral_diffusion module from within
                                    !! tracer_hor_diff.
+  logical :: recalc_neutral_surf   !< If true, recalculate the neutral surfaces if CFL has been
+                                   !! exceeded
   type(neutral_diffusion_CS), pointer :: neutral_diffusion_CSp => NULL() !< Control structure for neutral diffusion.
   type(diag_ctrl), pointer :: diag => NULL() !< A structure that is used to
                                    !! regulate the timing of diagnostic output.
@@ -94,14 +96,15 @@ contains
 !! using the diffusivity in CS%KhTr, or using space-dependent diffusivity.
 !! Multiple iterations are used (if necessary) so that there is no limit
 !! on the acceptable time increment.
-subroutine tracer_hordiff(h, dt, MEKE, VarMix, G, GV, CS, Reg, tv, do_online_flag, read_khdt_x, read_khdt_y)
+subroutine tracer_hordiff(h, dt, MEKE, VarMix, G, GV, US, CS, Reg, tv, do_online_flag, read_khdt_x, read_khdt_y)
   type(ocean_grid_type),      intent(inout) :: G       !< Grid type
   real, dimension(SZI_(G),SZJ_(G),SZK_(G)), &
                               intent(in)    :: h       !< Layer thickness [H ~> m or kg m-2]
-  real,                       intent(in)    :: dt      !< time step [s]
+  real,                       intent(in)    :: dt      !< time step [T ~> s]
   type(MEKE_type),            pointer       :: MEKE    !< MEKE type
   type(VarMix_CS),            pointer       :: VarMix  !< Variable mixing type
   type(verticalGrid_type),    intent(in)    :: GV      !< ocean vertical grid structure
+  type(unit_scale_type),      intent(in)    :: US      !< A dimensional unit scaling type
   type(tracer_hor_diff_CS),   pointer       :: CS      !< module control structure
   type(tracer_registry_type), pointer       :: Reg     !< registered tracers
   type(thermo_var_ptrs),      intent(in)    :: tv      !< A structure containing pointers to any available
@@ -123,25 +126,25 @@ subroutine tracer_hordiff(h, dt, MEKE, VarMix, G, GV, CS, Reg, tv, do_online_fla
 
   real, dimension(SZI_(G),SZJ_(G)) :: &
     Ihdxdy, &     ! The inverse of the volume or mass of fluid in a layer in a
-                  ! grid cell [H-1 m-2 ~> m-3 or kg-1].
-    Kh_h, &       ! The tracer diffusivity averaged to tracer points [m2 s-1].
+                  ! grid cell [H-1 L-2 ~> m-3 or kg-1].
+    Kh_h, &       ! The tracer diffusivity averaged to tracer points [L2 T-1 ~> m2 s-1].
     CFL, &        ! A diffusive CFL number for each cell [nondim].
     dTr           ! The change in a tracer's concentration, in units of concentration [Conc].
 
   real, dimension(SZIB_(G),SZJ_(G)) :: &
     khdt_x, &     ! The value of Khtr*dt times the open face width divided by
-                  ! the distance between adjacent tracer points [m2].
+                  ! the distance between adjacent tracer points [L2 ~> m2].
     Coef_x, &     ! The coefficients relating zonal tracer differences
-                  ! to time-integrated fluxes [H m2 ~> m3 or kg].
-    Kh_u          ! Tracer mixing coefficient at u-points [m2 s-1].
+                  ! to time-integrated fluxes [H L2 ~> m3 or kg].
+    Kh_u          ! Tracer mixing coefficient at u-points [L2 T-1 ~> m2 s-1].
   real, dimension(SZI_(G),SZJB_(G)) :: &
     khdt_y, &     ! The value of Khtr*dt times the open face width divided by
-                  ! the distance between adjacent tracer points [m2].
+                  ! the distance between adjacent tracer points [L2 ~> m2].
     Coef_y, &     ! The coefficients relating meridional tracer differences
-                  ! to time-integrated fluxes [H m2 ~> m3 or kg].
-    Kh_v          ! Tracer mixing coefficient at u-points [m2 s-1].
+                  ! to time-integrated fluxes [H L2 ~> m3 or kg].
+    Kh_v          ! Tracer mixing coefficient at u-points [L2 T-1 ~> m2 s-1].
 
-  real :: khdt_max ! The local limiting value of khdt_x or khdt_y [m2].
+  real :: khdt_max ! The local limiting value of khdt_x or khdt_y [L2 ~> m2].
   real :: max_CFL ! The global maximum of the diffusive CFL number.
   logical :: use_VarMix, Resoln_scaled, do_online, use_Eady
   integer :: S_idx, T_idx ! Indices for temperature and salinity if needed
@@ -149,10 +152,10 @@ subroutine tracer_hordiff(h, dt, MEKE, VarMix, G, GV, CS, Reg, tv, do_online_fla
   real :: I_numitts  ! The inverse of the number of iterations, num_itts.
   real :: scale      ! The fraction of khdt_x or khdt_y that is applied in this
                      ! layer for this iteration [nondim].
-  real :: Idt        ! The inverse of the time step [s-1].
+  real :: Idt        ! The inverse of the time step [T-1 ~> s-1].
   real :: h_neglect  ! A thickness that is so small it is usually lost
                      ! in roundoff and can be neglected [H ~> m or kg m-2].
-  real :: Kh_loc     ! The local value of Kh [m2 s-1].
+  real :: Kh_loc     ! The local value of Kh [L2 T-1 ~> m2 s-1].
   real :: Res_Fn     ! The local value of the resolution function [nondim].
   real :: Rd_dx      ! The local value of deformation radius over grid-spacing [nondim].
   real :: normalize  ! normalization used for diagnostic Kh_h; diffusivity averaged to h-points.
@@ -173,7 +176,7 @@ subroutine tracer_hordiff(h, dt, MEKE, VarMix, G, GV, CS, Reg, tv, do_online_fla
   call cpu_clock_begin(id_clock_diffuse)
 
   ntr = Reg%ntr
-  Idt = 1.0/dt
+  Idt = 1.0 / dt
   h_neglect = GV%H_subroundoff
 
   if (CS%Diffuse_ML_interior .and. CS%first_call) then ; if (is_root_pe()) then
@@ -210,14 +213,14 @@ subroutine tracer_hordiff(h, dt, MEKE, VarMix, G, GV, CS, Reg, tv, do_online_fla
         Kh_loc = CS%KhTr
         if (use_Eady) Kh_loc = Kh_loc + CS%KhTr_Slope_Cff*VarMix%L2u(I,j)*VarMix%SN_u(I,j)
         if (associated(MEKE%Kh)) &
-          Kh_Loc = Kh_Loc + MEKE%KhTr_fac*sqrt(MEKE%Kh(i,j)*MEKE%Kh(i+1,j))
+          Kh_loc = Kh_loc + MEKE%KhTr_fac*sqrt(MEKE%Kh(i,j)*MEKE%Kh(i+1,j))
         if (CS%KhTr_max > 0.) Kh_loc = min(Kh_loc, CS%KhTr_max)
         if (Resoln_scaled) &
-          Kh_Loc = Kh_Loc * 0.5*(VarMix%Res_fn_h(i,j) + VarMix%Res_fn_h(i+1,j))
+          Kh_loc = Kh_loc * 0.5*(VarMix%Res_fn_h(i,j) + VarMix%Res_fn_h(i+1,j))
         Kh_u(I,j) = max(Kh_loc, CS%KhTr_min)
         if (CS%KhTr_passivity_coeff>0.) then ! Apply passivity
           Rd_dx=0.5*( VarMix%Rd_dx_h(i,j)+VarMix%Rd_dx_h(i+1,j) ) ! Rd/dx at u-points
-          Kh_loc=Kh_u(I,j)*max( CS%KhTr_passivity_min, CS%KhTr_passivity_coeff*Rd_dx )
+          Kh_loc = Kh_u(I,j)*max( CS%KhTr_passivity_min, CS%KhTr_passivity_coeff*Rd_dx )
           if (CS%KhTr_max > 0.) Kh_loc = min(Kh_loc, CS%KhTr_max) ! Re-apply max
           Kh_u(I,j) = max(Kh_loc, CS%KhTr_min) ! Re-apply min
         endif
@@ -227,14 +230,14 @@ subroutine tracer_hordiff(h, dt, MEKE, VarMix, G, GV, CS, Reg, tv, do_online_fla
         Kh_loc = CS%KhTr
         if (use_Eady) Kh_loc = Kh_loc + CS%KhTr_Slope_Cff*VarMix%L2v(i,J)*VarMix%SN_v(i,J)
         if (associated(MEKE%Kh)) &
-          Kh_Loc = Kh_Loc + MEKE%KhTr_fac*sqrt(MEKE%Kh(i,j)*MEKE%Kh(i,j+1))
+          Kh_loc = Kh_loc + MEKE%KhTr_fac*sqrt(MEKE%Kh(i,j)*MEKE%Kh(i,j+1))
         if (CS%KhTr_max > 0.) Kh_loc = min(Kh_loc, CS%KhTr_max)
         if (Resoln_scaled) &
-          Kh_Loc = Kh_Loc * 0.5*(VarMix%Res_fn_h(i,j) + VarMix%Res_fn_h(i,j+1))
+          Kh_loc = Kh_loc * 0.5*(VarMix%Res_fn_h(i,j) + VarMix%Res_fn_h(i,j+1))
         Kh_v(i,J) = max(Kh_loc, CS%KhTr_min)
         if (CS%KhTr_passivity_coeff>0.) then ! Apply passivity
-          Rd_dx=0.5*( VarMix%Rd_dx_h(i,j)+VarMix%Rd_dx_h(i,j+1) ) ! Rd/dx at v-points
-          Kh_loc=Kh_v(I,j)*max( CS%KhTr_passivity_min, CS%KhTr_passivity_coeff*Rd_dx )
+          Rd_dx = 0.5*( VarMix%Rd_dx_h(i,j)+VarMix%Rd_dx_h(i,j+1) ) ! Rd/dx at v-points
+          Kh_loc = Kh_v(i,J)*max( CS%KhTr_passivity_min, CS%KhTr_passivity_coeff*Rd_dx )
           if (CS%KhTr_max > 0.) Kh_loc = min(Kh_loc, CS%KhTr_max) ! Re-apply max
           Kh_v(i,J) = max(Kh_loc, CS%KhTr_min) ! Re-apply min
         endif
@@ -328,13 +331,13 @@ subroutine tracer_hordiff(h, dt, MEKE, VarMix, G, GV, CS, Reg, tv, do_online_fla
   else ! .not. do_online
     !$OMP parallel do default(shared)
     do j=js,je ; do I=is-1,ie
-      khdt_x(I,j) = read_khdt_x(I,j)
+      khdt_x(I,j) = US%m_to_L**2*read_khdt_x(I,j)
     enddo ; enddo
     !$OMP parallel do default(shared)
     do J=js-1,je ;  do i=is,ie
-      khdt_y(i,J) = read_khdt_y(i,J)
+      khdt_y(i,J) = US%m_to_L**2*read_khdt_y(i,J)
     enddo ; enddo
-    call pass_vector(khdt_x,khdt_y,G%Domain)
+    call pass_vector(khdt_x, khdt_y, G%Domain)
   endif ! do_online
 
   if (CS%check_diffusive_CFL) then
@@ -400,8 +403,11 @@ subroutine tracer_hordiff(h, dt, MEKE, VarMix, G, GV, CS, Reg, tv, do_online_fla
       if (CS%show_call_tree) call callTree_waypoint("Calling neutral diffusion (tracer_hordiff)",itt)
       if (itt>1) then ! Update halos for subsequent iterations
         call do_group_pass(CS%pass_t, G%Domain, clock=id_clock_pass)
+        if (CS%recalc_neutral_surf) then
+          call neutral_diffusion_calc_coeffs(G, GV, h, tv%T, tv%S, CS%neutral_diffusion_CSp)
+        endif
       endif
-      call neutral_diffusion(G, GV,  h, Coef_x, Coef_y, I_numitts*dt, Reg, CS%neutral_diffusion_CSp)
+      call neutral_diffusion(G, GV,  h, Coef_x, Coef_y, I_numitts*dt, Reg, US, CS%neutral_diffusion_CSp)
     enddo ! itt
 
   else    ! following if not using neutral diffusion, but instead along-surface diffusion
@@ -445,20 +451,20 @@ subroutine tracer_hordiff(h, dt, MEKE, VarMix, G, GV, CS, Reg, tv, do_online_fla
                 Coef_y(i,J) * (Reg%Tr(m)%t(i,j,k) - Reg%Tr(m)%t(i,j+1,k))))
           enddo ; enddo
           if (associated(Reg%Tr(m)%df_x)) then ; do j=js,je ; do I=G%IscB,G%IecB
-            Reg%Tr(m)%df_x(I,j,k) = Reg%Tr(m)%df_x(I,j,k) + Coef_x(I,j) * &
-                                (Reg%Tr(m)%t(i,j,k) - Reg%Tr(m)%t(i+1,j,k))*Idt
+            Reg%Tr(m)%df_x(I,j,k) = Reg%Tr(m)%df_x(I,j,k) + Coef_x(I,j) &
+                * (Reg%Tr(m)%t(i,j,k) - Reg%Tr(m)%t(i+1,j,k)) * Idt
           enddo ; enddo ; endif
           if (associated(Reg%Tr(m)%df_y)) then ; do J=G%JscB,G%JecB ; do i=is,ie
-            Reg%Tr(m)%df_y(i,J,k) = Reg%Tr(m)%df_y(i,J,k) + Coef_y(i,J) * &
-                                (Reg%Tr(m)%t(i,j,k) - Reg%Tr(m)%t(i,j+1,k))*Idt
+            Reg%Tr(m)%df_y(i,J,k) = Reg%Tr(m)%df_y(i,J,k) + Coef_y(i,J) &
+                * (Reg%Tr(m)%t(i,j,k) - Reg%Tr(m)%t(i,j+1,k)) * Idt
           enddo ; enddo ; endif
           if (associated(Reg%Tr(m)%df2d_x)) then ; do j=js,je ; do I=G%IscB,G%IecB
-            Reg%Tr(m)%df2d_x(I,j) = Reg%Tr(m)%df2d_x(I,j) + Coef_x(I,j) * &
-                                (Reg%Tr(m)%t(i,j,k) - Reg%Tr(m)%t(i+1,j,k))*Idt
+            Reg%Tr(m)%df2d_x(I,j) = Reg%Tr(m)%df2d_x(I,j) + Coef_x(I,j) &
+                * (Reg%Tr(m)%t(i,j,k) - Reg%Tr(m)%t(i+1,j,k)) * Idt
           enddo ; enddo ; endif
           if (associated(Reg%Tr(m)%df2d_y)) then ; do J=G%JscB,G%JecB ; do i=is,ie
-            Reg%Tr(m)%df2d_y(i,J) = Reg%Tr(m)%df2d_y(i,J) + Coef_y(i,J) * &
-                                (Reg%Tr(m)%t(i,j,k) - Reg%Tr(m)%t(i,j+1,k))*Idt
+            Reg%Tr(m)%df2d_y(i,J) = Reg%Tr(m)%df2d_y(i,J) + Coef_y(i,J) &
+                * (Reg%Tr(m)%t(i,j,k) - Reg%Tr(m)%t(i,j+1,k)) * Idt
           enddo ; enddo ; endif
           do j=js,je ; do i=is,ie
             Reg%Tr(m)%t(i,j,k) = Reg%Tr(m)%t(i,j,k) + dTr(i,j)
@@ -478,7 +484,7 @@ subroutine tracer_hordiff(h, dt, MEKE, VarMix, G, GV, CS, Reg, tv, do_online_fla
     if (CS%debug) call MOM_tracer_chksum("Before epipycnal diff ", Reg%Tr, ntr, G)
 
     call cpu_clock_begin(id_clock_epimix)
-    call tracer_epipycnal_ML_diff(h, dt, Reg%Tr, ntr, khdt_x, khdt_y, G, GV, &
+    call tracer_epipycnal_ML_diff(h, dt, Reg%Tr, ntr, khdt_x, khdt_y, G, GV, US, &
                                   CS, tv, num_itts)
     call cpu_clock_end(id_clock_epimix)
   endif
@@ -518,10 +524,10 @@ subroutine tracer_hordiff(h, dt, MEKE, VarMix, G, GV, CS, Reg, tv, do_online_fla
 
   if (CS%debug) then
     call uvchksum("After tracer diffusion khdt_[xy]", khdt_x, khdt_y, &
-                  G%HI, haloshift=0, symmetric=.true.)
+                  G%HI, haloshift=0, symmetric=.true., scale=US%L_to_m**2)
     if (CS%use_neutral_diffusion) then
       call uvchksum("After tracer diffusion Coef_[xy]", Coef_x, Coef_y, &
-                    G%HI, haloshift=0, symmetric=.true.)
+                    G%HI, haloshift=0, symmetric=.true., scale=US%L_to_m**2)
     endif
   endif
 
@@ -537,24 +543,29 @@ end subroutine tracer_hordiff
 !! Multiple iterations are used (if necessary) so that there is no limit on the
 !! acceptable time increment.
 subroutine tracer_epipycnal_ML_diff(h, dt, Tr, ntr, khdt_epi_x, khdt_epi_y, G, &
-                                    GV, CS, tv, num_itts)
+                                    GV, US, CS, tv, num_itts)
   type(ocean_grid_type),                    intent(inout) :: G          !< ocean grid structure
   type(verticalGrid_type),                  intent(in)    :: GV         !< ocean vertical grid structure
   real, dimension(SZI_(G),SZJ_(G),SZK_(G)), intent(in)    :: h          !< layer thickness [H ~> m or kg m-2]
-  real,                                     intent(in)    :: dt         !< time step
+  real,                                     intent(in)    :: dt         !< time step [T ~> s]
   type(tracer_type),                        intent(inout) :: Tr(:)      !< tracer array
   integer,                                  intent(in)    :: ntr        !< number of tracers
-  real, dimension(SZIB_(G),SZJ_(G)),        intent(in)    :: khdt_epi_x !< needs a comment
-  real, dimension(SZI_(G),SZJB_(G)),        intent(in)    :: khdt_epi_y !< needs a comment
+  real, dimension(SZIB_(G),SZJ_(G)),        intent(in)    :: khdt_epi_x !< Zonal epipycnal diffusivity times
+                                                           !! a time step and the ratio of the open face width over
+                                                           !! the distance between adjacent tracer points [L2 ~> m2]
+  real, dimension(SZI_(G),SZJB_(G)),        intent(in)    :: khdt_epi_y !< Meridional epipycnal diffusivity times
+                                                           !! a time step and the ratio of the open face width over
+                                                           !! the distance between adjacent tracer points [L2 ~> m2]
+  type(unit_scale_type),                    intent(in)    :: US !< A dimensional unit scaling type
   type(tracer_hor_diff_CS),                 intent(inout) :: CS         !< module control structure
   type(thermo_var_ptrs),                    intent(in)    :: tv         !< thermodynamic structure
   integer,                                  intent(in)    :: num_itts   !< number of iterations (usually=1)
 
 
   real, dimension(SZI_(G), SZJ_(G)) :: &
-    Rml_max  ! The maximum coordinate density within the mixed layer [kg m-3].
+    Rml_max  ! The maximum coordinate density within the mixed layer [R ~> kg m-3].
   real, dimension(SZI_(G), SZJ_(G), max(1,GV%nk_rho_varies)) :: &
-    rho_coord ! The coordinate density that is used to mix along [kg m-3].
+    rho_coord ! The coordinate density that is used to mix along [R ~> kg m-3].
 
   ! The naming mnemnonic is a=above,b=below,L=Left,R=Right,u=u-point,v=v-point.
   ! These are 1-D arrays of pointers to 2-d arrays to minimize memory usage.
@@ -574,11 +585,11 @@ subroutine tracer_epipycnal_ML_diff(h, dt, Tr, ntr, khdt_epi_x, khdt_epi_y, G, &
     k0b_Rv, k0a_Rv     ! in each pair of mixing at v-faces.
 
   real, dimension(SZI_(G), SZJ_(G), SZK_(G)) :: &
-    tr_flux_conv  ! The flux convergence of tracers [conc H m2 ~> conc m3 or conc kg]
+    tr_flux_conv  ! The flux convergence of tracers [conc H L2 ~> conc m3 or conc kg]
   real, dimension(SZI_(G), SZJ_(G), SZK_(G)) :: Tr_flux_3d, Tr_adj_vert_L, Tr_adj_vert_R
 
   real, dimension(SZI_(G), SZK_(G), SZJ_(G)) :: &
-    rho_srt, & ! The density of each layer of the sorted columns [kg m-3].
+    rho_srt, & ! The density of each layer of the sorted columns [R ~> kg m-3].
     h_srt      ! The thickness of each layer of the sorted columns [H ~> m or kg m-2].
   integer, dimension(SZI_(G), SZK_(G), SZJ_(G)) :: &
     k0_srt     ! The original k-index that each layer of the sorted column
@@ -609,21 +620,21 @@ subroutine tracer_epipycnal_ML_diff(h, dt, Tr, ntr, khdt_epi_x, khdt_epi_y, G, &
     nPv          ! The number of epipycnal pairings at each v-point.
   real :: h_exclude    ! A thickness that layers must attain to be considered
                        ! for inclusion in mixing [H ~> m or kg m-2].
-  real :: Idt        ! The inverse of the time step [s-1].
+  real :: Idt        ! The inverse of the time step [T-1 ~> s-1].
   real :: I_maxitt   ! The inverse of the maximum number of iterations.
-  real :: rho_pair, rho_a, rho_b  ! Temporary densities [kg m-3].
+  real :: rho_pair, rho_a, rho_b  ! Temporary densities [R ~> kg m-3].
   real :: Tr_min_face  ! The minimum and maximum tracer concentrations
   real :: Tr_max_face  ! associated with a pairing [Conc]
   real :: Tr_La, Tr_Lb ! The 4 tracer concentrations that might be
   real :: Tr_Ra, Tr_Rb ! associated with a pairing [Conc]
   real :: Tr_av_L    ! The average tracer concentrations on the left and right
   real :: Tr_av_R    ! sides of a pairing [Conc].
-  real :: Tr_flux    ! The tracer flux from left to right in a pair [conc H m2 ~> conc m3 or conc kg].
+  real :: Tr_flux    ! The tracer flux from left to right in a pair [conc H L2 ~> conc m3 or conc kg].
   real :: Tr_adj_vert  ! A downward vertical adjustment to Tr_flux between the
-                     ! two cells that make up one side of the pairing [conc H m2 ~> conc m3 or conc kg].
+                     ! two cells that make up one side of the pairing [conc H L2 ~> conc m3 or conc kg].
   real :: h_L, h_R   ! Thicknesses to the left and right [H ~> m or kg m-2].
   real :: wt_a, wt_b ! Fractional weights of layers above and below [nondim].
-  real :: vol        ! A cell volume or mass [H m2 ~> m3 or kg].
+  real :: vol        ! A cell volume or mass [H L2 ~> m3 or kg].
   logical, dimension(SZK_(G)) :: &
     left_set, &  ! If true, the left or right point determines the density of
     right_set    ! of the trio.  If densities are exactly equal, both are true.
@@ -640,7 +651,7 @@ subroutine tracer_epipycnal_ML_diff(h, dt, Tr, ntr, khdt_epi_x, khdt_epi_y, G, &
   is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec ; nz = GV%ke
   isd = G%isd ; ied = G%ied ; jsd = G%jsd ; jed = G%jed
   IsdB = G%IsdB ; IedB = G%IedB
-  Idt = 1.0/dt
+  Idt = 1.0 / dt
   nkmb = GV%nk_rho_varies
 
   if (num_itts <= 1) then
@@ -656,7 +667,7 @@ subroutine tracer_epipycnal_ML_diff(h, dt, Tr, ntr, khdt_epi_x, khdt_epi_y, G, &
   !$OMP parallel do default(shared)
   do k=1,nkmb ; do j=js-2,je+2
     call calculate_density(tv%T(:,j,k),tv%S(:,j,k), p_ref_cv, &
-                         rho_coord(:,j,k), is-2, ie-is+5, tv%eqn_of_state)
+                         rho_coord(:,j,k), is-2, ie-is+5, tv%eqn_of_state, scale=US%kg_m3_to_R)
   enddo ; enddo
 
   do j=js-2,je+2 ; do i=is-2,ie+2
@@ -1334,7 +1345,7 @@ subroutine tracer_epipycnal_ML_diff(h, dt, Tr, ntr, khdt_epi_x, khdt_epi_y, G, &
             tr_flux_conv(i,j,kLb) = tr_flux_conv(i,j,kLb) - (wt_b*Tr_flux_3d(i,j,k) - Tr_adj_vert_L(i,j,k))
           endif
           if (deep_wt_Rv(J)%p(i,k) >= 1.0) then
-            tr_flux_conv(i,j+1,kRb) = tr_flux_conv(i,j+1,kRb) + tr_flux_3d(i,j,k)
+            tr_flux_conv(i,j+1,kRb) = tr_flux_conv(i,j+1,kRb) + Tr_flux_3d(i,j,k)
           else
             kRa = k0a_Rv(J)%p(i,k)
             wt_b = deep_wt_Rv(J)%p(i,k) ; wt_a = 1.0 - wt_b
@@ -1375,9 +1386,10 @@ end subroutine tracer_epipycnal_ML_diff
 
 
 !> Initialize lateral tracer diffusion module
-subroutine tracer_hor_diff_init(Time, G, param_file, diag, EOS, CS)
+subroutine tracer_hor_diff_init(Time, G, US, param_file, diag, EOS, CS)
   type(time_type), target,    intent(in)    :: Time       !< current model time
   type(ocean_grid_type),      intent(in)    :: G          !< ocean grid structure
+  type(unit_scale_type),      intent(in)    :: US         !< A dimensional unit scaling type
   type(diag_ctrl), target,    intent(inout) :: diag       !< diagnostic control
   type(EOS_type),  target,    intent(in)    :: EOS        !< Equation of state CS
   type(param_file_type),      intent(in)    :: param_file !< parameter file
@@ -1401,7 +1413,7 @@ subroutine tracer_hor_diff_init(Time, G, param_file, diag, EOS, CS)
   call log_version(param_file, mdl, version, "")
   call get_param(param_file, mdl, "KHTR", CS%KhTr, &
                  "The background along-isopycnal tracer diffusivity.", &
-                 units="m2 s-1", default=0.0)
+                 units="m2 s-1", default=0.0, scale=US%m_to_L**2*US%T_to_s)
   call get_param(param_file, mdl, "KHTR_SLOPE_CFF", CS%KhTr_Slope_Cff, &
                  "The scaling coefficient for along-isopycnal tracer "//&
                  "diffusivity using a shear-based (Visbeck-like) "//&
@@ -1409,10 +1421,10 @@ subroutine tracer_hor_diff_init(Time, G, param_file, diag, EOS, CS)
                  units="nondim", default=0.0)
   call get_param(param_file, mdl, "KHTR_MIN", CS%KhTr_Min, &
                  "The minimum along-isopycnal tracer diffusivity.", &
-                 units="m2 s-1", default=0.0)
+                 units="m2 s-1", default=0.0, scale=US%m_to_L**2*US%T_to_s)
   call get_param(param_file, mdl, "KHTR_MAX", CS%KhTr_Max, &
                  "The maximum along-isopycnal tracer diffusivity.", &
-                 units="m2 s-1", default=0.0)
+                 units="m2 s-1", default=0.0, scale=US%m_to_L**2*US%T_to_s)
   call get_param(param_file, mdl, "KHTR_PASSIVITY_COEFF", CS%KhTr_passivity_coeff, &
                  "The coefficient that scales deformation radius over "//&
                  "grid-spacing in passivity, where passivity is the ratio "//&
@@ -1437,6 +1449,10 @@ subroutine tracer_hor_diff_init(Time, G, param_file, diag, EOS, CS)
                  "below this value.  The number of diffusive iterations "//&
                  "is often this value or the next greater integer.", &
                  units="nondim", default=-1.0)
+  call get_param(param_File, mdl, "RECALC_NEUTRAL_SURF", CS%recalc_neutral_surf, &
+                 "If true, then recalculate the neutral surfaces if the \n"//&
+                 "diffusive CFL is exceeded. If false, assume that the  \n"//&
+                 "positions of the surfaces do not change \n", default = .false.)
   CS%ML_KhTR_scale = 1.0
   if (CS%Diffuse_ML_interior) then
     call get_param(param_file, mdl, "ML_KHTR_SCALE", CS%ML_KhTR_scale, &
@@ -1463,19 +1479,19 @@ subroutine tracer_hor_diff_init(Time, G, param_file, diag, EOS, CS)
   CS%id_CFL    = -1
 
   CS%id_KhTr_u = register_diag_field('ocean_model', 'KHTR_u', diag%axesCu1, Time, &
-     'Epipycnal tracer diffusivity at zonal faces of tracer cell', 'm2 s-1')
+     'Epipycnal tracer diffusivity at zonal faces of tracer cell', 'm2 s-1', conversion=US%L_to_m**2*US%s_to_T)
   CS%id_KhTr_v = register_diag_field('ocean_model', 'KHTR_v', diag%axesCv1, Time, &
-     'Epipycnal tracer diffusivity at meridional faces of tracer cell', 'm2 s-1')
-  CS%id_KhTr_h = register_diag_field('ocean_model', 'KHTR_h', diag%axesT1, Time,&
-     'Epipycnal tracer diffusivity at tracer cell center', 'm2 s-1',   &
+     'Epipycnal tracer diffusivity at meridional faces of tracer cell', 'm2 s-1', conversion=US%L_to_m**2*US%s_to_T)
+  CS%id_KhTr_h = register_diag_field('ocean_model', 'KHTR_h', diag%axesT1, Time, &
+     'Epipycnal tracer diffusivity at tracer cell center', 'm2 s-1', conversion=US%L_to_m**2*US%s_to_T, &
      cmor_field_name='diftrelo',                                                &
      cmor_standard_name= 'ocean_tracer_epineutral_laplacian_diffusivity',       &
      cmor_long_name = 'Ocean Tracer Epineutral Laplacian Diffusivity')
 
   CS%id_khdt_x = register_diag_field('ocean_model', 'KHDT_x', diag%axesCu1, Time, &
-     'Epipycnal tracer diffusivity operator at zonal faces of tracer cell', 'm2')
+     'Epipycnal tracer diffusivity operator at zonal faces of tracer cell', 'm2', conversion=US%L_to_m**2)
   CS%id_khdt_y = register_diag_field('ocean_model', 'KHDT_y', diag%axesCv1, Time, &
-     'Epipycnal tracer diffusivity operator at meridional faces of tracer cell', 'm2')
+     'Epipycnal tracer diffusivity operator at meridional faces of tracer cell', 'm2', conversion=US%L_to_m**2)
   if (CS%check_diffusive_CFL) then
     CS%id_CFL = register_diag_field('ocean_model', 'CFL_lateral_diff', diag%axesT1, Time,&
        'Grid CFL number for lateral/neutral tracer diffusion', 'nondim')

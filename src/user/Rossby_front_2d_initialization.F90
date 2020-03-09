@@ -36,9 +36,10 @@ real, parameter :: HMLmax = 0.75 !< Deepest ML as fractional depth of ocean [non
 contains
 
 !> Initialization of thicknesses in 2D Rossby front test
-subroutine Rossby_front_initialize_thickness(h, G, GV, param_file, just_read_params)
-  type(ocean_grid_type),   intent(in) :: G            !< Grid structure
-  type(verticalGrid_type), intent(in) :: GV           !< Vertical grid structure
+subroutine Rossby_front_initialize_thickness(h, G, GV, US, param_file, just_read_params)
+  type(ocean_grid_type),   intent(in)  :: G           !< Grid structure
+  type(verticalGrid_type), intent(in)  :: GV          !< Vertical grid structure
+  type(unit_scale_type),   intent(in)  :: US          !< A dimensional unit scaling type
   real, dimension(SZI_(G),SZJ_(G),SZK_(GV)), &
                            intent(out) :: h           !< The thickness that is being initialized [H ~> m or kg m-2]
   type(param_file_type),   intent(in)  :: param_file  !< A structure indicating the open file
@@ -48,7 +49,8 @@ subroutine Rossby_front_initialize_thickness(h, G, GV, param_file, just_read_par
 
   integer :: i, j, k, is, ie, js, je, nz
   real    :: Tz, Dml, eta, stretch, h0
-  real    :: min_thickness, T_range, dRho_dT
+  real    :: min_thickness, T_range
+  real    :: dRho_dT      ! The partial derivative of density with temperature [R degC-1 ~> kg m-3 degC-1]
   logical :: just_read    ! If true, just read parameters but set nothing.
   character(len=40) :: verticalCoordinate
 
@@ -67,7 +69,7 @@ subroutine Rossby_front_initialize_thickness(h, G, GV, param_file, just_read_par
                  default=DEFAULT_COORDINATE_MODE, do_not_log=just_read)
   call get_param(param_file, mdl, "T_RANGE", T_range, 'Initial temperature range', &
                  units='C', default=0.0, do_not_log=just_read)
-  call get_param(param_file, mdl, "DRHO_DT", dRho_dT, default=-0.2, do_not_log=.true.)
+  call get_param(param_file, mdl, "DRHO_DT", dRho_dT, default=-0.2, scale=US%kg_m3_to_R, do_not_log=.true.)
 
   if (just_read) return ! All run-time parameters have been read, so return.
 
@@ -163,13 +165,13 @@ end subroutine Rossby_front_initialize_temperature_salinity
 subroutine Rossby_front_initialize_velocity(u, v, h, G, GV, US, param_file, just_read_params)
   type(ocean_grid_type),      intent(in)  :: G  !< Grid structure
   type(verticalGrid_type),    intent(in)  :: GV !< Vertical grid structure
-  type(unit_scale_type),      intent(in)  :: US !< A dimensional unit scaling type
   real, dimension(SZIB_(G),SZJ_(G),SZK_(G)), &
-                              intent(out) :: u  !< i-component of velocity [m s-1]
+                              intent(out) :: u  !< i-component of velocity [L T-1 ~> m s-1]
   real, dimension(SZI_(G),SZJB_(G),SZK_(G)), &
-                              intent(out) :: v  !< j-component of velocity [m s-1]
+                              intent(out) :: v  !< j-component of velocity [L T-1 ~> m s-1]
   real, dimension(SZI_(G),SZJ_(G), SZK_(G)), &
                               intent(in)  :: h  !< Thickness [H ~> m or kg m-2]
+  type(unit_scale_type),      intent(in)  :: US !< A dimensional unit scaling type
   type(param_file_type),      intent(in)  :: param_file !< A structure indicating the open file
                                                 !! to parse for model parameter values.
   logical,          optional, intent(in)  :: just_read_params !< If present and true, this call
@@ -178,7 +180,7 @@ subroutine Rossby_front_initialize_velocity(u, v, h, G, GV, US, param_file, just
   real    :: y            ! Non-dimensional coordinate across channel, 0..pi
   real    :: T_range      ! Range of salinities and temperatures over the vertical
   real    :: dUdT         ! Factor to convert dT/dy into dU/dz, g*alpha/f [L2 Z-1 T-1 degC-1 ~> m s-1 degC-1]
-  real    :: dRho_dT
+  real    :: dRho_dT      ! The partial derivative of density with temperature [R degC-1 ~> kg m-3 degC-1]
   real    :: Dml, zi, zc, zm ! Depths [Z ~> m].
   real    :: f            ! The local Coriolis parameter [T-1 ~> s-1]
   real    :: Ty           ! The meridional temperature gradient [degC L-1 ~> degC m-1]
@@ -195,7 +197,7 @@ subroutine Rossby_front_initialize_velocity(u, v, h, G, GV, US, param_file, just
                  default=DEFAULT_COORDINATE_MODE, do_not_log=just_read)
   call get_param(param_file, mdl, "T_RANGE", T_range, 'Initial temperature range', &
                  units='C', default=0.0, do_not_log=just_read)
-  call get_param(param_file, mdl, "DRHO_DT", dRho_dT, default=-0.2, do_not_log=.true.)
+  call get_param(param_file, mdl, "DRHO_DT", dRho_dT, default=-0.2, scale=US%kg_m3_to_R, do_not_log=.true.)
 
   if (just_read) return ! All run-time parameters have been read, so return.
 
@@ -214,7 +216,7 @@ subroutine Rossby_front_initialize_velocity(u, v, h, G, GV, US, param_file, just
       zi = zi - hAtU              ! Bottom interface position
       zc = zi - 0.5*hAtU          ! Position of middle of cell
       zm = max( zc + Dml, 0. )    ! Height above bottom of mixed layer
-      u(I,j,k) = US%L_T_to_m_s * dUdT * Ty * zm   ! Thermal wind starting at base of ML
+      u(I,j,k) = dUdT * Ty * zm   ! Thermal wind starting at base of ML
     enddo
   enddo ; enddo
 

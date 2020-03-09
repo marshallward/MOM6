@@ -43,10 +43,10 @@ type, public :: wave_structure_CS ; !private
   real, allocatable, dimension(:,:,:) :: W_profile
                                    !< Vertical profile of w_hat(z), where
                                    !! w(x,y,z,t) = w_hat(z)*exp(i(kx+ly-freq*t)) is the full time-
-                                   !! varying vertical velocity with w_hat(z) = W0*w_strct(z) [m s-1].
+                                   !! varying vertical velocity with w_hat(z) = W0*w_strct(z) [Z T-1 ~> m s-1].
   real, allocatable, dimension(:,:,:) :: Uavg_profile
                                    !< Vertical profile of the magnitude of horizontal velocity,
-                                   !! (u^2+v^2)^0.5, averaged over a period [m s-1].
+                                   !! (u^2+v^2)^0.5, averaged over a period [L T-1 ~> m s-1].
   real, allocatable, dimension(:,:,:) :: z_depths
                                    !< Depths of layer interfaces [m].
   real, allocatable, dimension(:,:,:) :: N2
@@ -96,48 +96,61 @@ subroutine wave_structure(h, tv, G, GV, US, cn, ModeNum, freq, CS, En, full_halo
   type(thermo_var_ptrs),                    intent(in)  :: tv !< A structure pointing to various
                                                               !! thermodynamic variables.
   real, dimension(SZI_(G),SZJ_(G)),         intent(in)  :: cn !< The (non-rotational) mode internal
-                                                              !! gravity wave speed [m s-1].
+                                                              !! gravity wave speed [L T-1 ~> m s-1].
   integer,                                  intent(in)  :: ModeNum !< Mode number
-  real,                                     intent(in)  :: freq !< Intrinsic wave frequency [s-1].
+  real,                                     intent(in)  :: freq !< Intrinsic wave frequency [T-1 ~> s-1].
   type(wave_structure_CS),                  pointer     :: CS !< The control structure returned by a
                                                               !! previous call to wave_structure_init.
   real, dimension(SZI_(G),SZJ_(G)), &
-                                  optional, intent(in)  :: En !< Internal wave energy density [J m-2].
-  logical,optional,                         intent(in)  :: full_halos !< If true, do the calculation
+                                  optional, intent(in)  :: En !< Internal wave energy density [R Z3 T-2 ~> J m-2]
+  logical,                        optional, intent(in)  :: full_halos !< If true, do the calculation
                                                               !! over the entire computational domain.
   ! Local variables
   real, dimension(SZK_(G)+1) :: &
-    dRho_dT, dRho_dS, &
-    pres, T_int, S_int, &
+    dRho_dT, &    ! Partial derivative of density with temperature [R degC-1 ~> kg m-3 degC-1]
+    dRho_dS, &    ! Partial derivative of density with salinity [R ppt-1 ~> kg m-3 ppt-1]
+    pres, &       ! Interface pressure [Pa]
+    T_int, &      ! Temperature interpolated to interfaces [degC]
+    S_int, &      ! Salinity interpolated to interfaces [ppt]
     gprime        ! The reduced gravity across each interface [m2 Z-1 s-2 ~> m s-2].
   real, dimension(SZK_(G)) :: &
     Igl, Igu      ! The inverse of the reduced gravity across an interface times
                   ! the thickness of the layer below (Igl) or above (Igu) it [s2 m-2].
   real, dimension(SZK_(G),SZI_(G)) :: &
-    Hf, Tf, Sf, Rf
+    Hf, &         ! Layer thicknesses after very thin layers are combined [Z ~> m]
+    Tf, &         ! Layer temperatures after very thin layers are combined [degC]
+    Sf, &         ! Layer salinities after very thin layers are combined [ppt]
+    Rf            ! Layer densities after very thin layers are combined [R ~> kg m-3]
   real, dimension(SZK_(G)) :: &
-    Hc, Tc, Sc, Rc, &
+    Hc, &         ! A column of layer thicknesses after convective istabilities are removed [Z ~> m]
+    Tc, &         ! A column of layer temperatures after convective istabilities are removed [degC]
+    Sc, &         ! A column of layer salinites after convective istabilities are removed [ppt]
+    Rc, &         ! A column of layer densities after convective istabilities are removed [R ~> kg m-3]
     det, ddet
   real, dimension(SZI_(G),SZJ_(G)) :: &
-    htot
+    htot          ! The vertical sum of the thicknesses [Z ~> m]
   real :: lam
   real :: min_h_frac
   real :: H_to_pres
   real, dimension(SZI_(G)) :: &
-    hmin, &  ! Thicknesses [Z ~> m].
-    H_here, HxT_here, HxS_here, HxR_here
+    hmin, &        ! Thicknesses [Z ~> m]
+    H_here, &      ! A thickness [Z ~> m]
+    HxT_here, &    ! A layer integrated temperature [degC Z ~> degC m]
+    HxS_here, &    ! A layer integrated salinity [ppt Z ~> ppt m]
+    HxR_here       ! A layer integrated density [R Z ~> kg m-2]
   real :: speed2_tot
-  real :: I_Hnew, drxh_sum
+  real :: I_Hnew   ! The inverse of a new layer thickness [Z-1 ~> m-1]
+  real :: drxh_sum ! The sum of density diffrences across interfaces times thicknesses [R Z ~> kg m-2]
   real, parameter :: tol1  = 0.0001, tol2 = 0.001
   real, pointer, dimension(:,:,:) :: T => NULL(), S => NULL()
-  real :: g_Rho0  ! G_Earth/Rho0 in m5 Z-1 s-2 kg-1.
-  real :: rescale, I_rescale
+  real :: g_Rho0  ! G_Earth/Rho0 in [m2 s-2 Z-1 R-1 ~> m4 s-2 kg-1].
+  ! real :: rescale, I_rescale
   integer :: kf(SZI_(G))
   integer, parameter :: max_itt = 1 ! number of times to iterate in solving for eigenvector
-  real, parameter    :: cg_subRO = 1e-100 ! a very small number
+  real :: cg_subRO        ! A tiny wave speed to prevent division by zero [L T-1 ~> m s-1]
   real, parameter    :: a_int = 0.5 ! value of normalized integral: \int(w_strct^2)dz = a_int
   real               :: I_a_int     ! inverse of a_int
-  real               :: f2          ! squared Coriolis frequency
+  real               :: f2          ! squared Coriolis frequency [T-2 ~> s-2]
   real               :: Kmag2       ! magnitude of horizontal wave number squared
   logical            :: use_EOS     ! If true, density is calculated from T & S using an
                                     ! equation of state.
@@ -147,10 +160,14 @@ subroutine wave_structure(h, tv, G, GV, US, cn, ModeNum, freq, CS, En, full_halo
   real, dimension(SZK_(G)+1) :: w_strct2, u_strct2
                                         ! squared values
   real, dimension(SZK_(G))   :: dz      ! thicknesses of merged layers (same as Hc I hope)
-  real, dimension(SZK_(G)+1) :: dWdz_profile ! profile of dW/dz
+  ! real, dimension(SZK_(G)+1) :: dWdz_profile ! profile of dW/dz
   real                       :: w2avg   ! average of squared vertical velocity structure funtion
-  real                       :: int_dwdz2, int_w2, int_N2w2, KE_term, PE_term, W0
-                                        ! terms in vertically averaged energy equation
+  real                       :: int_dwdz2
+  real                       :: int_w2
+  real                       :: int_N2w2
+  real                       :: KE_term ! terms in vertically averaged energy equation
+  real                       :: PE_term ! terms in vertically averaged energy equation
+  real                       :: W0      ! A vertical velocity magnitude [Z T-1 ~> m s-1]
   real                       :: gp_unscaled ! A version of gprime rescaled to [m s-2].
   real, dimension(SZK_(G)-1) :: lam_z   ! product of eigen value and gprime(k); one value for each
                                         ! interface (excluding surface and bottom)
@@ -178,11 +195,12 @@ subroutine wave_structure(h, tv, G, GV, US, cn, ModeNum, freq, CS, En, full_halo
   Pi = (4.0*atan(1.0))
 
   S => tv%S ; T => tv%T
-  g_Rho0 = US%L_T_to_m_s**2 * GV%g_Earth /GV%Rho0
+  g_Rho0 = US%L_T_to_m_s**2 * GV%g_Earth / GV%Rho0
+  cg_subRO = 1e-100*US%m_s_to_L_T  ! The hard-coded value here might need to increase.
   use_EOS = associated(tv%eqn_of_state)
 
   H_to_pres = GV%Z_to_H*GV%H_to_Pa
-  rescale = 1024.0**4 ; I_rescale = 1.0/rescale
+  ! rescale = 1024.0**4 ; I_rescale = 1.0/rescale
 
   min_h_frac = tol1 / real(nz)
 
@@ -248,7 +266,7 @@ subroutine wave_structure(h, tv, G, GV, US, cn, ModeNum, freq, CS, En, full_halo
       !-----------------------------------
       if (G%mask2dT(i,j) > 0.5) then
 
-        lam = 1/(cn(i,j)**2)
+        lam = 1/(US%L_T_to_m_s**2 * cn(i,j)**2)
 
         ! Calculate drxh_sum
         if (use_EOS) then
@@ -259,15 +277,15 @@ subroutine wave_structure(h, tv, G, GV, US, cn, ModeNum, freq, CS, En, full_halo
             S_int(k) = 0.5*(Sf(k,i)+Sf(k-1,i))
           enddo
           call calculate_density_derivs(T_int, S_int, pres, drho_dT, drho_dS, 2, &
-                                        kf(i)-1, tv%eqn_of_state)
+                                        kf(i)-1, tv%eqn_of_state, scale=US%kg_m3_to_R)
 
           ! Sum the reduced gravities to find out how small a density difference
           ! is negligibly small.
           drxh_sum = 0.0
           do k=2,kf(i)
             drxh_sum = drxh_sum + 0.5*(Hf(k-1,i)+Hf(k,i)) * &
-                max(0.0,drho_dT(k)*(Tf(k,i)-Tf(k-1,i)) + &
-                        drho_dS(k)*(Sf(k,i)-Sf(k-1,i)))
+                max(0.0,dRho_dT(k)*(Tf(k,i)-Tf(k-1,i)) + &
+                        dRho_dS(k)*(Sf(k,i)-Sf(k-1,i)))
           enddo
         else
           drxh_sum = 0.0
@@ -286,7 +304,7 @@ subroutine wave_structure(h, tv, G, GV, US, cn, ModeNum, freq, CS, En, full_halo
             kc = 1
             Hc(1) = Hf(1,i) ; Tc(1) = Tf(1,i) ; Sc(1) = Sf(1,i)
             do k=2,kf(i)
-              if ((drho_dT(k)*(Tf(k,i)-Tc(kc)) + drho_dS(k)*(Sf(k,i)-Sc(kc))) * &
+              if ((dRho_dT(k)*(Tf(k,i)-Tc(kc)) + dRho_dS(k)*(Sf(k,i)-Sc(kc))) * &
                   (Hc(kc) + Hf(k,i)) < 2.0 * tol2*drxh_sum) then
                 ! Merge this layer with the one above and backtrack.
                 I_Hnew = 1.0 / (Hc(kc) + Hf(k,i))
@@ -297,7 +315,7 @@ subroutine wave_structure(h, tv, G, GV, US, cn, ModeNum, freq, CS, En, full_halo
                 ! that the tolerance is a factor of two larger, to avoid limit how
                 ! far back we go.
                 do k2=kc,2,-1
-                  if ((drho_dT(k2)*(Tc(k2)-Tc(k2-1)) + drho_dS(k2)*(Sc(k2)-Sc(k2-1))) * &
+                  if ((dRho_dT(k2)*(Tc(k2)-Tc(k2-1)) + dRho_dS(k2)*(Sc(k2)-Sc(k2-1))) * &
                       (Hc(k2) + Hc(k2-1)) < tol2*drxh_sum) then
                     ! Merge the two bottommost layers.  At this point kc = k2.
                     I_Hnew = 1.0 / (Hc(kc) + Hc(kc-1))
@@ -316,8 +334,8 @@ subroutine wave_structure(h, tv, G, GV, US, cn, ModeNum, freq, CS, En, full_halo
             enddo
             ! At this point there are kc layers and the gprimes should be positive.
             do k=2,kc ! Revisit this if non-Boussinesq.
-              gprime(k) = g_Rho0 * (drho_dT(k)*(Tc(k)-Tc(k-1)) + &
-                                    drho_dS(k)*(Sc(k)-Sc(k-1)))
+              gprime(k) = g_Rho0 * (dRho_dT(k)*(Tc(k)-Tc(k-1)) + &
+                                    dRho_dS(k)*(Sc(k)-Sc(k-1)))
             enddo
           else  ! .not.use_EOS
             ! Do the same with density directly...
@@ -421,7 +439,7 @@ subroutine wave_structure(h, tv, G, GV, US, cn, ModeNum, freq, CS, En, full_halo
             do itt=1,max_itt
               call tridiag_solver(a_diag(1:kc-1),b_diag(1:kc-1),c_diag(1:kc-1), &
                                   -lam_z(1:kc-1),e_guess(1:kc-1),"TDMA_H",e_itt)
-              e_guess(1:kc-1) = e_itt(1:kc-1)/sqrt(sum(e_itt(1:kc-1)**2))
+              e_guess(1:kc-1) = e_itt(1:kc-1) / sqrt(sum(e_itt(1:kc-1)**2))
             enddo ! itt-loop
             w_strct(2:kc) = e_guess(1:kc-1)
             w_strct(1)    = 0.0 ! rigid lid at surface
@@ -448,53 +466,54 @@ subroutine wave_structure(h, tv, G, GV, US, cn, ModeNum, freq, CS, En, full_halo
             enddo
             !### Some mathematical cancellations could occur in the next two lines.
             w2avg = w2avg / htot(i,j)
-            w_strct = w_strct / sqrt(htot(i,j)*w2avg*I_a_int)
+            w_strct(:) = w_strct(:) / sqrt(htot(i,j)*w2avg*I_a_int)
 
             ! Calculate vertical structure function of u (i.e. dw/dz)
             do K=2,nzm-1
               u_strct(K) = 0.5*((w_strct(K-1) - w_strct(K)  )/dz(k-1) + &
-                           (w_strct(K)   - w_strct(K+1))/dz(k))
+                                (w_strct(K)   - w_strct(K+1))/dz(k))
             enddo
             u_strct(1)   = (w_strct(1)   -  w_strct(2) )/dz(1)
-            u_strct(nzm)  = (w_strct(nzm-1)-  w_strct(nzm))/dz(nzm-1)
+            u_strct(nzm) = (w_strct(nzm-1)-  w_strct(nzm))/dz(nzm-1)
 
             ! Calculate wavenumber magnitude
-            f2 = US%s_to_T**2 * G%CoriolisBu(I,J)**2
+            f2 = G%CoriolisBu(I,J)**2
             !f2 = 0.25*US%s_to_T**2 *((G%CoriolisBu(I,J)**2 + G%CoriolisBu(I-1,J-1)**2) + &
             !    (G%CoriolisBu(I,J-1)**2 + G%CoriolisBu(I-1,J)**2))
-            Kmag2 = (freq**2 - f2) / (cn(i,j)**2 + cg_subRO**2)
+            Kmag2 = US%m_to_L**2 * (freq**2 - f2) / (cn(i,j)**2 + cg_subRO**2)
 
             ! Calculate terms in vertically integrated energy equation
             int_dwdz2 = 0.0 ; int_w2 = 0.0 ; int_N2w2 = 0.0
-            u_strct2 = u_strct(1:nzm)**2
-            w_strct2 = w_strct(1:nzm)**2
+            u_strct2(:) = u_strct(1:nzm)**2
+            w_strct2(:) = w_strct(1:nzm)**2
             ! vertical integration with Trapezoidal rule
             do k=1,nzm-1
-              int_dwdz2 = int_dwdz2 + 0.5*(u_strct2(K)+u_strct2(K+1))*dz(k)
-              int_w2    = int_w2    + 0.5*(w_strct2(K)+w_strct2(K+1))*dz(k)
-              int_N2w2  = int_N2w2  + 0.5*(w_strct2(K)*N2(K)+w_strct2(K+1)*N2(K+1))*dz(k)
+              int_dwdz2 = int_dwdz2 + 0.5*(u_strct2(K)+u_strct2(K+1)) * US%m_to_Z*dz(k)
+              int_w2    = int_w2    + 0.5*(w_strct2(K)+w_strct2(K+1)) * US%m_to_Z*dz(k)
+              int_N2w2  = int_N2w2  + 0.5*(w_strct2(K)*N2(K)+w_strct2(K+1)*N2(K+1)) * US%m_to_Z*dz(k)
             enddo
 
             ! Back-calculate amplitude from energy equation
-            if (Kmag2 > 0.0) then
-              KE_term = 0.25*GV%Rho0*( (1+f2/freq**2)/Kmag2*int_dwdz2 + int_w2 )
-              PE_term = 0.25*GV%Rho0*( int_N2w2/freq**2 )
+            if (present(En) .and. (freq**2*Kmag2 > 0.0)) then
+              ! Units here are [R
+              KE_term = 0.25*GV%Rho0*( ((freq**2 + f2) / (freq**2*Kmag2))*int_dwdz2 + int_w2 )
+              PE_term = 0.25*GV%Rho0*( int_N2w2 / (US%s_to_T*freq)**2 )
               if (En(i,j) >= 0.0) then
-                W0 = sqrt( En(i,j)/(KE_term + PE_term) )
+                W0 = sqrt( En(i,j) / (KE_term + PE_term) )
               else
                 call MOM_error(WARNING, "wave_structure: En < 0.0; setting to W0 to 0.0")
                 print *, "En(i,j)=", En(i,j), " at ig=", ig, ", jg=", jg
                 W0 = 0.0
               endif
               ! Calculate actual vertical velocity profile and derivative
-              W_profile    = W0*w_strct
-              dWdz_profile = W0*u_strct
+              W_profile(:)    = W0*w_strct(:)
+              ! dWdz_profile(:) = W0*u_strct(:)
               ! Calculate average magnitude of actual horizontal velocity over a period
-              Uavg_profile = abs(dWdz_profile) * sqrt((1+f2/freq**2)/(2.0*Kmag2))
+              Uavg_profile(:) = US%Z_to_L*abs(W0*u_strct(:)) * sqrt((freq**2 + f2) / (2.0*freq**2*Kmag2))
             else
-              W_profile    = 0.0
-              dWdz_profile = 0.0
-              Uavg_profile = 0.0
+              W_profile(:)    = 0.0
+              ! dWdz_profile(:) = 0.0
+              Uavg_profile(:) = 0.0
             endif
 
             ! Store values in control structure

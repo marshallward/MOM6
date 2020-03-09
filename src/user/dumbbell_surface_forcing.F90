@@ -27,9 +27,9 @@ type, public :: dumbbell_surface_forcing_CS ; private
   logical :: use_temperature !< If true, temperature and salinity are used as
                              !! state variables.
   logical :: restorebuoy     !< If true, use restoring surface buoyancy forcing.
-  real :: Rho0               !< The density used in the Boussinesq approximation [kg m-3].
+  real :: Rho0               !< The density used in the Boussinesq approximation [R ~> kg m-3].
   real :: G_Earth            !< The gravitational acceleration [L2 Z-1 T-2 ~> m s-2]
-  real :: Flux_const         !< The restoring rate at the surface [m s-1].
+  real :: Flux_const         !< The restoring rate at the surface [Z T-1 ~> m s-1].
   real :: gust_const         !< A constant unresolved background gustiness
                              !! that contributes to ustar [Pa].
   real :: slp_amplitude      !< The amplitude of pressure loading [Pa] applied
@@ -47,7 +47,7 @@ end type dumbbell_surface_forcing_CS
 contains
 
 !> Surface buoyancy (heat and fresh water) fluxes for the dumbbell test case
-subroutine dumbbell_buoyancy_forcing(state, fluxes, day, dt, G, CS)
+subroutine dumbbell_buoyancy_forcing(state, fluxes, day, dt, G, US, CS)
   type(surface),                 intent(inout) :: state  !< A structure containing fields that
                                                          !! describe the surface state of the ocean.
   type(forcing),                 intent(inout) :: fluxes !< A structure containing pointers to any
@@ -57,6 +57,7 @@ subroutine dumbbell_buoyancy_forcing(state, fluxes, day, dt, G, CS)
   real,                          intent(in)    :: dt     !< The amount of time over which
                                                          !! the fluxes apply [s]
   type(ocean_grid_type),         intent(in)    :: G      !< The ocean's grid structure
+  type(unit_scale_type),         intent(in)    :: US     !< A dimensional unit scaling type
   type(dumbbell_surface_forcing_CS),  pointer  :: CS     !< A control structure returned by a previous
                                                          !! call to dumbbell_surface_forcing_init
   ! Local variables
@@ -104,7 +105,7 @@ subroutine dumbbell_buoyancy_forcing(state, fluxes, day, dt, G, CS)
       ! vprec will be set later, if it is needed for salinity restoring.
       fluxes%vprec(i,j) = 0.0
 
-      ! Heat fluxes are in units of [W m-2] and are positive into the ocean.
+      ! Heat fluxes are in units of [Q R Z T-1 ~> W m-2] and are positive into the ocean.
       fluxes%lw(i,j) = 0.0 * G%mask2dT(i,j)
       fluxes%latent(i,j) = 0.0 * G%mask2dT(i,j)
       fluxes%sens(i,j) = 0.0 * G%mask2dT(i,j)
@@ -124,8 +125,7 @@ subroutine dumbbell_buoyancy_forcing(state, fluxes, day, dt, G, CS)
       ! density [kg m-3] that is being restored toward.
       if (CS%forcing_mask(i,j)>0.) then
         fluxes%vprec(i,j) = - (G%mask2dT(i,j) * (CS%Rho0*CS%Flux_const)) * &
-          ((CS%S_restore(i,j) - state%SSS(i,j)) / &
-           (0.5 * (CS%S_restore(i,j) + state%SSS(i,j))))
+                ((CS%S_restore(i,j) - state%SSS(i,j)) /  (0.5 * (CS%S_restore(i,j) + state%SSS(i,j))))
 
       endif
     enddo ; enddo
@@ -189,6 +189,7 @@ subroutine dumbbell_surface_forcing_init(Time, G, US, param_file, diag, CS)
   real :: S_surf, S_range
   real :: x, y
   integer :: i, j
+  logical :: dbrotate    ! If true, rotate the domain.
 #include "version_variable.h"
   character(len=40)  :: mdl = "dumbbell_surface_forcing" ! This module's name.
 
@@ -214,7 +215,7 @@ subroutine dumbbell_surface_forcing_init(Time, G, US, param_file, diag, CS)
                  "calculate accelerations and the mass for conservation "//&
                  "properties, or with BOUSSINSEQ false to convert some "//&
                  "parameters from vertical units of m to kg m-2.", &
-                 units="kg m-3", default=1035.0)
+                 units="kg m-3", default=1035.0, scale=US%kg_m3_to_R)
   call get_param(param_file, mdl, "DUMBBELL_SLP_AMP", CS%slp_amplitude, &
                  "Amplitude of SLP forcing in reservoirs.", &
                  units="kg m2 s-1", default = 10000.0)
@@ -224,6 +225,9 @@ subroutine dumbbell_surface_forcing_init(Time, G, US, param_file, diag, CS)
   call get_param(param_file, mdl, "DUMBBELL_SLP_PERIOD", CS%slp_period, &
                  "Periodicity of SLP forcing in reservoirs.", &
                  units="days", default = 1.0)
+  call get_param(param_file, mdl, "DUMBBELL_ROTATION", dbrotate, &
+                'Logical for rotation of dumbbell domain.',&
+                 units='nondim', default=.false., do_not_log=.true.)
   call get_param(param_file, mdl,"INITIAL_SSS", S_surf, &
                  "Initial surface salinity", units="1e-3", default=34.0, do_not_log=.true.)
   call get_param(param_file, mdl,"INITIAL_S_RANGE", S_range, &
@@ -238,8 +242,8 @@ subroutine dumbbell_surface_forcing_init(Time, G, US, param_file, diag, CS)
     call get_param(param_file, mdl, "FLUXCONST", CS%Flux_const, &
                  "The constant that relates the restoring surface fluxes "//&
                  "to the relative surface anomalies (akin to a piston "//&
-                 "velocity).  Note the non-MKS units.", units="m day-1", &
-                 fail_if_missing=.true.)
+                 "velocity).  Note the non-MKS units.", &
+                 units="m day-1", scale=US%m_to_Z*US%T_to_s, fail_if_missing=.true.)
     ! Convert CS%Flux_const from m day-1 to m s-1.
     CS%Flux_const = CS%Flux_const / 86400.0
 
@@ -250,8 +254,14 @@ subroutine dumbbell_surface_forcing_init(Time, G, US, param_file, diag, CS)
     do j=G%jsc,G%jec
       do i=G%isc,G%iec
         ! Compute normalized zonal coordinates (x,y=0 at center of domain)
-        x = ( G%geoLonT(i,j) - G%west_lon ) / G%len_lon - 0.5
-        y = ( G%geoLatT(i,j) - G%south_lat ) / G%len_lat - 0.5
+!       x = ( G%geoLonT(i,j) - G%west_lon ) / G%len_lon - 0.5
+!       y = ( G%geoLatT(i,j) - G%south_lat ) / G%len_lat - 0.5
+        if (dbrotate) then
+          ! This is really y in the rotated case
+          x = ( G%geoLatT(i,j) - G%south_lat ) / G%len_lat - 0.5
+        else
+          x = ( G%geoLonT(i,j) - G%west_lon ) / G%len_lon - 0.5
+        endif
         CS%forcing_mask(i,j)=0
         CS%S_restore(i,j) = S_surf
         if ((x>0.25)) then

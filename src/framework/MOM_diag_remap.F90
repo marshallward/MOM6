@@ -115,15 +115,21 @@ type :: diag_remap_ctrl
   real, dimension(:), allocatable :: dz !< Nominal layer thicknesses
   integer :: interface_axes_id = 0 !< Vertical axes id for remapping at interfaces
   integer :: layer_axes_id = 0 !< Vertical axes id for remapping on layers
+  logical :: answers_2018      !< If true, use the order of arithmetic and expressions for remapping
+                               !! that recover the answers from the end of 2018. Otherwise, use
+                               !! updated more robust forms of the same expressions.
 end type diag_remap_ctrl
 
 contains
 
 !> Initialize a diagnostic remapping type with the given vertical coordinate.
-subroutine diag_remap_init(remap_cs, coord_tuple)
+subroutine diag_remap_init(remap_cs, coord_tuple, answers_2018)
   type(diag_remap_ctrl), intent(inout) :: remap_cs !< Diag remapping control structure
   character(len=*),      intent(in)    :: coord_tuple !< A string in form of
                                                       !! MODULE_SUFFIX PARAMETER_SUFFIX COORDINATE_NAME
+  logical,               intent(in)    :: answers_2018 !< If true, use the order of arithmetic and expressions
+                                                      !! for remapping that recover the answers from the end of 2018.
+                                                      !! Otherwise, use more robust forms of the same expressions.
 
   remap_cs%diag_module_suffix = trim(extractWord(coord_tuple, 1))
   remap_cs%diag_coord_name = trim(extractWord(coord_tuple, 2))
@@ -132,6 +138,7 @@ subroutine diag_remap_init(remap_cs, coord_tuple)
   remap_cs%configured = .false.
   remap_cs%initialized = .false.
   remap_cs%used = .false.
+  remap_cs%answers_2018 = answers_2018
   remap_cs%nz = 0
 
 end subroutine diag_remap_init
@@ -285,8 +292,9 @@ subroutine diag_remap_update(remap_cs, G, GV, US, h, T, S, eqn_of_state)
     return
   endif
 
-  !### Try replacing both of these with GV%H_subroundoff
-  if (GV%Boussinesq) then
+  if (.not.remap_cs%answers_2018) then
+    h_neglect = GV%H_subroundoff ; h_neglect_edge = GV%H_subroundoff
+  elseif (GV%Boussinesq) then
     h_neglect = GV%m_to_H*1.0e-30 ; h_neglect_edge = GV%m_to_H*1.0e-10
   else
     h_neglect = GV%kg_m2_to_H*1.0e-30 ; h_neglect_edge = GV%kg_m2_to_H*1.0e-10
@@ -295,7 +303,8 @@ subroutine diag_remap_update(remap_cs, G, GV, US, h, T, S, eqn_of_state)
 
   if (.not. remap_cs%initialized) then
     ! Initialize remapping and regridding on the first call
-    call initialize_remapping(remap_cs%remap_cs, 'PPM_IH4', boundary_extrapolation=.false.)
+    call initialize_remapping(remap_cs%remap_cs, 'PPM_IH4', boundary_extrapolation=.false., &
+                              answers_2018=remap_cs%answers_2018)
     allocate(remap_cs%h(G%isd:G%ied,G%jsd:G%jed, nz))
     remap_cs%initialized = .true.
   endif
@@ -361,8 +370,9 @@ subroutine diag_remap_do_remap(remap_cs, G, GV, h, staggered_in_x, staggered_in_
   call assert(size(field, 3) == size(h, 3), &
               'diag_remap_do_remap: Remap field and thickness z-axes do not match.')
 
-  !### Try replacing both of these with GV%H_subroundoff
-  if (GV%Boussinesq) then
+  if (.not.remap_cs%answers_2018) then
+    h_neglect = GV%H_subroundoff ; h_neglect_edge = GV%H_subroundoff
+  elseif (GV%Boussinesq) then
     h_neglect = GV%m_to_H*1.0e-30 ; h_neglect_edge = GV%m_to_H*1.0e-10
   else
     h_neglect = GV%kg_m2_to_H*1.0e-30 ; h_neglect_edge = GV%kg_m2_to_H*1.0e-10
@@ -637,11 +647,12 @@ subroutine vertically_interpolate_diag_field(remap_cs, G, h, staggered_in_x, sta
 end subroutine vertically_interpolate_diag_field
 
 !> Horizontally average field
-subroutine horizontally_average_diag_field(G, h, staggered_in_x, staggered_in_y, &
+subroutine horizontally_average_diag_field(G, GV, h, staggered_in_x, staggered_in_y, &
                                            is_layer, is_extensive, &
                                            missing_value, field, averaged_field, &
                                            averaged_mask)
   type(ocean_grid_type),  intent(in) :: G !< Ocean grid structure
+  type(verticalGrid_type), intent(in) :: GV !< The ocean vertical grid structure
   real, dimension(:,:,:), intent(in) :: h !< The current thicknesses
   logical,                intent(in) :: staggered_in_x !< True if the x-axis location is at u or q points
   logical,                intent(in) :: staggered_in_y !< True if the y-axis location is at v or q points
@@ -663,6 +674,7 @@ subroutine horizontally_average_diag_field(G, h, staggered_in_x, staggered_in_y,
 
   ! TODO: These averages could potentially be modified to use the function in
   !       the MOM_spatial_means module.
+  ! NOTE: Reproducible sums must be computed in the original MKS units
 
   if (staggered_in_x .and. .not. staggered_in_y) then
     if (is_layer) then
@@ -673,14 +685,15 @@ subroutine horizontally_average_diag_field(G, h, staggered_in_x, staggered_in_y,
         if (is_extensive) then
           do j=G%jsc, G%jec ; do I=G%isc, G%iec
             I1 = I - G%isdB + 1
-            volume(I,j,k) = G%areaCu(I,j) * G%mask2dCu(I,j)
+            volume(I,j,k) = (G%US%L_to_m**2 * G%areaCu(I,j)) * G%mask2dCu(I,j)
             stuff(I,j,k) = volume(I,j,k) * field(I1,j,k)
           enddo ; enddo
         else ! Intensive
           do j=G%jsc, G%jec ; do I=G%isc, G%iec
             I1 = i - G%isdB + 1
             height = 0.5 * (h(i,j,k) + h(i+1,j,k))
-            volume(I,j,k) = G%areaCu(I,j) * height * G%mask2dCu(I,j)
+            volume(I,j,k) = (G%US%L_to_m**2 * G%areaCu(I,j)) &
+                * (GV%H_to_m * height) * G%mask2dCu(I,j)
             stuff(I,j,k) = volume(I,j,k) * field(I1,j,k)
           enddo ; enddo
         endif
@@ -689,7 +702,7 @@ subroutine horizontally_average_diag_field(G, h, staggered_in_x, staggered_in_y,
       do k=1,nz
         do j=G%jsc, G%jec ; do I=G%isc, G%iec
           I1 = I - G%isdB + 1
-          volume(I,j,k) = G%areaCu(I,j) * G%mask2dCu(I,j)
+          volume(I,j,k) = (G%US%L_to_m**2 * G%areaCu(I,j)) * G%mask2dCu(I,j)
           stuff(I,j,k) = volume(I,j,k) * field(I1,j,k)
         enddo ; enddo
       enddo
@@ -701,14 +714,15 @@ subroutine horizontally_average_diag_field(G, h, staggered_in_x, staggered_in_y,
         if (is_extensive) then
           do J=G%jsc, G%jec ; do i=G%isc, G%iec
             J1 = J - G%jsdB + 1
-            volume(i,J,k) = G%areaCv(i,J) * G%mask2dCv(i,J)
+            volume(i,J,k) = (G%US%L_to_m**2 * G%areaCv(i,J)) * G%mask2dCv(i,J)
             stuff(i,J,k) = volume(i,J,k) * field(i,J1,k)
           enddo ; enddo
         else ! Intensive
           do J=G%jsc, G%jec ; do i=G%isc, G%iec
             J1 = J - G%jsdB + 1
             height = 0.5 * (h(i,j,k) + h(i,j+1,k))
-            volume(i,J,k) = G%areaCv(i,J) * height * G%mask2dCv(i,J)
+            volume(i,J,k) = (G%US%L_to_m**2 * G%areaCv(i,J)) &
+                * (GV%H_to_m * height) * G%mask2dCv(i,J)
             stuff(i,J,k) = volume(i,J,k) * field(i,J1,k)
           enddo ; enddo
         endif
@@ -717,7 +731,7 @@ subroutine horizontally_average_diag_field(G, h, staggered_in_x, staggered_in_y,
       do k=1,nz
         do J=G%jsc, G%jec ; do i=G%isc, G%iec
           J1 = J - G%jsdB + 1
-          volume(i,J,k) = G%areaCv(i,J) * G%mask2dCv(i,J)
+          volume(i,J,k) = (G%US%L_to_m**2 * G%areaCv(i,J)) * G%mask2dCv(i,J)
           stuff(i,J,k) = volume(i,J,k) * field(i,J1,k)
         enddo ; enddo
       enddo
@@ -729,7 +743,7 @@ subroutine horizontally_average_diag_field(G, h, staggered_in_x, staggered_in_y,
         if (is_extensive) then
           do j=G%jsc, G%jec ; do i=G%isc, G%iec
             if (h(i,j,k) > 0.) then
-              volume(i,j,k) = G%areaT(i,j) * G%mask2dT(i,j)
+              volume(i,j,k) = (G%US%L_to_m**2 * G%areaT(i,j)) * G%mask2dT(i,j)
               stuff(i,j,k) = volume(i,j,k) * field(i,j,k)
             else
               volume(i,j,k) = 0.
@@ -738,7 +752,8 @@ subroutine horizontally_average_diag_field(G, h, staggered_in_x, staggered_in_y,
           enddo ; enddo
         else ! Intensive
           do j=G%jsc, G%jec ; do i=G%isc, G%iec
-            volume(i,j,k) = G%areaT(i,j) * h(i,j,k) * G%mask2dT(i,j)
+            volume(i,j,k) = (G%US%L_to_m**2 * G%areaT(i,j)) &
+                * (GV%H_to_m * h(i,j,k)) * G%mask2dT(i,j)
             stuff(i,j,k) = volume(i,j,k) * field(i,j,k)
           enddo ; enddo
         endif
@@ -746,7 +761,7 @@ subroutine horizontally_average_diag_field(G, h, staggered_in_x, staggered_in_y,
     else ! Interface
       do k=1,nz
         do j=G%jsc, G%jec ; do i=G%isc, G%iec
-          volume(i,j,k) = G%areaT(i,j) * G%mask2dT(i,j)
+          volume(i,j,k) = (G%US%L_to_m**2 * G%areaT(i,j)) * G%mask2dT(i,j)
           stuff(i,j,k) = volume(i,j,k) * field(i,j,k)
         enddo ; enddo
       enddo

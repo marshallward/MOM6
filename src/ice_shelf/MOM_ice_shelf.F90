@@ -190,8 +190,9 @@ contains
 !! formulation (optional to use just two equations).
 !! See \ref section_ICE_SHELF_equations
 subroutine shelf_calc_flux(state, fluxes, Time, time_step, CS, forces)
-  type(surface),         intent(inout) :: state !< structure containing fields that
-                                                !!describe the surface state of the ocean
+  type(surface),         intent(inout) :: state !< A structure containing fields that
+                                                !! describe the surface state of the ocean.  The
+                                                !! intent is only inout to allow for halo updates.
   type(forcing),         intent(inout) :: fluxes !< structure containing pointers to any possible
                                                  !! thermodynamic or mass-flux forcing fields.
   type(time_type),       intent(in)    :: Time  !< Start time of the fluxes.
@@ -336,7 +337,7 @@ subroutine shelf_calc_flux(state, fluxes, Time, time_step, CS, forces)
     do i=is,ie ; p_int(i) = CS%g_Earth * ISS%mass_shelf(i,j) ; enddo
 
     ! Calculate insitu densities and expansion coefficients
-    call calculate_density(state%sst(:,j),state%sss(:,j), p_int, &
+    call calculate_density(state%sst(:,j), state%sss(:,j), p_int, &
              Rhoml(:), is, ie-is+1, CS%eqn_of_state)
     call calculate_density_derivs(state%sst(:,j), state%sss(:,j), p_int, &
              dR0_dT, dR0_dS, is, ie-is+1, CS%eqn_of_state)
@@ -363,15 +364,20 @@ subroutine shelf_calc_flux(state, fluxes, Time, time_step, CS, forces)
           v_at_h = state%v(i,j)
 
           !### I think that CS%utide**1 should be CS%utide**2
+          !    Also I think that if taux_shelf and tauy_shelf have been calculated by the
+          ! ocean stress calculation, they should be used here or later to set ustar_shelf. - RWH
           fluxes%ustar_shelf(i,j) = MAX(CS%ustar_bg, US%m_to_Z*US%T_to_s * &
               sqrt(CS%cdrag*((u_at_h**2 + v_at_h**2) + CS%utide(i,j)**1)))
 
           ustar_h = US%Z_to_m*US%s_to_T*fluxes%ustar_shelf(i,j)
 
-          if (associated(state%taux_shelf) .and. associated(state%tauy_shelf)) then
-            state%taux_shelf(i,j) = ustar_h*ustar_h*CS%Rho0*Isqrt2
-            state%tauy_shelf(i,j) = state%taux_shelf(i,j)
-          endif
+          ! I think that the following can be deleted without causing any problems.
+          ! if (allocated(state%taux_shelf) .and. allocated(state%tauy_shelf)) then
+          !   ! These arrays are supposed to be stress components at C-grid points, which is
+          !   ! inconsistent with what is coded up here.
+          !   state%taux_shelf(i,j) = ustar_h*ustar_h*CS%Rho0*Isqrt2
+          !   state%tauy_shelf(i,j) = state%taux_shelf(i,j)
+          ! endif
 
           ! Estimate the neutral ocean boundary layer thickness as the minimum of the
           ! reported ocean mixed layer thickness and the neutral Ekman depth.
@@ -652,7 +658,7 @@ subroutine shelf_calc_flux(state, fluxes, Time, time_step, CS, forces)
 
   if (CS%debug) call MOM_forcing_chksum("Before add shelf flux", fluxes, G, CS%US, haloshift=0)
 
-  call add_shelf_flux(G, CS, state, fluxes)
+  call add_shelf_flux(G, US, CS, state, fluxes)
 
   ! now the thermodynamic data is passed on... time to update the ice dynamic quantities
 
@@ -686,7 +692,7 @@ subroutine shelf_calc_flux(state, fluxes, Time, time_step, CS, forces)
   call disable_averaging(CS%diag)
 
   if (present(forces)) then
-    call add_shelf_forces(G, CS, forces, do_shelf_area=(CS%active_shelf_dynamics .or. &
+    call add_shelf_forces(G, US, CS, forces, do_shelf_area=(CS%active_shelf_dynamics .or. &
                                                         CS%override_shelf_movement))
   endif
 
@@ -750,8 +756,9 @@ end subroutine change_thickness_using_melt
 
 !> This subroutine adds the mechanical forcing fields and perhaps shelf areas, based on
 !! the ice state in ice_shelf_CS.
-subroutine add_shelf_forces(G, CS, forces, do_shelf_area)
+subroutine add_shelf_forces(G, US, CS, forces, do_shelf_area)
   type(ocean_grid_type), intent(inout) :: G    !< The ocean's grid structure.
+  type(unit_scale_type), intent(in)    :: US   !< A dimensional unit scaling type
   type(ice_shelf_CS),    pointer       :: CS   !< This module's control structure.
   type(mech_forcing),    intent(inout) :: forces !< A structure with the driving mechanical forces
   logical, optional,     intent(in)    :: do_shelf_area !< If true find the shelf-covered areas.
@@ -780,20 +787,20 @@ subroutine add_shelf_forces(G, CS, forces, do_shelf_area)
       forces%frac_shelf_u(I,j) = 0.0
       if ((G%areaT(i,j) + G%areaT(i+1,j) > 0.0)) & ! .and. (G%areaCu(I,j) > 0.0)) &
         forces%frac_shelf_u(I,j) = ((ISS%area_shelf_h(i,j) + ISS%area_shelf_h(i+1,j)) / &
-                                    (G%areaT(i,j) + G%areaT(i+1,j)))
+                                    (US%L_to_m**2*G%areaT(i,j) + US%L_to_m**2*G%areaT(i+1,j)))
     enddo ; enddo
     do J=jsd,jed-1 ; do i=isd,ied
       forces%frac_shelf_v(i,J) = 0.0
       if ((G%areaT(i,j) + G%areaT(i,j+1) > 0.0)) & ! .and. (G%areaCv(i,J) > 0.0)) &
         forces%frac_shelf_v(i,J) = ((ISS%area_shelf_h(i,j) + ISS%area_shelf_h(i,j+1)) / &
-                                    (G%areaT(i,j) + G%areaT(i,j+1)))
+                                    (US%L_to_m**2*G%areaT(i,j) + US%L_to_m**2*G%areaT(i,j+1)))
     enddo ; enddo
     call pass_vector(forces%frac_shelf_u, forces%frac_shelf_v, G%domain, TO_ALL, CGRID_NE)
   endif
 
   !### Consider working over a smaller array range.
   do j=jsd,jed ; do i=isd,ied
-    press_ice = (ISS%area_shelf_h(i,j) * G%IareaT(i,j)) * (CS%g_Earth * ISS%mass_shelf(i,j))
+    press_ice = (ISS%area_shelf_h(i,j) * US%m_to_L**2*G%IareaT(i,j)) * (CS%g_Earth * ISS%mass_shelf(i,j))
     if (associated(forces%p_surf)) then
       if (.not.forces%accumulate_p_surf) forces%p_surf(i,j) = 0.0
       forces%p_surf(i,j) = forces%p_surf(i,j) + press_ice
@@ -830,8 +837,9 @@ subroutine add_shelf_forces(G, CS, forces, do_shelf_area)
 end subroutine add_shelf_forces
 
 !> This subroutine adds the ice shelf pressure to the fluxes type.
-subroutine add_shelf_pressure(G, CS, fluxes)
+subroutine add_shelf_pressure(G, US, CS, fluxes)
   type(ocean_grid_type), intent(inout) :: G    !< The ocean's grid structure.
+  type(unit_scale_type), intent(in)    :: US   !< A dimensional unit scaling type
   type(ice_shelf_CS),    intent(in)    :: CS   !< This module's control structure.
   type(forcing),         intent(inout) :: fluxes  !< A structure of surface fluxes that may be updated.
 
@@ -844,7 +852,7 @@ subroutine add_shelf_pressure(G, CS, fluxes)
     call MOM_error(FATAL,"add_shelf_pressure: Incompatible ocean and ice shelf grids.")
 
   do j=js,je ; do i=is,ie
-    press_ice = (CS%ISS%area_shelf_h(i,j) * G%IareaT(i,j)) * (CS%g_Earth * CS%ISS%mass_shelf(i,j))
+    press_ice = (CS%ISS%area_shelf_h(i,j) * US%m_to_L**2*G%IareaT(i,j)) * (CS%g_Earth * CS%ISS%mass_shelf(i,j))
     if (associated(fluxes%p_surf)) then
       if (.not.fluxes%accumulate_p_surf) fluxes%p_surf(i,j) = 0.0
       fluxes%p_surf(i,j) = fluxes%p_surf(i,j) + press_ice
@@ -858,8 +866,9 @@ subroutine add_shelf_pressure(G, CS, fluxes)
 end subroutine add_shelf_pressure
 
 !> Updates surface fluxes that are influenced by sub-ice-shelf melting
-subroutine add_shelf_flux(G, CS, state, fluxes)
+subroutine add_shelf_flux(G, US, CS, state, fluxes)
   type(ocean_grid_type), intent(inout) :: G    !< The ocean's grid structure.
+  type(unit_scale_type), intent(in)    :: US   !< A dimensional unit scaling type
   type(ice_shelf_CS),    pointer       :: CS   !< This module's control structure.
   type(surface),         intent(inout) :: state!< Surface ocean state
   type(forcing),         intent(inout) :: fluxes  !< A structure of surface fluxes that may be used/updated.
@@ -903,22 +912,21 @@ subroutine add_shelf_flux(G, CS, state, fluxes)
 
   ISS => CS%ISS
 
-  call add_shelf_pressure(G, CS, fluxes)
+  call add_shelf_pressure(G, US, CS, fluxes)
 
   ! Determine ustar and the square magnitude of the velocity in the
   ! bottom boundary layer. Together these give the TKE source and
   ! vertical decay scale.
 
   if (CS%debug) then
-    if (associated(state%taux_shelf) .and. associated(state%tauy_shelf)) then
+    if (allocated(state%taux_shelf) .and. allocated(state%tauy_shelf)) then
       call uvchksum("tau[xy]_shelf", state%taux_shelf, state%tauy_shelf, &
                     G%HI, haloshift=0)
     endif
   endif
 
-  if (associated(state%taux_shelf) .and. associated(state%tauy_shelf)) then
+  if (allocated(state%taux_shelf) .and. allocated(state%tauy_shelf)) then
     call pass_vector(state%taux_shelf, state%tauy_shelf, G%domain, TO_ALL, CGRID_NE)
-  endif
   ! GMM: melting is computed using ustar_shelf (and not ustar), which has already
   ! been passed, I so believe we do not need to update fluxes%ustar.
 !  Irho0 = 1.0 / CS%Rho0
@@ -938,11 +946,12 @@ subroutine add_shelf_flux(G, CS, state, fluxes)
 
     ! fluxes%ustar(i,j) = MAX(CS%ustar_bg, US%m_to_Z*US%T_to_s*sqrt(Irho0 * sqrt(taux2 + tauy2)))
 !  endif ; enddo ; enddo
+  endif
 
   if (CS%active_shelf_dynamics .or. CS%override_shelf_movement) then
     do j=jsd,jed ; do i=isd,ied
       if (G%areaT(i,j) > 0.0) &
-        fluxes%frac_shelf_h(i,j) = ISS%area_shelf_h(i,j) * G%IareaT(i,j)
+        fluxes%frac_shelf_h(i,j) = ISS%area_shelf_h(i,j) * US%m_to_L**2*G%IareaT(i,j)
     enddo ; enddo
   endif
 
@@ -958,15 +967,15 @@ subroutine add_shelf_flux(G, CS, state, fluxes)
     if (associated(fluxes%evap)) fluxes%evap(i,j) = 0.0
     if (associated(fluxes%lprec)) then
       if (ISS%water_flux(i,j) > 0.0) then
-        fluxes%lprec(i,j) =  frac_area*ISS%water_flux(i,j)*CS%flux_factor
+        fluxes%lprec(i,j) =  US%kg_m2s_to_RZ_T*frac_area*ISS%water_flux(i,j)*CS%flux_factor
       else
         fluxes%lprec(i,j) = 0.0
-        fluxes%evap(i,j) = frac_area*ISS%water_flux(i,j)*CS%flux_factor
+        fluxes%evap(i,j) = US%kg_m2s_to_RZ_T*frac_area*ISS%water_flux(i,j)*CS%flux_factor
       endif
     endif
 
     if (associated(fluxes%sens)) &
-      fluxes%sens(i,j) = -frac_area*ISS%tflux_ocn(i,j)*CS%flux_factor
+      fluxes%sens(i,j) = -frac_area*ISS%tflux_ocn(i,j)*US%W_m2_to_QRZ_T*CS%flux_factor
     if (associated(fluxes%salt_flux)) &
       fluxes%salt_flux(i,j) = frac_area * ISS%salt_flux(i,j)*CS%flux_factor
   endif ; enddo ; enddo
@@ -993,7 +1002,7 @@ subroutine add_shelf_flux(G, CS, state, fluxes)
 
       !### These hard-coded limits need to be corrected.  They are inappropriate here.
       if (G%geoLonT(i,j) >= 790.0 .AND. G%geoLonT(i,j) <= 800.0) then
-        sponge_area = sponge_area + G%areaT(i,j)
+        sponge_area = sponge_area + US%L_to_m**2*G%areaT(i,j)
       endif
     enddo ; enddo
 
@@ -1050,7 +1059,9 @@ subroutine add_shelf_flux(G, CS, state, fluxes)
       ! Note the following is hard coded for ISOMIP
       if (G%geoLonT(i,j) >= 790.0 .AND. G%geoLonT(i,j) <= 800.0) then
         fluxes%vprec(i,j) = -mean_melt_flux * CS%density_ice/1000. ! evap is negative
-        fluxes%sens(i,j) = fluxes%vprec(i,j) * CS%Cp * CS%T0 ! W /m^2
+        ! Rescale fluxes%vprec to the proper units.
+        fluxes%vprec(i,j) =  US%kg_m2s_to_RZ_T * fluxes%vprec(i,j)
+        fluxes%sens(i,j) = fluxes%vprec(i,j) * US%J_kg_to_Q*CS%Cp * CS%T0 ! [ Q R Z T-1 ~> W /m^2 ]
         fluxes%salt_flux(i,j) = fluxes%vprec(i,j) * CS%S0*1.0e-3 ! kg (salt)/(m^2 s)
       endif
     enddo ; enddo
@@ -1121,12 +1132,12 @@ subroutine initialize_ice_shelf(param_file, ocn_grid, Time, CS, diag, forces, fl
   call MOM_domains_init(CS%grid%domain, param_file, min_halo=wd_halos, symmetric=GRID_SYM_)
   ! call diag_mediator_init(CS%grid,param_file,CS%diag)
   ! this needs to be fixed - will probably break when not using coupled driver 0
-  call MOM_grid_init(CS%grid, param_file)
+  call MOM_grid_init(CS%grid, param_file, CS%US)
 
   call create_dyn_horgrid(dG, CS%grid%HI)
   call clone_MOM_domain(CS%grid%Domain, dG%Domain)
 
-  call set_grid_metrics(dG, param_file)
+  call set_grid_metrics(dG, param_file, CS%US)
   ! call set_diag_mediator_grid(CS%grid, CS%diag)
 
   ! The ocean grid possibly uses different symmetry.
@@ -1396,7 +1407,7 @@ subroutine initialize_ice_shelf(param_file, ocn_grid, Time, CS, diag, forces, fl
   ! Set up the Coriolis parameter, G%f, usually analytically.
   call MOM_initialize_rotation(dG%CoriolisBu, dG, param_file, US)
   ! This copies grid elements, including bathyT and CoriolisBu from dG to CS%grid.
-  call copy_dyngrid_to_MOM_grid(dG, CS%grid)
+  call copy_dyngrid_to_MOM_grid(dG, CS%grid, US)
 
   call destroy_dyn_horgrid(dG)
 
@@ -1505,13 +1516,13 @@ subroutine initialize_ice_shelf(param_file, ocn_grid, Time, CS, diag, forces, fl
   call cpu_clock_end(id_clock_pass)
 
   do j=jsd,jed ; do i=isd,ied
-    if (ISS%area_shelf_h(i,j) > G%areaT(i,j)) then
+    if (ISS%area_shelf_h(i,j) > US%L_to_m**2*G%areaT(i,j)) then
       call MOM_error(WARNING,"Initialize_ice_shelf: area_shelf_h exceeds G%areaT.")
-      ISS%area_shelf_h(i,j) = G%areaT(i,j)
+      ISS%area_shelf_h(i,j) = US%L_to_m**2*G%areaT(i,j)
     endif
   enddo ; enddo
   if (present(fluxes)) then ; do j=jsd,jed ; do i=isd,ied
-    if (G%areaT(i,j) > 0.0) fluxes%frac_shelf_h(i,j) = ISS%area_shelf_h(i,j) / G%areaT(i,j)
+    if (G%areaT(i,j) > 0.0) fluxes%frac_shelf_h(i,j) = ISS%area_shelf_h(i,j) / (US%L_to_m**2*G%areaT(i,j))
   enddo ; enddo ; endif
 
   if (CS%debug) then
@@ -1519,9 +1530,9 @@ subroutine initialize_ice_shelf(param_file, ocn_grid, Time, CS, diag, forces, fl
   endif
 
   if (present(forces)) &
-    call add_shelf_forces(G, CS, forces, do_shelf_area=.not.CS%solo_ice_sheet)
+    call add_shelf_forces(G, US, CS, forces, do_shelf_area=.not.CS%solo_ice_sheet)
 
-  if (present(fluxes)) call add_shelf_pressure(G, CS, fluxes)
+  if (present(fluxes)) call add_shelf_pressure(G, US, CS, fluxes)
 
   if (CS%active_shelf_dynamics .and. .not.CS%isthermo) then
     ISS%water_flux(:,:) = 0.0
@@ -1684,7 +1695,7 @@ subroutine update_shelf_mass(G, CS, ISS, Time)
     ISS%area_shelf_h(i,j) = 0.0
     ISS%hmask(i,j) = 0.
     if (ISS%mass_shelf(i,j) > 0.0) then
-      ISS%area_shelf_h(i,j) = G%areaT(i,j)
+      ISS%area_shelf_h(i,j) = G%US%L_to_m**2*G%areaT(i,j)
       ISS%h_shelf(i,j) = ISS%mass_shelf(i,j) / CS%rho_ice
       ISS%hmask(i,j) = 1.
     endif

@@ -40,35 +40,30 @@ type, public :: surface
     SST, &         !< The sea surface temperature [degC].
     SSS, &         !< The sea surface salinity [ppt ~> psu or gSalt/kg].
     sfc_density, & !< The mixed layer density [kg m-3].
-    Hml, &      !< The mixed layer depth [m].
-    u, &        !< The mixed layer zonal velocity [m s-1].
-    v, &        !< The mixed layer meridional velocity [m s-1].
-    sea_lev, &  !< The sea level [m].  If a reduced surface gravity is
-                !! used, that is compensated for in sea_lev.
+    Hml, &         !< The mixed layer depth [m].
+    u, &           !< The mixed layer zonal velocity [m s-1].
+    v, &           !< The mixed layer meridional velocity [m s-1].
+    sea_lev, &     !< The sea level [m].  If a reduced surface gravity is
+                   !! used, that is compensated for in sea_lev.
+    frazil, &      !< The energy needed to heat the ocean column to the freezing point during
+                   !! the call to step_MOM [J m-2].
     melt_potential, & !< Instantaneous amount of heat that can be used to melt sea ice [J m-2].
                       !! This is computed w.r.t. surface freezing temperature.
     ocean_mass, &  !< The total mass of the ocean [kg m-2].
     ocean_heat, &  !< The total heat content of the ocean in [degC kg m-2].
     ocean_salt, &  !< The total salt content of the ocean in [kgSalt m-2].
-    salt_deficit   !< The salt needed to maintain the ocean column at a minimum
+    taux_shelf, &  !< The zonal stresses on the ocean under shelves [Pa].
+    tauy_shelf, &  !< The meridional stresses on the ocean under shelves [Pa].
+    TempxPmE, &    !< The net inflow of water into the ocean times the temperature at which this
+                   !! inflow occurs during the call to step_MOM [degC kg m-2].
+    salt_deficit, & !< The salt needed to maintain the ocean column at a minimum
                    !! salinity of 0.01 PSU over the call to step_MOM [kgSalt m-2].
+    internal_heat  !< Any internal or geothermal heat sources that are applied to the ocean
+                   !! integrated over the call to step_MOM [degC kg m-2].
   logical :: T_is_conT = .false. !< If true, the temperature variable SST is actually the
                    !! conservative temperature in [degC].
   logical :: S_is_absS = .false. !< If true, the salinity variable SSS is actually the
                    !! absolute salinity in [g/kg].
-  real, pointer, dimension(:,:) :: &
-    taux_shelf => NULL(), & !< The zonal stresses on the ocean under shelves [Pa].
-    tauy_shelf => NULL()    !< The meridional stresses on the ocean under shelves [Pa].
-  real, pointer, dimension(:,:) :: frazil => NULL()
-                !< The energy needed to heat the ocean column to the freezing point during the call
-                !! to step_MOM [J m-2].
-  real, pointer, dimension(:,:) :: TempxPmE => NULL()
-                !< The net inflow of water into the ocean times the temperature at which this inflow
-                !! occurs during the call to step_MOM [degC kg m-2]. This should be prescribed in the
-                !! forcing fields, but as it often is not, this is a useful heat budget diagnostic.
-  real, pointer, dimension(:,:) :: internal_heat => NULL()
-                !< Any internal or geothermal heat sources that are applied to the ocean integrated
-                !! over the call to step_MOM [degC kg m-2].
   type(coupler_2d_bc_type) :: tr_fields !< A structure that may contain an
                 !! array of named fields describing tracer-related quantities.
        !### NOTE: ALL OF THE ARRAYS IN TR_FIELDS USE THE COUPLER'S INDEXING CONVENTION AND HAVE NO
@@ -88,7 +83,7 @@ type, public :: thermo_var_ptrs
   real :: P_Ref          !<   The coordinate-density reference pressure [Pa].
                          !! This is the pressure used to calculate Rml from
                          !! T and S when eqn_of_state is associated.
-  real :: C_p            !<   The heat capacity of seawater [J degC-1 kg-1].
+  real :: C_p            !<   The heat capacity of seawater [Q degC-1 ~> J degC-1 kg-1].
                          !! When conservative temperature is used, this is
                          !! constant and exactly 3991.86795711963 J degC-1 kg-1.
   logical :: T_is_conT = .false. !< If true, the temperature variable tv%T is
@@ -101,21 +96,21 @@ type, public :: thermo_var_ptrs
   real, dimension(:,:), pointer :: frazil => NULL()
                          !< The energy needed to heat the ocean column to the
                          !! freezing point since calculate_surface_state was2
-                         !! last called [J m-2].
+                         !! last called [Q Z R ~> J m-2].
   real, dimension(:,:), pointer :: salt_deficit => NULL()
                          !<   The salt needed to maintain the ocean column
                          !! at a minimum salinity of MIN_SALINITY since the last time
-                         !! that calculate_surface_state was called, [gSalt m-2].
+                         !! that calculate_surface_state was called, [ppt R Z ~> gSalt m-2].
   real, dimension(:,:), pointer :: TempxPmE => NULL()
                          !<   The net inflow of water into the ocean times the
                          !! temperature at which this inflow occurs since the
-                         !! last call to calculate_surface_state [degC kg m-2].
+                         !! last call to calculate_surface_state [degC R Z ~> degC kg m-2].
                          !! This should be prescribed in the forcing fields, but
                          !! as it often is not, this is a useful heat budget diagnostic.
   real, dimension(:,:), pointer :: internal_heat => NULL()
                          !< Any internal or geothermal heat sources that
                          !! have been applied to the ocean since the last call to
-                         !! calculate_surface_state [degC kg m-2].
+                         !! calculate_surface_state [degC R Z ~> degC kg m-2].
 end type thermo_var_ptrs
 
 !> Pointers to all of the prognostic variables allocated in MOM_variables.F90 and MOM.F90.
@@ -127,28 +122,28 @@ type, public :: ocean_internal_state
   real, pointer, dimension(:,:,:) :: &
     T => NULL(), & !< Pointer to the temperature state variable [degC]
     S => NULL(), & !< Pointer to the salinity state variable [ppt ~> PSU or g/kg]
-    u => NULL(), & !< Pointer to the zonal velocity [m s-1]
-    v => NULL(), & !< Pointer to the meridional velocity [m s-1]
+    u => NULL(), & !< Pointer to the zonal velocity [L T-1 ~> m s-1]
+    v => NULL(), & !< Pointer to the meridional velocity [L T-1 ~> m s-1]
     h => NULL()    !< Pointer to the layer thicknesses [H ~> m or kg m-2]
   real, pointer, dimension(:,:,:) :: &
-    uh => NULL(), & !<  Pointer to zonal transports [H m2 s-1 ~> m3 s-1 or kg s-1]
-    vh => NULL()    !<  Pointer to meridional transports [H m2 s-1 ~> m3 s-1 or kg s-1]
+    uh => NULL(), & !<  Pointer to zonal transports [H L2 T-1 ~> m3 s-1 or kg s-1]
+    vh => NULL()    !<  Pointer to meridional transports [H L2 T-1 ~> m3 s-1 or kg s-1]
   real, pointer, dimension(:,:,:) :: &
-    CAu => NULL(), & !< Pointer to the zonal Coriolis and Advective acceleration [m s-2]
-    CAv => NULL(), & !< Pointer to the meridional Coriolis and Advective acceleration [m s-2]
-    PFu => NULL(), & !< Pointer to the zonal Pressure force acceleration [m s-2]
-    PFv => NULL(), & !< Pointer to the meridional Pressure force acceleration [m s-2]
-    diffu => NULL(), & !< Pointer to the zonal acceleration due to lateral viscosity [m s-1 T-1 ~> m s-2]
-    diffv => NULL(), & !< Pointer to the meridional acceleration due to lateral viscosity [m s-1 T-1 ~> m s-2]
+    CAu => NULL(), & !< Pointer to the zonal Coriolis and Advective acceleration [L T-2 ~> m s-2]
+    CAv => NULL(), & !< Pointer to the meridional Coriolis and Advective acceleration [L T-2 ~> m s-2]
+    PFu => NULL(), & !< Pointer to the zonal Pressure force acceleration [L T-2 ~> m s-2]
+    PFv => NULL(), & !< Pointer to the meridional Pressure force acceleration [L T-2 ~> m s-2]
+    diffu => NULL(), & !< Pointer to the zonal acceleration due to lateral viscosity [L T-2 ~> m s-2]
+    diffv => NULL(), & !< Pointer to the meridional acceleration due to lateral viscosity [L T-2 ~> m s-2]
     pbce => NULL(), &  !< Pointer to the baroclinic pressure force dependency on free surface movement
-                       !! [m2 s-2 H-1 ~> m s-2 or m4 kg-1 s-2]
-    u_accel_bt => NULL(), & !< Pointer to the zonal barotropic-solver acceleration [m s-2]
-    v_accel_bt => NULL()  !< Pointer to the meridional barotropic-solver acceleration [m s-2]
+                       !! [L2 T-2 H-1 ~> m s-2 or m4 kg-1 s-2]
+    u_accel_bt => NULL(), & !< Pointer to the zonal barotropic-solver acceleration [L T-2 ~> m s-2]
+    v_accel_bt => NULL()  !< Pointer to the meridional barotropic-solver acceleration [L T-2 ~> m s-2]
   real, pointer, dimension(:,:,:) :: &
-    u_av => NULL(), &  !< Pointer to zonal velocity averaged over the timestep [m s-1]
-    v_av => NULL(), &  !< Pointer to meridional velocity averaged over the timestep [m s-1]
-    u_prev => NULL(), & !< Pointer to zonal velocity at the end of the last timestep [m s-1]
-    v_prev => NULL()   !< Pointer to meridional velocity at the end of the last timestep [m s-1]
+    u_av => NULL(), &  !< Pointer to zonal velocity averaged over the timestep [L T-1 ~> m s-1]
+    v_av => NULL(), &  !< Pointer to meridional velocity averaged over the timestep [L T-1 ~> m s-1]
+    u_prev => NULL(), & !< Pointer to zonal velocity at the end of the last timestep [L T-1 ~> m s-1]
+    v_prev => NULL()   !< Pointer to meridional velocity at the end of the last timestep [L T-1 ~> m s-1]
 end type ocean_internal_state
 
 !> Pointers to arrays with accelerations, which can later be used for derived diagnostics, like energy balances.
@@ -156,28 +151,28 @@ type, public :: accel_diag_ptrs
 
   ! Each of the following fields has nz layers.
   real, pointer, dimension(:,:,:) :: &
-    diffu => NULL(), &     !< Zonal acceleration due to along isopycnal viscosity [m s-1 T-1 ~> m s-2]
-    diffv => NULL(), &     !< Meridional acceleration due to along isopycnal viscosity [m s-1 T-1 ~> m s-2]
-    CAu => NULL(), &       !< Zonal Coriolis and momentum advection accelerations [m s-2]
-    CAv => NULL(), &       !< Meridional Coriolis and momentum advection accelerations [m s-2]
-    PFu => NULL(), &       !< Zonal acceleration due to pressure forces [m s-2]
-    PFv => NULL(), &       !< Meridional acceleration due to pressure forces [m s-2]
-    du_dt_visc => NULL(), &!< Zonal acceleration due to vertical viscosity [m s-2]
-    dv_dt_visc => NULL(), &!< Meridional acceleration due to vertical viscosity [m s-2]
-    du_dt_dia => NULL(), & !< Zonal acceleration due to diapycnal  mixing [m s-2]
-    dv_dt_dia => NULL()    !< Meridional acceleration due to diapycnal  mixing [m s-2]
+    diffu => NULL(), &     !< Zonal acceleration due to along isopycnal viscosity [L T-2 ~> m s-2]
+    diffv => NULL(), &     !< Meridional acceleration due to along isopycnal viscosity [L T-2 ~> m s-2]
+    CAu => NULL(), &       !< Zonal Coriolis and momentum advection accelerations [L T-2 ~> m s-2]
+    CAv => NULL(), &       !< Meridional Coriolis and momentum advection accelerations [L T-2 ~> m s-2]
+    PFu => NULL(), &       !< Zonal acceleration due to pressure forces [L T-2 ~> m s-2]
+    PFv => NULL(), &       !< Meridional acceleration due to pressure forces [L T-2 ~> m s-2]
+    du_dt_visc => NULL(), &!< Zonal acceleration due to vertical viscosity [L T-2 ~> m s-2]
+    dv_dt_visc => NULL(), &!< Meridional acceleration due to vertical viscosity [L T-2 ~> m s-2]
+    du_dt_dia => NULL(), & !< Zonal acceleration due to diapycnal  mixing [L T-2 ~> m s-2]
+    dv_dt_dia => NULL()    !< Meridional acceleration due to diapycnal  mixing [L T-2 ~> m s-2]
   real, pointer, dimension(:,:,:) :: du_other => NULL()
                            !< Zonal velocity changes due to any other processes that are
-                           !! not due to any explicit accelerations [m s-1].
+                           !! not due to any explicit accelerations [L T-1 ~> m s-1].
   real, pointer, dimension(:,:,:) :: dv_other => NULL()
-                           !< Meridional velocity changes  due to any other processes that are
-                           !! not due to any explicit accelerations [m s-1].
+                           !< Meridional velocity changes due to any other processes that are
+                           !! not due to any explicit accelerations [L T-1 ~> m s-1].
 
   ! These accelerations are sub-terms included in the accelerations above.
-  real, pointer :: gradKEu(:,:,:) => NULL()  !< gradKEu = - d/dx(u2) [m s-2]
-  real, pointer :: gradKEv(:,:,:) => NULL()  !< gradKEv = - d/dy(u2) [m s-2]
-  real, pointer :: rv_x_v(:,:,:) => NULL()   !< rv_x_v = rv * v at u [m s-2]
-  real, pointer :: rv_x_u(:,:,:) => NULL()   !< rv_x_u = rv * u at v [m s-2]
+  real, pointer :: gradKEu(:,:,:) => NULL()  !< gradKEu = - d/dx(u2) [L T-2 ~> m s-2]
+  real, pointer :: gradKEv(:,:,:) => NULL()  !< gradKEv = - d/dy(u2) [L T-2 ~> m s-2]
+  real, pointer :: rv_x_v(:,:,:) => NULL()   !< rv_x_v = rv * v at u [L T-2 ~> m s-2]
+  real, pointer :: rv_x_u(:,:,:) => NULL()   !< rv_x_u = rv * u at v [L T-2 ~> m s-2]
 
 end type accel_diag_ptrs
 
@@ -186,10 +181,10 @@ type, public :: cont_diag_ptrs
 
 ! Each of the following fields has nz layers.
   real, pointer, dimension(:,:,:) :: &
-    uh => NULL(), &   !< Resolved zonal layer thickness fluxes, [H m2 s-1 ~> m3 s-1 or kg s-1]
-    vh => NULL(), &   !< Resolved meridional layer thickness fluxes, [H m2 s-1 ~> m3 s-1 or kg s-1]
-    uhGM => NULL(), & !< Isopycnal height diffusion induced zonal volume fluxes [H m2 s-1 ~> m3 s-1 or kg s-1]
-    vhGM => NULL()    !< Isopycnal height diffusion induced meridional volume fluxes [H m2 s-1 ~> m3 s-1 or kg s-1]
+    uh => NULL(), &   !< Resolved zonal layer thickness fluxes, [H L2 T-1 ~> m3 s-1 or kg s-1]
+    vh => NULL(), &   !< Resolved meridional layer thickness fluxes, [H L2 T-1 ~> m3 s-1 or kg s-1]
+    uhGM => NULL(), & !< Isopycnal height diffusion induced zonal volume fluxes [H L2 T-1 ~> m3 s-1 or kg s-1]
+    vhGM => NULL()    !< Isopycnal height diffusion induced meridional volume fluxes [H L2 T-1 ~> m3 s-1 or kg s-1]
 
 ! Each of the following fields is found at nz+1 interfaces.
   real, pointer :: diapyc_vel(:,:,:) => NULL() !< The net diapycnal velocity [H s-1 ~> m s-1 or kg m-2 s-1]
@@ -211,8 +206,8 @@ type, public :: vertvisc_type
                              !! energy, currently in [Z3 T-3 ~> m3 s-3], but may at some time be changed
                              !! to [kg Z3 m-3 T-3 ~> W m-2].
   real, pointer, dimension(:,:) :: &
-    taux_shelf => NULL(), &  !< The zonal stresses on the ocean under shelves [Pa].
-    tauy_shelf => NULL()     !< The meridional stresses on the ocean under shelves [Pa].
+    taux_shelf => NULL(), &  !< The zonal stresses on the ocean under shelves [R Z L T-2 ~> Pa].
+    tauy_shelf => NULL()     !< The meridional stresses on the ocean under shelves [R Z L T-2 ~> Pa].
   real, pointer, dimension(:,:) :: tbl_thick_shelf_u => NULL()
                 !< Thickness of the viscous top boundary layer under ice shelves at u-points [Z ~> m].
   real, pointer, dimension(:,:) :: tbl_thick_shelf_v => NULL()
@@ -229,7 +224,7 @@ type, public :: vertvisc_type
   real, pointer, dimension(:,:) :: nkml_visc_v => NULL()
                 !< The number of layers in the viscous surface mixed layer at v-points [nondim].
   real, pointer, dimension(:,:) :: &
-    MLD => NULL()      !< Instantaneous active mixing layer depth [H ~> m or kg m-2].
+    MLD => NULL()      !< Instantaneous active mixing layer depth in unscaled MKS units [m].
   real, pointer, dimension(:,:,:) :: &
     Ray_u => NULL(), & !< The Rayleigh drag velocity to be applied to each layer at u-points [Z T-1 ~> m s-1].
     Ray_v => NULL()    !< The Rayleigh drag velocity to be applied to each layer at v-points [Z T-1 ~> m s-1].
@@ -259,8 +254,6 @@ type, public :: vertvisc_type
                 !! This may be at the tracer or corner points
   real, pointer, dimension(:,:,:) :: Work3D_h_Eliz => NULL()
                 !< Work done by slumping in the x-direction for the SI parameterization [W m-2].
-  logical :: add_Kv_slow !< If True, add Kv_slow when calculating the 'coupling coefficient' (a_cpl)
-                         !! at the interfaces in find_coupling_coef.
 end type vertvisc_type
 
 !> Container for information about the summed layer transports
@@ -301,7 +294,7 @@ contains
 !> Allocates the fields for the surface (return) properties of
 !! the ocean model. Unused fields are unallocated.
 subroutine allocate_surface_state(sfc_state, G, use_temperature, do_integrals, &
-                                  gas_fields_ocn, use_meltpot)
+                                  gas_fields_ocn, use_meltpot, use_iceshelves, omit_frazil)
   type(ocean_grid_type), intent(in)    :: G                !< ocean grid structure
   type(surface),         intent(inout) :: sfc_state        !< ocean surface state type to be allocated.
   logical,     optional, intent(in)    :: use_temperature  !< If true, allocate the space for thermodynamic variables.
@@ -314,9 +307,13 @@ subroutine allocate_surface_state(sfc_state, G, use_temperature, do_integrals, &
                                               !! tracer fluxes, and can be used to spawn related
                                               !! internal variables in the ice model.
   logical,     optional, intent(in)    :: use_meltpot      !< If true, allocate the space for melt potential
+  logical,     optional, intent(in)    :: use_iceshelves   !< If true, allocate the space for the stresses
+                                                           !! under ice shelves.
+  logical,     optional, intent(in)    :: omit_frazil      !< If present and false, do not allocate the space to
+                                                           !! pass frazil fluxes to the coupler
 
   ! local variables
-  logical :: use_temp, alloc_integ, use_melt_potential
+  logical :: use_temp, alloc_integ, use_melt_potential, alloc_iceshelves, alloc_frazil
   integer :: is, ie, js, je, isd, ied, jsd, jed
   integer :: isdB, iedB, jsdB, jedB
 
@@ -327,6 +324,8 @@ subroutine allocate_surface_state(sfc_state, G, use_temperature, do_integrals, &
   use_temp = .true. ; if (present(use_temperature)) use_temp = use_temperature
   alloc_integ = .true. ; if (present(do_integrals)) alloc_integ = do_integrals
   use_melt_potential = .false. ; if (present(use_meltpot)) use_melt_potential = use_meltpot
+  alloc_iceshelves = .false. ; if (present(use_iceshelves)) alloc_iceshelves = use_iceshelves
+  alloc_frazil = .true. ; if (present(omit_frazil)) alloc_frazil = .not.omit_frazil
 
   if (sfc_state%arrays_allocated) return
 
@@ -335,6 +334,9 @@ subroutine allocate_surface_state(sfc_state, G, use_temperature, do_integrals, &
     allocate(sfc_state%SSS(isd:ied,jsd:jed)) ; sfc_state%SSS(:,:) = 0.0
   else
     allocate(sfc_state%sfc_density(isd:ied,jsd:jed)) ; sfc_state%sfc_density(:,:) = 0.0
+  endif
+  if (use_temp .and. alloc_frazil) then
+    allocate(sfc_state%frazil(isd:ied,jsd:jed)) ; sfc_state%frazil(:,:) = 0.0
   endif
   allocate(sfc_state%sea_lev(isd:ied,jsd:jed)) ; sfc_state%sea_lev(:,:) = 0.0
   allocate(sfc_state%Hml(isd:ied,jsd:jed)) ; sfc_state%Hml(:,:) = 0.0
@@ -351,8 +353,15 @@ subroutine allocate_surface_state(sfc_state, G, use_temperature, do_integrals, &
     if (use_temp) then
       allocate(sfc_state%ocean_heat(isd:ied,jsd:jed)) ; sfc_state%ocean_heat(:,:) = 0.0
       allocate(sfc_state%ocean_salt(isd:ied,jsd:jed)) ; sfc_state%ocean_salt(:,:) = 0.0
+      allocate(sfc_state%TempxPmE(isd:ied,jsd:jed))   ; sfc_state%TempxPmE(:,:) = 0.0
+      allocate(sfc_state%salt_deficit(isd:ied,jsd:jed))  ; sfc_state%salt_deficit(:,:) = 0.0
+      allocate(sfc_state%internal_heat(isd:ied,jsd:jed)) ; sfc_state%internal_heat(:,:) = 0.0
     endif
-    allocate(sfc_state%salt_deficit(isd:ied,jsd:jed)) ; sfc_state%salt_deficit(:,:) = 0.0
+  endif
+
+  if (alloc_iceshelves) then
+    allocate(sfc_state%taux_shelf(IsdB:IedB,jsd:jed)) ; sfc_state%taux_shelf(:,:) = 0.0
+    allocate(sfc_state%tauy_shelf(isd:ied,JsdB:JedB)) ; sfc_state%tauy_shelf(:,:) = 0.0
   endif
 
   if (present(gas_fields_ocn)) &
@@ -459,11 +468,11 @@ subroutine MOM_thermovar_chksum(mesg, tv, G)
   if (associated(tv%S)) &
     call hchksum(tv%S, mesg//" tv%S", G%HI)
   if (associated(tv%frazil)) &
-    call hchksum(tv%frazil, mesg//" tv%frazil", G%HI)
+    call hchksum(tv%frazil, mesg//" tv%frazil", G%HI, scale=G%US%Q_to_J_kg*G%US%RZ_to_kg_m2)
   if (associated(tv%salt_deficit)) &
-    call hchksum(tv%salt_deficit, mesg//" tv%salt_deficit", G%HI)
+    call hchksum(tv%salt_deficit, mesg//" tv%salt_deficit", G%HI, scale=G%US%RZ_to_kg_m2)
   if (associated(tv%TempxPmE)) &
-    call hchksum(tv%TempxPmE, mesg//" tv%TempxPmE", G%HI)
+    call hchksum(tv%TempxPmE, mesg//" tv%TempxPmE", G%HI, scale=G%US%RZ_to_kg_m2)
 end subroutine MOM_thermovar_chksum
 
 end module MOM_variables
