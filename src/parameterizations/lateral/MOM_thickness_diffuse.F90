@@ -2307,13 +2307,13 @@ subroutine thickness_diffuse_init(Time, G, GV, US, param_file, diag, CDp, CS)
   CS%id_Work_v = register_diag_field('ocean_model', 'Work_v', diag%axesCv1, Time, &
            'Work done at  V-point', 'W')
   CS%id_Work_h = register_diag_field('ocean_model', 'Work_h', diag%axesT1, Time, &
-           'Work done at  h-point', 'W')
+           'Work done at  h-point', 'W/m^2')
   CS%id_Work_u_Eliz = register_diag_field('ocean_model', 'Work_u_Eliz', diag%axesCu1, Time, &
            'Work done at  U-point (Eliz)', 'W')
   CS%id_Work_v_Eliz = register_diag_field('ocean_model', 'Work_v_Eliz', diag%axesCv1, Time, &
            'Work done at  V-point (Eliz)', 'W')
   CS%id_Work_h_Eliz = register_diag_field('ocean_model', 'Work_h_Eliz', diag%axesT1, Time, &
-           'Work done at  h-point', 'W')
+           'Work done at  h-point', 'W/m^2')
 end subroutine thickness_diffuse_init
 
 !> Copies ubtav and vbtav from private type into arrays
