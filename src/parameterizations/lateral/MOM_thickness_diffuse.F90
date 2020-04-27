@@ -618,7 +618,7 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, uhD_Eliz, vhD_
   real :: Work_v(SZI_(G), SZJB_(G)) ! diffusion integrated over a cell [R Z L4 T-3  ~> W ]
   real :: Work_u_Eliz(SZIB_(G), SZJ_(G)) ! The work being done by the thickness
   real :: Work_v_Eliz(SZI_(G), SZJB_(G)) ! diffusion integrated over a cell [R Z L4 T-3  ~> W ].
-  real :: Work_h        ! The work averaged over an h-cell [R Z L2 T-3 ~> W m-2].
+  real :: Work_h(SZI_(G), SZJ_(G))     ! The work averaged over an h-cell [R Z L2 T-3 ~> W m-2].
   real :: Work_h_Eliz(SZI_(G), SZJ_(G))        ! The work averaged over an h-cell [R Z L2 T-3 ~> W m-2].
   real :: PE_release_h  ! The amount of potential energy released by GM averaged over an h-cell [L4 Z-1 T-3 ~> m3 s-3]
                         ! The calculation is equal to h * S^2 * N^2 * kappa_GM.
@@ -1550,7 +1550,6 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, uhD_Eliz, vhD_
     ! Note that the units of Work_v and Work_u are W, while Work_h is W m-2.
     Work_h(i,j) = 0.5 * G%IareaT(i,j) * &
       ((Work_u(I-1,j) + Work_u(I,j)) + (Work_v(i,J-1) + Work_v(i,J)))
-!<<<<<<< HEAD
     Work_h_Eliz(i,j) = 0.5 * G%IareaT(i,j) * &
       ((Work_u_Eliz(I-1,j) + Work_u_Eliz(I,j)) + (Work_v_Eliz(i,J-1) + Work_v_Eliz(i,J)))
     enddo; enddo 
@@ -1586,13 +1585,6 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, uhD_Eliz, vhD_
   endif
 
   visc%Work3D_h_Eliz = Work3D_h_Eliz
-!=======
-!    if (associated(CS%GMwork)) CS%GMwork(i,j) = Work_h
-!    if (associated(MEKE) .and. .not.CS%GM_src_alt) then ; if (associated(MEKE%GM_src)) then
-!      MEKE%GM_src(i,j) = MEKE%GM_src(i,j) + Work_h
-!    endif ; endif
-!  enddo ; enddo ; endif
-!>>>>>>> dev/gfdl
 
   if (find_work .and. CS%GM_src_alt .and. associated(MEKE)) then ; if (associated(MEKE%GM_src)) then
     do j=js,je ; do i=is,ie ; do k=nz,1,-1

@@ -258,7 +258,7 @@ subroutine set_diffusivity(u, v, h, u_h, v_h, tv, fluxes, optics, visc, dt, &
     dRho_int, &   !< locally ref potential density difference across interfaces [R ~> kg m-3]
     KT_extra, &   !< double difusion diffusivity of temperature [Z2 T-1 ~> m2 s-1]
     KS_extra      !< double difusion diffusivity of salinity [Z2 T-1 ~> m2 s-1]
-
+  real :: I_Rho0      ! inverse of Boussinesq reference density [R-1 ~> m3 kg-1]
   real :: dissip        ! local variable for dissipation calculations [Z2 R T-3 ~> W m-3]
   real :: Omega2        ! squared absolute rotation rate [T-2 ~> s-2]
   real :: Kd_Eliz        ! diffusivity to add in a layer from SI parameterization [Z2 T-1 ~> m2 s-1].
@@ -280,7 +280,8 @@ subroutine set_diffusivity(u, v, h, u_h, v_h, tv, fluxes, optics, visc, dt, &
 
   if (.not.associated(CS)) call MOM_error(FATAL,"set_diffusivity: "//&
          "Module must be initialized before it is used.")
-
+  
+  I_Rho0     = 1.0 / GV%Rho0
   if (CS%answers_2018) then
     ! These hard-coded dimensional parameters are being replaced.
     kappa_dt_fill = US%m_to_Z**2 * 1.e-3 * 7200.
