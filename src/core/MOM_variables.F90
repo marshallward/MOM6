@@ -252,7 +252,7 @@ type, public :: vertvisc_type
   real, pointer, dimension(:,:,:) :: TKE_turb => NULL()
                 !< The turbulent kinetic energy per unit mass at the interfaces [Z2 T-2 ~> m2 s-2].
                 !! This may be at the tracer or corner points
-  real, pointer, dimension(:,:,:) :: Work3D_h_Eliz => NULL()
+  real, pointer, dimension(:,:,:) :: Work3D_h_SymInst => NULL()
                 !< Work done by slumping in the x-direction for the SI parameterization [W m-2].
 end type vertvisc_type
 
