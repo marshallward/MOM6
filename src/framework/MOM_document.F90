@@ -4,7 +4,7 @@ module MOM_document
 
 ! This file is part of MOM6. See LICENSE.md for the license.
 
-use MOM_time_manager, only : time_type
+use MOM_time_manager,  only : time_type, operator(==), get_time, get_ticks_per_second
 use MOM_error_handler, only : MOM_error, FATAL, WARNING, is_root_pe
 
 implicit none ; private
@@ -104,9 +104,9 @@ subroutine doc_param_logical(doc, varname, desc, units, val, default, &
 
   if (doc%filesAreOpen) then
     if (val) then
-      mesg = define_string(doc,varname,STRING_TRUE,units)
+      mesg = define_string(doc, varname, STRING_TRUE, units)
     else
-      mesg = undef_string(doc,varname,units)
+      mesg = undef_string(doc, varname, units)
     endif
 
     equalsDefault = .false.
@@ -156,7 +156,7 @@ subroutine doc_param_logical_array(doc, varname, desc, units, vals, default, &
       endif
     enddo
 
-    mesg = define_string(doc,varname,valstring,units)
+    mesg = define_string(doc, varname, valstring, units)
 
   equalsDefault = .false.
     if (present(default)) then
@@ -197,7 +197,7 @@ subroutine doc_param_int(doc, varname, desc, units, val, default, &
 
   if (doc%filesAreOpen) then
     valstring = int_string(val)
-    mesg = define_string(doc,varname,valstring,units)
+    mesg = define_string(doc, varname, valstring, units)
 
     equalsDefault = .false.
     if (present(default)) then
@@ -238,7 +238,7 @@ subroutine doc_param_int_array(doc, varname, desc, units, vals, default, &
       valstring = trim(valstring)//", "//trim(int_string(vals(i)))
     enddo
 
-    mesg = define_string(doc,varname,valstring,units)
+    mesg = define_string(doc, varname, valstring, units)
 
     equalsDefault = .false.
     if (present(default)) then
@@ -274,7 +274,7 @@ subroutine doc_param_real(doc, varname, desc, units, val, default, debuggingPara
 
   if (doc%filesAreOpen) then
     valstring = real_string(val)
-    mesg = define_string(doc,varname,valstring,units)
+    mesg = define_string(doc, varname, valstring, units)
 
     equalsDefault = .false.
     if (present(default)) then
@@ -283,8 +283,7 @@ subroutine doc_param_real(doc, varname, desc, units, val, default, debuggingPara
     endif
 
     if (mesgHasBeenDocumented(doc, varName, mesg)) return ! Avoid duplicates
-    call writeMessageAndDesc(doc, mesg, desc, equalsDefault, &
-                             debuggingParam=debuggingParam)
+    call writeMessageAndDesc(doc, mesg, desc, equalsDefault, debuggingParam=debuggingParam)
   endif
 end subroutine doc_param_real
 
@@ -310,7 +309,7 @@ subroutine doc_param_real_array(doc, varname, desc, units, vals, default, debugg
   if (doc%filesAreOpen) then
     valstring = trim(real_array_string(vals(:)))
 
-    mesg = define_string(doc,varname,valstring,units)
+    mesg = define_string(doc, varname, valstring, units)
 
     equalsDefault = .false.
     if (present(default)) then
@@ -320,8 +319,7 @@ subroutine doc_param_real_array(doc, varname, desc, units, vals, default, debugg
     endif
 
     if (mesgHasBeenDocumented(doc, varName, mesg)) return ! Avoid duplicates
-    call writeMessageAndDesc(doc, mesg, desc, equalsDefault, &
-                             debuggingParam=debuggingParam)
+    call writeMessageAndDesc(doc, mesg, desc, equalsDefault, debuggingParam=debuggingParam)
   endif
 
 end subroutine doc_param_real_array
@@ -347,7 +345,7 @@ subroutine doc_param_char(doc, varname, desc, units, val, default, &
   call open_doc_file(doc)
 
   if (doc%filesAreOpen) then
-    mesg = define_string(doc,varname,'"'//trim(val)//'"',units)
+    mesg = define_string(doc, varname, '"'//trim(val)//'"', units)
 
     equalsDefault = .false.
     if (present(default)) then
@@ -414,35 +412,40 @@ subroutine doc_closeBlock(doc, blockName)
 end subroutine doc_closeBlock
 
 !> This subroutine handles parameter documentation for time-type variables.
-subroutine doc_param_time(doc, varname, desc, units, val, default, &
-                          layoutParam, debuggingParam)
+subroutine doc_param_time(doc, varname, desc, val, default, units, debuggingParam)
   type(doc_type),   pointer    :: doc     !< A pointer to a structure that controls where the
                                           !! documentation occurs and its formatting
   character(len=*), intent(in) :: varname !< The name of the parameter being documented
   character(len=*), intent(in) :: desc    !< A description of the parameter being documented
-  character(len=*), intent(in) :: units   !< The units of the parameter being documented
   type(time_type),  intent(in) :: val     !< The value of the parameter
   type(time_type),  optional, intent(in) :: default !< The default value of this parameter
-  logical,          optional, intent(in) :: layoutParam !< If present and true, this is a layout parameter.
+  character(len=*), optional, intent(in) :: units   !< The units of the parameter being documented
   logical,          optional, intent(in) :: debuggingParam !< If present and true, this is a debugging parameter.
-! This subroutine handles parameter documentation for time-type variables.
-!  ### This needs to be written properly!
-  integer :: numspc
-  character(len=mLen) :: mesg
-  logical :: equalsDefault
+
+  ! Local varables
+  character(len=mLen)              :: mesg          ! The output message
+  character(len=doc%commentColumn) :: valstring     ! A string with the formatted value.
+  logical                          :: equalsDefault ! True if val = default.
 
   if (.not. (is_root_pe() .and. associated(doc))) return
   call open_doc_file(doc)
 
-  equalsDefault = .false.
   if (doc%filesAreOpen) then
-    numspc = max(1,doc%commentColumn-18-len_trim(varname))
-    mesg = "#define "//trim(varname)//" Time-type"//repeat(" ",numspc)//"!"
-    if (len_trim(units) > 0) mesg = trim(mesg)//"   ["//trim(units)//"]"
+    valstring = time_string(val)
+    if (present(units)) then
+      mesg = define_string(doc, varname, valstring, units)
+    else
+      mesg = define_string(doc, varname, valstring, "[days : seconds]")
+    endif
+
+    equalsDefault = .false.
+    if (present(default)) then
+      if (val == default) equalsDefault = .true.
+      mesg = trim(mesg)//" default = "//trim(time_string(default))
+    endif
 
     if (mesgHasBeenDocumented(doc, varName, mesg)) return ! Avoid duplicates
-    call writeMessageAndDesc(doc, mesg, desc, equalsDefault, &
-                             layoutParam=layoutParam, debuggingParam=debuggingParam)
+    call writeMessageAndDesc(doc, mesg, desc, equalsDefault, debuggingParam=debuggingParam)
   endif
 
 end subroutine doc_param_time
@@ -465,6 +468,9 @@ subroutine writeMessageAndDesc(doc, vmesg, desc, valueWasDefault, indent, &
   integer :: start_ind = 1             ! The starting index in the description for the next line.
   integer :: nl_ind, tab_ind, end_ind  ! The indices of new-lines, tabs, and the end of a line.
   integer :: len_text, len_tab, len_nl ! The lengths of the text string, tabs and new-lines.
+  integer :: len_cor                   ! The permitted length corrected for tab sizes in a line.
+  integer :: len_desc                  ! The non-whitespace length of the description.
+  integer :: substr_start              ! The starting index of a substring to search for tabs.
   integer :: indnt, msg_pad            ! Space counts used to format a message.
   logical :: msg_done, reset_msg_pad   ! Logicals used to format messages.
   logical :: all, short, layout, debug ! Flags indicating which files to write into.
@@ -491,16 +497,27 @@ subroutine writeMessageAndDesc(doc, vmesg, desc, valueWasDefault, indent, &
   do
     if (len_trim(desc(start_ind:)) < 1) exit
 
-    nl_ind = index(desc(start_ind:), "\n")
+    len_cor = len_text - msg_pad
 
+    substr_start = start_ind
+    len_desc = len_trim(desc)
+    do ! Adjust the available line length for anomalies in the size of tabs, counting \t as 2 spaces.
+      if (substr_start >= start_ind+len_cor) exit
+      tab_ind = index(desc(substr_start:min(len_desc,start_ind+len_cor)), "\t")
+      if (tab_ind == 0) exit
+      substr_start = substr_start + tab_ind
+      len_cor = len_cor + (len_tab - 2)
+    enddo
+
+    nl_ind = index(desc(start_ind:), "\n")
     end_ind = 0
-    if ((nl_ind > 0) .and. (len_trim(desc(start_ind:start_ind+nl_ind-2)) > len_text-msg_pad)) then
+    if ((nl_ind > 0) .and. (len_trim(desc(start_ind:start_ind+nl_ind-2)) > len_cor)) then
       ! This line is too long despite the new-line character.  Look for an earlier space to break.
-      end_ind = scan(desc(start_ind:start_ind+(len_text-msg_pad)), " ", back=.true.) - 1
+      end_ind = scan(desc(start_ind:start_ind+len_cor), " ", back=.true.) - 1
       if (end_ind > 0) nl_ind = 0
-    elseif ((nl_ind == 0) .and. (len_trim(desc(start_ind:)) > len_text-msg_pad)) then
+    elseif ((nl_ind == 0) .and. (len_trim(desc(start_ind:)) > len_cor)) then
       ! This line is too long and does not have a new-line character.  Look for a space to break.
-      end_ind = scan(desc(start_ind:start_ind+(len_text-msg_pad)), " ", back=.true.) - 1
+      end_ind = scan(desc(start_ind:start_ind+len_cor), " ", back=.true.) - 1
     endif
 
     reset_msg_pad = .false.
@@ -544,6 +561,26 @@ subroutine writeMessageAndDesc(doc, vmesg, desc, valueWasDefault, indent, &
 end subroutine writeMessageAndDesc
 
 ! ----------------------------------------------------------------------
+
+!> This function returns a string with a time type formatted as seconds (perhaps including a
+!! fractional number of seconds) and days
+function time_string(time)
+  type(time_type), intent(in) :: time !< The time type being translated
+  character(len=40) :: time_string
+
+  ! Local variables
+  integer :: secs, days, ticks, ticks_per_sec
+
+  call get_time(Time, secs, days, ticks)
+
+  time_string = trim(adjustl(int_string(days))) // ":" // trim(adjustl(int_string(secs)))
+  if (ticks /= 0) then
+    ticks_per_sec = get_ticks_per_second()
+    time_string = trim(time_string) // ":" // &
+                  trim(adjustl(int_string(ticks)))//"/"//trim(adjustl(int_string(ticks_per_sec)))
+  endif
+
+end function time_string
 
 !> This function returns a string with a real formatted like '(G)'
 function real_string(val)
@@ -675,7 +712,7 @@ function logical_string(val)
 end function logical_string
 
 !> This function returns a string for formatted parameter assignment
-function define_string(doc,varName,valString,units)
+function define_string(doc, varName, valString, units)
   type(doc_type),   pointer    :: doc     !< A pointer to a structure that controls where the
                                           !! documentation occurs and its formatting
   character(len=*), intent(in) :: varName !< The name of the parameter being documented
@@ -696,7 +733,7 @@ function define_string(doc,varName,valString,units)
 end function define_string
 
 !> This function returns a string for formatted false logicals
-function undef_string(doc,varName,units)
+function undef_string(doc, varName, units)
   type(doc_type),   pointer    :: doc     !< A pointer to a structure that controls where the
                                           !! documentation occurs and its formatting
   character(len=*), intent(in) :: varName !< The name of the parameter being documented
