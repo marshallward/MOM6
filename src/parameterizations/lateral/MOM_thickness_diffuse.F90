@@ -927,8 +927,8 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, uhD_SymInst, v
 
             if (CS%SYMMETRIC_INSTABILITY_DIFFUSE) then
               Coriolis_u= 0.5*( G%CoriolisBu(I,J) + G%CoriolisBu(I,J-1) )
-              SymInst_denom = ((drdz*G_rho0) ** 2 + (drdx*G_rho0) ** 2) ** 0.25 
-              if (SymInst_denom > 0) then                
+              SymInst_denom = ((drdz*G_rho0) ** 2 + (drdx*G_rho0) ** 2) ** 0.25
+              if (SymInst_denom > 0) then
                 factor_u = abs(Coriolis_u) - MAX(abs(Coriolis_u),abs(drdx*G_rho0/SymInst_denom))
               else
                 factor_u = 0.0
@@ -1140,7 +1140,7 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, uhD_SymInst, v
             ((e(i,j,K) + e(i,j,K+1)) + (e(i+1,j,K) + e(i+1,j,K+1))) )
         !same but 3D structure:
         tmp_work_layer =  ((uhD_SymInst(I,j,k) * drdi_u(I,k)) * &
-             0.25 * ((e(i,j,K) + e(i,j,K+1)) + (e(i+1,j,K) + e(i+1,j,K+1)))) 
+             0.25 * ((e(i,j,K) + e(i,j,K+1)) + (e(i+1,j,K) + e(i+1,j,K+1))))
         Work3D_u_SymInst(I,j,K) = G_scale * &
           ( uhtot_SymInst(I,j) * drdkDe_u(I,K)  - 0.5 * tmp_work_layer )
         Work3D_u_SymInst(I,j,K+1) = Work3D_u_SymInst(I,j,K+1) - 0.5 * G_scale * tmp_work_layer
@@ -1279,7 +1279,6 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, uhD_SymInst, v
             endif
             ! Estimate the streamfunction at each interface [Z L2 T-1 ~> m3 s-1].
             Sfn_unlim_v(i,K) = -((KH_v(i,J,K)*G%dx_Cv(i,J))*US%L_to_Z*Slope)
-            
             ! Avoid moving dense water upslope from below the level of
             ! the bottom on the receiving side.
             if (Sfn_unlim_v(i,K) > 0.0) then ! The flow below this interface is positive.
@@ -1579,7 +1578,7 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, uhD_SymInst, v
       ((Work_u(I-1,j) + Work_u(I,j)) + (Work_v(i,J-1) + Work_v(i,J)))
     Work_h_SymInst(i,j) = 0.5 * G%IareaT(i,j) * &
       ((Work_u_SymInst(I-1,j) + Work_u_SymInst(I,j)) + (Work_v_SymInst(i,J-1) + Work_v_SymInst(i,J)))
-    enddo; enddo 
+    enddo; enddo
     do k=nz,1,-1; do j=js,je ; do i=is,ie
 !Computing 3D work at h-points that will be passed to calculating a diffusivity in MOM_set_diffusivity.F90:
       Work3D_h_SymInst(i,j,K) = -0.5 * CS%SymInst_frac_TKE_to_Kd * G%IareaT(i,j) * & !switch sign to make release of work positive

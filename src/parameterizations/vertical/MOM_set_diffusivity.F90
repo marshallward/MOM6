@@ -279,7 +279,6 @@ subroutine set_diffusivity(u, v, h, u_h, v_h, tv, fluxes, optics, visc, dt, &
 
   if (.not.associated(CS)) call MOM_error(FATAL,"set_diffusivity: "//&
          "Module must be initialized before it is used.")
-  
   I_Rho0     = 1.0 / GV%Rho0
   if (CS%answers_2018) then
     ! These hard-coded dimensional parameters are being replaced.
@@ -506,7 +505,6 @@ subroutine set_diffusivity(u, v, h, u_h, v_h, tv, fluxes, optics, visc, dt, &
           TKE_SymInst  = I_Rho0 * 0.5 * (visc%Work3D_h_SymInst(i,j,K)+visc%Work3D_h_SymInst(i,j,K+1))
           diag_TKE_SymInst(i,j,k) = TKE_SymInst
           if (TKE_SymInst<0) TKE_SymInst = 0.0
-         
           Kd_SymInst  = TKE_to_Kd(i,k) * TKE_SymInst
           diag_Kd_SymInst(i,j,k) = Kd_SymInst
 
