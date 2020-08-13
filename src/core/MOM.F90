@@ -1068,13 +1068,8 @@ subroutine step_MOM_dynamics(forces, p_surf_begin, p_surf_end, dt, dt_thermo, &
     if (CS%debug) call hchksum(h,"Pre-thickness_diffuse h", G%HI, haloshift=0, scale=GV%H_to_m)
 
     if (associated(CS%VarMix)) &
-<<<<<<< HEAD
-      call calc_slope_functions(h, CS%tv, dt, G, GV, US, CS%VarMix)
-    call thickness_diffuse(h, CS%uhtr, CS%vhtr, CS%tv, dt, G, GV, US, CS%visc, &
-=======
       call calc_slope_functions(h, CS%tv, dt, G, GV, US, CS%VarMix, OBC=CS%OBC)
-    call thickness_diffuse(h, CS%uhtr, CS%vhtr, CS%tv, dt, G, GV, US, &
->>>>>>> dev/gfdl
+    call thickness_diffuse(h, CS%uhtr, CS%vhtr, CS%tv, dt, G, GV, US, CS%visc, &
                            CS%MEKE, CS%VarMix, CS%CDp, CS%thickness_diffuse_CSp)
 
     if (CS%debug) call hchksum(h,"Post-thickness_diffuse h", G%HI, haloshift=1, scale=GV%H_to_m)
