@@ -4,12 +4,13 @@ module MOM_state_initialization
 ! This file is part of MOM6. See LICENSE.md for the license.
 
 use MOM_debugging, only : hchksum, qchksum, uvchksum
+use MOM_density_integrals, only : int_specific_vol_dp
+use MOM_density_integrals, only : find_depth_of_pressure_in_cell
 use MOM_coms, only : max_across_PEs, min_across_PEs, reproducing_sum
 use MOM_cpu_clock, only : cpu_clock_id, cpu_clock_begin, cpu_clock_end
 use MOM_cpu_clock, only :  CLOCK_ROUTINE, CLOCK_LOOP
 use MOM_domains, only : pass_var, pass_vector, sum_across_PEs, broadcast
 use MOM_domains, only : root_PE, To_All, SCALAR_PAIR, CGRID_NE, AGRID
-use MOM_EOS, only : find_depth_of_pressure_in_cell
 use MOM_error_handler, only : MOM_mesg, MOM_error, FATAL, WARNING, is_root_pe
 use MOM_error_handler, only : callTree_enter, callTree_leave, callTree_waypoint
 use MOM_file_parser, only : get_param, read_param, log_param, param_file_type
@@ -17,13 +18,11 @@ use MOM_file_parser, only : log_version
 use MOM_get_input, only : directories
 use MOM_grid, only : ocean_grid_type, isPointInCell
 use MOM_interface_heights, only : find_eta
-use MOM_io, only : file_exists
-use MOM_io, only : MOM_read_data, MOM_read_vector
-use MOM_io, only : slasher
-use MOM_open_boundary, only : ocean_OBC_type, open_boundary_init
+use MOM_io, only : file_exists, field_size, MOM_read_data, MOM_read_vector, slasher
+use MOM_open_boundary, only : ocean_OBC_type, open_boundary_init, set_tracer_data
 use MOM_open_boundary, only : OBC_NONE, OBC_SIMPLE
 use MOM_open_boundary, only : open_boundary_query
-use MOM_open_boundary, only : set_tracer_data
+use MOM_open_boundary, only : set_tracer_data, initialize_segment_data
 use MOM_open_boundary, only : open_boundary_test_extern_h
 use MOM_open_boundary, only : fill_temp_salt_segments
 use MOM_open_boundary, only : update_OBC_segment_data
@@ -32,20 +31,17 @@ use MOM_grid_initialize, only : initialize_masks, set_grid_metrics
 use MOM_restart, only : restore_state, determine_is_new_run, MOM_restart_CS
 use MOM_sponge, only : set_up_sponge_field, set_up_sponge_ML_density
 use MOM_sponge, only : initialize_sponge, sponge_CS
-use MOM_ALE_sponge, only : set_up_ALE_sponge_field, initialize_ALE_sponge
-use MOM_ALE_sponge, only : ALE_sponge_CS
+use MOM_ALE_sponge, only : set_up_ALE_sponge_field, initialize_ALE_sponge, ALE_sponge_CS
 use MOM_string_functions, only : uppercase, lowercase
 use MOM_time_manager, only : time_type
 use MOM_tracer_registry, only : tracer_registry_type
 use MOM_unit_scaling, only : unit_scale_type
 use MOM_variables, only : thermo_var_ptrs
 use MOM_verticalGrid, only : setVerticalGridAxes, verticalGrid_type
-use MOM_ALE, only : pressure_gradient_plm
 use MOM_EOS, only : calculate_density, calculate_density_derivs, EOS_type, EOS_domain
-use MOM_EOS, only : int_specific_vol_dp, convert_temp_salt_for_TEOS10
+use MOM_EOS, only : convert_temp_salt_for_TEOS10
 use user_initialization, only : user_initialize_thickness, user_initialize_velocity
-use user_initialization, only : user_init_temperature_salinity
-use user_initialization, only : user_set_OBC_data
+use user_initialization, only : user_init_temperature_salinity, user_set_OBC_data
 use user_initialization, only : user_initialize_sponges
 use DOME_initialization, only : DOME_initialize_thickness
 use DOME_initialization, only : DOME_set_OBC_data
@@ -57,7 +53,7 @@ use RGC_initialization, only : RGC_initialize_sponges
 use baroclinic_zone_initialization, only : baroclinic_zone_init_temperature_salinity
 use benchmark_initialization, only : benchmark_initialize_thickness
 use benchmark_initialization, only : benchmark_init_temperature_salinity
-use Neverland_initialization, only : Neverland_initialize_thickness
+use Neverworld_initialization, only : Neverworld_initialize_thickness
 use circle_obcs_initialization, only : circle_obcs_initialize_thickness
 use lock_exchange_initialization, only : lock_exchange_initialize_thickness
 use external_gwave_initialization, only : external_gwave_initialize_thickness
@@ -91,12 +87,12 @@ use dumbbell_initialization, only : dumbbell_initialize_sponges
 use MOM_tracer_Z_init, only : find_interfaces, tracer_Z_init_array, determine_temperature
 use MOM_ALE, only : ALE_initRegridding, ALE_CS, ALE_initThicknessToCoord
 use MOM_ALE, only : ALE_remap_scalar, ALE_build_grid, ALE_regrid_accelerated
+use MOM_ALE, only : TS_PLM_edge_values
 use MOM_regridding, only : regridding_CS, set_regrid_params, getCoordinateResolution
 use MOM_regridding, only : regridding_main
 use MOM_remapping, only : remapping_CS, initialize_remapping
 use MOM_remapping, only : remapping_core_h
 use MOM_horizontal_regridding, only : horiz_interp_and_extrap_tracer
-use fms_io_mod, only : field_size
 
 implicit none ; private
 
@@ -257,7 +253,7 @@ subroutine MOM_initialize_state(u, v, h, tv, Time, G, GV, US, PF, dirs, &
              " \t ISOMIP - use a configuration for the \n"//&
              " \t\t ISOMIP test case. \n"//&
              " \t benchmark - use the benchmark test case thicknesses. \n"//&
-             " \t Neverland - use the Neverland test case thicknesses. \n"//&
+             " \t Neverworld - use the Neverworld test case thicknesses. \n"//&
              " \t search - search a density profile for the interface \n"//&
              " \t\t densities. This is not yet implemented. \n"//&
              " \t circle_obcs - the circle_obcs test case is used. \n"//&
@@ -269,7 +265,7 @@ subroutine MOM_initialize_state(u, v, h, tv, Time, G, GV, US, PF, dirs, &
              " \t soliton - Equatorial Rossby soliton. \n"//&
              " \t rossby_front - a mixed layer front in thermal wind balance.\n"//&
              " \t USER - call a user modified routine.", &
-             fail_if_missing=new_sim, do_not_log=just_read)
+             default="uniform", do_not_log=just_read)
     select case (trim(config))
        case ("file")
          call initialize_thickness_from_file(h, G, GV, US, PF, .false., just_read_params=just_read)
@@ -292,7 +288,7 @@ subroutine MOM_initialize_state(u, v, h, tv, Time, G, GV, US, PF, dirs, &
                                  just_read_params=just_read)
        case ("benchmark"); call benchmark_initialize_thickness(h, G, GV, US, PF, &
                                     tv%eqn_of_state, tv%P_Ref, just_read_params=just_read)
-       case ("Neverland"); call Neverland_initialize_thickness(h, G, GV, US, PF, &
+       case ("Neverwoorld","Neverland"); call Neverworld_initialize_thickness(h, G, GV, US, PF, &
                                  tv%eqn_of_state, tv%P_Ref)
        case ("search"); call initialize_thickness_search
        case ("circle_obcs"); call circle_obcs_initialize_thickness(h, G, GV, PF, &
@@ -562,6 +558,8 @@ subroutine MOM_initialize_state(u, v, h, tv, Time, G, GV, US, PF, dirs, &
 
   ! This controls user code for setting open boundary data
   if (associated(OBC)) then
+     call initialize_segment_data(G, OBC, PF) !   call initialize_segment_data(G, OBC, param_file)
+!     call open_boundary_config(G, US, PF, OBC)
     ! Call this once to fill boundary arrays from fixed values
     if (.not. OBC%needs_IO_for_data)  &
       call update_OBC_segment_data(G, GV, US, OBC, tv, h, Time)
@@ -970,7 +968,7 @@ subroutine convert_thickness(h, G, GV, US, tv)
 
         do itt=1,max_itt
           call int_specific_vol_dp(tv%T(:,:,k), tv%S(:,:,k), p_top, p_bot, 0.0, G%HI, &
-                                   tv%eqn_of_state, dz_geo)
+                                   tv%eqn_of_state, US, dz_geo)
           if (itt < max_itt) then ; do j=js,je
             call calculate_density(tv%T(:,j,k), tv%S(:,j,k), p_bot(:,j), rho, &
                                    tv%eqn_of_state, EOSdom)
@@ -1130,7 +1128,7 @@ subroutine trim_for_ice(PF, G, GV, US, ALE_CSp, tv, h, just_read_params)
   if (use_remapping) then
     call get_param(PF, mdl, "DEFAULT_2018_ANSWERS", default_2018_answers, &
                  "This sets the default value for the various _2018_ANSWERS parameters.", &
-                 default=.true.)
+                 default=.false.)
     call get_param(PF, mdl, "REMAPPING_2018_ANSWERS", remap_answers_2018, &
                  "If true, use the order of arithmetic and expressions that recover the "//&
                  "answers from the end of 2018.  Otherwise, use updated and more robust "//&
@@ -1149,7 +1147,7 @@ subroutine trim_for_ice(PF, G, GV, US, ALE_CSp, tv, h, just_read_params)
 
   ! Find edge values of T and S used in reconstructions
   if ( associated(ALE_CSp) ) then ! This should only be associated if we are in ALE mode
-    call pressure_gradient_plm(ALE_CSp, S_t, S_b, T_t, T_b, G, GV, tv, h, .true.)
+    call TS_PLM_edge_values(ALE_CSp, S_t, S_b, T_t, T_b, G, GV, tv, h, .true.)
   else
 !    call MOM_error(FATAL, "trim_for_ice: Does not work without ALE mode")
     do k=1,G%ke ; do j=G%jsc,G%jec ; do i=G%isc,G%iec
@@ -1218,7 +1216,7 @@ subroutine cut_off_column_top(nk, tv, GV, US, G_earth, depth, min_thickness, T, 
   do k=1,nk
     call find_depth_of_pressure_in_cell(T_t(k), T_b(k), S_t(k), S_b(k), e(K), e(K+1), &
                                         P_t, p_surf, GV%Rho0, G_earth, tv%eqn_of_state, &
-                                        P_b, z_out, z_tol=z_tol)
+                                        US, P_b, z_out, z_tol=z_tol)
     if (z_out>=e(K)) then
       ! Imposed pressure was less that pressure at top of cell
       exit
@@ -1368,10 +1366,10 @@ subroutine initialize_velocity_uniform(u, v, G, US, param_file, just_read_params
 
   call get_param(param_file, mdl, "INITIAL_U_CONST", initial_u_const, &
                  "A initial uniform value for the zonal flow.", &
-                 units="m s-1", scale=US%m_s_to_L_T, fail_if_missing=.not.just_read, do_not_log=just_read)
+                 default=0.0, units="m s-1", scale=US%m_s_to_L_T, do_not_log=just_read)
   call get_param(param_file, mdl, "INITIAL_V_CONST", initial_v_const, &
                  "A initial uniform value for the meridional flow.", &
-                 units="m s-1", scale=US%m_s_to_L_T, fail_if_missing=.not.just_read, do_not_log=just_read)
+                 default=0.0, units="m s-1", scale=US%m_s_to_L_T, do_not_log=just_read)
 
   if (just_read) return ! All run-time parameters have been read, so return.
 
@@ -2107,10 +2105,10 @@ subroutine MOM_temp_salt_initialize_from_Z(h, tv, G, GV, US, PF, just_read_param
   call get_param(PF, mdl, "Z_INIT_REMAP_OLD_ALG", remap_old_alg, &
                  "If false, uses the preferred remapping algorithm for initialization. "//&
                  "If true, use an older, less robust algorithm for remapping.", &
-                 default=.true., do_not_log=just_read)
+                 default=.false., do_not_log=just_read)
   call get_param(PF, mdl, "DEFAULT_2018_ANSWERS", default_2018_answers, &
                  "This sets the default value for the various _2018_ANSWERS parameters.", &
-                 default=.true.)
+                 default=.false.)
   call get_param(PF, mdl, "TEMP_SALT_INIT_VERTICAL_REMAP_ONLY", pre_gridded, &
                  "If true, initial conditions are on the model horizontal grid. " //&
                  "Extrapolation over missing ocean values is done using an ICE-9 "//&
@@ -2470,7 +2468,7 @@ subroutine MOM_state_init_tests(G, GV, US, tv)
   P_t = 0.
   do k = 1, nk
     call find_depth_of_pressure_in_cell(T_t(k), T_b(k), S_t(k), S_b(k), e(K), e(K+1), P_t, 0.5*P_tot, &
-                                        GV%Rho0, GV%g_Earth, tv%eqn_of_state, P_b, z_out)
+                                        GV%Rho0, GV%g_Earth, tv%eqn_of_state, US, P_b, z_out)
     write(0,*) k, US%RL2_T2_to_Pa*P_t, US%RL2_T2_to_Pa*P_b, 0.5*US%RL2_T2_to_Pa*P_tot, &
                US%Z_to_m*e(K), US%Z_to_m*e(K+1), US%Z_to_m*z_out
     P_t = P_b
