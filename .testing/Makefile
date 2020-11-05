@@ -110,7 +110,7 @@ MKMF := $(DEPS)/bin/mkmf
 BUILDS = symmetric asymmetric repro openmp
 CONFIGS := $(wildcard tc*)
 TESTS = grids layouts restarts nans dims openmps rotations
-DIMS = t l h z q r
+DIMS ?= t l h z q r
 
 # REPRO tests enable reproducibility with optimization, and often do not match
 # the DEBUG results in older GCCs and vendor compilers, so we can optionally
