@@ -41,7 +41,6 @@ runs:
         echo "FCFLAGS_REPRO=-g -O2 -fbacktrace" >> config.mk
         echo "FCFLAGS_INIT=-finit-real=snan -finit-integer=2147483647 -finit-derived" >> config.mk
         echo "FCFLAGS_COVERAGE: --coverage" >> config.mk
-        echo "TIME="" >> config.mk"
 
     - name: Compile MOM6 in symmetric memory mode
       shell: bash
@@ -62,5 +61,4 @@ runs:
     - name: Set flags
       shell: bash
       run: |
-        echo "FC_TEST_VAR=yellow green blue" >> $GITHUB_ENV
-
+        echo "TIMEFORMAT='Time: %lR  (user: %lU, sys: %lS)'" >> $GITHUB_ENV
