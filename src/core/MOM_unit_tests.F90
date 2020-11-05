@@ -33,10 +33,10 @@ subroutine unit_tests(verbosity)
        "MOM_unit_tests: string_functions_unit_tests FAILED")
     if (remapping_unit_tests(verbose)) call MOM_error(FATAL, &
        "MOM_unit_tests: remapping_unit_tests FAILED")
-    if (neutral_diffusion_unit_tests(verbose)) call MOM_error(FATAL, &
-       "MOM_unit_tests: neutralDiffusionUnitTests FAILED")
     if (diag_vkernels_unit_tests(verbose)) call MOM_error(FATAL, &
        "MOM_unit_tests: diag_vkernels_unit_tests FAILED")
+    if (neutral_diffusion_unit_tests(verbose)) call MOM_error(FATAL, &
+       "MOM_unit_tests: neutralDiffusionUnitTests FAILED")
     if (random_unit_tests(verbose)) call MOM_error(FATAL, &
        "MOM_unit_tests: random_unit_tests FAILED")
     if (near_boundary_unit_tests(verbose)) call MOM_error(FATAL, &
