@@ -6,33 +6,19 @@ jobs:
   build-test-nans:
 
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: .testing
 
     env:
-      FCFLAGS_DEBUG: -g -O0 -Wextra -Wno-compare-reals -fbacktrace -ffpe-trap=invalid,zero,overflow -fcheck=bounds
-      FCFLAGS_INIT: -finit-real=snan -finit-integer=2147483647 -finit-derived
-      FCFLAGS_COVERAGE: --coverage
       REPORT_COVERAGE: true
-      TIME: ''
 
     steps:
-    - name: Install needed packages
-      run: sudo apt-get install netcdf-bin libnetcdf-dev libnetcdff-dev mpich libmpich-dev
-
     - uses: actions/checkout@v2
       with:
         submodules: recursive
 
-    - name: Compile FMS library
-      run: |
-        cd .testing
-        make deps/lib/libFMS.a -s -j
-
-    - name: Compile MOM6 in symmetric memory mode
-      run: |
-        cd .testing
-        make build/symmetric/MOM6 -j
+    - uses: ./.github/actions/testing-setup
 
     - name: Run and post coverage
-      run: |
-        cd .testing
-        make run.symmetric -k -s
+      run: make run.symmetric -k -s

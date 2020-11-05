@@ -10,22 +10,12 @@ jobs:
       run:
         working-directory: .testing
 
-    env:
-      FCFLAGS_DEBUG: -g -O0 -Wextra -Wno-compare-reals -fbacktrace -ffpe-trap=invalid,zero,overflow -fcheck=bounds
-      FCFLAGS_INIT: -finit-real=snan -finit-integer=2147483647 -finit-derived
-      FCFLAGS_COVERAGE: --coverage
-      TIME: ''
-
     steps:
     - uses: actions/checkout@v2
       with:
         submodules: recursive
 
-    - name: Setup .testing
-      uses: ./.github/actions/testing-setup
-
-    - name: Env again
-      run: env
+    - uses: ./.github/actions/testing-setup
 
     - name: Create validation data
       run: make run.symmetric -k -s

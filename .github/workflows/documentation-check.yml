@@ -6,26 +6,28 @@ jobs:
   doxygen:
 
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: docs
 
     steps:
+    - uses: actions/checkout@v2
+      with:
+        submodules: recursive
+
     - name: Install needed packages
       run: >
         sudo apt-get install
         python3-sphinx python3-lxml perl
         texlive-binaries texlive-base bibtool tex-common texlive-bibtex-extra
 
-    - uses: actions/checkout@v2
-      with:
-        submodules: recursive
-
     - name: Build doxygen HTML
       run: |
-        cd docs
         perl -e 'print "perl version $^V" . "\n"'
         mkdir _build && make nortd DOXYGEN_RELEASE=Release_1_8_13 UPDATEHTMLEQS=Y
         cat _build/doxygen_warn_nortd_log.txt
 
     - name: Report errors
       run: |
-        grep "warning:" docs/_build/doxygen_warn_nortd_log.txt | grep -v "as part of a" | tee doxy_errors
+        grep "warning:" _build/doxygen_warn_nortd_log.txt | grep -v "as part of a" | tee doxy_errors
         test ! -s  doxy_errors

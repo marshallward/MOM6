@@ -9,8 +9,6 @@ jobs:
 
     steps:
     - uses: actions/checkout@v2
-      #with:
-      #  submodules: recursive
 
     - name: Check white space
       run: ./.testing/trailer.py -e TEOS10 -l 120 src config_src
