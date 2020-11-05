@@ -3,11 +3,13 @@ description: 'Build pre-requisites for .testing including FMS and a symmetric MO
 runs:
   using: 'composite'
   steps:
-    - name: Info
+    - name: Git info
       shell: bash
       run: |
+        echo "::group::Git commit info"
         echo "git log:"
         git log | head -60
+        echo "::endgroup::"
 
     - name: Env
       shell: bash
@@ -43,6 +45,7 @@ runs:
       shell: bash
       run: |
         echo "::group::Create local python env for input data generation"
+        cd .testing
         make work/local-env
         echo "::endgroup::"
 
