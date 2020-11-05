@@ -47,7 +47,7 @@ runs:
         echo "::endgroup::"
 
     - name: Set flags
-      shell:
+      shell: bash
       run: |
         echo "FC_TEST_VAR=yellow green blue" >> $GITHUB_ENV
 
