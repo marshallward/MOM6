@@ -1406,14 +1406,13 @@ subroutine log_param_real_array(CS, modulename, varname, value, desc, &
   logical,          optional, intent(in) :: like_default !< If present and true, log this parameter as
                                          !! though it has the default value, even if there is no default.
 
-  character(len=1320) :: mesg
+  character(len=:), allocatable :: mesg
   character(len=240) :: myunits
 
  !write(mesg, '("  ",a," ",a,": ",ES19.12,99(",",ES19.12))') &
  !write(mesg, '("  ",a," ",a,": ",G,99(",",G))') &
  !  trim(modulename), trim(varname), value
-  write(mesg, '("  ",a," ",a,": ",a)') &
-    trim(modulename), trim(varname), trim(left_reals(value))
+  mesg = "  " // trim(modulename) // " " // trim(varname) // ": " // trim(left_reals(value))
   if (is_root_pe()) then
     if (CS%log_open) write(CS%stdlog,'(a)') trim(mesg)
     if (CS%log_to_stdout) write(CS%stdout,'(a)') trim(mesg)
@@ -1483,7 +1482,7 @@ subroutine log_param_char(CS, modulename, varname, value, desc, units, &
   logical,          optional, intent(in) :: like_default !< If present and true, log this parameter as
                                          !! though it has the default value, even if there is no default.
 
-  character(len=240) :: mesg, myunits
+  character(len=1024) :: mesg, myunits
 
   write(mesg, '("  ",a," ",a,": ",a)') &
     trim(modulename), trim(varname), trim(value)
@@ -1492,7 +1491,7 @@ subroutine log_param_char(CS, modulename, varname, value, desc, units, &
     if (CS%log_to_stdout) write(CS%stdout,'(a)') trim(mesg)
   endif
 
-  myunits=" "; if (present(units)) write(myunits(1:240),'(A)') trim(units)
+  myunits=" "; if (present(units)) write(myunits(1:1024),'(A)') trim(units)
   if (present(desc)) &
     call doc_param(CS%doc, varname, desc, myunits, value, default, &
                    layoutParam=layoutParam, debuggingParam=debuggingParam, like_default=like_default)
@@ -1893,7 +1892,7 @@ subroutine get_param_char_array(CS, modulename, varname, value, desc, units, &
   ! Local variables
   logical :: do_read, do_log
   integer :: i, len_tot, len_val
-  character(len=240) :: cat_val
+  character(len=1024) :: cat_val
 
   do_read = .true. ; if (present(do_not_read)) do_read = .not.do_not_read
   do_log  = .true. ; if (present(do_not_log))  do_log  = .not.do_not_log
