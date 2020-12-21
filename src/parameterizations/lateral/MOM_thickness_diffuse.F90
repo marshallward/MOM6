@@ -526,7 +526,8 @@ subroutine thickness_diffuse(h, uhtr, vhtr, tv, dt, G, GV, US, visc, MEKE, VarMi
 
   endif
 
-  !$OMP parallel do default(none) shared(is,ie,js,je,nz,uhtr,uhD,dt,vhtr,CDp,vhD,h,G,GV)
+  !$OMP parallel do default(none) &
+  !$OMP shared(is,ie,js,je,nz,uhtr,uhD,uhD_SymInst,dt,vhtr,CDp,vhD,vhD_SymInst,h,G,GV)
   do k=1,nz
     do j=js,je ; do I=is-1,ie
       uhtr(I,j,k) = uhtr(I,j,k) + uhD(I,j,k)*dt + uhD_SymInst(I,j,k)*dt
@@ -706,6 +707,7 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, uhD_SymInst, v
   real :: SymInst_denom    ! Value of the denominator, streamfunction goes to zero when it is zero.
   real :: frac          ! Fraction of transport being realized after limitation, [nondim].
   real :: tmp_work_layer    ! Temporary work calculated in loop.
+  real :: max_Sfn       ! Maximum permitted streamfunction [Z L2 T-1 ~> m3 s-1].
   logical :: use_EOS    ! If true, density is calculated from T & S using an
                         ! equation of state.
   logical :: find_work  ! If true, find the change in energy due to the fluxes.
@@ -741,6 +743,7 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, uhD_SymInst, v
   dz_neglect = GV%H_subroundoff*GV%H_to_Z
   G_rho0 = GV%g_Earth / GV%Rho0
   N2_floor = CS%N2_floor*US%Z_to_L**2
+  max_Sfn = 1.0e37*US%m_to_L**2*US%m_to_Z*US%T_to_s !Make sure diagnostics are representable as 32-bit reals
 
   use_EOS = associated(tv%eqn_of_state)
   present_int_slope_u = PRESENT(int_slope_u)
@@ -772,6 +775,10 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, uhD_SymInst, v
 
 !$OMP parallel default(none) shared(is,ie,js,je,h_avail_rsum,pres,h_avail,I4dt, use_Stanley, &
 !$OMP                               CS,G,GV,tv,h,h_frac,nz,uhtot,Work_u,vhtot,Work_v,Tsgs2,T, &
+!$OMP                               uhtot_SymInst, vhtot_SymInst, Work_u_SymInst, Work_v_SymInst, &
+!$OMP                               diag_sfn_SymInst_x, diag_sfn_SymInst_y, &
+!$OMP                               diag_sfn_unlim_SymInst_x, diag_sfn_unlim_SymInst_y, &
+!$OMP                               Work3D_u_SymInst, Work3D_v_SymInst, &
 !$OMP                               diag_sfn_x, diag_sfn_y, diag_sfn_unlim_x, diag_sfn_unlim_y ) &
 !$OMP          private(dTdi2,dTdj2)
   ! Find the maximum and minimum permitted streamfunction.
@@ -834,6 +841,9 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, uhD_SymInst, v
 
     EOSdom_u(1) = (is-1) - (G%IsdB-1) ; EOSdom_u(2) = ie - (G%IsdB-1)
 !$OMP parallel do default(none) shared(nz,is,ie,js,je,find_work,use_EOS,G,GV,US,pres,T,S, &
+!$OMP                                  uhtot_SymInst, uhD_SymInst, Work_u_SymInst, &
+!$OMP                                  Work3D_u_SymInst, &
+!$OMP                                  diag_sfn_SymInst_x, diag_sfn_unlim_SymInst_x, &
 !$OMP                                  nk_linear,IsdB,tv,h,h_neglect,e,dz_neglect,  &
 !$OMP                                  I_slope_max2,h_neglect2,present_int_slope_u, &
 !$OMP                                  int_slope_u,KH_u,uhtot,h_frac,h_avail_rsum,  &
@@ -847,6 +857,9 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, uhD_SymInst, v
 !$OMP                                  haB,haL,haR,dzaL,dzaR,wtA,wtB,wtL,wtR,drdz,  &
 !$OMP                                  drdx,mag_grad2,Slope,slope2_Ratio_u,hN2_u,   &
 !$OMP                                  Sfn_unlim_u,drdi_u,drdkDe_u,h_harm,c2_h_u,   &
+!$OMP                                  Sfn_SymInst_u, Sfn_in_h_SymInst, Sfn_SymInst, &
+!$OMP                                  Sfn_safe_SymInst, Coriolis_u, factor_u, frac, &
+!$OMP                                  tmp_work_layer, SymInst_denom, max_Sfn, &
 !$OMP                                  Sfn_safe,Sfn_est,Sfn_in_h,calc_derivatives)
   do j=js,je
     do I=is-1,ie ; hN2_u(I,1) = 0. ; hN2_u(I,nz+1) = 0. ; enddo
@@ -1035,8 +1048,12 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, uhD_SymInst, v
           Sfn_unlim_u(I,K) = 0.
           Sfn_SymInst_u(I,K) = 0.
         endif ! if (k > nk_linear)
-        if (CS%id_sfn_unlim_x>0) diag_sfn_unlim_x(I,j,K) = Sfn_unlim_u(I,K)
-        if (CS%id_sfn_unlim_SymInst_x>0) diag_sfn_unlim_SymInst_x(I,j,K) = Sfn_SymInst_u(I,K)
+        if (CS%id_sfn_unlim_x>0) then
+            diag_sfn_unlim_x(I,j,K) = max(min(Sfn_unlim_u(I,K),max_Sfn),-max_Sfn)
+        endif
+        if (CS%id_sfn_unlim_SymInst_x>0) then
+            diag_sfn_unlim_SymInst_x(I,j,K) = max(min(Sfn_SymInst_u(I,K),max_Sfn),-max_Sfn)
+        endif
       enddo ! i-loop
     enddo ! k-loop
 
@@ -1193,6 +1210,9 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, uhD_SymInst, v
     ! Calculate the meridional fluxes and gradients.
     EOSdom_v(:) = EOS_domain(G%HI)
 !$OMP parallel do default(none) shared(nz,is,ie,js,je,find_work,use_EOS,G,GV,US,pres,T,S, &
+!$OMP                                  vhtot_SymInst, vhD_SymInst, Work_v_SymInst, &
+!$OMP                                  Work3D_v_SymInst, &
+!$OMP                                  diag_sfn_SymInst_y, diag_sfn_unlim_SymInst_y, &
 !$OMP                                  nk_linear,IsdB,tv,h,h_neglect,e,dz_neglect,  &
 !$OMP                                  I_slope_max2,h_neglect2,present_int_slope_v, &
 !$OMP                                  int_slope_v,KH_v,vhtot,h_frac,h_avail_rsum,  &
@@ -1206,6 +1226,9 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, uhD_SymInst, v
 !$OMP                                  haB,haL,haR,dzaL,dzaR,wtA,wtB,wtL,wtR,drdz,  &
 !$OMP                                  drdy,mag_grad2,Slope,slope2_Ratio_v,hN2_v,   &
 !$OMP                                  Sfn_unlim_v,drdj_v,drdkDe_v,h_harm,c2_h_v,   &
+!$OMP                                  Sfn_SymInst_v, Sfn_in_h_SymInst, Sfn_SymInst, &
+!$OMP                                  Sfn_safe_SymInst, Coriolis_v, factor_v, frac, &
+!$OMP                                  tmp_work_layer, SymInst_denom, max_Sfn, &
 !$OMP                                  Sfn_safe,Sfn_est,Sfn_in_h,calc_derivatives)
   do J=js-1,je
     do K=nz,2,-1
@@ -1390,8 +1413,12 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, uhD_SymInst, v
           Sfn_unlim_v(i,K) = 0.
           Sfn_SymInst_v(i,K) = 0.
         endif ! if (k > nk_linear)
-        if (CS%id_sfn_unlim_y>0) diag_sfn_unlim_y(i,J,K) = Sfn_unlim_v(i,K)
-        if (CS%id_sfn_unlim_SymInst_y>0) diag_sfn_unlim_SymInst_y(i,J,K) = Sfn_SymInst_v(i,K)
+        if (CS%id_sfn_unlim_y>0) then
+          diag_sfn_unlim_y(i,J,K) = max(min(Sfn_unlim_v(i,K),max_Sfn),-max_Sfn)
+        endif
+        if (CS%id_sfn_unlim_SymInst_y>0) then
+          diag_sfn_unlim_SymInst_y(i,J,K) = max(min(Sfn_SymInst_v(i,K),max_Sfn),-max_Sfn)
+        endif
       enddo ! i-loop
     enddo ! k-loop
 
@@ -1552,7 +1579,7 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, uhD_SymInst, v
     do J=js-1,je ; do i=is,ie ; vhD_SymInst(i,J,1) = -vhtot_SymInst(i,J) ; enddo ; enddo
   else
     EOSdom_u(1) = (is-1) - (G%IsdB-1) ; EOSdom_u(2) = ie - (G%IsdB-1)
-    !$OMP parallel do default(shared) private(pres_u,T_u,S_u,drho_dT_u,drho_dS_u,drdiB)
+    !$OMP parallel do default(shared) private(pres_u,tmp_work_layer,T_u,S_u,drho_dT_u,drho_dS_u,drdiB)
     do j=js,je
       if (use_EOS) then
         do I=is-1,ie
@@ -1593,7 +1620,7 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, uhD_SymInst, v
     enddo
 
     EOSdom_v(:) = EOS_domain(G%HI)
-    !$OMP parallel do default(shared) private(pres_v,T_v,S_v,drho_dT_v,drho_dS_v,drdjB)
+    !$OMP parallel do default(shared) private(pres_v,tmp_work_layer,T_v,S_v,drho_dT_v,drho_dS_v,drdjB)
     do J=js-1,je
       if (use_EOS) then
         do i=is,ie
@@ -1666,8 +1693,9 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, uhD_SymInst, v
         endif
     endif; endif
   endif
-
-  visc%Work3D_h_SymInst = Work3D_h_SymInst
+  if (associated(visc%Work3D_h_SymInst)) then
+    visc%Work3D_h_SymInst(:,:,:) = Work3D_h_SymInst(:,:,:)
+  endif
 
   if (find_work .and. CS%GM_src_alt .and. associated(MEKE)) then ; if (associated(MEKE%GM_src)) then
     do j=js,je ; do i=is,ie ; do k=nz,1,-1
@@ -2260,7 +2288,7 @@ subroutine thickness_diffuse_init(Time, G, GV, US, param_file, diag, CDp, CS)
   if (CS%SYMMETRIC_INSTABILITY_DIFFUSE) &
     call get_param(param_file, mdl, "SymInst_frac_TKE_to_Kd",CS%SymInst_frac_TKE_to_Kd, &
                    "Fraction of TKE used to calculate diffusivity (0-1).", units="nondim", &
-                   default=1.0)
+                   default=0.167)
 
   call get_param(param_file, mdl, "MEKE_GM_SRC_ALT", CS%GM_src_alt, &
                  "If true, use the GM energy conversion form S^2*N^2*kappa rather "//&

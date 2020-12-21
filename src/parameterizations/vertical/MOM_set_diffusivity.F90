@@ -151,7 +151,7 @@ type, public :: set_diffusivity_CS ; private
   logical :: answers_2018   !< If true, use the order of arithmetic and expressions that recover the
                             !! answers from the end of 2018.  Otherwise, use updated and more robust
                             !! forms of the same expressions.
-
+  real    :: Prandtl_SymInst      !< Prandtl number for symmetric instability parameterization. Default 1.
   character(len=200) :: inputdir !< The directory in which input files are found
   type(user_change_diff_CS), pointer :: user_change_diff_CSp => NULL() !< Control structure for a child module
   type(Kappa_shear_CS),      pointer :: kappaShear_CSp       => NULL() !< Control structure for a child module
@@ -517,6 +517,13 @@ subroutine set_diffusivity(u, v, h, u_h, v_h, tv, fluxes, optics, visc, dt, &
             Kd_int(i,j,K)   = Kd_int(i,j,K)   + 0.5 * Kd_SymInst
             Kd_int(i,j,K+1) = Kd_int(i,j,K+1) + 0.5 * Kd_SymInst
           endif
+          ! Adding viscosity and Prandtl number component:
+          if (CS%Prandtl_SymInst > 0.0) then
+            visc%Kv_slow(i,j,K)   = visc%Kv_slow(i,j,K)   + 0.5 * Kd_SymInst * CS%Prandtl_SymInst
+            visc%Kv_slow(i,j,K+1) = visc%Kv_slow(i,j,K+1) + 0.5 * Kd_SymInst * CS%Prandtl_SymInst      
+          endif
+
+
         enddo ; enddo
     endif
     if (CS%limit_dissipation) then
@@ -1976,6 +1983,7 @@ subroutine set_diffusivity_init(Time, G, GV, US, param_file, diag, CS, int_tide_
   real :: decay_length
   logical :: ML_use_omega
   logical :: default_2018_answers
+  logical :: local_syminst
   ! This include declares and sets the variable "version".
 # include "version_variable.h"
   character(len=40)  :: mdl = "MOM_set_diffusivity"  ! This module's name.
@@ -2265,7 +2273,12 @@ subroutine set_diffusivity_init(Time, G, GV, US, param_file, diag, CS, int_tide_
     halo_TS = 0
     if (CS%Vertex_Shear) halo_TS = 1
   endif
-
+  call get_param(param_file, mdl, "SYMMETRIC_INSTABILITY_DIFFUSE", local_syminst, &
+                 "If true, uses the symmetric instability parameterization \n"//&
+                 "(Yankovsky et al., 2020).", default=.false., do_not_log=.true.)
+  call get_param(param_file, mdl, "PRANDTL_SYMINST", CS%Prandtl_SymInst, &
+                 "Prandtl Number for Symmetric Instability Parameterization", &
+                 default=1.0, units="nondim", do_not_log =.not.local_syminst)
 end subroutine set_diffusivity_init
 
 !> Clear pointers and dealocate memory
