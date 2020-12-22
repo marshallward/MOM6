@@ -301,14 +301,7 @@ subroutine initialize_ALE_sponge_fixed(Iresttime, G, param_file, CS, data_h, nz_
     CS%num_col_v = 0 ; !CS%fldno_v = 0
     do J=CS%jscB,CS%jecB; do i=CS%isc,CS%iec
       Iresttime_v(i,J) = 0.5 * (Iresttime(i,j) + Iresttime(i,j+1))
-<<<<<<< HEAD
-      if ((Iresttime_v(i,J)>0.0) .and. (G%mask2dCv(i,J)>0)) then
-        data_hv(i,J,:) = 0.5 * (data_h(i,j,:) + data_h(i,j+1,:))
-        CS%num_col_v = CS%num_col_v + 1
-      endif
-=======
       if ((Iresttime_v(i,J)>0.0) .and. (G%mask2dCv(i,J)>0)) CS%num_col_v = CS%num_col_v + 1
->>>>>>> dev/gfdl
     enddo ; enddo
 
     if (CS%num_col_v > 0) then
