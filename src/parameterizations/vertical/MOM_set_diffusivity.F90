@@ -694,7 +694,6 @@ subroutine set_diffusivity(u, v, h, u_h, v_h, tv, fluxes, optics, visc, dt, &
   ! background mixing
   if (CS%id_Kd_bkgnd > 0) call post_data(CS%id_Kd_bkgnd, dd%Kd_bkgnd, CS%diag)
   if (CS%id_Kv_bkgnd > 0) call post_data(CS%id_Kv_bkgnd, dd%Kv_bkgnd, CS%diag)
-  if (CS%id_Kd_layer > 0) call post_data(CS%id_Kd_layer, Kd_lay, CS%diag)
   if (CS%id_diag_TKE_SymInst > 0) call post_data(CS%id_diag_TKE_SymInst, diag_TKE_SymInst, CS%diag)
   if (CS%id_diag_Kd_SymInst > 0) call post_data(CS%id_diag_Kd_SymInst, diag_Kd_SymInst, CS%diag)
   ! tidal mixing
