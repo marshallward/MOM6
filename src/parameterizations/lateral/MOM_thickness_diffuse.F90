@@ -873,7 +873,7 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, uhD_SymInst, v
 !$OMP                                  I_slope_max2,h_neglect2,present_int_slope_u, &
 !$OMP                                  int_slope_u,KH_u,uhtot,h_frac,h_avail_rsum,  &
 !$OMP                                  uhD,h_avail,G_scale,Work_u,CS,slope_x,cg1,   &
-!$OMP                                  diag_sfn_x, diag_sfn_unlim_x,N2_floor,EOSdom_u, &
+!$OMP                                  diag_sfn_x, diag_sfn_unlim_x, max_Sfn, N2_floor,EOSdom_u, &
 !$OMP                                  use_stanley, Tsgs2,                          &
 !$OMP                                  present_slope_x,G_rho0,Slope_x_PE,hN2_x_PE)  &
 !$OMP                          private(drdiA,drdiB,drdkL,drdkR,pres_u,T_u,S_u,      &
@@ -884,7 +884,7 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, uhD_SymInst, v
 !$OMP                                  Sfn_unlim_u,drdi_u,drdkDe_u,h_harm,c2_h_u,   &
 !$OMP                                  Sfn_SymInst_u, Sfn_in_h_SymInst, Sfn_SymInst, &
 !$OMP                                  Sfn_safe_SymInst, Coriolis_u, factor_u, frac, &
-!$OMP                                  tmp_work_layer, SymInst_denom, max_Sfn, &
+!$OMP                                  tmp_work_layer, SymInst_denom, &
 !$OMP                                  Sfn_safe,Sfn_est,Sfn_in_h,calc_derivatives)
   do j=js,je
     do I=is-1,ie ; hN2_u(I,1) = 0. ; hN2_u(I,nz+1) = 0. ; enddo
@@ -1014,6 +1014,8 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, uhD_SymInst, v
                 factor_u = 0.0
               endif
               Sfn_SymInst_u(I,K)=(G%dxCu(I,j))**2*factor_u*(G%dy_Cu(I,j)*US%L_to_Z*Slope)
+            else
+              Sfn_SymInst_u(I,K) = 0.
             endif
             ! Estimate the streamfunction at each interface [Z L2 T-1 ~> m3 s-1].
             Sfn_unlim_u(I,K) = -((KH_u(I,j,K)*G%dy_Cu(I,j))*US%L_to_Z*Slope)
@@ -1242,7 +1244,7 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, uhD_SymInst, v
 !$OMP                                  I_slope_max2,h_neglect2,present_int_slope_v, &
 !$OMP                                  int_slope_v,KH_v,vhtot,h_frac,h_avail_rsum,  &
 !$OMP                                  vhD,h_avail,G_scale,Work_v,CS,slope_y,cg1,   &
-!$OMP                                  diag_sfn_y,diag_sfn_unlim_y,N2_floor,EOSdom_v,&
+!$OMP                                  diag_sfn_y,diag_sfn_unlim_y, max_Sfn, N2_floor,EOSdom_v,&
 !$OMP                                  use_stanley, Tsgs2,                          &
 !$OMP                                  present_slope_y,G_rho0,Slope_y_PE,hN2_y_PE)  &
 !$OMP                          private(drdjA,drdjB,drdkL,drdkR,pres_v,T_v,S_v,      &
@@ -1253,7 +1255,7 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, uhD_SymInst, v
 !$OMP                                  Sfn_unlim_v,drdj_v,drdkDe_v,h_harm,c2_h_v,   &
 !$OMP                                  Sfn_SymInst_v, Sfn_in_h_SymInst, Sfn_SymInst, &
 !$OMP                                  Sfn_safe_SymInst, Coriolis_v, factor_v, frac, &
-!$OMP                                  tmp_work_layer, SymInst_denom, max_Sfn, &
+!$OMP                                  tmp_work_layer, SymInst_denom, &
 !$OMP                                  Sfn_safe,Sfn_est,Sfn_in_h,calc_derivatives)
   do J=js-1,je
     do K=nz,2,-1
@@ -1381,7 +1383,10 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, uhD_SymInst, v
                 factor_v = 0.0
               endif
               Sfn_SymInst_v(i,K)=(G%dyCv(i,J))**2*factor_v*(G%dx_Cv(i,J)*US%L_to_Z*Slope)
+            else
+              Sfn_SymInst_v(i,K) = 0.
             endif
+
             ! Estimate the streamfunction at each interface [Z L2 T-1 ~> m3 s-1].
             Sfn_unlim_v(i,K) = -((KH_v(i,J,K)*G%dx_Cv(i,J))*US%L_to_Z*Slope)
             ! Avoid moving dense water upslope from below the level of
