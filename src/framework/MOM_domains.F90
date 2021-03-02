@@ -6,21 +6,20 @@ module MOM_domains
 use MOM_coms_infra,       only : MOM_infra_init, MOM_infra_end
 use MOM_coms_infra,       only : PE_here, root_PE, num_PEs, broadcast
 use MOM_coms_infra,       only : sum_across_PEs, min_across_PEs, max_across_PEs
-use MOM_domain_infra,     only : MOM_domain_type, domain2D, domain1D
+use MOM_domain_infra,     only : MOM_domain_type, domain2D, domain1D, group_pass_type
 use MOM_domain_infra,     only : create_MOM_domain, clone_MOM_domain, deallocate_MOM_domain
-use MOM_domain_infra,     only : MOM_define_domain, MOM_define_layout
 use MOM_domain_infra,     only : get_domain_extent, get_domain_components
 use MOM_domain_infra,     only : compute_block_extent, get_global_shape
 use MOM_domain_infra,     only : pass_var, pass_vector, fill_symmetric_edges, global_field_sum
 use MOM_domain_infra,     only : pass_var_start, pass_var_complete
 use MOM_domain_infra,     only : pass_vector_start, pass_vector_complete
-use MOM_domain_infra,     only : create_group_pass, do_group_pass, group_pass_type
+use MOM_domain_infra,     only : create_group_pass, do_group_pass
 use MOM_domain_infra,     only : start_group_pass, complete_group_pass
-use MOM_domain_infra,     only : global_field, redistribute_array, broadcast_domain
+use MOM_domain_infra,     only : rescale_comp_data, global_field, redistribute_array, broadcast_domain
+use MOM_domain_infra,     only : MOM_thread_affinity_set, set_MOM_thread_affinity
 use MOM_domain_infra,     only : AGRID, BGRID_NE, CGRID_NE, SCALAR_PAIR, BITWISE_EXACT_SUM
 use MOM_domain_infra,     only : CORNER, CENTER, NORTH_FACE, EAST_FACE
 use MOM_domain_infra,     only : To_East, To_West, To_North, To_South, To_All, Omit_Corners
-use MOM_domain_infra,     only : MOM_thread_affinity_set, set_MOM_thread_affinity
 use MOM_error_handler,    only : MOM_error, MOM_mesg, NOTE, WARNING, FATAL
 use MOM_file_parser,      only : get_param, log_param, log_version, param_file_type
 use MOM_io_infra,         only : file_exists
@@ -29,26 +28,33 @@ use MOM_string_functions, only : slasher
 implicit none ; private
 
 public :: MOM_infra_init, MOM_infra_end
-!      Domain types and creation and destruction routines
+!  Domain types and creation and destruction routines
 public :: MOM_domain_type, domain2D, domain1D
 public :: MOM_domains_init, create_MOM_domain, clone_MOM_domain, deallocate_MOM_domain
 public :: MOM_thread_affinity_set, set_MOM_thread_affinity
-!      Domain query routines
+!  Domain query routines
 public :: get_domain_extent, get_domain_components, compute_block_extent, get_global_shape
 public :: PE_here, root_PE, num_PEs
-!      Single call communication routines
+!  Single call communication routines
 public :: pass_var, pass_vector, fill_symmetric_edges, broadcast
-!      Non-blocking communication routines
+!  Non-blocking communication routines
 public :: pass_var_start, pass_var_complete, pass_vector_start, pass_vector_complete
-!      Multi-variable group communication routines and type
+!  Multi-variable group communication routines and type
 public :: create_group_pass, do_group_pass, group_pass_type, start_group_pass, complete_group_pass
-!      Global reduction routines
-public :: global_field_sum, sum_across_PEs, min_across_PEs, max_across_PEs
+!  Global reduction routines
+public :: sum_across_PEs, min_across_PEs, max_across_PEs
 public :: global_field, redistribute_array, broadcast_domain
-!      Coded integers for controlling communication or staggering
-public :: AGRID, BGRID_NE, CGRID_NE, SCALAR_PAIR, BITWISE_EXACT_SUM
+!  Simple index-convention-invariant array manipulation routine
+public :: rescale_comp_data
+!> These encoding constants are used to indicate the staggering of scalars and vectors
+public :: AGRID, BGRID_NE, CGRID_NE, SCALAR_PAIR
+!> These encoding constants are used to indicate the discretization position of a variable
 public :: CORNER, CENTER, NORTH_FACE, EAST_FACE
+!> These encoding constants indicate communication patterns.  In practice they can be added.
 public :: To_East, To_West, To_North, To_South, To_All, Omit_Corners
+! These are no longer used by MOM6 because the reproducing sum works so well, but they are
+! still referenced by some of the non-GFDL couplers.
+public :: global_field_sum, BITWISE_EXACT_SUM
 
 contains
 
@@ -192,11 +198,8 @@ subroutine MOM_domains_init(MOM_dom, param_file, symmetric, static_memory, &
   call get_param(param_file, mdl, "NONBLOCKING_UPDATES", nonblocking, &
                  "If true, non-blocking halo updates may be used.", &
                  default=.false., layoutParam=.true.)
-  !### Note the duplicated "the the" in the following description, which should be fixed as a part
-  !    of a larger commit that also changes other MOM_parameter_doc file messages, but for now
-  !    reproduces the existing output files.
   call get_param(param_file, mdl, "THIN_HALO_UPDATES", thin_halos, &
-                 "If true, optional arguments may be used to specify the the width of the "//&
+                 "If true, optional arguments may be used to specify the width of the "//&
                  "halos that are updated with each call.", &
                  default=.true., layoutParam=.true.)
 
@@ -316,7 +319,7 @@ subroutine MOM_domains_init(MOM_dom, param_file, symmetric, static_memory, &
     endif
 
     if ( (layout(1) == 0) .and. (layout(2) == 0) ) &
-      call MOM_define_layout( (/ 1, n_global(1), 1, n_global(2) /), PEs_used, layout)
+      call MOM_define_layout(n_global, PEs_used, layout)
     if ( (layout(1) /= 0) .and. (layout(2) == 0) ) layout(2) = PEs_used / layout(1)
     if ( (layout(1) == 0) .and. (layout(2) /= 0) ) layout(1) = PEs_used / layout(2)
 
@@ -358,5 +361,31 @@ subroutine MOM_domains_init(MOM_dom, param_file, symmetric, static_memory, &
                          symmetric=symmetric, thin_halos=thin_halos, nonblocking=nonblocking)
 
 end subroutine MOM_domains_init
+
+!> Given a global array size and a number of (logical) processors, provide a layout of the
+!! processors in the two directions where the total number of processors is the product of
+!! the two layouts and number of points in the partitioned arrays are as close as possible
+!! to an aspect ratio of 1.
+subroutine MOM_define_layout(n_global, ndivs, layout)
+  integer, dimension(2), intent(in)  :: n_global !< The total number of gridpoints in 2 directions
+  integer,               intent(in)  :: ndivs    !< The total number of (logical) PEs
+  integer, dimension(2), intent(out) :: layout   !< The generated layout of PEs
+
+  ! Local variables
+  integer :: isz, jsz, idiv, jdiv
+
+  ! At present, this algorithm is a copy of mpp_define_layout, but it could perhaps be improved?
+
+  isz = n_global(1) ; jsz = n_global(2)
+  ! First try to divide ndivs to match the domain aspect ratio.  If this is not an even
+  ! divisor of ndivs, reduce idiv until a factor is found.
+  idiv = max(nint( sqrt(float(ndivs*isz)/jsz) ), 1)
+  do while( mod(ndivs,idiv) /= 0 )
+    idiv = idiv - 1
+  enddo ! This will terminate at idiv=1 if not before
+  jdiv = ndivs / idiv
+
+  layout = (/ idiv, jdiv /)
+end subroutine MOM_define_layout
 
 end module MOM_domains
