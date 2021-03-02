@@ -192,6 +192,40 @@ AX_FC_CHECK_LIB([FMS], [fms_init], [fms_mod],
 )
 
 
+# CVMix support
+# NOTE: We test for CVMix_init_bkgnd in CVMix_background.
+#   In the future, we may wish to test for all used CVMix routines.
+AX_FC_CHECK_MODULE([cvmix_background], [], [
+  AS_UNSET([ax_fc_cv_mod_cvmix_background])
+  AX_FC_CHECK_MODULE([cvmix_background],
+    [AC_SUBST([FCFLAGS], ["-I${srcdir}/ac/deps/include/cvmix $FCFLAGS"])],
+    [AC_MSG_ERROR([Could not find cvmix_utils Fortran module.])],
+    [-I${srcdir}/ac/deps/include/cvmix])
+])
+
+# TODO: We do not attempt to set the -L flag for CVMix, because unfortunately
+#   the AX_FC_CHECK_LIB function is deeply flawed and only works for functions
+#   with no arguments, like fms_init.
+#
+#   For now, we rely on the fact that CVMix and FMS share the same deps/lib
+#   directory, but this is an extremely poor solution which prevents linking
+#   to an external CVMix.
+LDFLAGS="$LDFLAGS -lcvmix"
+
+## Test for fms_init to verify FMS library linking
+#AX_FC_CHECK_LIB([cvmix], [cvmix_background], [cvmix_init_bkgnd],
+#  [], [
+#    AS_UNSET([ax_fc_cv_lib_cvmix_cvmix_background])
+#    AX_FC_CHECK_LIB([cvmix], [cvmix_background], [cvmix_init_bkgnd], [
+#      AC_SUBST([LDFLAGS], ["-L${srcdir}/ac/deps/lib $LDFLAGS"])
+#      AC_SUBST([LIBS], ["-lcvmix $LIBS"])
+#    ],
+#    [AC_MSG_ERROR([Could not find CVMix library.])],
+#    [-L${srcdir}/ac/deps/lib])
+#  ]
+#)
+
+
 # Search for mkmf build tools
 AC_PATH_PROG([LIST_PATHS], [list_paths])
 AS_IF([test -z "$LIST_PATHS"], [

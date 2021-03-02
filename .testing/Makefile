@@ -160,6 +160,7 @@ TARGET_SOURCE = $(call SOURCE,build/target_codebase/src) \
   $(wildcard build/target_codebase/config_src/solo_driver/*.F90) \
   $(wildcard build/target_codebase/config_src/ext*/*.F90)
 FMS_SOURCE = $(call SOURCE,$(DEPS)/fms/src)
+CVMIX_SOURCE = $(call SOURCE,$(DEPS)/cvmix/src/shared)
 
 
 #---
@@ -204,17 +205,17 @@ COVERAGE=$(if $(REPORT_COVERAGE),$(FCFLAGS_COVERAGE),)
 # .testing dependencies
 # TODO: We should probably build TARGET with the FMS that it was configured
 #   to use.  But for now we use the same FMS over all builds.
-FCFLAGS_FMS = -I../../$(DEPS)/include
+FCFLAGS_FMS = -I../../$(DEPS)/include -I../../$(DEPS)/include/cvmix
 LDFLAGS_FMS = -L../../$(DEPS)/lib
 PATH_FMS = PATH="${PATH}:../../$(DEPS)/bin"
 
 
 # Define the build targets in terms of the traditional DEBUG/REPRO/etc labels
-SYMMETRIC_FCFLAGS := FCFLAGS="$(FCFLAGS_DEBUG) $(FCFLAGS_INIT) $(COVERAGE) $(FCFLAGS_FMS)"
-ASYMMETRIC_FCFLAGS := FCFLAGS="$(FCFLAGS_DEBUG) $(FCFLAGS_INIT) $(FCFLAGS_FMS)"
-REPRO_FCFLAGS := FCFLAGS="$(FCFLAGS_REPRO) $(FCFLAGS_FMS)"
-OPENMP_FCFLAGS := FCFLAGS="$(FCFLAGS_DEBUG) $(FCFLAGS_INIT) $(FCFLAGS_FMS)"
-TARGET_FCFLAGS := FCFLAGS="$(FCFLAGS_DEBUG) $(FCFLAGS_INIT) $(FCFLAGS_FMS)"
+SYMMETRIC_FCFLAGS := FCFLAGS="$(FCFLAGS_DEBUG) $(FCFLAGS_INIT) $(COVERAGE) $(FCFLAGS_FMS) $(FCFLAGS_CVMIX)"
+ASYMMETRIC_FCFLAGS := FCFLAGS="$(FCFLAGS_DEBUG) $(FCFLAGS_INIT) $(FCFLAGS_FMS) $(FCFLAGS_CVMIX)"
+REPRO_FCFLAGS := FCFLAGS="$(FCFLAGS_REPRO) $(FCFLAGS_FMS) $(FCFLAGS_CVMIX)"
+OPENMP_FCFLAGS := FCFLAGS="$(FCFLAGS_DEBUG) $(FCFLAGS_INIT) $(FCFLAGS_FMS) $(FCFLAGS_CVMIX)"
+TARGET_FCFLAGS := FCFLAGS="$(FCFLAGS_DEBUG) $(FCFLAGS_INIT) $(FCFLAGS_FMS) $(FCFLAGS_CVMIX)"
 
 MOM_LDFLAGS := LDFLAGS="$(LDFLAGS_FMS)"
 SYMMETRIC_LDFLAGS := LDFLAGS="$(COVERAGE) $(LDFLAGS_FMS)"
@@ -260,7 +261,7 @@ build/%/MOM6: build/%/Makefile
 
 # Use autoconf to construct the Makefile for each target
 .PRECIOUS: $(foreach b,$(BUILDS),build/$(b)/Makefile)
-build/%/Makefile: ../ac/configure ../ac/Makefile.in $(DEPS)/lib/libFMS.a $(MKMF) $(LIST_PATHS)
+build/%/Makefile: ../ac/configure ../ac/Makefile.in $(DEPS)/lib/libFMS.a $(DEPS)/lib/libcvmix.a $(MKMF) $(LIST_PATHS)
 	mkdir -p $(@D)
 	cd $(@D) \
 	  && $(MOM_ENV) ../../../ac/configure $(MOM_ACFLAGS) \
@@ -272,7 +273,7 @@ build/%/Makefile: ../ac/configure ../ac/Makefile.in $(DEPS)/lib/libFMS.a $(MKMF)
 
 
 # Fetch the regression target codebase
-build/target/Makefile: $(TARGET_CODEBASE)/ac/configure $(DEPS)/lib/libFMS.a $(MKMF) $(LIST_PATHS)
+build/target/Makefile: $(TARGET_CODEBASE)/ac/configure $(DEPS)/lib/libFMS.a $(DEPS)/lib/libcvmix.a $(MKMF) $(LIST_PATHS)
 	mkdir -p $(@D)
 	cd $(@D) \
 	  && $(MOM_ENV) ../../$(TARGET_CODEBASE)/ac/configure $(MOM_ACFLAGS) \
@@ -320,7 +321,38 @@ $(DEPS)/fms/src/configure: ../ac/deps/configure.fms.ac $(DEPS)/Makefile $(FMS_SO
 $(DEPS)/fms/src: $(DEPS)/Makefile
 	make -C $(DEPS) fms/src
 
+
+#---
+# CVMix
+
+# Set up the CVMix build environment variables
+# NOTE: For now we just use FMS environment
+CVMIX_ENV = PATH="${PATH}:../../bin" FCFLAGS="$(FCFLAGS_DEBUG)"
+
+# TODO: *.mod dependencies?
+$(DEPS)/lib/libcvmix.a: $(DEPS)/cvmix/build/libcvmix.a
+	$(MAKE) -C $(DEPS) lib/libcvmix.a
+
+$(DEPS)/cvmix/build/libcvmix.a: $(DEPS)/cvmix/build/Makefile
+	$(MAKE) -C $(DEPS) cvmix/build/libcvmix.a
+
+$(DEPS)/cvmix/build/Makefile: $(DEPS)/cvmix/src/shared/configure $(DEPS)/Makefile.fms.in $(MKMF) $(LIST_PATHS)
+	$(CVMIX_ENV) $(MAKE) -C $(DEPS) cvmix/build/Makefile
+	$(MAKE) -C $(DEPS) cvmix/build/Makefile
+
+# TODO: m4 dependencies?
+$(DEPS)/cvmix/src/shared/configure: ../ac/deps/configure.cvmix.ac $(DEPS)/Makefile $(CVMIX_SOURCE) | $(DEPS)/cvmix/src/shared
+	cp ../ac/deps/configure.cvmix.ac $(DEPS)
+	cp -r ../ac/deps/m4 $(DEPS)
+	$(MAKE) -C $(DEPS) cvmix/src/shared/configure
+
+$(DEPS)/cvmix/src/shared: $(DEPS)/Makefile
+	make -C $(DEPS) cvmix
+
+
+#---
 # mkmf
+
 $(MKMF) $(LIST_PATHS): $(DEPS)/mkmf
 	$(MAKE) -C $(DEPS) bin/$(@F)
 
@@ -331,6 +363,7 @@ $(DEPS)/mkmf: $(DEPS)/Makefile
 $(DEPS)/Makefile: ../ac/deps/Makefile
 	mkdir -p $(@D)
 	cp $< $@
+
 
 #---
 # The following block does a non-library build of a coupled driver interface to MOM, along with everything below it.
@@ -351,6 +384,7 @@ check_mom6_api_coupled: build/coupled/ocean_model_MOM.o
 build/mct/mom_ocean_model_mct.o: build/mct/Makefile
 	cd $(@D) && make $(@F)
 check_mom6_api_mct: build/mct/mom_ocean_model_mct.o
+
 
 #---
 # Python preprocessing
