@@ -327,6 +327,28 @@ subroutine step_MOM_dyn_split_RK2(u, v, h, tv, visc, Time_local, dt, forces, p_s
     v_av, & ! The meridional velocity time-averaged over a time step [L T-1 ~> m s-1].
     h_av    ! The layer thickness time-averaged over a time step [H ~> m or kg m-2].
 
+  real, dimension(SZK_(GV),SZIB_(G),SZJ_(G)) :: u_tr
+  real, dimension(SZK_(GV),SZI_(G),SZJB_(G)) :: v_tr
+
+  real, dimension(SZK_(GV),SZIB_(G),SZJ_(G)) :: u_bc_accel_tr
+  real, dimension(SZK_(GV),SZI_(G),SZJB_(G)) :: v_bc_accel_tr
+
+  real, dimension(SZK_(GV),SZI_(G),SZJ_(G)) :: pbce_tr
+
+  real, dimension(SZK_(GV),SZIB_(G),SZJ_(G)) :: u_av_tr
+  real, dimension(SZK_(GV),SZI_(G),SZJB_(G)) :: v_av_tr
+
+  real, dimension(SZK_(GV),SZIB_(G),SZJ_(G)) :: visc_rem_u_tr
+  real, dimension(SZK_(GV),SZI_(G),SZJB_(G)) :: visc_rem_v_tr
+
+  real, dimension(SZK_(GV),SZIB_(G),SZJ_(G)) :: uh_ptr_tr
+  real, dimension(SZK_(GV),SZIB_(G),SZJ_(G)) :: u_ptr_tr
+  real, dimension(SZK_(GV),SZI_(G),SZJB_(G)) :: vh_ptr_tr
+  real, dimension(SZK_(GV),SZI_(G),SZJB_(G)) :: v_ptr_tr
+
+  real, dimension(SZK_(GV),SZIB_(G),SZJ_(G)) :: u_accel_bt_tr
+  real, dimension(SZK_(GV),SZI_(G),SZJB_(G)) :: v_accel_bt_tr
+
   ! real, allocatable, dimension(:,:,:) :: &
     ! hf_PFu, hf_PFv, & ! Pressure force accel. x fract. thickness [L T-2 ~> m s-2].
     ! hf_CAu, hf_CAv, & ! Coriolis force accel. x fract. thickness [L T-2 ~> m s-2].
@@ -553,18 +575,43 @@ subroutine step_MOM_dyn_split_RK2(u, v, h, tv, visc, Time_local, dt, forces, p_s
     uh_ptr => uh_in ; vh_ptr => vh_in; u_ptr => u ; v_ptr => v
   endif
 
-  call cpu_clock_begin(id_clock_btstep)
+  !call cpu_clock_begin(id_clock_btstep)
   if (calc_dtbt) call set_dtbt(G, GV, US, CS%barotropic_CSp, eta, CS%pbce)
   if (showCallTree) call callTree_enter("btstep(), MOM_barotropic.F90")
   ! This is the predictor step call to btstep.
-  call btstep(u, v, eta, dt, u_bc_accel, v_bc_accel, forces, CS%pbce, CS%eta_PF, &
-              u_av, v_av, CS%u_accel_bt, CS%v_accel_bt, eta_pred, CS%uhbt, CS%vhbt, &
-              G, GV, US, CS%barotropic_CSp, CS%visc_rem_u, CS%visc_rem_v, ADp=CS%ADp, &
+  ! XXX: Transpose [UV]_cor
+  do k=1,nz
+    u_tr(k,:,:) = u(:,:,k)
+    v_tr(k,:,:) = v(:,:,k)
+    u_bc_accel_tr(k,:,:) = u_bc_accel(:,:,k)
+    v_bc_accel_tr(k,:,:) = v_bc_accel(:,:,k)
+    pbce_tr(k,:,:) = CS%pbce(:,:,k)
+    u_av_tr(k,:,:) = u_av(:,:,k)
+    v_av_tr(k,:,:) = v_av(:,:,k)
+    visc_rem_u_tr(k,:,:) = CS%visc_rem_u(:,:,k)
+    visc_rem_v_tr(k,:,:) = CS%visc_rem_v(:,:,k)
+  enddo
+  if (CS%BT_use_layer_fluxes) then
+    do k=1,nz
+      uh_ptr_tr(k,:,:) = uh_ptr(:,:,k)
+      vh_ptr_tr(k,:,:) = vh_ptr(:,:,k)
+      u_ptr_tr(k,:,:) = u_ptr(:,:,k)
+      v_ptr_tr(k,:,:) = v_ptr(:,:,k)
+    enddo
+  endif
+  call cpu_clock_begin(id_clock_btstep)
+  call btstep(u_tr, v_tr, eta, dt, u_bc_accel_tr, v_bc_accel_tr, forces, pbce_tr, CS%eta_PF, &
+              u_av_tr, v_av_tr, u_accel_bt_tr, v_accel_bt_tr, eta_pred, CS%uhbt, CS%vhbt, &
+              G, GV, US, CS%barotropic_CSp, visc_rem_u_tr, visc_rem_v_tr, ADp=CS%ADp, &
               OBC=CS%OBC, BT_cont=CS%BT_cont, eta_PF_start=eta_PF_start, &
               taux_bot=taux_bot, tauy_bot=tauy_bot, &
-              uh0=uh_ptr, vh0=vh_ptr, u_uh0=u_ptr, v_vh0=v_ptr)
+              uh0=uh_ptr_tr, vh0=vh_ptr_tr, u_uh0=u_ptr_tr, v_vh0=v_ptr_tr)
   if (showCallTree) call callTree_leave("btstep()")
   call cpu_clock_end(id_clock_btstep)
+  do k=1,nz
+    CS%u_accel_bt(:,:,k) = u_accel_bt_tr(k,:,:)
+    CS%v_accel_bt(:,:,k) = v_accel_bt_tr(k,:,:)
+  enddo
 
 ! up = u + dt_pred*( u_bc_accel + u_accel_bt )
   dt_pred = dt * CS%be
@@ -751,23 +798,48 @@ subroutine step_MOM_dyn_split_RK2(u, v, h, tv, visc, Time_local, dt, forces, p_s
 
   ! u_accel_bt = layer accelerations due to barotropic solver
   ! pbce = dM/deta
-  call cpu_clock_begin(id_clock_btstep)
+  !call cpu_clock_begin(id_clock_btstep)
   if (CS%BT_use_layer_fluxes) then
     uh_ptr => uh ; vh_ptr => vh ; u_ptr => u_av ; v_ptr => v_av
   endif
 
   if (showCallTree) call callTree_enter("btstep(), MOM_barotropic.F90")
   ! This is the corrector step call to btstep.
-  call btstep(u, v, eta, dt, u_bc_accel, v_bc_accel, forces, CS%pbce, &
-              CS%eta_PF, u_av, v_av, CS%u_accel_bt, CS%v_accel_bt, &
+  ! XXX: Transpose test
+  do k=1,nz
+    u_tr(k,:,:) = u(:,:,k)
+    v_tr(k,:,:) = v(:,:,k)
+    u_bc_accel_tr(k,:,:) = u_bc_accel(:,:,k)
+    v_bc_accel_tr(k,:,:) = v_bc_accel(:,:,k)
+    pbce_tr(k,:,:) = CS%pbce(:,:,k)
+    u_av_tr(k,:,:) = u_av(:,:,k)
+    v_av_tr(k,:,:) = v_av(:,:,k)
+    visc_rem_u_tr(k,:,:) = CS%visc_rem_u(:,:,k)
+    visc_rem_v_tr(k,:,:) = CS%visc_rem_v(:,:,k)
+  enddo
+  if (CS%BT_use_layer_fluxes) then
+    do k=1,nz
+      uh_ptr_tr(k,:,:) = uh_ptr(:,:,k)
+      vh_ptr_tr(k,:,:) = vh_ptr(:,:,k)
+      u_ptr_tr(k,:,:) = u_ptr(:,:,k)
+      v_ptr_tr(k,:,:) = v_ptr(:,:,k)
+    enddo
+  endif
+  call cpu_clock_begin(id_clock_btstep)
+  call btstep(u_tr, v_tr, eta, dt, u_bc_accel_tr, v_bc_accel_tr, forces, pbce_tr, &
+              CS%eta_PF, u_av_tr, v_av_tr, u_accel_bt_tr, v_accel_bt_tr, &
               eta_pred, CS%uhbt, CS%vhbt, G, GV, US, CS%barotropic_CSp, &
-              CS%visc_rem_u, CS%visc_rem_v, etaav=eta_av, ADp=CS%ADp, &
+              visc_rem_u_tr, visc_rem_v_tr, etaav=eta_av, ADp=CS%ADp, &
               OBC=CS%OBC, BT_cont = CS%BT_cont, eta_PF_start=eta_PF_start, &
               taux_bot=taux_bot, tauy_bot=tauy_bot, &
-              uh0=uh_ptr, vh0=vh_ptr, u_uh0=u_ptr, v_vh0=v_ptr)
+              uh0=uh_ptr_tr, vh0=vh_ptr_tr, u_uh0=u_ptr_tr, v_vh0=v_ptr_tr)
   do j=js,je ; do i=is,ie ; eta(i,j) = eta_pred(i,j) ; enddo ; enddo
-
   call cpu_clock_end(id_clock_btstep)
+
+  do k=1,nz
+    CS%u_accel_bt(:,:,k) = u_accel_bt_tr(k,:,:)
+    CS%v_accel_bt(:,:,k) = v_accel_bt_tr(k,:,:)
+  enddo
   if (showCallTree) call callTree_leave("btstep()")
 
   if (CS%debug) then
