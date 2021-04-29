@@ -8,17 +8,22 @@ record_type = collections.defaultdict(lambda: float)
 for rec in ('grain', 'pemin', 'pemax',):
     record_type[rec] = int
 
+
 def main():
     desc = 'Parse MOM6 model stdout and return clock data in JSON format.'
 
     parser = argparse.ArgumentParser(description=desc)
+    parser.add_argument('--format', '-f', action='store_true')
     parser.add_argument('input')
     args = parser.parse_args()
 
     with open(args.input) as log:
         clocks = parse_clocks(log)
 
-    print(json.dumps(clocks, indent=4))
+    if args.format:
+        print(json.dumps(clocks, indent=4))
+    else:
+        print(json.dumps(clocks))
 
 
 def parse_clocks(log):

@@ -126,9 +126,8 @@ ifeq ($(DO_REPRO_TESTS), true)
 endif
 
 # Profiling
-ifeq ($(DO_PROFILE), true)
+ifeq ($(DO_PROFILE), false)
   BUILDS += opt opt_target
-  # TODO: TESTS += ??
 endif
 
 # The following variables are configured by Travis:
@@ -204,6 +203,7 @@ endif
 .PHONY: all build.regressions
 all: $(foreach b,$(BUILDS),build/$(b)/MOM6) $(VENV_PATH)
 build.regressions: $(foreach b,symmetric target,build/$(b)/MOM6)
+build.prof: $(foreach b,opt opt_target,build/$(b)/MOM6)
 
 # Executable
 BUILD_TARGETS = MOM6 Makefile path_names
@@ -639,12 +639,21 @@ test.summary:
 #---
 # Profiling
 # XXX: This is experimental work to track, log, and report changes in runtime
+PCONFIGS = p0
+
 .PHONY: profile
-profile: $(foreach p,p0, prof.$(p))
+profile: $(foreach p,$(PCONFIGS), prof.$(p))
 
-prof.p0: work/p0/opt/std.out work work/p0/opt_target/std.out
+prof.p0: work/p0/opt/clocks.json work/p0/opt_target/clocks.json
+	python tools/compare_clocks.py $^
 
-work/p0/%/std.out: build/%/MOM6
+work/%/clocks.json: work/%/std.out
+	python tools/parse_fms_clocks.py $< > $@
+
+work/p0/opt/std.out: build/opt/MOM6
+work/p0/opt_target/std.out: build/opt_target/MOM6
+
+work/p0/%/std.out:
 	mkdir -p $(@D)
 	cp -RL p0/* $(@D)
 	mkdir -p $(@D)/RESTART
