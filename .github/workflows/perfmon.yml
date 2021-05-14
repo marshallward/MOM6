@@ -26,5 +26,6 @@ jobs:
 
     - name: Generate profile data
       run: >-
+        pip install f90nml &&
         make profile
         DO_REGRESSION_TESTS=true

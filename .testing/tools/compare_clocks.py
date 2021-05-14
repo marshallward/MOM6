@@ -37,8 +37,8 @@ def main():
     print()
 
     with open(args.expt) as log_expt, open(args.ref) as log_ref:
-        clocks_expt = json.load(log_expt)
-        clocks_ref = json.load(log_ref)
+        clocks_expt = json.load(log_expt)['clocks']
+        clocks_ref = json.load(log_ref)['clocks']
 
         # Gather timers which appear in both clocks
         clock_tags = [clk for clk in clocks_expt if clk in clocks_ref]

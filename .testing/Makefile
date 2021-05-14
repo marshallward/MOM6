@@ -647,8 +647,8 @@ profile: $(foreach p,$(PCONFIGS), prof.$(p))
 prof.p0: work/p0/opt/clocks.json work/p0/opt_target/clocks.json
 	python tools/compare_clocks.py $^
 
-work/%/clocks.json: work/%/std.out
-	python tools/parse_fms_clocks.py $< > $@
+work/p0/%/clocks.json: work/p0/%/std.out
+	python tools/parse_fms_clocks.py -d $(@D) $^ > $@
 
 work/p0/opt/std.out: build/opt/MOM6
 work/p0/opt_target/std.out: build/opt_target/MOM6
