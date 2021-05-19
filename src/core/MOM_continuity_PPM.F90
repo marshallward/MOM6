@@ -2161,18 +2161,17 @@ subroutine PPM_limit_pos(h_in, h_L, h_R, h_min, G, iis, iie, jis, jie)
     ! This limiter prevents undershooting minima within the domain with
     ! values less than h_min.
     curv = 3.0*(h_L(i,j) + h_R(i,j) - 2.0*h_in(i,j))
-    if (curv > 0.0) then ! Only minima are limited.
-      dh = h_R(i,j) - h_L(i,j)
-      if (abs(dh) < curv) then ! The parabola's minimum is within the cell.
-        if (h_in(i,j) <= h_min) then
-          h_L(i,j) = h_in(i,j) ; h_R(i,j) = h_in(i,j)
-        elseif (12.0*curv*(h_in(i,j) - h_min) < (curv**2 + 3.0*dh**2)) then
-          ! The minimum value is h_in - (curv^2 + 3*dh^2)/(12*curv), and must
-          ! be limited in this case.  0 < scale < 1.
-          scale = 12.0*curv*(h_in(i,j) - h_min) / (curv**2 + 3.0*dh**2)
-          h_L(i,j) = h_in(i,j) + scale*(h_L(i,j) - h_in(i,j))
-          h_R(i,j) = h_in(i,j) + scale*(h_R(i,j) - h_in(i,j))
-        endif
+    dh = h_R(i,j) - h_L(i,j)
+    ! Only minima are limited.
+    if (abs(dh) < curv) then ! The parabola's minimum is within the cell.
+      if (h_in(i,j) <= h_min) then
+        h_L(i,j) = h_in(i,j) ; h_R(i,j) = h_in(i,j)
+      elseif (12.0*curv*(h_in(i,j) - h_min) < (curv**2 + 3.0*dh**2)) then
+        ! The minimum value is h_in - (curv^2 + 3*dh^2)/(12*curv), and must
+        ! be limited in this case.  0 < scale < 1.
+        scale = 12.0*curv*(h_in(i,j) - h_min) / (curv**2 + 3.0*dh**2)
+        h_L(i,j) = h_in(i,j) + scale*(h_L(i,j) - h_in(i,j))
+        h_R(i,j) = h_in(i,j) + scale*(h_R(i,j) - h_in(i,j))
       endif
     endif
   enddo ; enddo
