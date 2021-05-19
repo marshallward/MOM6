@@ -1925,17 +1925,27 @@ subroutine PPM_reconstruction_x(h_in, h_L, h_R, G, LB, h_min, monotonic, simple_
     enddo ; enddo
   else
     do j=jsl,jel ; do i=isl-1,iel+1
-      if ((G%mask2dT(i-1,j) * G%mask2dT(i,j) * G%mask2dT(i+1,j)) == 0.0) then
-        slp(i,j) = 0.0
-      else
-        ! This uses a simple 2nd order slope.
-        slp(i,j) = 0.5 * (h_in(i+1,j) - h_in(i-1,j))
-        ! Monotonic constraint, see Eq. B2 in Lin 1994, MWR (132)
-        dMx = max(h_in(i+1,j), h_in(i-1,j), h_in(i,j)) - h_in(i,j)
-        dMn = h_in(i,j) - min(h_in(i+1,j), h_in(i-1,j), h_in(i,j))
-        slp(i,j) = sign(1.,slp(i,j)) * min(abs(slp(i,j)), 2. * min(dMx, dMn))
-                ! * (G%mask2dT(i-1,j) * G%mask2dT(i,j) * G%mask2dT(i+1,j))
-      endif
+      !! v1
+      !if ((G%mask2dT(i-1,j) * G%mask2dT(i,j) * G%mask2dT(i+1,j)) == 0.0) then
+      !  slp(i,j) = 0.0
+      !else
+      !  ! This uses a simple 2nd order slope.
+      !  slp(i,j) = 0.5 * (h_in(i+1,j) - h_in(i-1,j))
+      !  ! Monotonic constraint, see Eq. B2 in Lin 1994, MWR (132)
+      !  dMx = max(h_in(i+1,j), h_in(i-1,j), h_in(i,j)) - h_in(i,j)
+      !  dMn = h_in(i,j) - min(h_in(i+1,j), h_in(i-1,j), h_in(i,j))
+      !  slp(i,j) = sign(1.,slp(i,j)) * min(abs(slp(i,j)), 2. * min(dMx, dMn))
+      !          ! * (G%mask2dT(i-1,j) * G%mask2dT(i,j) * G%mask2dT(i+1,j))
+      !endif
+
+      ! v2
+      ! This uses a simple 2nd order slope.
+      slp(i,j) = 0.5 * (h_in(i+1,j) - h_in(i-1,j))
+      ! Monotonic constraint, see Eq. B2 in Lin 1994, MWR (132)
+      dMx = max(h_in(i+1,j), h_in(i-1,j), h_in(i,j)) - h_in(i,j)
+      dMn = h_in(i,j) - min(h_in(i+1,j), h_in(i-1,j), h_in(i,j))
+      slp(i,j) = sign(1.,slp(i,j)) * min(abs(slp(i,j)), 2. * min(dMx, dMn)) &
+          * (G%mask2dT(i-1,j) * G%mask2dT(i,j) * G%mask2dT(i+1,j))
     enddo ; enddo
 
     if (local_open_BC) then
@@ -2064,17 +2074,24 @@ subroutine PPM_reconstruction_y(h_in, h_L, h_R, G, LB, h_min, monotonic, simple_
     enddo ; enddo
   else
     do j=jsl-1,jel+1 ; do i=isl,iel
-      if ((G%mask2dT(i,j-1) * G%mask2dT(i,j) * G%mask2dT(i,j+1)) == 0.0) then
-        slp(i,j) = 0.0
-      else
-        ! This uses a simple 2nd order slope.
-        slp(i,j) = 0.5 * (h_in(i,j+1) - h_in(i,j-1))
-        ! Monotonic constraint, see Eq. B2 in Lin 1994, MWR (132)
-        dMx = max(h_in(i,j+1), h_in(i,j-1), h_in(i,j)) - h_in(i,j)
-        dMn = h_in(i,j) - min(h_in(i,j+1), h_in(i,j-1), h_in(i,j))
-        slp(i,j) = sign(1.,slp(i,j)) * min(abs(slp(i,j)), 2. * min(dMx, dMn))
-                ! * (G%mask2dT(i,j-1) * G%mask2dT(i,j) * G%mask2dT(i,j+1))
-      endif
+      !if ((G%mask2dT(i,j-1) * G%mask2dT(i,j) * G%mask2dT(i,j+1)) == 0.0) then
+      !  slp(i,j) = 0.0
+      !else
+      !  ! This uses a simple 2nd order slope.
+      !  slp(i,j) = 0.5 * (h_in(i,j+1) - h_in(i,j-1))
+      !  ! Monotonic constraint, see Eq. B2 in Lin 1994, MWR (132)
+      !  dMx = max(h_in(i,j+1), h_in(i,j-1), h_in(i,j)) - h_in(i,j)
+      !  dMn = h_in(i,j) - min(h_in(i,j+1), h_in(i,j-1), h_in(i,j))
+      !  slp(i,j) = sign(1.,slp(i,j)) * min(abs(slp(i,j)), 2. * min(dMx, dMn))
+      !          ! * (G%mask2dT(i,j-1) * G%mask2dT(i,j) * G%mask2dT(i,j+1))
+      !endif
+      ! This uses a simple 2nd order slope.
+      slp(i,j) = 0.5 * (h_in(i,j+1) - h_in(i,j-1))
+      ! Monotonic constraint, see Eq. B2 in Lin 1994, MWR (132)
+      dMx = max(h_in(i,j+1), h_in(i,j-1), h_in(i,j)) - h_in(i,j)
+      dMn = h_in(i,j) - min(h_in(i,j+1), h_in(i,j-1), h_in(i,j))
+      slp(i,j) = sign(1.,slp(i,j)) * min(abs(slp(i,j)), 2. * min(dMx, dMn)) &
+          * (G%mask2dT(i,j-1) * G%mask2dT(i,j) * G%mask2dT(i,j+1))
     enddo ; enddo
 
     if (local_open_BC) then
@@ -2157,6 +2174,48 @@ subroutine PPM_limit_pos(h_in, h_L, h_R, h_min, G, iis, iie, jis, jie)
   character(len=256) :: mesg
   integer :: i,j
 
+  !! v1
+  !do j=jis,jie ; do i=iis,iie
+  !  ! This limiter prevents undershooting minima within the domain with
+  !  ! values less than h_min.
+  !  curv = 3.0*(h_L(i,j) + h_R(i,j) - 2.0*h_in(i,j))
+  !  if (curv > 0.0) then ! Only minima are limited.
+  !    dh = h_R(i,j) - h_L(i,j)
+  !    if (abs(dh) < curv) then ! The parabola's minimum is within the cell.
+  !      if (h_in(i,j) <= h_min) then
+  !        h_L(i,j) = h_in(i,j) ; h_R(i,j) = h_in(i,j)
+  !      elseif (12.0*curv*(h_in(i,j) - h_min) < (curv**2 + 3.0*dh**2)) then
+  !        ! The minimum value is h_in - (curv^2 + 3*dh^2)/(12*curv), and must
+  !        ! be limited in this case.  0 < scale < 1.
+  !        scale = 12.0*curv*(h_in(i,j) - h_min) / (curv**2 + 3.0*dh**2)
+  !        h_L(i,j) = h_in(i,j) + scale*(h_L(i,j) - h_in(i,j))
+  !        h_R(i,j) = h_in(i,j) + scale*(h_R(i,j) - h_in(i,j))
+  !      endif
+  !    endif
+  !  endif
+  !enddo ; enddo
+
+  !! v2
+  !do j=jis,jie ; do i=iis,iie
+  !  ! This limiter prevents undershooting minima within the domain with
+  !  ! values less than h_min.
+  !  curv = 3.0*(h_L(i,j) + h_R(i,j) - 2.0*h_in(i,j))
+  !  dh = h_R(i,j) - h_L(i,j)
+  !  ! Only minima are limited.
+  !  if (abs(dh) < curv) then ! The parabola's minimum is within the cell.
+  !    if (h_in(i,j) <= h_min) then
+  !      h_L(i,j) = h_in(i,j) ; h_R(i,j) = h_in(i,j)
+  !    elseif (12.0*curv*(h_in(i,j) - h_min) < (curv**2 + 3.0*dh**2)) then
+  !      ! The minimum value is h_in - (curv^2 + 3*dh^2)/(12*curv), and must
+  !      ! be limited in this case.  0 < scale < 1.
+  !      scale = 12.0*curv*(h_in(i,j) - h_min) / (curv**2 + 3.0*dh**2)
+  !      h_L(i,j) = h_in(i,j) + scale*(h_L(i,j) - h_in(i,j))
+  !      h_R(i,j) = h_in(i,j) + scale*(h_R(i,j) - h_in(i,j))
+  !    endif
+  !  endif
+  !enddo ; enddo
+
+  ! v3
   do j=jis,jie ; do i=iis,iie
     ! This limiter prevents undershooting minima within the domain with
     ! values less than h_min.
@@ -2164,17 +2223,27 @@ subroutine PPM_limit_pos(h_in, h_L, h_R, h_min, G, iis, iie, jis, jie)
     dh = h_R(i,j) - h_L(i,j)
     ! Only minima are limited.
     if (abs(dh) < curv) then ! The parabola's minimum is within the cell.
-      if (h_in(i,j) <= h_min) then
-        h_L(i,j) = h_in(i,j) ; h_R(i,j) = h_in(i,j)
-      elseif (12.0*curv*(h_in(i,j) - h_min) < (curv**2 + 3.0*dh**2)) then
-        ! The minimum value is h_in - (curv^2 + 3*dh^2)/(12*curv), and must
-        ! be limited in this case.  0 < scale < 1.
-        scale = 12.0*curv*(h_in(i,j) - h_min) / (curv**2 + 3.0*dh**2)
-        h_L(i,j) = h_in(i,j) + scale*(h_L(i,j) - h_in(i,j))
-        h_R(i,j) = h_in(i,j) + scale*(h_R(i,j) - h_in(i,j))
-      endif
+      scale = (curv * (12. * max(0., h_in(i,j) - h_min))) &
+          / (curv**2 + 3. * dh**2)
+      h_L(i,j) = merge(h_in(i,j) + scale*(h_L(i,j) - h_in(i,j)), h_L(i,j), scale < 1)
+      h_R(i,j) = merge(h_in(i,j) + scale*(h_R(i,j) - h_in(i,j)), h_R(i,j), scale < 1)
     endif
   enddo ; enddo
+
+  !! v4
+  !do j=jis,jie ; do i=iis,iie
+  !  ! This limiter prevents undershooting minima within the domain with
+  !  ! values less than h_min.
+  !  curv = 3. * ((h_L(i,j) + h_R(i,j)) - 2. * h_in(i,j))
+  !  dh = h_R(i,j) - h_L(i,j)
+
+  !  scale = (curv * (12. * max(0., h_in(i,j) - h_min))) / (curv**2 + 3. * dh**2)
+  !  scale = min(scale, 1.)
+  !  scale = merge(scale, 1., abs(dh) < curv)
+
+  !  h_L(i,j) = h_in(i,j) + scale * (h_L(i,j) - h_in(i,j))
+  !  h_R(i,j) = h_in(i,j) + scale * (h_R(i,j) - h_in(i,j))
+  !enddo ; enddo
 
 end subroutine PPM_limit_pos
 
