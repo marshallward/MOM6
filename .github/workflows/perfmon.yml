@@ -29,3 +29,8 @@ jobs:
         pip install f90nml &&
         make profile
         DO_REGRESSION_TESTS=true
+
+    - name: Generate perf data
+      run: |
+        sudo sysctl -w kernel.perf_event_paranoid=2
+        make perf DO_REGRESSION_TESTS=true

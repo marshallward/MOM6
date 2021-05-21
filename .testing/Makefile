@@ -73,7 +73,7 @@ export MPIFC
 # NOTE: FMS will be built using FCFLAGS_DEBUG
 FCFLAGS_DEBUG ?= -g -O0
 FCFLAGS_REPRO ?= -g -O2
-FCFLAGS_OPT	?= -g -O3 -mavx
+FCFLAGS_OPT	?= -g -O3 -mavx -fno-omit-frame-pointer
 FCFLAGS_INIT ?=
 FCFLAGS_COVERAGE ?=
 # Additional notes:
@@ -644,6 +644,7 @@ PCONFIGS = p0
 .PHONY: profile
 profile: $(foreach p,$(PCONFIGS), prof.$(p))
 
+.PHONY: prof.p0
 prof.p0: work/p0/opt/clocks.json work/p0/opt_target/clocks.json
 	python tools/compare_clocks.py $^
 
@@ -660,6 +661,37 @@ work/p0/%/std.out:
 	echo -e "" > $(@D)/MOM_override
 	cd $(@D) \
 	  && $(MPIRUN) -n 1 ../../../$< 2> std.err > std.out
+
+#---
+# Same but with perf
+
+# TODO: This expects the -e flag, can I handle it in the command?
+PERF_EVENTS ?=
+
+.PHONY: perf
+perf: $(foreach p,$(PCONFIGS), perf.$(p))
+
+.PHONY: prof.p0
+perf.p0: work/p0/opt/profile.json work/p0/opt_target/profile.json
+	python tools/compare_perf.py $^
+
+work/p0/%/profile.json: work/p0/%/perf.data
+	python tools/parse_perf.py -f $< > $@
+
+work/p0/opt/perf.data: build/opt/MOM6
+work/p0/opt_target/perf.data: build/opt_target/MOM6
+
+work/p0/%/perf.data:
+	mkdir -p $(@D)
+	cp -RL p0/* $(@D)
+	mkdir -p $(@D)/RESTART
+	echo -e "" > $(@D)/MOM_override
+	cd $(@D) \
+	  && perf record \
+	    -F 3999 \
+	    ${PERF_EVENTS} \
+	    ../../../$< 2> std.perf.err > std.perf.out \
+	  || cat std.perf.err
 
 
 #----
