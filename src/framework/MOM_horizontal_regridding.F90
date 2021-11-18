@@ -17,7 +17,7 @@ use MOM_interpolate,   only : build_horiz_interp_weights, run_horiz_interp, hori
 use MOM_interp_infra,  only : axistype, get_external_field_info, get_axis_data
 use MOM_time_manager,  only : time_type
 use MOM_io,            only : axis_info, get_axis_info, get_var_axes_info, MOM_read_data
-use MOM_io,            only : read_attribute
+use MOM_io,            only : read_attribute, read_variable
 
 implicit none ; private
 
@@ -448,12 +448,11 @@ subroutine horiz_interp_and_extrap_tracer_record(filename, varnam,  conversion, 
           endif
         enddo
       enddo
-
     else
+      start(:) = 1 ; start(3) = k
+      count(:) = 1 ; count(1) = id ; count(2) = jd
+      call read_variable(trim(filename), trim(varnam), tr_in, start=start, nread=count)
       if (is_root_pe()) then
-        start = 1 ; start(3) = k ; count(:) = 1 ; count(1) = id ; count(2) = jd
-        start(4) = 1; count(4) = 1
-        call MOM_read_data(trim(filename), trim(varnam), tr_in, start, count, no_domain=.true.)
         if (add_np) then
           pole = 0.0 ; npole = 0.0
           do i=1,id

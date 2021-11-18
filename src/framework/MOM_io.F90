@@ -100,6 +100,7 @@ end interface MOM_write_field
 interface read_variable
   module procedure read_variable_0d, read_variable_0d_int
   module procedure read_variable_1d, read_variable_1d_int
+  module procedure read_variable_2d
 end interface read_variable
 
 !> Read a global or variable attribute from a named netCDF file using netCDF calls
@@ -886,6 +887,61 @@ subroutine read_variable_1d_int(filename, varname, var, ncid_in)
 
   call broadcast(var, size(var), blocking=.true.)
 end subroutine read_variable_1d_int
+
+!> Read a 2d array from a netCDF input file and save to a variable.
+!!
+!! Start and nread ranks may exceed var, but must match the rank of the
+!! variable in the netCDF file.  This allows for reading slices of larger
+!! arrays.
+!!
+!! I/O occurs only on the root PE, and data is broadcast to other ranks.
+!! Due to potentially large memory communication and storage, this subroutine
+!! should only be used when domain-decomposition is unavaialable.
+subroutine read_variable_2d(filename, varname, var, start, nread, ncid_in)
+  character(len=*), intent(in) :: filename  !< Name of file to be read
+  character(len=*), intent(in) :: varname   !< Name of variable to be read
+  real, intent(out)            :: var(:,:)  !< Output array of variable
+  integer, optional, intent(in) :: start(:) !< Starting index on each axis.
+  integer, optional, intent(in) :: nread(:) !< Number of values to be read along each axis
+  integer, optional, intent(in) :: ncid_in  !< netCDF ID of an opened file.
+              !! If absent, the file is opened and closed within this routine.
+
+  integer :: ncid, varid, ndims, rc
+  character(len=*), parameter :: hdr = "read_variable_2d"
+  character(len=128) :: msg
+
+  if (is_root_pe()) then
+    if (present(ncid_in)) then
+      ncid = ncid_in
+    else
+      call open_file_to_Read(filename, ncid)
+    endif
+
+    call get_varid(varname, ncid, filename, varid, match_case=.false.)
+    if (varid < 0) call MOM_error(FATAL, "Unable to get netCDF varid for "//trim(varname)//&
+                                         " in "//trim(filename))
+    ! Verify that start(:) and nread(:) ranks match variable's dimension count
+    rc = nf90_inquire_variable(ncid, varid, ndims=ndims)
+    if (rc /= NF90_NOERR) call MOM_error(FATAL, hdr // trim(nf90_strerror(rc)) //&
+          " Difficulties reading "//trim(varname)//" from "//trim(filename))
+
+    ! NOTE: We could check additional information here (type, size, ...)
+
+    rc = nf90_get_var(ncid, varid, var)
+    if (rc /= NF90_NOERR) call MOM_error(FATAL, hdr // trim(nf90_strerror(rc)) //&
+          " Difficulties reading "//trim(varname)//" from "//trim(filename))
+
+    if (size(start) /= ndims .or. size(nread) /= ndims) then
+      write (msg, '("'// hdr //': size(start) ", i0, " and/or size(nread) ", &
+        i0, " do not match ndims ", i0)') size(start), size(nread), ndims
+      call MOM_error(FATAL, trim(msg))
+    endif
+
+    if (.not.present(ncid_in)) call close_file_to_read(ncid, filename)
+  endif
+
+  call broadcast(var, size(var), blocking=.true.)
+end subroutine read_variable_2d
 
 !> Read a character-string global or variable attribute
 subroutine read_attribute_str(filename, attname, att_val, varname, found, all_read, ncid_in)
