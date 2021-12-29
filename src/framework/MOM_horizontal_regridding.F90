@@ -394,7 +394,7 @@ subroutine horiz_interp_and_extrap_tracer_record(filename, varnam,  conversion, 
 
   call read_attribute(trim(filename), "scale_factor", scale_factor, &
                       varname=trim(varnam), found=found_attr)
-  if (.not. found_attr) scale_factor = 0.
+  if (.not. found_attr) scale_factor = 1.
 
   call read_attribute(trim(filename), "add_offset", add_offset, &
                       varname=trim(varnam), found=found_attr)
