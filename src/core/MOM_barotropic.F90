@@ -623,7 +623,7 @@ subroutine btstep(U_in, V_in, eta_in, dt, bc_accel_u, bc_accel_v, forces, pbce, 
     vbt_int_prev, & ! Previous value of time-integrated velocity stored for OBCs [L ~> m]
     vhbt_int_prev   ! Previous value of time-integrated transport stored for OBCs [L2 H ~> m3]
   real :: mass_to_Z   ! The inverse of the the mean density (Rho0) [R-1 ~> m3 kg-1]
-  real :: visc_rem    ! A work variable that may equal visc_rem_[uv] [nondim]
+  !real :: visc_rem    ! A work variable that may equal visc_rem_[uv] [nondim]
   real :: vel_prev    ! The previous velocity [L T-1 ~> m s-1].
   real :: dtbt        ! The barotropic time step [T ~> s].
   real :: bebt        ! A copy of CS%bebt [nondim].
@@ -939,8 +939,8 @@ subroutine btstep(U_in, V_in, eta_in, dt, bc_accel_u, bc_accel_v, forces, pbce, 
   ! Zero out various wide-halo arrays.
   !$OMP parallel do default(shared)
   do j=CS%jsdw,CS%jedw ; do i=CS%isdw,CS%iedw
-    gtot_E(i,j) = 0.0 ; gtot_W(i,j) = 0.0
-    gtot_N(i,j) = 0.0 ; gtot_S(i,j) = 0.0
+    !gtot_E(i,j) = 0.0 ; gtot_W(i,j) = 0.0
+    !gtot_N(i,j) = 0.0 ; gtot_S(i,j) = 0.0
     eta(i,j) = 0.0
     eta_PF(i,j) = 0.0
     if (interp_eta_PF) then
@@ -999,61 +999,61 @@ subroutine btstep(U_in, V_in, eta_in, dt, bc_accel_u, bc_accel_v, forces, pbce, 
     enddo ; enddo
   endif
 
-  !$OMP parallel do default(shared) private(visc_rem)
-  do k=1,nz ; do j=js,je ; do I=is-1,ie
-    ! rem needs greater than visc_rem_u and 1-Instep/visc_rem_u.
-    ! The 0.5 below is just for safety.
-    if (visc_rem_u(I,j,k) <= 0.0) then ; visc_rem = 0.0
-    elseif (visc_rem_u(I,j,k) >= 1.0) then ; visc_rem = 1.0
-    elseif (visc_rem_u(I,j,k)**2 > visc_rem_u(I,j,k) - 0.5*Instep) then
-      visc_rem = visc_rem_u(I,j,k)
-    else ; visc_rem = 1.0 - 0.5*Instep/visc_rem_u(I,j,k) ; endif
-    wt_u(I,j,k) = CS%frhatu(I,j,k) * visc_rem
-  enddo ; enddo ; enddo
-  !$OMP parallel do default(shared) private(visc_rem)
-  do k=1,nz ; do J=js-1,je ; do i=is,ie
-    ! rem needs greater than visc_rem_v and 1-Instep/visc_rem_v.
-    if (visc_rem_v(i,J,k) <= 0.0) then ; visc_rem = 0.0
-    elseif (visc_rem_v(i,J,k) >= 1.0) then ; visc_rem = 1.0
-    elseif (visc_rem_v(i,J,k)**2 > visc_rem_v(i,J,k) - 0.5*Instep) then
-      visc_rem = visc_rem_v(i,J,k)
-    else ; visc_rem = 1.0 - 0.5*Instep/visc_rem_v(i,J,k) ; endif
-    wt_v(i,J,k) = CS%frhatv(i,J,k) * visc_rem
-  enddo ; enddo ; enddo
+  !!$OMP parallel do default(shared) private(visc_rem)
+  !do k=1,nz ; do j=js,je ; do I=is-1,ie
+  !  ! rem needs greater than visc_rem_u and 1-Instep/visc_rem_u.
+  !  ! The 0.5 below is just for safety.
+  !  if (visc_rem_u(I,j,k) <= 0.0) then ; visc_rem = 0.0
+  !  elseif (visc_rem_u(I,j,k) >= 1.0) then ; visc_rem = 1.0
+  !  elseif (visc_rem_u(I,j,k)**2 > visc_rem_u(I,j,k) - 0.5*Instep) then
+  !    visc_rem = visc_rem_u(I,j,k)
+  !  else ; visc_rem = 1.0 - 0.5*Instep/visc_rem_u(I,j,k) ; endif
+  !  wt_u(I,j,k) = CS%frhatu(I,j,k) * visc_rem
+  !enddo ; enddo ; enddo
+  !!$OMP parallel do default(shared) private(visc_rem)
+  !do k=1,nz ; do J=js-1,je ; do i=is,ie
+  !  ! rem needs greater than visc_rem_v and 1-Instep/visc_rem_v.
+  !  if (visc_rem_v(i,J,k) <= 0.0) then ; visc_rem = 0.0
+  !  elseif (visc_rem_v(i,J,k) >= 1.0) then ; visc_rem = 1.0
+  !  elseif (visc_rem_v(i,J,k)**2 > visc_rem_v(i,J,k) - 0.5*Instep) then
+  !    visc_rem = visc_rem_v(i,J,k)
+  !  else ; visc_rem = 1.0 - 0.5*Instep/visc_rem_v(i,J,k) ; endif
+  !  wt_v(i,J,k) = CS%frhatv(i,J,k) * visc_rem
+  !enddo ; enddo ; enddo
 
-  !   Use u_Cor and v_Cor as the reference values for the Coriolis terms,
-  ! including the viscous remnant.
-  !$OMP parallel do default(shared)
-  do j=js-1,je+1 ; do I=is-1,ie ; ubt_Cor(I,j) = 0.0 ; enddo ; enddo
-  !$OMP parallel do default(shared)
-  do J=js-1,je ; do i=is-1,ie+1 ; vbt_Cor(i,J) = 0.0 ; enddo ; enddo
-  !$OMP parallel do default(shared)
-  do j=js,je ; do k=1,nz ; do I=is-1,ie
-    ubt_Cor(I,j) = ubt_Cor(I,j) + wt_u(I,j,k) * U_Cor(I,j,k)
-  enddo ; enddo ; enddo
-  !$OMP parallel do default(shared)
-  do J=js-1,je ; do k=1,nz ; do i=is,ie
-    vbt_Cor(i,J) = vbt_Cor(i,J) + wt_v(i,J,k) * V_Cor(i,J,k)
-  enddo ; enddo ; enddo
+  !!   Use u_Cor and v_Cor as the reference values for the Coriolis terms,
+  !! including the viscous remnant.
+  !!$OMP parallel do default(shared)
+  !do j=js-1,je+1 ; do I=is-1,ie ; ubt_Cor(I,j) = 0.0 ; enddo ; enddo
+  !!$OMP parallel do default(shared)
+  !do J=js-1,je ; do i=is-1,ie+1 ; vbt_Cor(i,J) = 0.0 ; enddo ; enddo
+  !!$OMP parallel do default(shared)
+  !do j=js,je ; do k=1,nz ; do I=is-1,ie
+  !  ubt_Cor(I,j) = ubt_Cor(I,j) + wt_u(I,j,k) * U_Cor(I,j,k)
+  !enddo ; enddo ; enddo
+  !!$OMP parallel do default(shared)
+  !do J=js-1,je ; do k=1,nz ; do i=is,ie
+  !  vbt_Cor(i,J) = vbt_Cor(i,J) + wt_v(i,J,k) * V_Cor(i,J,k)
+  !enddo ; enddo ; enddo
 
-  ! The gtot arrays are the effective layer-weighted reduced gravities for
-  ! accelerations across the various faces, with names for the relative
-  ! locations of the faces to the pressure point.  They will have their halos
-  ! updated later on.
-  !$OMP parallel do default(shared)
-  do j=js,je
-    do k=1,nz ; do I=is-1,ie
-      gtot_E(i,j)   = gtot_E(i,j)   + pbce(i,j,k)   * wt_u(I,j,k)
-      gtot_W(i+1,j) = gtot_W(i+1,j) + pbce(i+1,j,k) * wt_u(I,j,k)
-    enddo ; enddo
-  enddo
-  !$OMP parallel do default(shared)
-  do J=js-1,je
-    do k=1,nz ; do i=is,ie
-      gtot_N(i,j)   = gtot_N(i,j)   + pbce(i,j,k)   * wt_v(i,J,k)
-      gtot_S(i,j+1) = gtot_S(i,j+1) + pbce(i,j+1,k) * wt_v(i,J,k)
-    enddo ; enddo
-  enddo
+  !! The gtot arrays are the effective layer-weighted reduced gravities for
+  !! accelerations across the various faces, with names for the relative
+  !! locations of the faces to the pressure point.  They will have their halos
+  !! updated later on.
+  !!$OMP parallel do default(shared)
+  !do j=js,je
+  !  do k=1,nz ; do I=is-1,ie
+  !    gtot_E(i,j)   = gtot_E(i,j)   + pbce(i,j,k)   * wt_u(I,j,k)
+  !    gtot_W(i+1,j) = gtot_W(i+1,j) + pbce(i+1,j,k) * wt_u(I,j,k)
+  !  enddo ; enddo
+  !enddo
+  !!$OMP parallel do default(shared)
+  !do J=js-1,je
+  !  do k=1,nz ; do i=is,ie
+  !    gtot_N(i,j)   = gtot_N(i,j)   + pbce(i,j,k)   * wt_v(i,J,k)
+  !    gtot_S(i,j+1) = gtot_S(i,j+1) + pbce(i,j+1,k) * wt_v(i,J,k)
+  !  enddo ; enddo
+  !enddo
 
   if (CS%tides) then
     call tidal_forcing_sensitivity(G, CS%tides_CSp, det_de)
@@ -1071,6 +1071,9 @@ subroutine btstep(U_in, V_in, eta_in, dt, bc_accel_u, bc_accel_v, forces, pbce, 
     call complete_group_pass(CS%pass_q_DCor, CS%BT_Domain, clock=id_clock_pass_pre)
     if (id_clock_calc_pre > 0) call cpu_clock_begin(id_clock_calc_pre)
   endif
+
+  call pre_btstep(CS, G, GV, nstep, visc_rem_u, visc_rem_v, U_Cor, V_Cor, &
+      pbce, wt_u, wt_v, ubt_Cor, vbt_Cor, gtot_E, gtot_W, gtot_N, gtot_S)
 
   ! Calculate the open areas at the velocity points.
   ! The halo updates are needed before Datu is first used, either in set_up_BT_OBC or ubt_Cor.
@@ -1735,6 +1738,8 @@ subroutine btstep(U_in, V_in, eta_in, dt, bc_accel_u, bc_accel_v, forces, pbce, 
     wt_eta(n) = wt_eta(n) * I_sum_wt_eta
   enddo
 
+  ! ============= SPLIT HERE =================== !
+
   sum_wt_vel = 0.0 ; sum_wt_eta = 0.0 ; sum_wt_accel = 0.0 ; sum_wt_trans = 0.0
 
   ! The following loop contains all of the time steps.
@@ -2391,6 +2396,8 @@ subroutine btstep(U_in, V_in, eta_in, dt, bc_accel_u, bc_accel_v, forces, pbce, 
   if (id_clock_calc > 0) call cpu_clock_end(id_clock_calc)
   if (id_clock_calc_post > 0) call cpu_clock_begin(id_clock_calc_post)
 
+  ! ===== SPLIT HERE ==== !
+
   ! Reset the time information in the diag type.
   if (do_hifreq_output) call enable_averaging(time_int_in, time_end_in, CS%diag)
 
@@ -2723,6 +2730,145 @@ subroutine btstep(U_in, V_in, eta_in, dt, bc_accel_u, bc_accel_v, forces, pbce, 
   endif
 
 end subroutine btstep
+
+
+!> Compute barotropic 2D fields from 3D fields
+subroutine pre_btstep(CS, G, GV, nstep, visc_rem_u, visc_rem_v, U_Cor, V_Cor, &
+    pbce, wt_u, wt_v, ubt_Cor, vbt_Cor, gtot_E, gtot_W, gtot_N, gtot_S)
+  type(barotropic_CS), intent(inout) :: CS
+    !< Barotropic control structure
+  type(ocean_grid_type), intent(inout) :: G
+    !< The ocean's grid structure.
+  type(verticalGrid_type), intent(in)  :: GV
+    !< The ocean's vertical grid structure.
+  integer, intent(in) :: nstep
+    ! The number of barotropic time steps to take.
+  real, intent(in) :: visc_rem_u(SZIB_(G),SZJ_(G),SZK_(GV))
+    !< Both the fraction of the momentum originally in a layer that remains
+    !! after a time-step of viscosity, and the fraction of a time-step's worth
+    !! of a barotropic acceleration that a layer experiences after viscosity is
+    !! applied, in the zonal direction [nondim].
+    !! Visc_rem_u is between 0 (at the bottom) and 1 (far above).
+  real, intent(in) :: visc_rem_v(SZI_(G),SZJB_(G),SZK_(GV))
+    !< Ditto for meridional direction [nondim]
+  real, intent(in) :: U_Cor(SZIB_(G),SZJ_(G),SZK_(GV))
+    !< The 3D zonal velocities used to calculate the Coriolis terms in
+    !! bc_accel_u [L T-1 ~> m s-1]
+  real, intent(in) :: V_Cor(SZI_(G),SZJB_(G),SZK_(GV))
+    !< The 3D meridional velocities used to calculate the Coriolis terms in
+    !! bc_accel_u [L T-1 ~> m s-1]
+  real, intent(in) :: pbce(SZI_(G),SZJ_(G),SZK_(GV))
+    !< The baroclinic pressure anomaly in each layer due to free surface height
+    !! anomalies [L2 H-1 T-2 ~> m s-2 or m4 kg-1 s-2]
+  ! TODO: Move these to be purely internal
+  real, intent(out) :: wt_u(SZIB_(G),SZJ_(G),SZK_(GV))
+  real, intent(out) :: wt_v(SZI_(G),SZJB_(G),SZK_(GV))
+    ! wt_u and wt_v are the normalized weights to be used in calculating
+    ! barotropic velocities, possibly with sums less than one due to viscous
+    ! losses [nondim]
+  ! NOTE: This should be in the final output
+  real, intent(out) :: ubt_Cor(SZIB_(G),SZJ_(G))
+  real, intent(out) :: vbt_Cor(SZI_(G),SZJB_(G))
+    ! The barotropic velocities that had been used to calculate the input
+    ! Coriolis terms [L T-1 ~> m s-1]
+  real, intent(out) :: gtot_E(SZIW_(CS),SZJW_(CS))
+  real, intent(out) :: gtot_W(SZIW_(CS),SZJW_(CS))
+  real, intent(out) :: gtot_N(SZIW_(CS),SZJW_(CS))
+  real, intent(out) :: gtot_S(SZIW_(CS),SZJW_(CS))
+     ! gtot_X is the effective total reduced gravity used to relate free
+     ! surface height deviations to pressure forces (including GFS and
+     ! baroclinic contributions) in the barotropic momentum equations half a
+     ! grid-point in the X-direction (X is N, S, E, or W) from the thickness
+     ! point [L2 H-1 T-2 ~> m s-2 or m4 kg-1 s-2].  (See Hallberg, J Comp Phys
+     ! 1997 for a discussion.)
+
+  integer :: is, ie, js, je, nz
+    ! Domain index bounds
+  integer :: i, j, k
+    ! Loop counters
+  real :: Instep
+    ! The inverse of the number of barotropic time steps to take [nondim].
+  real :: visc_rem
+    ! Current visc_rem_[uv]
+
+  is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec ; nz = GV%ke
+  Instep = 1.0 / real(nstep)
+
+  ! Configure halo updates
+  !call create_group_pass(CS%pass_ubt_Cor, ubt_Cor, vbt_Cor, G%Domain)
+
+  ! Compute normalized barotropic weights
+  !$OMP parallel do default(shared) private(visc_rem)
+  do k=1,nz ; do j=js,je ; do I=is-1,ie
+    ! rem needs greater than visc_rem_u and 1-Instep/visc_rem_u.
+    ! The 0.5 below is just for safety.
+    if (visc_rem_u(I,j,k) <= 0.0) then ; visc_rem = 0.0
+    elseif (visc_rem_u(I,j,k) >= 1.0) then ; visc_rem = 1.0
+    elseif (visc_rem_u(I,j,k)**2 > visc_rem_u(I,j,k) - 0.5*Instep) then
+      visc_rem = visc_rem_u(I,j,k)
+    else ; visc_rem = 1.0 - 0.5*Instep/visc_rem_u(I,j,k) ; endif
+    wt_u(I,j,k) = CS%frhatu(I,j,k) * visc_rem
+  enddo ; enddo ; enddo
+  !$OMP parallel do default(shared) private(visc_rem)
+  do k=1,nz ; do J=js-1,je ; do i=is,ie
+    ! rem needs greater than visc_rem_v and 1-Instep/visc_rem_v.
+    if (visc_rem_v(i,J,k) <= 0.0) then ; visc_rem = 0.0
+    elseif (visc_rem_v(i,J,k) >= 1.0) then ; visc_rem = 1.0
+    elseif (visc_rem_v(i,J,k)**2 > visc_rem_v(i,J,k) - 0.5*Instep) then
+      visc_rem = visc_rem_v(i,J,k)
+    else ; visc_rem = 1.0 - 0.5*Instep/visc_rem_v(i,J,k) ; endif
+    wt_v(i,J,k) = CS%frhatv(i,J,k) * visc_rem
+  enddo ; enddo ; enddo
+
+  ! Use u_Cor and v_Cor as the reference values for the Coriolis terms,
+  ! including the viscous remnant.
+  ! NOTE: zero-initialization should not be necessary (and may even be wrong)
+  !$OMP parallel do default(shared)
+  do j=js-1,je+1 ; do I=is-1,ie ; ubt_Cor(I,j) = 0.0 ; enddo ; enddo
+  !$OMP parallel do default(shared)
+  do J=js-1,je ; do i=is-1,ie+1 ; vbt_Cor(i,J) = 0.0 ; enddo ; enddo
+  ! NOTE: This is the only use of [UV]_Cor (i.e. pure 3d->2d operation)
+  !$OMP parallel do default(shared)
+  do j=js,je ; do k=1,nz ; do I=is-1,ie
+    ubt_Cor(I,j) = ubt_Cor(I,j) + wt_u(I,j,k) * U_Cor(I,j,k)
+  enddo ; enddo ; enddo
+  !$OMP parallel do default(shared)
+  do J=js-1,je ; do k=1,nz ; do i=is,ie
+    vbt_Cor(i,J) = vbt_Cor(i,J) + wt_v(i,J,k) * V_Cor(i,J,k)
+  enddo ; enddo ; enddo
+
+  ! Zero out various wide-halo arrays.
+  do j=CS%jsdw,CS%jedw ; do i=CS%isdw,CS%iedw
+    gtot_E(i,j) = 0.0 ; gtot_W(i,j) = 0.0
+    gtot_N(i,j) = 0.0 ; gtot_S(i,j) = 0.0
+  enddo ; enddo
+
+  ! The gtot arrays are the effective layer-weighted reduced gravities for
+  ! accelerations across the various faces, with names for the relative
+  ! locations of the faces to the pressure point.  They will have their halos
+  ! updated later on.
+  !$OMP parallel do default(shared)
+  do j=js,je
+    do k=1,nz ; do I=is-1,ie
+      gtot_E(i,j)   = gtot_E(i,j)   + pbce(i,j,k)   * wt_u(I,j,k)
+      gtot_W(i+1,j) = gtot_W(i+1,j) + pbce(i+1,j,k) * wt_u(I,j,k)
+    enddo ; enddo
+  enddo
+  !$OMP parallel do default(shared)
+  do J=js-1,je
+    do k=1,nz ; do i=is,ie
+      gtot_N(i,j)   = gtot_N(i,j)   + pbce(i,j,k)   * wt_v(i,J,k)
+      gtot_S(i,j+1) = gtot_S(i,j+1) + pbce(i,j+1,k) * wt_v(i,J,k)
+    enddo ; enddo
+  enddo
+
+  !if (CS%debug) then
+  !  call uvchksum("BT wt_[uv]", wt_u, wt_v, G%HI, haloshift=0, &
+  !                symmetric=.true., omit_corners=.true., scalar_pair=.true.)
+  !endif
+
+end subroutine pre_btstep
+
 
 !> This subroutine automatically determines an optimal value for dtbt based
 !! on some state of the ocean.
