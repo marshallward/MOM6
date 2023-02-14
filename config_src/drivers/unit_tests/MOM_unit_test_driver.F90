@@ -4,6 +4,7 @@ use MPI
 use MOM_domains, only : MOM_infra_init
 use MOM_domains, only : MOM_infra_end
 use MOM_file_parser_tests, only : run_file_parser_tests
+use MOM_hor_visc_tests, only : run_hor_visc_tests
 
 implicit none
 
@@ -50,6 +51,7 @@ call MOM_infra_init(comm)
 
 ! Run tests
 call run_file_parser_tests
+call run_hor_visc_tests
 
 ! Cleanup
 call MOM_infra_end
