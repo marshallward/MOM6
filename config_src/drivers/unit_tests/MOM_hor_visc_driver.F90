@@ -4,8 +4,8 @@
 program MOM_hor_visc_driver
 
 !use MPI
-!use MOM_domains, only : MOM_infra_init
-!use MOM_domains, only : MOM_infra_end
+use MOM_domains, only : MOM_infra_init
+use MOM_domains, only : MOM_infra_end
 !use MOM_file_parser_tests, only : run_file_parser_tests
 use MOM_hor_visc_tests, only : run_hor_visc_tests
 
@@ -49,17 +49,15 @@ implicit none
 !  open(newunit=io_unit, file='MOM_input', status='replace')
 !  close(io_unit)
 !endif
-!
-!call MOM_infra_init(comm)
 
-!! Run tests
-!call run_file_parser_tests
+call MOM_infra_init()
 
+! Run tests
 call run_hor_visc_tests
 
-!! Cleanup
-!call MOM_infra_end
-!
+! Cleanup
+call MOM_infra_end
+
 !if (rank == root) then
 !  open(newunit=io_unit, file='MOM_input')
 !  close(io_unit, status='delete')

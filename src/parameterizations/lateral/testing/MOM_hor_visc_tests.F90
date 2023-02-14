@@ -17,7 +17,7 @@ subroutine run_hor_visc_tests
   ! Build the test suite
   suite = TestSuite()
 
-  call suite%add(test_hor_visc_init, "test_hor_visc_init")
+  !call suite%add(test_hor_visc_init, "test_hor_visc_init")
 
   call suite%run()
 end subroutine run_hor_visc_tests

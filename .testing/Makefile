@@ -152,7 +152,7 @@ ifeq ($(DO_PROFILE), true)
 endif
 
 # Unit testing
-UNIT_EXECS ?= MOM_unit_tests
+UNIT_EXECS ?= MOM_unit_tests MOM_hor_visc_driver
 ifeq ($(DO_COVERAGE), true)
   BUILDS += cov/MOM6 $(foreach e, $(UNIT_EXECS), unit/$(e))
 endif
@@ -711,6 +711,54 @@ $(WORKSPACE)/work/unit/std.out: build/unit/MOM_unit_tests
 # NOTE: .gcov actually depends on .gcda, but .gcda is produced with std.out
 # TODO: Replace $(WORKSPACE)/work/unit/std.out with *.gcda?
 build/unit/MOM_file_parser_tests.F90.gcov: $(WORKSPACE)/work/unit/std.out
+	cd $(@D) \
+	  && gcov -b *.gcda > gcov.unit.out
+	find $(@D) -name "*.gcov" -exec sed -i -r 's/^( *[0-9]*)\*:/ \1:/g' {} \;
+
+.PHONY: report.cov.horvisc
+report.cov.horvisc: build/unit/MOM_hor_visc_tests.F90.gcov codecov
+	./codecov -R build/unit -f "*.gcov" -Z -n "Unit tests" \
+	    > build/unit/codecov.out \
+	    2> build/unit/codecov.err \
+	  && echo -e "${MAGENTA}Report uploaded to codecov.${RESET}" \
+	  || { \
+	    cat build/unit/codecov.err ; \
+	    echo -e "${RED}Failed to upload report.${RESET}" ; \
+	    if [ "$(REQUIRE_COVERAGE_UPLOAD)" = true ] ; then false ; fi ; \
+	  }
+
+
+#----
+# Horvisc Unit test
+# (Hopefully temporary)
+
+
+# NOTE: Using file parser gcov report as a proxy for test completion
+.PHONY: run.cov.horvisc
+run.cov.horvisc: build/unit/MOM_hor_visc_tests.F90.gcov
+
+$(WORKSPACE)/work/unit/horvisc.out: build/unit/MOM_hor_visc_driver
+	if [ $(REPORT_COVERAGE) ]; then \
+	  find build/unit -name *.gcda -exec rm -f '{}' \; ; \
+	fi
+	rm -rf $(@D)
+	mkdir -p $(@D)
+	cd $(@D) \
+	  && $(TIME) $(MPIRUN) -n 1 $(abspath $<) 2> horvisc.err > horvisc.out \
+	  || !( \
+	    cat horvisc.out | tail -n 100 ; \
+	    cat horvisc.err | tail -n 100 ; \
+	  )
+	cd $(@D) \
+	  && $(TIME) $(MPIRUN) -n 2 $(abspath $<) 2> p2.horvisc.err > p2.horvisc.out \
+	  || !( \
+	    cat p2.horvisc.out | tail -n 100 ; \
+	    cat p2.horvisc.err | tail -n 100 ; \
+	  )
+
+# NOTE: .gcov actually depends on .gcda, but .gcda is produced with std.out
+# TODO: Replace $(WORKSPACE)/work/unit/std.out with *.gcda?
+build/unit/MOM_hor_visc_tests.F90.gcov: $(WORKSPACE)/work/unit/horvisc.out
 	cd $(@D) \
 	  && gcov -b *.gcda > gcov.unit.out
 	find $(@D) -name "*.gcov" -exec sed -i -r 's/^( *[0-9]*)\*:/ \1:/g' {} \;
