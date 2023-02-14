@@ -185,7 +185,7 @@ endif
 # (1): Root directory
 # NOTE: extensions could be a second variable
 SOURCE = \
-  $(foreach ext,F90 inc c h,$(wildcard $(1)/*/*.$(ext) $(1)/*/*/*.$(ext)))
+  $(foreach ext,F90 inc c h,$(wildcard $(1)/*/*.$(ext) $(1)/*/*/*.$(ext) $(1)/*/*/*/*.$(ext)))
 
 MOM_SOURCE = \
   $(call SOURCE,../src) \
