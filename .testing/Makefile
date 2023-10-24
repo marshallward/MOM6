@@ -551,7 +551,7 @@ $(WORKSPACE)/work/%/$(1)/ocean.stats $(WORKSPACE)/work/%/$(1)/chksum_diag: build
 	echo -e "$(4)" > $$(@D)/MOM_override
 	rm -f $(WORKSPACE)/results/$$*/std.$(1).{out,err}
 	cd $$(@D) \
-	  && $(TIME) $(5) $(MPIRUN) -n $(6) $(abspath $$<) 2> std.err > std.out \
+	  && $(TIME) $(5) $(MPIRUN) -np $(6) $(abspath $$<) 2> std.err > std.out \
 	  || !( \
 	    mkdir -p ../../../results/$$*/ ; \
 	    cat std.out | tee ../../../results/$$*/std.$(1).out | tail -n 20 ; \
@@ -628,7 +628,7 @@ $(WORKSPACE)/work/%/restart/ocean.stats: build/symmetric/MOM6 | preproc
 	# Remove any previous archived output
 	rm -f $(WORKSPACE)/results/$*/std.restart{1,2}.{out,err}
 	# Run the first half-period
-	cd $(@D) && $(TIME) $(MPIRUN) -n 1 $(abspath $<) 2> std1.err > std1.out \
+	cd $(@D) && $(TIME) $(MPIRUN) -np 1 $(abspath $<) 2> std1.err > std1.out \
 	  || !( \
 	    cat std1.out | tee ../../../results/$*/std.restart1.out | tail -n 20 ; \
 	    cat std1.err | tee ../../../results/$*/std.restart1.err | tail -n 20 ; \
@@ -639,7 +639,7 @@ $(WORKSPACE)/work/%/restart/ocean.stats: build/symmetric/MOM6 | preproc
 	mkdir $(@D)/RESTART
 	cd $(@D) && sed -i -e "s/input_filename *= *'n'/input_filename = 'r'/g" input.nml
 	# Run the second half-period
-	cd $(@D) && $(TIME) $(MPIRUN) -n 1 $(abspath $<) 2> std2.err > std2.out \
+	cd $(@D) && $(TIME) $(MPIRUN) -np 1 $(abspath $<) 2> std2.err > std2.out \
 	  || !( \
 	    cat std2.out | tee ../../../results/$*/std.restart2.out | tail -n 20 ; \
 	    cat std2.err | tee ../../../results/$*/std.restart2.err | tail -n 20 ; \

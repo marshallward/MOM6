@@ -986,27 +986,31 @@ subroutine btstep(U_in, V_in, eta_in, dt, bc_accel_u, bc_accel_v, forces, pbce, 
   ! Copy input arrays into their wide-halo counterparts.
   if (interp_eta_PF) then
     !$OMP parallel do default(shared)
-    do j=G%jsd,G%jed ; do i=G%isd,G%ied ! Was "do j=Jsq,Jeq+1 ; do i=Isq,Ieq+1" but doing so breaks OBC. Not sure why?
+    !do j=G%jsd,G%jed ; do i=G%isd,G%ied ! Was "do j=Jsq,Jeq+1 ; do i=Isq,Ieq+1" but doing so breaks OBC. Not sure why?
+    do concurrent (j=G%jsd:G%jed, i=G%isd:G%ied)
       eta(i,j) = eta_in(i,j)
       eta_PF_1(i,j) = eta_PF_start(i,j)
       d_eta_PF(i,j) = eta_PF_in(i,j) - eta_PF_start(i,j)
-    enddo ; enddo
+    enddo
   else
     !$OMP parallel do default(shared)
-    do j=G%jsd,G%jed ; do i=G%isd,G%ied !: Was "do j=Jsq,Jeq+1 ; do i=Isq,Ieq+1" but doing so breaks OBC. Not sure why?
+    !do j=G%jsd,G%jed ; do i=G%isd,G%ied !: Was "do j=Jsq,Jeq+1 ; do i=Isq,Ieq+1" but doing so breaks OBC. Not sure why?
+    do concurrent (j=G%jsd:G%jed, i=G%isd:G%ied)
       eta(i,j) = eta_in(i,j)
       eta_PF(i,j) = eta_PF_in(i,j)
-    enddo ; enddo
+    enddo
   endif
   if (integral_BT_cont) then
     !$OMP parallel do default(shared)
-    do j=G%jsd,G%jed ; do i=G%isd,G%ied
+    !do j=G%jsd,G%jed ; do i=G%isd,G%ied
+    do concurrent (j=G%jsd:G%jed, i=G%isd:G%ied)
       eta_IC(i,j) = eta_in(i,j)
-    enddo ; enddo
+    enddo
   endif
 
   !$OMP parallel do default(shared) private(visc_rem)
-  do k=1,nz ; do j=js,je ; do I=is-1,ie
+  !do k=1,nz ; do j=js,je ; do I=is-1,ie
+  do concurrent (k=1:nz, j=js:je, I=is-1:ie) local(visc_rem)
     ! rem needs to be greater than visc_rem_u and 1-Instep/visc_rem_u.
     ! The 0.5 below is just for safety.
     ! NOTE: subroundoff is a neglible value used to prevent division by zero.
@@ -1017,15 +1021,16 @@ subroutine btstep(U_in, V_in, eta_in, dt, bc_accel_u, bc_accel_v, forces, pbce, 
     visc_rem = max(visc_rem, 1. - 0.5 * Instep / (visc_rem + subroundoff))
     visc_rem = max(visc_rem, 0.)
     wt_u(I,j,k) = CS%frhatu(I,j,k) * visc_rem
-  enddo ; enddo ; enddo
+  enddo
   !$OMP parallel do default(shared) private(visc_rem)
-  do k=1,nz ; do J=js-1,je ; do i=is,ie
+  !do k=1,nz ; do J=js-1,je ; do i=is,ie
+  do concurrent (k=1:nz, J=js-1:je, i=is:ie) local(visc_rem)
     ! As above, rem must be greater than visc_rem_v and 1-Instep/visc_rem_v.
     visc_rem = min(visc_rem_v(I,j,k), 1.)
     visc_rem = max(visc_rem, 1. - 0.5 * Instep / (visc_rem + subroundoff))
     visc_rem = max(visc_rem, 0.)
     wt_v(i,J,k) = CS%frhatv(i,J,k) * visc_rem
-  enddo ; enddo ; enddo
+  enddo
 
   !   Use u_Cor and v_Cor as the reference values for the Coriolis terms,
   ! including the viscous remnant.
@@ -1317,12 +1322,15 @@ subroutine btstep(U_in, V_in, eta_in, dt, bc_accel_u, bc_accel_v, forces, pbce, 
   endif ; enddo ; enddo
   if (associated(taux_bot) .and. associated(tauy_bot)) then
     !$OMP parallel do default(shared)
-    do j=js,je ; do I=is-1,ie ; if (G%mask2dCu(I,j) > 0.0) then
+    !do j=js,je ; do I=is-1,ie ; if (G%mask2dCu(I,j) > 0.0) then
+    do concurrent (j=js:je, I=is-1:ie, G%mask2dCu(I,j) > 0.0)
       BT_force_u(I,j) = BT_force_u(I,j) - taux_bot(I,j) * mass_to_Z  * CS%IDatu(I,j)
-    endif ; enddo ; enddo
+    enddo
+    !endif ; enddo ; enddo
     !$OMP parallel do default(shared)
     do J=js-1,je ; do i=is,ie ; if (G%mask2dCv(i,J) > 0.0) then
       BT_force_v(i,J) = BT_force_v(i,J) - tauy_bot(i,J) * mass_to_Z  * CS%IDatv(i,J)
+    !enddo
     endif ; enddo ; enddo
   endif
 
@@ -1330,11 +1338,21 @@ subroutine btstep(U_in, V_in, eta_in, dt, bc_accel_u, bc_accel_v, forces, pbce, 
   ! non-symmetric computational domain.
   !$OMP parallel do default(shared)
   do j=js,je ; do k=1,nz ; do I=Isq,Ieq
-    BT_force_u(I,j) = BT_force_u(I,j) + wt_u(I,j,k) * bc_accel_u(I,j,k)
+  !do concurrent (I=Isq:Ieq, j=js:je, k=1:nz)
+  !do concurrent (I=Isq:Ieq, j=js:je)
+  !  do k=1,nz
+      BT_force_u(I,j) = BT_force_u(I,j) + wt_u(I,j,k) * bc_accel_u(I,j,k)
+  !  enddo
+  !enddo
   enddo ; enddo ; enddo
   !$OMP parallel do default(shared)
   do J=Jsq,Jeq ; do k=1,nz ; do i=is,ie
-    BT_force_v(i,J) = BT_force_v(i,J) + wt_v(i,J,k) * bc_accel_v(i,J,k)
+  !do concurrent (i=is:ie, J=Jsq:Jeq, k=1:nz)
+  !do concurrent (i=is:ie, J=Jsq:Jeq)
+  !  do k=1,nz
+      BT_force_v(i,J) = BT_force_v(i,J) + wt_v(i,J,k) * bc_accel_v(i,J,k)
+  !  enddo
+  !enddo
   enddo ; enddo ; enddo
 
   if (CS%gradual_BT_ICs) then
