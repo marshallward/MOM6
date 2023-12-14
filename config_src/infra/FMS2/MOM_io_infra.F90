@@ -29,6 +29,9 @@ use mpp_mod,              only : mpp_pe, mpp_root_pe, mpp_npes
 use mpp_mod,              only : mpp_get_current_pelist_name
 use iso_fortran_env,      only : int64
 
+! not allowed ha ha
+use MOM_error_handler, only : callTree_enter, callTree_leave
+
 implicit none ; private
 
 ! Duplication of FMS1 parameter values
@@ -293,6 +296,8 @@ subroutine open_file(IO_handle, filename, action, MOM_domain, threading, fileset
   character(len=256) :: dim_unlim_name ! name of the unlimited dimension in the file
   integer :: index_nc
 
+  call callTree_enter('open_file, MOM_io_infra.F90')
+
   if (IO_handle%open_to_write) then
     call MOM_error(WARNING, "open_file called for file "//trim(filename)//&
         " with an IO_handle that is already open to to write.")
@@ -334,17 +339,27 @@ subroutine open_file(IO_handle, filename, action, MOM_domain, threading, fileset
   IO_handle%num_times = 0
   IO_handle%file_time = 0.0
   if ((file_mode == APPEND_FILE) .and. file_exists(filename_tmp, MOM_Domain)) then
+    print *, "APPEND + DOMAIN"
+    print *, "call fms2_open_file"
     ! Determine the latest file time and number of records so far.
     success = fms2_open_file(fileObj_read, trim(filename_tmp), "read", MOM_domain%mpp_domain)
+    print *, "call find_unlimited_dimension_name"
     dim_unlim_name = find_unlimited_dimension_name(fileObj_read)
-    if (len_trim(dim_unlim_name) > 0) &
+    if (len_trim(dim_unlim_name) > 0) then
+      print *, "call dimension_size?"
       call get_dimension_size(fileObj_read, trim(dim_unlim_name), IO_handle%num_times)
-    if (IO_handle%num_times > 0) &
+    endif
+    if (IO_handle%num_times > 0) then
+      print *, "call fms2_read_data?"
       call fms2_read_data(fileObj_read, trim(dim_unlim_name), IO_handle%file_time, &
                           unlim_dim_level=IO_handle%num_times)
+    endif
+    print *, "call fms2_close_file"
     call fms2_close_file(fileObj_read)
   endif
+  print *, "end APPEND + DOMAIN"
 
+  print *, "call fms2_open_file"
   success = fms2_open_file(IO_handle%fileobj, trim(filename_tmp), trim(mode), MOM_domain%mpp_domain)
   if (.not.success) call MOM_error(FATAL, "Unable to open file "//trim(filename_tmp))
   IO_handle%filename = trim(filename)
@@ -355,6 +370,7 @@ subroutine open_file(IO_handle, filename, action, MOM_domain, threading, fileset
     IO_handle%open_to_read = .false. ; IO_handle%open_to_write = .true.
   endif
 
+  call callTree_leave('open_file()')
 end subroutine open_file
 
 !> open_file opens an ascii file for parallel or single-file I/O using Fortran read and write calls.
