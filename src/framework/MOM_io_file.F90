@@ -38,6 +38,8 @@ use MOM_netcdf, only : read_netcdf_field
 
 use MOM_error_handler, only : MOM_error, FATAL
 use MOM_error_handler, only : is_root_PE
+use MOM_error_handler, only : callTree_enter
+use MOM_error_handler, only : callTree_leave
 
 implicit none ; private
 
@@ -660,9 +662,13 @@ contains
 subroutine initialize_axis_list_infra(list)
   class(axis_list_infra), intent(inout) :: list
 
+  call callTree_enter('initialize_axis_list_infra(), MOM_io_file.F90')
+
   ! Pre-allocate the first node and set the tail to this empty node
   allocate(list%head)
   list%tail => list%head
+
+  call callTree_leave('initialize_axis_list_infra()')
 end subroutine initialize_axis_list_infra
 
 
@@ -790,9 +796,13 @@ end subroutine finalize_axis_list_nc
 subroutine initialize_field_list_infra(list)
   class(field_list_infra), intent(inout) :: list
 
+  call callTree_enter('initialize_field_list_infra(), MOM_io_file.F90')
+
   ! Pre-allocate the first node and set the tail to this empty node
   allocate(list%head)
   list%tail => list%head
+
+  call callTree_leave('initialize_field_list_infra()')
 end subroutine initialize_field_list_infra
 
 
@@ -928,6 +938,8 @@ subroutine open_file_infra(handle, filename, action, MOM_domain, threading, file
   logical :: use_single_file_domain
     ! True if the domain is replaced with a single-file IO layout.
 
+  call callTree_enter('open_file_infra(), MOM_io_file.F90')
+
   use_single_file_domain = .false.
   if (present(MOM_domain) .and. present(fileset)) then
     if (fileset == SINGLE_FILE) &
@@ -945,6 +957,8 @@ subroutine open_file_infra(handle, filename, action, MOM_domain, threading, file
 
   call handle%axes%init()
   call handle%fields%init()
+
+  call callTree_leave('open_file_infra()')
 end subroutine open_file_infra
 
 !> Close a MOM framework file
@@ -998,6 +1012,8 @@ function register_axis_infra(handle, label, units, longname, &
 
   type(axistype) :: ax_infra
 
+  call callTree_enter('register_axis_infra(), MOM_io_file.F90')
+
   ! Create new infra axis and assign to pre-allocated tail of axes
   call write_metadata(handle%handle_infra, ax_infra, label, units, longname, &
       cartesian=cartesian, sense=sense, domain=domain, data=data, &
@@ -1005,6 +1021,8 @@ function register_axis_infra(handle, label, units, longname, &
 
   call handle%axes%append(ax_infra, label)
   axis%label = label
+
+  call callTree_leave('register_axis_infra()')
 end function register_axis_infra
 
 
@@ -1035,6 +1053,8 @@ function register_field_infra(handle, axes, label, units, longname, pack, &
   type(axistype), allocatable :: field_axes(:)
   integer :: i
 
+  call callTree_enter('register_field_infra(), MOM_io_file.F90')
+
   ! Construct array of framework axes
   allocate(field_axes(size(axes)))
   do i = 1, size(axes)
@@ -1046,6 +1066,8 @@ function register_field_infra(handle, axes, label, units, longname, pack, &
 
   call handle%fields%append(field_infra, label)
   field%label = label
+
+  call callTree_leave('register_field_infra()')
 end function register_field_infra
 
 
@@ -1069,9 +1091,13 @@ subroutine write_field_4d_infra(handle, field_md, MOM_domain, field, tstamp, &
 
   type(fieldtype) :: field_infra
 
+  call callTree_enter('write_field_4d_infra(), MOM_io_file.F90')
+
   field_infra = handle%fields%get(field_md%label)
   call write_field(handle%handle_infra, field_infra, MOM_domain, field, &
       tstamp=tstamp, tile_count=tile_count, fill_value=fill_value)
+
+  call callTree_leave('write_field_4d_infra()')
 end subroutine write_field_4d_infra
 
 
@@ -1095,9 +1121,13 @@ subroutine write_field_3d_infra(handle, field_md, MOM_domain, field, tstamp, &
 
   type(fieldtype) :: field_infra
 
+  call callTree_enter('write_field_3d_infra(), MOM_io_file.F90')
+
   field_infra = handle%fields%get(field_md%label)
   call write_field(handle%handle_infra, field_infra, MOM_domain, field, &
       tstamp=tstamp, tile_count=tile_count, fill_value=fill_value)
+
+  call callTree_leave('write_field_3d_infra()')
 end subroutine write_field_3d_infra
 
 
@@ -1121,9 +1151,13 @@ subroutine write_field_2d_infra(handle, field_md, MOM_domain, field, tstamp, &
 
   type(fieldtype) :: field_infra
 
+  call callTree_enter('write_field_2d_infra(), MOM_io_file.F90')
+
   field_infra = handle%fields%get(field_md%label)
   call write_field(handle%handle_infra, field_infra, MOM_domain, field, &
       tstamp=tstamp, tile_count=tile_count, fill_value=fill_value)
+
+  call callTree_leave('write_field_2d_infra()')
 end subroutine write_field_2d_infra
 
 
@@ -1140,8 +1174,12 @@ subroutine write_field_1d_infra(handle, field_md, field, tstamp)
 
   type(fieldtype) :: field_infra
 
+  call callTree_enter('write_field_1d_infra(), MOM_io_file.F90')
+
   field_infra = handle%fields%get(field_md%label)
   call write_field(handle%handle_infra, field_infra, field, tstamp=tstamp)
+
+  call callTree_leave('write_field_1d_infra()')
 end subroutine write_field_1d_infra
 
 
@@ -1158,8 +1196,12 @@ subroutine write_field_0d_infra(handle, field_md, field, tstamp)
 
   type(fieldtype) :: field_infra
 
+  call callTree_enter('write_field_0d_infra(), MOM_io_file.F90')
+
   field_infra = handle%fields%get(field_md%label)
   call write_field(handle%handle_infra, field_infra, field, tstamp=tstamp)
+
+  call callTree_leave('write_field_0d_infra()')
 end subroutine write_field_0d_infra
 
 
@@ -1173,8 +1215,12 @@ subroutine write_field_axis_infra(handle, axis)
   type(axistype) :: axis_infra
     !< An axis type variable with information to write
 
+  call callTree_enter('write_field_axis_infra(), MOM_io_file.F90')
+
   axis_infra = handle%axes%get(axis%label)
   call write_field(handle%handle_infra, axis_infra)
+
+  call callTree_leave('write_field_axis_infra()')
 end subroutine write_field_axis_infra
 
 
@@ -1319,6 +1365,8 @@ subroutine open_file_nc(handle, filename, action, MOM_domain, threading, fileset
   integer, intent(in), optional :: threading
   integer, intent(in), optional :: fileset
 
+  call callTree_enter('open_file_nc(), MOM_io_file.F90')
+
   if (.not. present(MOM_domain) .and. .not. is_root_PE()) return
 
   call open_netcdf_file(handle%handle_nc, filename, action)
@@ -1331,6 +1379,8 @@ subroutine open_file_nc(handle, filename, action, MOM_domain, threading, fileset
 
   call handle%axes%init()
   call handle%fields%init()
+
+  call callTree_leave('open_file_nc()')
 end subroutine open_file_nc
 
 

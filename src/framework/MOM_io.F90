@@ -10,6 +10,7 @@ use MOM_domains,          only : rescale_comp_data, num_PEs, AGRID, BGRID_NE, CG
 use MOM_dyn_horgrid,      only : dyn_horgrid_type
 use MOM_ensemble_manager, only : get_ensemble_id
 use MOM_error_handler,    only : MOM_error, NOTE, FATAL, WARNING, is_root_PE
+use MOM_error_handler,    only : callTree_enter, callTree_leave
 use MOM_file_parser,      only : log_version, param_file_type
 use MOM_grid,             only : ocean_grid_type
 use MOM_io_infra,         only : read_field, read_vector
@@ -302,6 +303,8 @@ subroutine create_MOM_file(IO_handle, filename, vars, novars, fields, &
   character(len=8)  :: t_grid, t_grid_read
   character(len=64) :: ax_name(5)  ! The axis names of a variable
 
+  call callTree_enter('create_MOM_file(), MOM_io.F90')
+
   use_lath  = .false. ; use_lonh     = .false.
   use_latq  = .false. ; use_lonq     = .false.
   use_time  = .false. ; use_periodic = .false.
@@ -584,6 +587,8 @@ subroutine create_MOM_file(IO_handle, filename, vars, novars, fields, &
   if (num_extra_dims > 0) then
     deallocate(use_extra_axis, more_axes)
   endif
+
+  call callTree_leave('create_MOM_file()')
 end subroutine create_MOM_file
 
 
