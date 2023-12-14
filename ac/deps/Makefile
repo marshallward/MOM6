@@ -7,8 +7,10 @@ SHELL = bash
 MAKEFLAGS += -R
 
 # FMS framework
-FMS_URL ?= https://github.com/NOAA-GFDL/FMS.git
-FMS_COMMIT ?= 2023.03
+#FMS_URL ?= https://github.com/NOAA-GFDL/FMS.git
+#FMS_COMMIT ?= 2023.03
+FMS_URL ?= https://github.com/marshallward/FMS.git
+FMS_COMMIT ?= fpe_probe
 
 
 # List of source files to link this Makefile's dependencies to model Makefiles
