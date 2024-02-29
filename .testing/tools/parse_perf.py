@@ -59,8 +59,12 @@ def parse_perf_report(perf_data_path):
             # get per-symbol count
             else:
                 tokens = line.split()
-                symbol = tokens[2]
-                period = int(tokens[3])
+                try:
+                    symbol = tokens[2]
+                    period = int(tokens[3])
+                except ValueError:
+                    print(tokens)
+                    print("Unable to parse")
 
                 profile[event_name]['symbol'][symbol] = period
 
