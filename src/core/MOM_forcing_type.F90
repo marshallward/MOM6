@@ -3760,10 +3760,18 @@ subroutine rotate_mech_forcing(forces_in, turns, forces)
   endif
 
   if (do_press) then
-    ! NOTE: p_surf_SSH either points to p_surf or p_surf_full
     call rotate_array(forces_in%p_surf, turns, forces%p_surf)
     call rotate_array(forces_in%p_surf_full, turns, forces%p_surf_full)
     call rotate_array(forces_in%net_mass_src, turns, forces%net_mass_src)
+
+    ! p_surf_SSH points to either p_surf or p_surf_full
+    if (associated(forces_in%p_surf_SSH, forces_in%p_surf)) then
+      forces%p_surf_SSH => forces%p_surf
+    else if (associated(forces_in%p_surf_SSH, forces_in%p_surf_full)) then
+      forces%p_surf_SSH => forces%p_surf_full
+    else
+      forces%p_surf_SSH => null()
+    endif
   endif
 
   if (do_iceberg) then
