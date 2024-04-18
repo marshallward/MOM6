@@ -44,7 +44,6 @@ public calculate_compress
 public calculate_density_elem
 public calculate_density
 public calculate_density_nohalo
-public calculate_density_2d_nohalo
 public calculate_density_derivs
 public calculate_density_second_derivs
 public calculate_spec_vol
@@ -76,6 +75,7 @@ end interface calculate_density
 interface calculate_density_nohalo
   ! NOTE: This interface block can be extended to higher dimensions as needed.
   module procedure calculate_density_2d_nohalo
+  module procedure calculate_density_3d_nohalo
 end interface calculate_density_nohalo
 
 !> Calculates specific volume of sea water from T, S and P
@@ -394,6 +394,47 @@ subroutine calculate_density_2d_nohalo(T, S, pressure, rho, EOS, rho_ref, scale)
     rho(:,:) = rho_scale * rho(:,:)
   endif
 end subroutine calculate_density_2d_nohalo
+
+
+!> Calculate the density of seawater in a contiguous 3D array (i.e. no halos).
+!! If rho_ref is present, then the anomaly with respect to rho_ref is returned.
+subroutine calculate_density_3d_nohalo(T, S, pressure, rho, EOS, rho_ref, scale)
+  real, intent(in) :: T(:,:,:)            !< Potential temperature referenced to the surface [C ~> degC]
+  real, intent(in) :: S(:,:,:)            !< Salinity [S ~> ppt]
+  real, intent(in) :: pressure(:,:,:)     !< Pressure [R L2 T-2 ~> Pa]
+  real, intent(inout) :: rho(:,:,:)       !< Density (in-situ if pressure is local) [R ~> kg m-3]
+  type(EOS_type), intent(in) :: EOS       !< Equation of state structure
+  real,  optional, intent(in) :: rho_ref  !< A reference density [R ~> kg m-3]
+  real,  optional, intent(in) :: scale    !< A multiplicative factor by which to scale density
+                                          !! in combination with scaling stored in EOS [various]
+  ! Local variables
+  real :: rho_scale ! A factor to convert density from kg m-3 to the desired units [R m3 kg-1 ~> 1]
+  real :: pres(size(rho,1), size(rho,2), size(rho,3))  ! Pressure converted to [Pa]
+  real :: Ta(size(rho,1), size(rho,2), size(rho,3))    ! Temperature converted to [degC]
+  real :: Sa(size(rho,1), size(rho,2), size(rho,3))    ! Salinity converted to [ppt]
+
+  if (all([EOS%RL2_T2_to_Pa, EOS%R_to_kg_m3, EOS%C_to_degC, EOS%S_to_ppt] == 1.0)) then
+    call EOS%type%calculate_density_3d_nohalo(T, S, pressure, rho, rho_ref=rho_ref)
+  else
+    pres(:,:,:) = EOS%RL2_T2_to_Pa * pressure(:,:,:)
+    Ta(:,:,:) = EOS%C_to_degC * T(:,:,:)
+    Sa(:,:,:) = EOS%S_to_ppt * S(:,:,:)
+
+    if (present(rho_ref)) then
+      call EOS%type%calculate_density_3d_nohalo(Ta, Sa, pres, rho, &
+          rho_ref=EOS%R_to_kg_m3*rho_ref)
+    else
+      call EOS%type%calculate_density_3d_nohalo(Ta, Sa, pres, rho)
+    endif
+  endif
+
+  rho_scale = EOS%kg_m3_to_R
+  if (present(scale)) rho_scale = rho_scale * scale
+
+  if (rho_scale /= 1.0) then
+    rho(:,:,:) = rho_scale * rho(:,:,:)
+  endif
+end subroutine calculate_density_3d_nohalo
 
 
 !> Calls the appropriate subroutine to calculate the density of sea water for 1-D array inputs

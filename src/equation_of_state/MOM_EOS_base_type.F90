@@ -44,6 +44,8 @@ contains
   procedure :: calculate_density_array => a_calculate_density_array
   !> Calculates the in-situ density or density anomaly for 2D array inputs without halos [m3 kg-1]
   procedure :: calculate_density_2d_nohalo => a_calculate_density_2d_nohalo
+  !> Calculates the in-situ density or density anomaly for 3D array inputs without halos [m3 kg-1]
+  procedure :: calculate_density_3d_nohalo => a_calculate_density_3d_nohalo
   !> Calculates the in-situ specific volume or specific volume anomaly for scalar inputs [m3 kg-1]
   procedure :: calculate_spec_vol_scalar => a_calculate_spec_vol_scalar
   !> Calculates the in-situ specific volume or specific volume anomaly for array inputs [m3 kg-1]
@@ -269,6 +271,22 @@ contains
       rho(:,:) = this%density_elem(T(:,:), S(:,:), pressure(:,:))
     endif
   end subroutine a_calculate_density_2d_nohalo
+
+  !> Calculate the in-situ density for 2D arrays without halos.
+  subroutine a_calculate_density_3d_nohalo(this, T, S, pressure, rho, rho_ref)
+    class(EOS_base), intent(in) :: this   !< This EOS
+    real, intent(in) :: T(:,:,:)        !< Potential temperature relative to the surface [degC]
+    real, intent(in) :: S(:,:,:)        !< Salinity [PSU]
+    real, intent(in) :: pressure(:,:,:) !< Pressure [Pa]
+    real, intent(out) :: rho(:,:,:)     !< In situ density [kg m-3]
+    real, optional, intent(in) :: rho_ref  !< A reference density [kg m-3]
+
+    if (present(rho_ref)) then
+      rho(:,:,:) = this%density_anomaly_elem(T(:,:,:), S(:,:,:), pressure(:,:,:), rho_ref)
+    else
+      rho(:,:,:) = this%density_elem(T(:,:,:), S(:,:,:), pressure(:,:,:))
+    endif
+  end subroutine a_calculate_density_3d_nohalo
 
   !> In situ specific volume [m3 kg-1]
   real function a_spec_vol_fn(this, T, S, pressure, spv_ref)
