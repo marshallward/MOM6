@@ -146,10 +146,6 @@ subroutine int_density_dz_generic_pcm(T, S, z_t, z_b, rho_ref, rho_0, G_e, HI, &
   real :: S5(5,HI%iscB:HI%iecB+1)   ! Salinities along a line of subgrid locations [S ~> ppt]
   real :: p5(5,HI%iscB:HI%iecB+1)   ! Pressures along a line of subgrid locations [R L2 T-2 ~> Pa]
   real :: r5(5,HI%iscB:HI%iecB+1)   ! Densities anomalies along a line of subgrid locations [R ~> kg m-3]
-  !real :: T15(15,HI%iscB:HI%iecB) ! Temperatures at an array of subgrid locations [C ~> degC]
-  !real :: S15(15,HI%iscB:HI%iecB) ! Salinities at an array of subgrid locations [S ~> ppt]
-  !real :: p15(15,HI%iscB:HI%iecB) ! Pressures at an array of subgrid locations [R L2 T-2 ~> Pa]
-  !real :: r15(15,HI%iscB:HI%iecB) ! Densities at an array of subgrid locations [R ~> kg m-3]
   real :: T15(5,2:4,HI%iscB:HI%iecB) ! Temperatures at an array of subgrid locations [C ~> degC]
   real :: S15(5,2:4,HI%iscB:HI%iecB) ! Salinities at an array of subgrid locations [S ~> ppt]
   real :: p15(5,2:4,HI%iscB:HI%iecB) ! Pressures at an array of subgrid locations [R L2 T-2 ~> Pa]
@@ -177,7 +173,7 @@ subroutine int_density_dz_generic_pcm(T, S, z_t, z_b, rho_ref, rho_0, G_e, HI, &
   integer, dimension(2) :: EOSdom_h5  ! The 5-point h-point i-computational domain for the equation of state
   integer, dimension(2) :: EOSdom_q15 ! The 3x5-point q-point i-computational domain for the equation of state
   integer, dimension(2) :: EOSdom_h15 ! The 3x5-point h-point i-computational domain for the equation of state
-  integer :: is, ie, js, je, Isq, Ieq, Jsq, Jeq, i, j, m, n, pos
+  integer :: is, ie, js, je, Isq, Ieq, Jsq, Jeq, i, j, m, n
 
   ! These array bounds work for the indexing convention of the input arrays, but
   ! on the computational domain defined for the output arrays.
@@ -262,11 +258,6 @@ subroutine int_density_dz_generic_pcm(T, S, z_t, z_b, rho_ref, rho_0, G_e, HI, &
         wt_L = 0.25*real(5-m) ; wt_R = 1.0-wt_L
         wtT_L = wt_L*hWt_LL + wt_R*hWt_RL ; wtT_R = wt_L*hWt_LR + wt_R*hWt_RR
         dz_x(m,i) = wt_L*(z_t(i,j) - z_b(i,j)) + wt_R*(z_t(i+1,j) - z_b(i+1,j))
-        !pos = i*15+(m-2)*5
-        !T15(pos+1) = wtT_L*T(i,j) + wtT_R*T(i+1,j)
-        !S15(pos+1) = wtT_L*S(i,j) + wtT_R*S(i+1,j)
-        !p15(pos+1) = -GxRho*((wt_L*z_t(i,j) + wt_R*z_t(i+1,j)) - z0pres)
-        !pos = 5*(m-2)
         T15(1,m,i) = wtT_L*T(i,j) + wtT_R*T(i+1,j)
         S15(1,m,i) = wtT_L*S(i,j) + wtT_R*S(i+1,j)
         p15(1,m,i) = -GxRho*((wt_L*z_t(i,j) + wt_R*z_t(i+1,j)) - z0pres)
@@ -289,8 +280,6 @@ subroutine int_density_dz_generic_pcm(T, S, z_t, z_b, rho_ref, rho_0, G_e, HI, &
       ! Use Boole's rule to estimate the pressure anomaly change.
       if (use_rho_ref) then
         do m=2,4
-          !pos = i*15+(m-2)*5
-          pos = 5*(m-2)
           intz(m) = G_e*dz_x(m,i)*( C1_90*( 7.0*(r15(1,m,i)+r15(5,m,i)) + &
                                            32.0*(r15(2,m,i)+r15(4,m,i)) + &
                                            12.0*r15(3,m,i)))
@@ -335,8 +324,6 @@ subroutine int_density_dz_generic_pcm(T, S, z_t, z_b, rho_ref, rho_0, G_e, HI, &
         wt_L = 0.25*real(5-m) ; wt_R = 1.0-wt_L
         wtT_L = wt_L*hWt_LL + wt_R*hWt_RL ; wtT_R = wt_L*hWt_LR + wt_R*hWt_RR
         dz_y(m,i) = wt_L*(z_t(i,j) - z_b(i,j)) + wt_R*(z_t(i,j+1) - z_b(i,j+1))
-        !pos = i*15+(m-2)*5
-        pos = 5*(m-2)
         T15(1,m,i) = wtT_L*T(i,j) + wtT_R*T(i,j+1)
         S15(1,m,i) = wtT_L*S(i,j) + wtT_R*S(i,j+1)
         p15(1,m,i) = -GxRho*((wt_L*z_t(i,j) + wt_R*z_t(i,j+1)) - z0pres)
@@ -360,8 +347,6 @@ subroutine int_density_dz_generic_pcm(T, S, z_t, z_b, rho_ref, rho_0, G_e, HI, &
       intz(1) = dpa(i,j) ; intz(5) = dpa(i,j+1)
       ! Use Boole's rule to estimate the pressure anomaly change.
       do m=2,4
-        !pos = i*15+(m-2)*5
-        pos = 5*(m-2)
         ! TODO: Move if-block outside of loop?
         if (use_rho_ref) then
           intz(m) = G_e*dz_y(m,i)*( C1_90*(7.0*(r15(1,m,i)+r15(5,m,i)) + &
@@ -490,7 +475,7 @@ subroutine int_density_dz_generic_plm(k, tv, T_t, T_b, S_t, S_b, e, rho_ref, &
   integer, dimension(2) :: EOSdom_h5  ! The 5-point h-point i-computational domain for the equation of state
   integer, dimension(2) :: EOSdom_q15 ! The 3x5-point q-point i-computational domain for the equation of state
   integer, dimension(2) :: EOSdom_h15 ! The 3x5-point h-point i-computational domain for the equation of state
-  integer :: Isq, Ieq, Jsq, Jeq, i, j, m, n, pos
+  integer :: Isq, Ieq, Jsq, Jeq, i, j, m, n
 
   Isq = HI%IscB ; Ieq = HI%IecB ; Jsq = HI%JscB ; Jeq = HI%JecB
 
@@ -624,8 +609,6 @@ subroutine int_density_dz_generic_plm(k, tv, T_t, T_b, S_t, S_b, e, rho_ref, &
         ! the horizontal. The subscript (1) refers to the top value in
         ! the vertical profile while subscript (5) refers to the bottom
         ! value in the vertical profile.
-        !pos = i*15+(m-2)*5
-        pos = 5*(m-2)
         T15(1,m,i) = w_left*Ttl + w_right*Ttr
         T15(5,m,i) = w_left*Tbl + w_right*Tbr
 
@@ -644,9 +627,9 @@ subroutine int_density_dz_generic_plm(k, tv, T_t, T_b, S_t, S_b, e, rho_ref, &
           S15(n,m,i) = wt_t(n) * S15(1,m,i) + wt_b(n) * S15(5,m,i)
           T15(n,m,i) = wt_t(n) * T15(1,m,i) + wt_b(n) * T15(5,m,i)
         enddo
-        if (use_varT) T215(1:5,m,i) = w_left*tv%varT(i,j,k) + w_right*tv%varT(i+1,j,k)
-        if (use_covarTS) TS15(1:5,m,i) = w_left*tv%covarTS(i,j,k) + w_right*tv%covarTS(i+1,j,k)
-        if (use_varS) S215(1:5,m,i) = w_left*tv%varS(i,j,k) + w_right*tv%varS(i+1,j,k)
+        if (use_varT) T215(:,m,i) = w_left*tv%varT(i,j,k) + w_right*tv%varT(i+1,j,k)
+        if (use_covarTS) TS15(:,m,i) = w_left*tv%covarTS(i,j,k) + w_right*tv%covarTS(i+1,j,k)
+        if (use_varS) S215(:,m,i) = w_left*tv%varS(i,j,k) + w_right*tv%varS(i+1,j,k)
       enddo
     enddo
 
@@ -667,16 +650,12 @@ subroutine int_density_dz_generic_plm(k, tv, T_t, T_b, S_t, S_b, e, rho_ref, &
       ! Use Boole's rule to estimate the pressure anomaly change.
       if (use_rho_ref) then
         do m = 2,4
-          !pos = i*15+(m-2)*5
-          pos = 5*(m-2)
           intz(m) = G_e*dz_x(m,i)*(C1_90*(7.0*(r15(1,m,i)+r15(5,m,i)) &
               + 32.0*(r15(2,m,i)+r15(4,m,i)) &
               + 12.0*r15(3,m,i)))
         enddo
       else
         do m = 2,4
-          !pos = i*15+(m-2)*5
-          pos = 5*(m-2)
           intz(m) = G_e*dz_x(m,i)*(C1_90*(7.0*(r15(1,m,i)+r15(5,m,i)) &
               + 32.0*(r15(2,m,i)+r15(4,m,i)) &
               + 12.0*r15(3,m,i)) - rho_ref)
@@ -726,8 +705,6 @@ subroutine int_density_dz_generic_plm(k, tv, T_t, T_b, S_t, S_b, e, rho_ref, &
         ! the horizontal. The subscript (1) refers to the top value in
         ! the vertical profile while subscript (5) refers to the bottom
         ! value in the vertical profile.
-        !pos = i*15+(m-2)*5
-        pos = 5*(m-2)
         T15(1,m,i) = w_left*Ttl + w_right*Ttr
         T15(5,m,i) = w_left*Tbl + w_right*Tbr
 
@@ -746,9 +723,9 @@ subroutine int_density_dz_generic_plm(k, tv, T_t, T_b, S_t, S_b, e, rho_ref, &
           S15(n,m,i) = wt_t(n) * S15(1,m,i) + wt_b(n) * S15(5,m,i)
           T15(n,m,i) = wt_t(n) * T15(1,m,i) + wt_b(n) * T15(5,m,i)
         enddo
-        if (use_varT) T215(1:5,m,i) = w_left*tv%varT(i,j,k) + w_right*tv%varT(i,j+1,k)
-        if (use_covarTS) TS15(1:5,m,i) = w_left*tv%covarTS(i,j,k) + w_right*tv%covarTS(i,j+1,k)
-        if (use_varS) S215(1:5,m,i) = w_left*tv%varS(i,j,k) + w_right*tv%varS(i,j+1,k)
+        if (use_varT) T215(:,m,i) = w_left*tv%varT(i,j,k) + w_right*tv%varT(i,j+1,k)
+        if (use_covarTS) TS15(:,m,i) = w_left*tv%covarTS(i,j,k) + w_right*tv%covarTS(i,j+1,k)
+        if (use_varS) S215(:,m,i) = w_left*tv%varS(i,j,k) + w_right*tv%varS(i,j+1,k)
       enddo
     enddo
 
@@ -773,16 +750,12 @@ subroutine int_density_dz_generic_plm(k, tv, T_t, T_b, S_t, S_b, e, rho_ref, &
       ! Use Boole's rule to estimate the pressure anomaly change.
       if (use_rho_ref) then
         do m = 2,4
-          !pos = i*15+(m-2)*5
-          pos = 5*(m-2)
           intz(m) = G_e*dz_y(m,i)*(C1_90*(7.0*(r15(1,m,i)+r15(5,m,i)) + &
                                            32.0*(r15(2,m,i)+r15(4,m,i)) + &
                                            12.0*r15(3,m,i)))
         enddo
       else
         do m = 2,4
-          !pos = i*15+(m-2)*5
-          pos = 5*(m-2)
           intz(m) = G_e*dz_y(m,i)*(C1_90*(7.0*(r15(1,m,i)+r15(5,m,i)) + &
                                            32.0*(r15(2,m,i)+r15(4,m,i)) + &
                                            12.0*r15(3,m,i)) - rho_ref)
@@ -857,26 +830,26 @@ subroutine int_density_dz_generic_ppm(k, tv, T_t, T_b, S_t, S_b, e, &
 ! a parabolic interpolation is used to compute intermediate values.
 
   ! Local variables
-  real :: T5(5, HI%iscB:HI%iecB+1)  ! Temperatures along a line of subgrid locations [C ~> degC]
-  real :: S5(5, HI%iscB:HI%iecB+1)  ! Salinities along a line of subgrid locations [S ~> ppt]
-  real :: T25(5, HI%iscB:HI%iecB+1) ! SGS temperature variance along a line of subgrid
+  real :: T5(5,HI%iscB:HI%iecB+1)  ! Temperatures along a line of subgrid locations [C ~> degC]
+  real :: S5(5,HI%iscB:HI%iecB+1)  ! Salinities along a line of subgrid locations [S ~> ppt]
+  real :: T25(5,HI%iscB:HI%iecB+1) ! SGS temperature variance along a line of subgrid
                                     ! locations [C2 ~> degC2]
-  real :: TS5(5, HI%iscB:HI%iecB+1) ! SGS temp-salt covariance along a line of subgrid
+  real :: TS5(5,HI%iscB:HI%iecB+1) ! SGS temp-salt covariance along a line of subgrid
                                     ! locations [C S ~> degC ppt]
-  real :: S25(5, HI%iscB:HI%iecB+1) ! SGS salinity variance along a line of subgrid locations [S2 ~> ppt2]
-  real :: p5(5, HI%iscB:HI%iecB+1)  ! Pressures along a line of subgrid locations [R L2 T-2 ~> Pa]
-  real :: r5(5, HI%iscB:HI%iecB+1)  ! Densities anomalies along a line of subgrid
+  real :: S25(5,HI%iscB:HI%iecB+1) ! SGS salinity variance along a line of subgrid locations [S2 ~> ppt2]
+  real :: p5(5,HI%iscB:HI%iecB+1)  ! Pressures along a line of subgrid locations [R L2 T-2 ~> Pa]
+  real :: r5(5,HI%iscB:HI%iecB+1)  ! Densities anomalies along a line of subgrid
                                     ! locations [R ~> kg m-3]
-  real :: T15(15, HI%iscB:HI%iecB)  ! Temperatures at an array of subgrid locations [C ~> degC]
-  real :: S15(15, HI%iscB:HI%iecB)  ! Salinities at an array of subgrid locations [S ~> ppt]
-  real :: T215(15, HI%iscB:HI%iecB) ! SGS temperature variance along a line of subgrid
+  real :: T15(5,2:4, HI%iscB:HI%iecB)  ! Temperatures at an array of subgrid locations [C ~> degC]
+  real :: S15(5,2:4, HI%iscB:HI%iecB)  ! Salinities at an array of subgrid locations [S ~> ppt]
+  real :: T215(5,2:4, HI%iscB:HI%iecB) ! SGS temperature variance along a line of subgrid
                                     ! locations [C2 ~> degC2]
-  real :: TS15(15, HI%iscB:HI%iecB) ! SGS temp-salt covariance along a line of subgrid
+  real :: TS15(5,2:4,HI%iscB:HI%iecB) ! SGS temp-salt covariance along a line of subgrid
                                     ! locations [C S ~> degC ppt]
-  real :: S215(15, HI%iscB:HI%iecB) ! SGS salinity variance along a line of subgrid
+  real :: S215(5,2:4,HI%iscB:HI%iecB) ! SGS salinity variance along a line of subgrid
                                     ! locations [S2 ~> ppt2]
-  real :: p15(15, HI%iscB:HI%iecB)  ! Pressures at an array of subgrid locations [R L2 T-2 ~> Pa]
-  real :: r15(15, HI%iscB:HI%iecB)  ! Densities at an array of subgrid locations [R ~> kg m-3]
+  real :: p15(5,2:4,HI%iscB:HI%iecB)  ! Pressures at an array of subgrid locations [R L2 T-2 ~> Pa]
+  real :: r15(5,2:4,HI%iscB:HI%iecB)  ! Densities at an array of subgrid locations [R ~> kg m-3]
   real :: wt_t(5), wt_b(5) ! Top and bottom weights [nondim]
   real :: rho_anom ! The integrated density anomaly [R ~> kg m-3]
   real :: w_left, w_right  ! Left and right weights [nondim]
@@ -902,7 +875,7 @@ subroutine int_density_dz_generic_ppm(k, tv, T_t, T_b, S_t, S_b, e, &
   integer, dimension(2) :: EOSdom_h5  ! The 5-point h-point i-computational domain for the equation of state
   integer, dimension(2) :: EOSdom_q15 ! The 3x5-point q-point i-computational domain for the equation of state
   integer, dimension(2) :: EOSdom_h15 ! The 3x5-point h-point i-computational domain for the equation of state
-  integer :: Isq, Ieq, Jsq, Jeq, i, j, m, n, pos
+  integer :: Isq, Ieq, Jsq, Jeq, i, j, m, n
   logical :: use_PPM ! If false, assume zero curvature in reconstruction, i.e. PLM
   logical :: use_varT, use_varS, use_covarTS ! Logicals for SGS variances fields
 
@@ -933,9 +906,9 @@ subroutine int_density_dz_generic_ppm(k, tv, T_t, T_b, S_t, S_b, e, &
   T25(:,:) = 0.
   TS5(:,:) = 0.
   S25(:,:) = 0.
-  T215(:,:) = 0.
-  TS15(:,:) = 0.
-  S215(:,:) = 0.
+  T215(:,:,:) = 0.
+  TS15(:,:,:) = 0.
+  S215(:,:,:) = 0.
 
   do n = 1, 5
     wt_t(n) = 0.25 * real(5-n)
@@ -957,12 +930,9 @@ subroutine int_density_dz_generic_ppm(k, tv, T_t, T_b, S_t, S_b, e, &
       endif
       dz = e(i,j,K) - e(i,j,K+1)
       do n=1,5
-        !p5(I*5+n) = -GxRho*((e(i,j,K) - z0pres) - 0.25*real(n-1)*dz)
         p5(n,I) = -GxRho*((e(i,j,K) - z0pres) - 0.25*real(n-1)*dz)
         ! Salinity and temperature points are reconstructed with PPM
-        !S5(I*5+n) = wt_t(n) * S_t(i,j,k) + wt_b(n) * ( S_b(i,j,k) + s6 * wt_t(n) )
         S5(n,I) = wt_t(n) * S_t(i,j,k) + wt_b(n) * ( S_b(i,j,k) + s6 * wt_t(n) )
-        !T5(I*5+n) = wt_t(n) * T_t(i,j,k) + wt_b(n) * ( T_b(i,j,k) + t6 * wt_t(n) )
         T5(n,I) = wt_t(n) * T_t(i,j,k) + wt_b(n) * ( T_b(i,j,k) + t6 * wt_t(n) )
       enddo
       if (use_stanley_eos) then
@@ -1049,11 +1019,9 @@ subroutine int_density_dz_generic_ppm(k, tv, T_t, T_b, S_t, S_b, e, &
         ! Pressure
         dz_x(m,i) = w_left*(e(i,j,K) - e(i,j,K+1)) + w_right*(e(i+1,j,K) - e(i+1,j,K+1))
 
-        !pos = i*15+(m-2)*5
-        pos = 5*(m-2)
-        p15(pos+1,i) = -GxRho*((w_left*e(i,j,K) + w_right*e(i+1,j,K)) - z0pres)
+        p15(1,m,i) = -GxRho*((w_left*e(i,j,K) + w_right*e(i+1,j,K)) - z0pres)
         do n=2,5
-          p15(pos+n,i) = p15(pos+n-1,i) + GxRho*0.25*dz_x(m,i)
+          p15(n,m,i) = p15(n-1,m,i) + GxRho*0.25*dz_x(m,i)
         enddo
 
         ! Parabolic reconstructions in the vertical for T and S
@@ -1063,13 +1031,13 @@ subroutine int_density_dz_generic_ppm(k, tv, T_t, T_b, S_t, S_b, e, &
           t6 = 3.0 * ( 2.0*T_mn - ( T_top + T_bot ) )
         endif
         do n=1,5
-          S15(pos+n,i) = wt_t(n) * S_top + wt_b(n) * ( S_bot + s6 * wt_t(n) )
-          T15(pos+n,i) = wt_t(n) * T_top + wt_b(n) * ( T_bot + t6 * wt_t(n) )
+          S15(n,m,i) = wt_t(n) * S_top + wt_b(n) * ( S_bot + s6 * wt_t(n) )
+          T15(n,m,i) = wt_t(n) * T_top + wt_b(n) * ( T_bot + t6 * wt_t(n) )
         enddo
         if (use_stanley_eos) then
-          if (use_varT) T215(:5,i) = w_left*tv%varT(i,j,k) + w_right*tv%varT(i+1,j,k)
-          if (use_covarTS) TS15(:5,i) = w_left*tv%covarTS(i,j,k) + w_right*tv%covarTS(i+1,j,k)
-          if (use_varS) S215(:5,i) = w_left*tv%varS(i,j,k) + w_right*tv%varS(i+1,j,k)
+          if (use_varT) T215(:,m,i) = w_left*tv%varT(i,j,k) + w_right*tv%varT(i+1,j,k)
+          if (use_covarTS) TS15(:,m,i) = w_left*tv%covarTS(i,j,k) + w_right*tv%covarTS(i+1,j,k)
+          if (use_varS) S215(:,m,i) = w_left*tv%varS(i,j,k) + w_right*tv%varS(i+1,j,k)
         endif
         if (use_stanley_eos) then
           ! XXX: Not yet implmented!
@@ -1089,12 +1057,10 @@ subroutine int_density_dz_generic_ppm(k, tv, T_t, T_b, S_t, S_b, e, &
 
     do I=Isq,Ieq
       do m=2,4
-        !pos = i*15+(m-2)*5
-        pos = 5*(m-2)
         ! Use Boole's rule to estimate the pressure anomaly change.
-        intz(m) = G_e*dz_x(m,i)*( C1_90*( 7.0*(r15(pos+1,i)+r15(pos+5,i)) + &
-                                         32.0*(r15(pos+2,i)+r15(pos+4,i)) + &
-                                         12.0*r15(pos+3,i)) )
+        intz(m) = G_e*dz_x(m,i)*( C1_90*( 7.0*(r15(1,m,i)+r15(5,m,i)) + &
+                                         32.0*(r15(2,m,i)+r15(4,m,i)) + &
+                                         12.0*r15(3,m,i)) )
       enddo ! m
       intz(1) = dpa(i,j) ; intz(5) = dpa(i+1,j)
 
@@ -1142,6 +1108,7 @@ subroutine int_density_dz_generic_ppm(k, tv, T_t, T_b, S_t, S_b, e, &
 
       do m=2,4
         ! XXX: pos is not updated?
+        !   (If so, then 3D version fixes it)
         w_left = wt_t(m) ; w_right = wt_b(m)
 
         ! Salinity and temperature points are linearly interpolated in
@@ -1158,9 +1125,9 @@ subroutine int_density_dz_generic_ppm(k, tv, T_t, T_b, S_t, S_b, e, &
 
         ! Pressure
         dz_y(m,i) = w_left*(e(i,j,K) - e(i,j,K+1)) + w_right*(e(i,j+1,K) - e(i,j+1,K+1))
-        p15(pos+1,i) = -GxRho*((w_left*e(i,j,K) + w_right*e(i,j+1,K)) - z0pres)
+        p15(1,m,i) = -GxRho*((w_left*e(i,j,K) + w_right*e(i,j+1,K)) - z0pres)
         do n=2,5
-          p15(pos+n,i) = p15(pos+n-1,i) + GxRho*0.25*dz_y(m,i)
+          p15(n,m,i) = p15(n-1,m,i) + GxRho*0.25*dz_y(m,i)
         enddo
 
         ! Parabolic reconstructions in the vertical for T and S
@@ -1170,14 +1137,14 @@ subroutine int_density_dz_generic_ppm(k, tv, T_t, T_b, S_t, S_b, e, &
           t6 = 3.0 * ( 2.0*T_mn - ( T_top + T_bot ) )
         endif
         do n=1,5
-          S15(pos+n,i) = wt_t(n) * S_top + wt_b(n) * ( S_bot + s6 * wt_t(n) )
-          T15(pos+n,i) = wt_t(n) * T_top + wt_b(n) * ( T_bot + t6 * wt_t(n) )
+          S15(n,m,i) = wt_t(n) * S_top + wt_b(n) * ( S_bot + s6 * wt_t(n) )
+          T15(n,m,i) = wt_t(n) * T_top + wt_b(n) * ( T_bot + t6 * wt_t(n) )
         enddo
 
         if (use_stanley_eos) then
-          if (use_varT) T215(pos+1:pos+5,i) = w_left*tv%varT(i,j,k) + w_right*tv%varT(i,j+1,k)
-          if (use_covarTS) TS15(pos+1:pos+5,i) = w_left*tv%covarTS(i,j,k) + w_right*tv%covarTS(i,j+1,k)
-          if (use_varS) S215(pos+1:pos+5,i) = w_left*tv%varS(i,j,k) + w_right*tv%varS(i,j+1,k)
+          if (use_varT) T215(:,m,i) = w_left*tv%varT(i,j,k) + w_right*tv%varT(i,j+1,k)
+          if (use_covarTS) TS15(:,m,i) = w_left*tv%covarTS(i,j,k) + w_right*tv%covarTS(i,j+1,k)
+          if (use_varS) S215(:,m,i) = w_left*tv%varS(i,j,k) + w_right*tv%varS(i,j+1,k)
         endif
       enddo
     enddo
@@ -1188,17 +1155,16 @@ subroutine int_density_dz_generic_ppm(k, tv, T_t, T_b, S_t, S_b, e, &
       !                       T215(15*HI%isc+1:), TS15(15*HI%isc+1:), S215(15*HI%isc+1:), &
       !                       r15(15*HI%isc+1:), EOS, EOSdom_h15, rho_ref=rho_ref)
     else
-      call calculate_density_nohalo(T15(:,HI%isc:), S15(:,HI%isc:), p15(:,HI%isc:), &
-                             r15(:,HI%isc:), EOS, rho_ref=rho_ref)
+      call calculate_density_nohalo(T15(:,:,HI%isc:), S15(:,:,HI%isc:), &
+          p15(:,:,HI%isc:), r15(:,:,HI%isc:), EOS, rho_ref=rho_ref)
     endif
 
     do i=HI%isc,HI%iec
       do m=2,4
         ! Use Boole's rule to estimate the pressure anomaly change.
-        pos = i*15+(m-2)*5
-        intz(m) = G_e*dz_y(m,i)*( C1_90*( 7.0*(r15(pos+1,i)+r15(pos+5,i)) + &
-                                         32.0*(r15(pos+2,i)+r15(pos+4,i)) + &
-                                         12.0*r15(pos+3,i)) )
+        intz(m) = G_e*dz_y(m,i)*( C1_90*( 7.0*(r15(1,m,i)+r15(5,m,i)) + &
+                                         32.0*(r15(2,m,i)+r15(4,m,i)) + &
+                                         12.0*r15(3,m,i)) )
       enddo ! m
       intz(1) = dpa(i,j) ; intz(5) = dpa(i,j+1)
 
