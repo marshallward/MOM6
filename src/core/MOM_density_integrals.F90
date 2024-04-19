@@ -10,6 +10,7 @@ use MOM_EOS,              only : analytic_int_specific_vol_dp
 use MOM_EOS,              only : calculate_density
 use MOM_EOS,              only : calculate_density_nohalo
 use MOM_EOS,              only : calculate_spec_vol
+use MOM_EOS,              only : calculate_spec_vol_nohalo
 use MOM_EOS,              only : calculate_specific_vol_derivs
 use MOM_EOS,              only : average_specific_vol
 use MOM_error_handler,    only : MOM_error, FATAL, WARNING, MOM_mesg
@@ -286,8 +287,6 @@ subroutine int_density_dz_generic_pcm(T, S, z_t, z_b, rho_ref, rho_0, G_e, HI, &
         enddo
       else
         do m=2,4
-          ! XXX: missing?
-          ! XXX: pos = 5*(m-2)
           intz(m) = G_e*dz_x(m,i)*( C1_90*( 7.0*(r15(1,m,i)+r15(5,m,i)) + &
                                            32.0*(r15(2,m,i)+r15(4,m,i)) + &
                                            12.0*r15(3,m,i)) - rho_ref )
@@ -336,11 +335,11 @@ subroutine int_density_dz_generic_pcm(T, S, z_t, z_b, rho_ref, rho_0, G_e, HI, &
     enddo
 
     if (use_rho_ref) then
-      call calculate_density_nohalo(T15(:,:,HI%isc:), S15(:,:,HI%isc:), p15(:,:,HI%isc:), &
-                             r15(:,:,HI%isc:), EOS, rho_ref=rho_ref)
+      call calculate_density_nohalo(T15(:,:,HI%isc:HI%iec), S15(:,:,HI%isc:HI%iec), &
+          p15(:,:,HI%isc:HI%iec), r15(:,:,HI%isc:HI%iec), EOS, rho_ref=rho_ref)
     else
-      call calculate_density_nohalo(T15(:,:,HI%isc:), S15(:,:,HI%isc:), p15(:,:,HI%isc:), &
-                             r15(:,:,HI%isc:), EOS)
+      call calculate_density_nohalo(T15(:,:,HI%isc:HI%iec), S15(:,:,HI%isc:HI%iec), &
+          p15(:,:,HI%isc:HI%iec), r15(:,:,HI%isc:HI%iec), EOS)
     endif
 
     do i=is,ie
@@ -736,11 +735,11 @@ subroutine int_density_dz_generic_plm(k, tv, T_t, T_b, S_t, S_b, e, rho_ref, &
       !                       r15(15*HI%isc+1:), EOS, EOSdom_h15, rho_ref=rho_ref)
     else
       if (use_rho_ref) then
-        call calculate_density_nohalo(T15(:,:,HI%isc:), S15(:,:,HI%isc:), p15(:,:,HI%isc:), &
-                               r15(:,:,HI%isc:), EOS, rho_ref=rho_ref)
+        call calculate_density_nohalo(T15(:,:,HI%isc:HI%iec), S15(:,:,HI%isc:HI%iec), &
+            p15(:,:,HI%isc:HI%iec), r15(:,:,HI%isc:HI%iec), EOS, rho_ref=rho_ref)
       else
-        call calculate_density_nohalo(T15(:,:,HI%isc:), S15(:,:,HI%isc:), p15(:,:,HI%isc:), &
-                               r15(:,:,HI%isc:), EOS)
+        call calculate_density_nohalo(T15(:,:,HI%isc:HI%iec), S15(:,:,HI%isc:HI%iec), &
+            p15(:,:,HI%isc:HI%iec), r15(:,:,HI%isc:HI%iec), EOS)
       endif
     endif
 
@@ -936,11 +935,9 @@ subroutine int_density_dz_generic_ppm(k, tv, T_t, T_b, S_t, S_b, e, &
         T5(n,I) = wt_t(n) * T_t(i,j,k) + wt_b(n) * ( T_b(i,j,k) + t6 * wt_t(n) )
       enddo
       if (use_stanley_eos) then
-        !XXX: This is I*5+:I*5+n but the rest of the code is +1:+5...?
-        !if (use_varT) T25(I*5+1:I*5+n) = tv%varT(i,j,k)
-        if (use_varT) T25(:n,I) = tv%varT(i,j,k)
-        if (use_covarTS) TS5(:n,I) = tv%covarTS(i,j,k)
-        if (use_varS) S25(:n,I) = tv%varS(i,j,k)
+        if (use_varT) T25(:,I) = tv%varT(i,j,k)
+        if (use_covarTS) TS5(:,I) = tv%covarTS(i,j,k)
+        if (use_varS) S25(:,I) = tv%varS(i,j,k)
       endif
     enddo
 
@@ -1107,8 +1104,6 @@ subroutine int_density_dz_generic_ppm(k, tv, T_t, T_b, S_t, S_b, e, &
       endif
 
       do m=2,4
-        ! XXX: pos is not updated?
-        !   (If so, then 3D version fixes it)
         w_left = wt_t(m) ; w_right = wt_b(m)
 
         ! Salinity and temperature points are linearly interpolated in
@@ -1155,8 +1150,8 @@ subroutine int_density_dz_generic_ppm(k, tv, T_t, T_b, S_t, S_b, e, &
       !                       T215(15*HI%isc+1:), TS15(15*HI%isc+1:), S215(15*HI%isc+1:), &
       !                       r15(15*HI%isc+1:), EOS, EOSdom_h15, rho_ref=rho_ref)
     else
-      call calculate_density_nohalo(T15(:,:,HI%isc:), S15(:,:,HI%isc:), &
-          p15(:,:,HI%isc:), r15(:,:,HI%isc:), EOS, rho_ref=rho_ref)
+      call calculate_density_nohalo(T15(:,:,HI%isc:HI%iec), S15(:,:,HI%isc:HI%iec), &
+          p15(:,:,HI%isc:HI%iec), r15(:,:,HI%isc:HI%iec), EOS, rho_ref=rho_ref)
     endif
 
     do i=HI%isc,HI%iec
@@ -1289,15 +1284,15 @@ subroutine int_spec_vol_dp_generic_pcm(T, S, p_t, p_b, alpha_ref, HI, EOS, US, d
 ! series for log(1-eps/1+eps) that assumes that |eps| < 0.34.
 
   ! Local variables
-  real :: T5((5*HI%isd+1):(5*(HI%ied+2)))  ! Temperatures along a line of subgrid locations [C ~> degC]
-  real :: S5((5*HI%ied+1):(5*(HI%ied+2)))  ! Salinities along a line of subgrid locations [S ~> ppt]
-  real :: p5((5*HI%isd+1):(5*(HI%ied+2)))  ! Pressures along a line of subgrid locations [R L2 T-2 ~> Pa]
-  real :: a5((5*HI%isd+1):(5*(HI%ied+2)))  ! Specific volumes anomalies along a line of subgrid
-                                           ! locations [R-1 ~> m3 kg-3]
-  real :: T15((15*HI%isd+1):(15*(HI%ied+1))) ! Temperatures at an array of subgrid locations [C ~> degC]
-  real :: S15((15*HI%isd+1):(15*(HI%ied+1))) ! Salinities at an array of subgrid locations [S ~> ppt]
-  real :: p15((15*HI%isd+1):(15*(HI%ied+1))) ! Pressures at an array of subgrid locations [R L2 T-2 ~> Pa]
-  real :: a15((15*HI%isd+1):(15*(HI%ied+1))) ! Specific volumes at an array of subgrid locations [R ~> kg m-3]
+  real :: T5(5,HI%isd:HI%ied+1)  ! Temperatures along a line of subgrid locations [C ~> degC]
+  real :: S5(5,HI%ied:HI%ied+1)  ! Salinities along a line of subgrid locations [S ~> ppt]
+  real :: p5(5,HI%isd:HI%ied+1)  ! Pressures along a line of subgrid locations [R L2 T-2 ~> Pa]
+  real :: a5(5,HI%isd:HI%ied+1)  ! Specific volumes anomalies along a line of subgrid
+                                 ! locations [R-1 ~> m3 kg-3]
+  real :: T15(5,2:4,HI%isd:HI%ied) ! Temperatures at an array of subgrid locations [C ~> degC]
+  real :: S15(5,2:4,HI%isd:HI%ied) ! Salinities at an array of subgrid locations [S ~> ppt]
+  real :: p15(5,2:4,HI%isd:HI%ied) ! Pressures at an array of subgrid locations [R L2 T-2 ~> Pa]
+  real :: a15(5,2:4,HI%isd:HI%ied) ! Specific volumes at an array of subgrid locations [R ~> kg m-3]
   real :: alpha_anom ! The depth averaged specific density anomaly [R-1 ~> m3 kg-1]
   real :: dp         ! The pressure change through a layer [R L2 T-2 ~> Pa]
   real :: dp_x(5,SZIB_(HI)) ! The pressure change through a layer along an x-line of subgrid locations [Z ~> m]
@@ -1316,7 +1311,7 @@ subroutine int_spec_vol_dp_generic_pcm(T, S, p_t, p_b, alpha_ref, HI, EOS, US, d
   integer, dimension(2) :: EOSdom_h5  ! The 5-point h-point i-computational domain for the equation of state
   integer, dimension(2) :: EOSdom_q15 ! The 3x5-point q-point i-computational domain for the equation of state
   integer, dimension(2) :: EOSdom_h15 ! The 3x5-point h-point i-computational domain for the equation of state
-  integer :: Isq, Ieq, Jsq, Jeq, ish, ieh, jsh, jeh, i, j, m, n, pos, halo
+  integer :: Isq, Ieq, Jsq, Jeq, ish, ieh, jsh, jeh, i, j, m, n, halo
 
   Isq = HI%IscB ; Ieq = HI%IecB ; Jsq = HI%JscB ; Jeq = HI%JecB
   halo = 0 ; if (present(halo_size)) halo = MAX(halo_size,0)
@@ -1341,26 +1336,25 @@ subroutine int_spec_vol_dp_generic_pcm(T, S, p_t, p_b, alpha_ref, HI, EOS, US, d
   do j=jsh,jeh
     do i=ish,ieh
       dp = p_b(i,j) - p_t(i,j)
-      pos = 5*i
       do n=1,5
-        T5(pos+n) = T(i,j) ; S5(pos+n) = S(i,j)
-        p5(pos+n) = p_b(i,j) - 0.25*real(n-1)*dp
+        T5(n,i) = T(i,j)
+        S5(n,i) = S(i,j)
+        p5(n,i) = p_b(i,j) - 0.25*real(n-1)*dp
       enddo
     enddo
 
-    call calculate_spec_vol(T5(5*ish+1:), S5(5*ish+1:), p5(5*ish+1:), a5(5*ish+1:), EOS, &
-                            EOSdom_h5, spv_ref=alpha_ref)
+    call calculate_spec_vol_nohalo(T5(:,ish:ieh), S5(:,ish:ieh), p5(:,ish:ieh), &
+        a5(:,ish:ieh), EOS, spv_ref=alpha_ref)
 
     do i=ish,ieh
       dp = p_b(i,j) - p_t(i,j)
       ! Use Boole's rule to estimate the interface height anomaly change.
-      pos = 5*i
-      alpha_anom = C1_90*(7.0*(a5(pos+1)+a5(pos+5)) + 32.0*(a5(pos+2)+a5(pos+4)) + 12.0*a5(pos+3))
+      alpha_anom = C1_90*(7.0*(a5(1,i)+a5(5,i)) + 32.0*(a5(2,i)+a5(4,i)) + 12.0*a5(3,i))
       dza(i,j) = dp*alpha_anom
       ! Use a Boole's-rule-like fifth-order accurate estimate of the double integral of
       ! the interface height anomaly.
       if (present(intp_dza)) intp_dza(i,j) = 0.5*dp**2 * &
-            (alpha_anom - C1_90*(16.0*(a5(pos+4)-a5(pos+2)) + 7.0*(a5(pos+5)-a5(pos+1))) )
+            (alpha_anom - C1_90*(16.0*(a5(4,i)-a5(2,i)) + 7.0*(a5(5,i)-a5(1,i))))
     enddo
   enddo
 
@@ -1386,32 +1380,31 @@ subroutine int_spec_vol_dp_generic_pcm(T, S, p_t, p_b, alpha_ref, HI, EOS, US, d
       do m=2,4
         wt_L = 0.25*real(5-m) ; wt_R = 1.0-wt_L
         wtT_L = wt_L*hWt_LL + wt_R*hWt_RL ; wtT_R = wt_L*hWt_LR + wt_R*hWt_RR
-        pos = i*15+(m-2)*5
 
         ! T, S, and p are interpolated in the horizontal.  The p interpolation
         ! is linear, but for T and S it may be thickness weighted.
-        p15(pos+1) = wt_L*p_b(i,j) + wt_R*p_b(i+1,j)
+        p15(1,m,i) = wt_L*p_b(i,j) + wt_R*p_b(i+1,j)
         dp_x(m,I) = wt_L*(p_b(i,j) - p_t(i,j)) + wt_R*(p_b(i+1,j) - p_t(i+1,j))
-        T15(pos+1) = wtT_L*T(i,j) + wtT_R*T(i+1,j)
-        S15(pos+1) = wtT_L*S(i,j) + wtT_R*S(i+1,j)
+        T15(1,m,i) = wtT_L*T(i,j) + wtT_R*T(i+1,j)
+        S15(1,m,i) = wtT_L*S(i,j) + wtT_R*S(i+1,j)
 
         do n=2,5
-          T15(pos+n) = T15(pos+1) ; S15(pos+n) = S15(pos+1)
-          p15(pos+n) = p15(pos+n-1) - 0.25*dp_x(m,I)
+          T15(n,m,i) = T15(1,m,i)
+          S15(n,m,i) = S15(1,m,i)
+          p15(n,m,i) = p15(n-1,m,i) - 0.25*dp_x(m,I)
         enddo
       enddo
     enddo
 
-    call calculate_spec_vol(T15(15*Isq+1:), S15(15*Isq+1:), p15(15*Isq+1:), &
-                            a15(15*Isq+1:), EOS, EOSdom_q15, spv_ref=alpha_ref)
+    call calculate_spec_vol_nohalo(T15(:,:,Isq:Ieq), S15(:,:,Isq:Ieq), &
+        p15(:,:,Isq:Ieq), a15(:,:,Isq:Ieq), EOS, spv_ref=alpha_ref)
 
     do I=Isq,Ieq
       intp(1) = dza(i,j) ; intp(5) = dza(i+1,j)
       ! Use Boole's rule to estimate the interface height anomaly change.
       do m=2,4
-        pos = i*15+(m-2)*5
-        intp(m) = dp_x(m,I)*( C1_90*(7.0*(a15(pos+1)+a15(pos+5)) + 32.0*(a15(pos+2)+a15(pos+4)) + &
-                                  12.0*a15(pos+3)))
+        intp(m) = dp_x(m,I)*(C1_90*(7.0*(a15(1,m,i)+a15(5,m,i)) + 32.0*(a15(2,m,i)+a15(4,m,i)) + &
+                                  12.0*a15(3,m,i)))
       enddo
       ! Use Boole's rule to integrate the interface height anomaly values in x.
       intx_dza(i,j) = C1_90*(7.0*(intp(1)+intp(5)) + 32.0*(intp(2)+intp(4)) + &
@@ -1441,32 +1434,30 @@ subroutine int_spec_vol_dp_generic_pcm(T, S, p_t, p_b, alpha_ref, HI, EOS, US, d
       do m=2,4
         wt_L = 0.25*real(5-m) ; wt_R = 1.0-wt_L
         wtT_L = wt_L*hWt_LL + wt_R*hWt_RL ; wtT_R = wt_L*hWt_LR + wt_R*hWt_RR
-        pos = i*15+(m-2)*5
 
         ! T, S, and p are interpolated in the horizontal.  The p interpolation
         ! is linear, but for T and S it may be thickness weighted.
-        p15(pos+1) = wt_L*p_b(i,j) + wt_R*p_b(i,j+1)
+        p15(1,m,i) = wt_L*p_b(i,j) + wt_R*p_b(i,j+1)
         dp_y(m,i) = wt_L*(p_b(i,j) - p_t(i,j)) + wt_R*(p_b(i,j+1) - p_t(i,j+1))
-        T15(pos+1) = wtT_L*T(i,j) + wtT_R*T(i,j+1)
-        S15(pos+1) = wtT_L*S(i,j) + wtT_R*S(i,j+1)
+        T15(1,m,i) = wtT_L*T(i,j) + wtT_R*T(i,j+1)
+        S15(1,m,i) = wtT_L*S(i,j) + wtT_R*S(i,j+1)
         do n=2,5
-          T15(pos+n) = T15(pos+1) ; S15(pos+n) = S15(pos+1)
-          p15(pos+n) = p15(pos+n-1) - 0.25*dp_y(m,i)
+          T15(n,m,i) = T15(1,m,i)
+          S15(n,m,i) = S15(1,m,i)
+          p15(n,m,i) = p15(n-1,m,i) - 0.25*dp_y(m,i)
         enddo
       enddo
     enddo
 
-    call calculate_spec_vol(T15(15*HI%isc+1:), S15(15*HI%isc+1:), p15(15*HI%isc+1:), &
-                            a15(15*HI%isc+1:), EOS, EOSdom_h15, spv_ref=alpha_ref)
+    call calculate_spec_vol_nohalo(T15(:,:,HI%isc:HI%iec), S15(:,:,HI%isc:HI%iec), &
+        p15(:,:,HI%isc:HI%iec), a15(:,:,HI%isc:HI%iec), EOS, spv_ref=alpha_ref)
 
     do i=HI%isc,HI%iec
-
       intp(1) = dza(i,j) ; intp(5) = dza(i,j+1)
       ! Use Boole's rule to estimate the interface height anomaly change.
       do m=2,4
-        pos = i*15+(m-2)*5
-        intp(m) = dp_y(m,i)*( C1_90*(7.0*(a15(pos+1)+a15(pos+5)) + 32.0*(a15(pos+2)+a15(pos+4)) + &
-                                  12.0*a15(pos+3)))
+        intp(m) = dp_y(m,i)*( C1_90*(7.0*(a15(1,m,i)+a15(5,m,i)) + 32.0*(a15(2,m,i)+a15(4,m,i)) + &
+                                  12.0*a15(3,m,i)))
       enddo
       ! Use Boole's rule to integrate the interface height anomaly values in y.
       inty_dza(i,j) = C1_90*(7.0*(intp(1)+intp(5)) + 32.0*(intp(2)+intp(4)) + &

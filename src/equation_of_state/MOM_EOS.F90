@@ -47,6 +47,7 @@ public calculate_density_nohalo
 public calculate_density_derivs
 public calculate_density_second_derivs
 public calculate_spec_vol
+public calculate_spec_vol_nohalo
 public calculate_specific_vol_derivs
 public calculate_TFreeze
 public convert_temp_salt_for_TEOS10
