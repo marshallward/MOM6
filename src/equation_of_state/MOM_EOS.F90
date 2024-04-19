@@ -73,7 +73,7 @@ end interface calculate_density
 !> Calculate the density of seawater from T, S, and P when the fields have no
 !! halos.  This is an optimized version of calculate_density().
 interface calculate_density_nohalo
-  ! NOTE: This interface block can be extended to higher dimensions as needed.
+  ! TODO: Integrate with the calculate_density interface block.
   module procedure calculate_density_2d_nohalo
   module procedure calculate_density_3d_nohalo
 end interface calculate_density_nohalo
@@ -83,6 +83,14 @@ interface calculate_spec_vol
   module procedure calc_spec_vol_scalar
   module procedure calc_spec_vol_1d
 end interface calculate_spec_vol
+
+!> Calculates specific volume of sea water from T, S and P when the fields have
+!! no halos.  This is an optimized version of calculate_spec_vol().
+interface calculate_spec_vol_nohalo
+  ! TODO: Integrate with the calculate_spec_vol interface block.
+  module procedure calc_spec_vol_2d_nohalo
+  module procedure calc_spec_vol_3d_nohalo
+end interface calculate_spec_vol_nohalo
 
 !> Calculate the derivatives of density with temperature and salinity from T, S, and P
 interface calculate_density_derivs
@@ -551,6 +559,7 @@ subroutine calc_spec_vol_scalar(T, S, pressure, specvol, EOS, spv_ref, scale)
 
 end subroutine calc_spec_vol_scalar
 
+
 !> Calls the appropriate subroutine to calculate the specific volume of sea water for 1-D array
 !! inputs, potentially limiting the domain of indices that are worked on.
 subroutine calc_spec_vol_1d(T, S, pressure, specvol, EOS, dom, spv_ref, scale)
@@ -603,6 +612,92 @@ subroutine calc_spec_vol_1d(T, S, pressure, specvol, EOS, dom, spv_ref, scale)
   enddo ; endif
 
 end subroutine calc_spec_vol_1d
+
+
+!> Calculate the specific volume of sea water in a contiguous 2D array (i.e. no
+!! halos), potentially limiting the domain of indices that are worked on.
+subroutine calc_spec_vol_2d_nohalo(T, S, pressure, specvol, EOS, spv_ref, scale)
+  real, intent(in) :: T(:,:)          !< Potential temperature referenced to the surface [C ~> degC]
+  real, intent(in) :: S(:,:)          !< Salinity [S ~> ppt]
+  real, intent(in) :: pressure(:,:)   !< Pressure [R L2 T-2 ~> Pa]
+  real, intent(inout) :: specvol(:,:) !< In situ specific volume [R-1 ~> m3 kg-1]
+  type(EOS_type),        intent(in)    :: EOS      !< Equation of state structure
+  real,                  optional, intent(in) :: spv_ref !< A reference specific volume [R-1 ~> m3 kg-1]
+  real,                  optional, intent(in) :: scale !< A multiplicative factor by which to scale
+                                                       !! output specific volume in combination with
+                                                       !! scaling stored in EOS [various]
+  ! Local variables
+  real, dimension(size(pressure,1), size(pressure,2)) :: pres  ! Pressure converted to [Pa]
+  real, dimension(size(T,1), size(T,2)) :: Ta    ! Temperature converted to [degC]
+  real, dimension(size(S,1), size(S,2)) :: Sa    ! Salinity converted to [ppt]
+  real :: spv_scale ! A factor to convert specific volume from m3 kg-1 to the desired units [kg m-3 R-1 ~> 1]
+
+  if (all([EOS%RL2_T2_to_Pa, EOS%kg_m3_to_R, EOS%C_to_degC, EOS%S_to_ppt] == 1.0)) then
+    call calculate_spec_vol_nohalo(T, S, pressure, specvol, EOS, spv_ref)
+  else
+    pres(:,:) = EOS%RL2_T2_to_Pa * pressure(:,:)
+    Ta(:,:) = EOS%C_to_degC * T(:,:)
+    Sa(:,:) = EOS%S_to_ppt * S(:,:)
+
+    if (present(spv_ref)) then
+      call calculate_spec_vol_nohalo(Ta, Sa, pres, specvol, EOS, EOS%kg_m3_to_R*spv_ref)
+    else
+      ! There is rescaling of variables, but spv_ref is not present. Passing a 0 value of spv_ref
+      ! changes answers at roundoff for some equations of state, like Wright and UNESCO.
+      call calculate_spec_vol_nohalo(Ta, Sa, pres, specvol, EOS)
+    endif
+  endif
+
+  spv_scale = EOS%R_to_kg_m3
+  if (present(scale)) spv_scale = spv_scale * scale
+
+  if (spv_scale /= 1.0) then
+    specvol(:,:) = spv_scale * specvol(:,:)
+  endif
+end subroutine calc_spec_vol_2d_nohalo
+
+
+!> Calculate the specific volume of sea water in a contiguous 3D array (i.e. no
+!! halos), potentially limiting the domain of indices that are worked on.
+subroutine calc_spec_vol_3d_nohalo(T, S, pressure, specvol, EOS, spv_ref, scale)
+  real, intent(in) :: T(:,:,:)          !< Potential temperature referenced to the surface [C ~> degC]
+  real, intent(in) :: S(:,:,:)          !< Salinity [S ~> ppt]
+  real, intent(in) :: pressure(:,:,:)   !< Pressure [R L2 T-2 ~> Pa]
+  real, intent(inout) :: specvol(:,:,:) !< In situ specific volume [R-1 ~> m3 kg-1]
+  type(EOS_type), intent(in) :: EOS     !< Equation of state structure
+  real,                  optional, intent(in) :: spv_ref !< A reference specific volume [R-1 ~> m3 kg-1]
+  real,                  optional, intent(in) :: scale !< A multiplicative factor by which to scale
+                                                       !! output specific volume in combination with
+                                                       !! scaling stored in EOS [various]
+  ! Local variables
+  real, dimension(size(pressure,1), size(pressure,2), size(pressure,3)) :: pres  ! Pressure converted to [Pa]
+  real, dimension(size(T,1), size(T,2), size(T,3)) :: Ta   ! Temperature converted to [degC]
+  real, dimension(size(S,1), size(S,2), size(S,3)) :: Sa   ! Salinity converted to [ppt]
+  real :: spv_scale ! A factor to convert specific volume from m3 kg-1 to the desired units [kg m-3 R-1 ~> 1]
+
+  if (all([EOS%RL2_T2_to_Pa, EOS%kg_m3_to_R, EOS%C_to_degC, EOS%S_to_ppt] == 1.0)) then
+    call calculate_spec_vol_nohalo(T, S, pressure, specvol, EOS, spv_ref)
+  else
+    pres(:,:,:) = EOS%RL2_T2_to_Pa * pressure(:,:,:)
+    Ta(:,:,:) = EOS%C_to_degC * T(:,:,:)
+    Sa(:,:,:) = EOS%S_to_ppt * S(:,:,:)
+
+    if (present(spv_ref)) then
+      call calculate_spec_vol_nohalo(Ta, Sa, pres, specvol, EOS, EOS%kg_m3_to_R*spv_ref)
+    else
+      ! There is rescaling of variables, but spv_ref is not present. Passing a 0 value of spv_ref
+      ! changes answers at roundoff for some equations of state, like Wright and UNESCO.
+      call calculate_spec_vol_nohalo(Ta, Sa, pres, specvol, EOS)
+    endif
+  endif
+
+  spv_scale = EOS%R_to_kg_m3
+  if (present(scale)) spv_scale = spv_scale * scale
+
+  if (spv_scale /= 1.0) then
+    specvol(:,:,:) = spv_scale * specvol(:,:,:)
+  endif
+end subroutine calc_spec_vol_3d_nohalo
 
 
 !> Calls the appropriate subroutine to calculate the freezing point for scalar inputs.
