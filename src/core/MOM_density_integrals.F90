@@ -531,8 +531,7 @@ subroutine int_density_dz_generic_plm(k, tv, T_t, T_b, S_t, S_b, e, rho_ref, &
       if (use_varS) S25(:,i) = tv%varS(i,j,k)
     enddo
     if (use_Stanley_eos) then
-      ! XXX: Not yet implemented!!
-      !call calculate_density(T5, S5, p5, T25, TS5, S25, r5, EOS, EOSdom_h5, rho_ref=rho_ref)
+      call calculate_density(T5, S5, p5, T25, TS5, S25, r5, EOS, rho_ref=rho_ref)
     else
       if (use_rho_ref) then
         call calculate_density_nohalo(T5, S5, p5, r5, EOS, rho_ref=rho_ref)
@@ -633,8 +632,7 @@ subroutine int_density_dz_generic_plm(k, tv, T_t, T_b, S_t, S_b, e, rho_ref, &
     enddo
 
     if (use_stanley_eos) then
-      ! XXX: Not yet implemented!
-      !call calculate_density(T15, S15, p15, T215, TS15, S215, r15, EOS, EOSdom_q15, rho_ref=rho_ref)
+      call calculate_density(T15, S15, p15, T215, TS15, S215, r15, EOS, rho_ref=rho_ref)
     else
       if (use_rho_ref) then
         call calculate_density_nohalo(T15, S15, p15, r15, EOS, rho_ref=rho_ref)
@@ -729,10 +727,9 @@ subroutine int_density_dz_generic_plm(k, tv, T_t, T_b, S_t, S_b, e, rho_ref, &
     enddo
 
     if (use_stanley_eos) then
-      ! XXX: Not yet implemented!
-      !call calculate_density(T15(15*HI%isc+1:), S15(15*HI%isc+1:), p15(15*HI%isc+1:), &
-      !                       T215(15*HI%isc+1:), TS15(15*HI%isc+1:), S215(15*HI%isc+1:), &
-      !                       r15(15*HI%isc+1:), EOS, EOSdom_h15, rho_ref=rho_ref)
+      call calculate_density(T15(:,:,HI%isc:HI%iec), S15(:,:,HI%isc:HI%iec), p15(:,:,HI%isc:HI%iec), &
+                             T215(:,:,HI%isc:HI%iec), TS15(:,:,HI%isc:HI%iec), S215(:,:,HI%isc:HI%iec), &
+                             r15(:,:,HI%isc:HI%iec), EOS, rho_ref=rho_ref)
     else
       if (use_rho_ref) then
         call calculate_density_nohalo(T15(:,:,HI%isc:HI%iec), S15(:,:,HI%isc:HI%iec), &
@@ -942,8 +939,7 @@ subroutine int_density_dz_generic_ppm(k, tv, T_t, T_b, S_t, S_b, e, &
     enddo
 
     if (use_stanley_eos) then
-      ! XXX: Not yet implemented!
-      !call calculate_density(T5, S5, p5, T25, TS5, S25, r5, EOS, EOSdom_h5, rho_ref=rho_ref)
+      call calculate_density(T5, S5, p5, T25, TS5, S25, r5, EOS, rho_ref=rho_ref)
     else
       call calculate_density_nohalo(T5, S5, p5, r5, EOS, rho_ref=rho_ref)
     endif
@@ -1037,8 +1033,7 @@ subroutine int_density_dz_generic_ppm(k, tv, T_t, T_b, S_t, S_b, e, &
           if (use_varS) S215(:,m,i) = w_left*tv%varS(i,j,k) + w_right*tv%varS(i+1,j,k)
         endif
         if (use_stanley_eos) then
-          ! XXX: Not yet implmented!
-          !call calculate_density(T5, S5, p5, T25, TS5, S25, r5, EOS, rho_ref=rho_ref)
+          call calculate_density(T5, S5, p5, T25, TS5, S25, r5, EOS, rho_ref=rho_ref)
         else
           call calculate_density_nohalo(T5, S5, p5, r5, EOS, rho_ref=rho_ref)
         endif
@@ -1046,8 +1041,7 @@ subroutine int_density_dz_generic_ppm(k, tv, T_t, T_b, S_t, S_b, e, &
     enddo
 
     if (use_stanley_eos) then
-      ! XXX: Not yet implemented!
-      !call calculate_density(T15, S15, p15, T215, TS15, S215, r15, EOS, EOSdom_q15, rho_ref=rho_ref)
+      call calculate_density(T15, S15, p15, T215, TS15, S215, r15, EOS, rho_ref=rho_ref)
     else
       call calculate_density_nohalo(T15, S15, p15, r15, EOS, rho_ref=rho_ref)
     endif
@@ -1145,10 +1139,9 @@ subroutine int_density_dz_generic_ppm(k, tv, T_t, T_b, S_t, S_b, e, &
     enddo
 
     if (use_stanley_eos) then
-      ! XXX: Not yet implemented!
-      !call calculate_density(T15(15*HI%isc+1:), S15(15*HI%isc+1:), p15(15*HI%isc+1:), &
-      !                       T215(15*HI%isc+1:), TS15(15*HI%isc+1:), S215(15*HI%isc+1:), &
-      !                       r15(15*HI%isc+1:), EOS, EOSdom_h15, rho_ref=rho_ref)
+      call calculate_density(T15(:,:,HI%isc:HI%iec), S15(:,:,HI%isc:HI%iec), p15(:,:,HI%isc:HI%iec), &
+                             T215(:,:,HI%isc:HI%iec), TS15(:,:,HI%isc:HI%iec), S215(:,:,HI%isc:HI%iec), &
+                             r15(:,:,HI%isc:HI%iec), EOS, rho_ref=rho_ref)
     else
       call calculate_density_nohalo(T15(:,:,HI%isc:HI%iec), S15(:,:,HI%isc:HI%iec), &
           p15(:,:,HI%isc:HI%iec), r15(:,:,HI%isc:HI%iec), EOS, rho_ref=rho_ref)
