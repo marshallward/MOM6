@@ -363,6 +363,7 @@ contains
     real, intent(out) :: specvol(:,:) !< In situ specific volume [m3 kg-1]
     real, optional, intent(in)  :: spv_ref  !< A reference specific volume [m3 kg-1]
 
+    ! TODO: All the (:,:) can probably be removed
     if (present(spv_ref)) then
       specvol(:,:) = this%spec_vol_anomaly_elem(T(:,:), S(:,:), pressure(:,:), spv_ref)
     else
@@ -379,6 +380,7 @@ contains
     real, intent(out) :: specvol(:,:,:) !< In situ specific volume [m3 kg-1]
     real, optional, intent(in)  :: spv_ref  !< A reference specific volume [m3 kg-1]
 
+    ! TODO: All the (:,:,:) can probably be removed
     if (present(spv_ref)) then
       specvol(:,:,:) = this%spec_vol_anomaly_elem(T(:,:,:), S(:,:,:), pressure(:,:,:), spv_ref)
     else

@@ -8,9 +8,7 @@ use MOM_EOS,              only : EOS_quadrature, EOS_domain
 use MOM_EOS,              only : analytic_int_density_dz
 use MOM_EOS,              only : analytic_int_specific_vol_dp
 use MOM_EOS,              only : calculate_density
-use MOM_EOS,              only : calculate_density_nohalo
 use MOM_EOS,              only : calculate_spec_vol
-use MOM_EOS,              only : calculate_spec_vol_nohalo
 use MOM_EOS,              only : calculate_specific_vol_derivs
 use MOM_EOS,              only : average_specific_vol
 use MOM_error_handler,    only : MOM_error, FATAL, WARNING, MOM_mesg
@@ -216,9 +214,9 @@ subroutine int_density_dz_generic_pcm(T, S, z_t, z_b, rho_ref, rho_0, G_e, HI, &
     enddo
 
     if (use_rho_ref) then
-      call calculate_density_nohalo(T5, S5, p5, r5, EOS, rho_ref=rho_ref)
+      call calculate_density(T5, S5, p5, r5, EOS, rho_ref=rho_ref)
     else
-      call calculate_density_nohalo(T5, S5, p5, r5, EOS)
+      call calculate_density(T5, S5, p5, r5, EOS)
     endif
 
     do i=Isq,Ieq+1
@@ -271,9 +269,9 @@ subroutine int_density_dz_generic_pcm(T, S, z_t, z_b, rho_ref, rho_0, G_e, HI, &
     enddo
 
     if (use_rho_ref) then
-      call calculate_density_nohalo(T15, S15, p15, r15, EOS, rho_ref=rho_ref)
+      call calculate_density(T15, S15, p15, r15, EOS, rho_ref=rho_ref)
     else
-      call calculate_density_nohalo(T15, S15, p15, r15, EOS)
+      call calculate_density(T15, S15, p15, r15, EOS)
     endif
 
     do I=Isq,Ieq
@@ -335,10 +333,10 @@ subroutine int_density_dz_generic_pcm(T, S, z_t, z_b, rho_ref, rho_0, G_e, HI, &
     enddo
 
     if (use_rho_ref) then
-      call calculate_density_nohalo(T15(:,:,HI%isc:HI%iec), S15(:,:,HI%isc:HI%iec), &
+      call calculate_density(T15(:,:,HI%isc:HI%iec), S15(:,:,HI%isc:HI%iec), &
           p15(:,:,HI%isc:HI%iec), r15(:,:,HI%isc:HI%iec), EOS, rho_ref=rho_ref)
     else
-      call calculate_density_nohalo(T15(:,:,HI%isc:HI%iec), S15(:,:,HI%isc:HI%iec), &
+      call calculate_density(T15(:,:,HI%isc:HI%iec), S15(:,:,HI%isc:HI%iec), &
           p15(:,:,HI%isc:HI%iec), r15(:,:,HI%isc:HI%iec), EOS)
     endif
 
@@ -534,9 +532,9 @@ subroutine int_density_dz_generic_plm(k, tv, T_t, T_b, S_t, S_b, e, rho_ref, &
       call calculate_density(T5, S5, p5, T25, TS5, S25, r5, EOS, rho_ref=rho_ref)
     else
       if (use_rho_ref) then
-        call calculate_density_nohalo(T5, S5, p5, r5, EOS, rho_ref=rho_ref)
+        call calculate_density(T5, S5, p5, r5, EOS, rho_ref=rho_ref)
       else
-        call calculate_density_nohalo(T5, S5, p5, r5, EOS)
+        call calculate_density(T5, S5, p5, r5, EOS)
         u5(:,:) = r5(:,:) - rho_ref
       endif
     endif
@@ -635,9 +633,9 @@ subroutine int_density_dz_generic_plm(k, tv, T_t, T_b, S_t, S_b, e, rho_ref, &
       call calculate_density(T15, S15, p15, T215, TS15, S215, r15, EOS, rho_ref=rho_ref)
     else
       if (use_rho_ref) then
-        call calculate_density_nohalo(T15, S15, p15, r15, EOS, rho_ref=rho_ref)
+        call calculate_density(T15, S15, p15, r15, EOS, rho_ref=rho_ref)
       else
-        call calculate_density_nohalo(T15, S15, p15, r15, EOS)
+        call calculate_density(T15, S15, p15, r15, EOS)
       endif
     endif
 
@@ -732,10 +730,10 @@ subroutine int_density_dz_generic_plm(k, tv, T_t, T_b, S_t, S_b, e, rho_ref, &
                              r15(:,:,HI%isc:HI%iec), EOS, rho_ref=rho_ref)
     else
       if (use_rho_ref) then
-        call calculate_density_nohalo(T15(:,:,HI%isc:HI%iec), S15(:,:,HI%isc:HI%iec), &
+        call calculate_density(T15(:,:,HI%isc:HI%iec), S15(:,:,HI%isc:HI%iec), &
             p15(:,:,HI%isc:HI%iec), r15(:,:,HI%isc:HI%iec), EOS, rho_ref=rho_ref)
       else
-        call calculate_density_nohalo(T15(:,:,HI%isc:HI%iec), S15(:,:,HI%isc:HI%iec), &
+        call calculate_density(T15(:,:,HI%isc:HI%iec), S15(:,:,HI%isc:HI%iec), &
             p15(:,:,HI%isc:HI%iec), r15(:,:,HI%isc:HI%iec), EOS)
       endif
     endif
@@ -941,7 +939,7 @@ subroutine int_density_dz_generic_ppm(k, tv, T_t, T_b, S_t, S_b, e, &
     if (use_stanley_eos) then
       call calculate_density(T5, S5, p5, T25, TS5, S25, r5, EOS, rho_ref=rho_ref)
     else
-      call calculate_density_nohalo(T5, S5, p5, r5, EOS, rho_ref=rho_ref)
+      call calculate_density(T5, S5, p5, r5, EOS, rho_ref=rho_ref)
     endif
 
     do i=Isq,Ieq+1
@@ -1035,7 +1033,7 @@ subroutine int_density_dz_generic_ppm(k, tv, T_t, T_b, S_t, S_b, e, &
         if (use_stanley_eos) then
           call calculate_density(T5, S5, p5, T25, TS5, S25, r5, EOS, rho_ref=rho_ref)
         else
-          call calculate_density_nohalo(T5, S5, p5, r5, EOS, rho_ref=rho_ref)
+          call calculate_density(T5, S5, p5, r5, EOS, rho_ref=rho_ref)
         endif
       enddo
     enddo
@@ -1043,7 +1041,7 @@ subroutine int_density_dz_generic_ppm(k, tv, T_t, T_b, S_t, S_b, e, &
     if (use_stanley_eos) then
       call calculate_density(T15, S15, p15, T215, TS15, S215, r15, EOS, rho_ref=rho_ref)
     else
-      call calculate_density_nohalo(T15, S15, p15, r15, EOS, rho_ref=rho_ref)
+      call calculate_density(T15, S15, p15, r15, EOS, rho_ref=rho_ref)
     endif
 
     do I=Isq,Ieq
@@ -1143,7 +1141,7 @@ subroutine int_density_dz_generic_ppm(k, tv, T_t, T_b, S_t, S_b, e, &
                              T215(:,:,HI%isc:HI%iec), TS15(:,:,HI%isc:HI%iec), S215(:,:,HI%isc:HI%iec), &
                              r15(:,:,HI%isc:HI%iec), EOS, rho_ref=rho_ref)
     else
-      call calculate_density_nohalo(T15(:,:,HI%isc:HI%iec), S15(:,:,HI%isc:HI%iec), &
+      call calculate_density(T15(:,:,HI%isc:HI%iec), S15(:,:,HI%isc:HI%iec), &
           p15(:,:,HI%isc:HI%iec), r15(:,:,HI%isc:HI%iec), EOS, rho_ref=rho_ref)
     endif
 
@@ -1336,7 +1334,7 @@ subroutine int_spec_vol_dp_generic_pcm(T, S, p_t, p_b, alpha_ref, HI, EOS, US, d
       enddo
     enddo
 
-    call calculate_spec_vol_nohalo(T5(:,ish:ieh), S5(:,ish:ieh), p5(:,ish:ieh), &
+    call calculate_spec_vol(T5(:,ish:ieh), S5(:,ish:ieh), p5(:,ish:ieh), &
         a5(:,ish:ieh), EOS, spv_ref=alpha_ref)
 
     do i=ish,ieh
@@ -1389,7 +1387,7 @@ subroutine int_spec_vol_dp_generic_pcm(T, S, p_t, p_b, alpha_ref, HI, EOS, US, d
       enddo
     enddo
 
-    call calculate_spec_vol_nohalo(T15(:,:,Isq:Ieq), S15(:,:,Isq:Ieq), &
+    call calculate_spec_vol(T15(:,:,Isq:Ieq), S15(:,:,Isq:Ieq), &
         p15(:,:,Isq:Ieq), a15(:,:,Isq:Ieq), EOS, spv_ref=alpha_ref)
 
     do I=Isq,Ieq
@@ -1442,7 +1440,7 @@ subroutine int_spec_vol_dp_generic_pcm(T, S, p_t, p_b, alpha_ref, HI, EOS, US, d
       enddo
     enddo
 
-    call calculate_spec_vol_nohalo(T15(:,:,HI%isc:HI%iec), S15(:,:,HI%isc:HI%iec), &
+    call calculate_spec_vol(T15(:,:,HI%isc:HI%iec), S15(:,:,HI%isc:HI%iec), &
         p15(:,:,HI%isc:HI%iec), a15(:,:,HI%isc:HI%iec), EOS, spv_ref=alpha_ref)
 
     do i=HI%isc,HI%iec

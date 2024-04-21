@@ -43,11 +43,9 @@ public average_specific_vol
 public calculate_compress
 public calculate_density_elem
 public calculate_density
-public calculate_density_nohalo
 public calculate_density_derivs
 public calculate_density_second_derivs
 public calculate_spec_vol
-public calculate_spec_vol_nohalo
 public calculate_specific_vol_derivs
 public calculate_TFreeze
 public convert_temp_salt_for_TEOS10
@@ -67,33 +65,21 @@ public get_EOS_name
 interface calculate_density
   module procedure calculate_density_scalar
   module procedure calculate_density_1d
+  module procedure calculate_density_2d_nohalo
+  module procedure calculate_density_3d_nohalo
   module procedure calculate_stanley_density_scalar
   module procedure calculate_stanley_density_1d
   module procedure calculate_stanley_density_2d_nohalo
   module procedure calculate_stanley_density_3d_nohalo
 end interface calculate_density
 
-!> Calculate the density of seawater from T, S, and P when the fields have no
-!! halos.  This is an optimized version of calculate_density().
-interface calculate_density_nohalo
-  ! TODO: Integrate with the calculate_density interface block.
-  module procedure calculate_density_2d_nohalo
-  module procedure calculate_density_3d_nohalo
-end interface calculate_density_nohalo
-
 !> Calculates specific volume of sea water from T, S and P
 interface calculate_spec_vol
   module procedure calc_spec_vol_scalar
   module procedure calc_spec_vol_1d
-end interface calculate_spec_vol
-
-!> Calculates specific volume of sea water from T, S and P when the fields have
-!! no halos.  This is an optimized version of calculate_spec_vol().
-interface calculate_spec_vol_nohalo
-  ! TODO: Integrate with the calculate_spec_vol interface block.
   module procedure calc_spec_vol_2d_nohalo
   module procedure calc_spec_vol_3d_nohalo
-end interface calculate_spec_vol_nohalo
+end interface calculate_spec_vol
 
 !> Calculate the derivatives of density with temperature and salinity from T, S, and P
 interface calculate_density_derivs
@@ -278,7 +264,6 @@ subroutine calculate_density_scalar(T, S, pressure, rho, EOS, rho_ref, scale)
   rho_scale = EOS%kg_m3_to_R
   if (present(scale)) rho_scale = rho_scale * scale
   rho = rho_scale * rho_mks
-
 end subroutine calculate_density_scalar
 
 !> Calls the appropriate subroutine to calculate density of sea water for scalar inputs
@@ -624,28 +609,28 @@ subroutine calc_spec_vol_scalar(T, S, pressure, specvol, EOS, spv_ref, scale)
   real, optional, intent(in)  :: scale    !< A multiplicative factor by which to scale specific
                                           !! volume in combination with scaling stored in EOS [various]
 
-  real, dimension(1) :: Ta   ! Rescaled single element array version of temperature [degC]
-  real, dimension(1) :: Sa   ! Rescaled single element array version of salinity [ppt]
-  real, dimension(1) :: pres ! Rescaled single element array version of pressure [Pa]
-  real, dimension(1) :: spv  ! Rescaled single element array version of specific volume [m3 kg-1]
+  real :: Ta   ! Rescaled single element array version of temperature [degC]
+  real :: Sa   ! Rescaled single element array version of salinity [ppt]
+  real :: pres ! Rescaled single element array version of pressure [Pa]
+  real :: spv_mks  ! Rescaled single element array version of specific volume [m3 kg-1]
   real :: spv_scale ! A factor to convert specific volume from m3 kg-1 to the desired units [kg R-1 m-3 ~> 1]
 
-  pres(1) = EOS%RL2_T2_to_Pa * pressure
-  Ta(1) = EOS%C_to_degC * T ; Sa(1) = EOS%S_to_ppt * S
+  pres = EOS%RL2_T2_to_Pa * pressure
+  Ta = EOS%C_to_degC * T
+  Sa = EOS%S_to_ppt * S
 
   if (present(spv_ref)) then
-    call calculate_spec_vol_array(Ta, Sa, pres, spv, 1, 1, EOS, EOS%kg_m3_to_R*spv_ref)
+    ! TODO: Use the elemental functions?  That is what calculate_density does.
+    call EOS%type%calculate_spec_vol_scalar(Ta, Sa, pres, spv_mks, &
+        spv_ref=EOS%kg_m3_to_R*spv_ref)
   else
-    call calculate_spec_vol_array(Ta, Sa, pres, spv, 1, 1, EOS)
+    call EOS%type%calculate_spec_vol_scalar(Ta, Sa, pres, spv_mks)
   endif
-  specvol = spv(1)
 
+  ! Rescale the output density to the desired units.
   spv_scale = EOS%R_to_kg_m3
   if (present(scale)) spv_scale = spv_scale * scale
-  if (spv_scale /= 1.0) then
-    specvol = spv_scale * specvol
-  endif
-
+  specvol = spv_scale * spv_mks
 end subroutine calc_spec_vol_scalar
 
 
@@ -678,7 +663,7 @@ subroutine calc_spec_vol_1d(T, S, pressure, specvol, EOS, dom, spv_ref, scale)
 
   if ((EOS%RL2_T2_to_Pa == 1.0) .and. (EOS%kg_m3_to_R == 1.0) .and. &
       (EOS%C_to_degC == 1.0) .and. (EOS%S_to_ppt == 1.0)) then
-    call calculate_spec_vol_array(T, S, pressure, specvol, is, npts, EOS, spv_ref)
+    call EOS%type%calculate_spec_vol_array(T, S, pressure, specvol, is, npts, spv_ref)
   else ! This is the same as above, but with some extra work to rescale variables.
     do i=is,ie
       pres(i) = EOS%RL2_T2_to_Pa * pressure(i)
@@ -686,11 +671,12 @@ subroutine calc_spec_vol_1d(T, S, pressure, specvol, EOS, dom, spv_ref, scale)
       Sa(i) = EOS%S_to_ppt * S(i)
     enddo
     if (present(spv_ref)) then
-      call calculate_spec_vol_array(Ta, Sa, pres, specvol, is, npts, EOS, EOS%kg_m3_to_R*spv_ref)
+      call EOS%type%calculate_spec_vol_array(Ta, Sa, pres, specvol, is, npts, &
+          spv_ref=EOS%kg_m3_to_R*spv_ref)
     else
       ! There is rescaling of variables, but spv_ref is not present. Passing a 0 value of spv_ref
       ! changes answers at roundoff for some equations of state, like Wright and UNESCO.
-      call calculate_spec_vol_array(Ta, Sa, pres, specvol, is, npts, EOS)
+      call EOS%type%calculate_spec_vol_array(Ta, Sa, pres, specvol, is, npts)
     endif
   endif
 
@@ -722,18 +708,19 @@ subroutine calc_spec_vol_2d_nohalo(T, S, pressure, specvol, EOS, spv_ref, scale)
   real :: spv_scale ! A factor to convert specific volume from m3 kg-1 to the desired units [kg m-3 R-1 ~> 1]
 
   if (all([EOS%RL2_T2_to_Pa, EOS%kg_m3_to_R, EOS%C_to_degC, EOS%S_to_ppt] == 1.0)) then
-    call calculate_spec_vol_nohalo(T, S, pressure, specvol, EOS, spv_ref)
+    call EOS%type%calculate_spec_vol_2d_nohalo(T, S, pressure, specvol, spv_ref)
   else
     pres(:,:) = EOS%RL2_T2_to_Pa * pressure(:,:)
     Ta(:,:) = EOS%C_to_degC * T(:,:)
     Sa(:,:) = EOS%S_to_ppt * S(:,:)
 
     if (present(spv_ref)) then
-      call calculate_spec_vol_nohalo(Ta, Sa, pres, specvol, EOS, EOS%kg_m3_to_R*spv_ref)
+      call EOS%type%calculate_spec_vol_2d_nohalo(Ta, Sa, pres, specvol, &
+          spv_ref=EOS%kg_m3_to_R*spv_ref)
     else
       ! There is rescaling of variables, but spv_ref is not present. Passing a 0 value of spv_ref
       ! changes answers at roundoff for some equations of state, like Wright and UNESCO.
-      call calculate_spec_vol_nohalo(Ta, Sa, pres, specvol, EOS)
+      call EOS%type%calculate_spec_vol_2d_nohalo(Ta, Sa, pres, specvol)
     endif
   endif
 
@@ -765,18 +752,19 @@ subroutine calc_spec_vol_3d_nohalo(T, S, pressure, specvol, EOS, spv_ref, scale)
   real :: spv_scale ! A factor to convert specific volume from m3 kg-1 to the desired units [kg m-3 R-1 ~> 1]
 
   if (all([EOS%RL2_T2_to_Pa, EOS%kg_m3_to_R, EOS%C_to_degC, EOS%S_to_ppt] == 1.0)) then
-    call calculate_spec_vol_nohalo(T, S, pressure, specvol, EOS, spv_ref)
+    call EOS%type%calculate_spec_vol_3d_nohalo(T, S, pressure, specvol, spv_ref)
   else
     pres(:,:,:) = EOS%RL2_T2_to_Pa * pressure(:,:,:)
     Ta(:,:,:) = EOS%C_to_degC * T(:,:,:)
     Sa(:,:,:) = EOS%S_to_ppt * S(:,:,:)
 
     if (present(spv_ref)) then
-      call calculate_spec_vol_nohalo(Ta, Sa, pres, specvol, EOS, EOS%kg_m3_to_R*spv_ref)
+      call EOS%type%calculate_spec_vol_3d_nohalo(Ta, Sa, pres, specvol, &
+          spv_ref=EOS%kg_m3_to_R*spv_ref)
     else
       ! There is rescaling of variables, but spv_ref is not present. Passing a 0 value of spv_ref
       ! changes answers at roundoff for some equations of state, like Wright and UNESCO.
-      call calculate_spec_vol_nohalo(Ta, Sa, pres, specvol, EOS)
+      call EOS%type%calculate_spec_vol_3d_nohalo(Ta, Sa, pres, specvol)
     endif
   endif
 
