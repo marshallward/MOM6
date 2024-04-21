@@ -62,6 +62,10 @@ contains
   procedure :: calculate_density_second_derivs_scalar => a_calculate_density_second_derivs_scalar
   !> Calculates the second derivatives of density for array inputs
   procedure :: calculate_density_second_derivs_array => a_calculate_density_second_derivs_array
+  !> Calculates the second derivatives of density for array inputs
+  procedure :: calculate_density_second_derivs_2d_nohalo => a_calculate_density_second_derivs_2d_nohalo
+  !> Calculates the second derivatives of density for array inputs
+  procedure :: calculate_density_second_derivs_3d_nohalo => a_calculate_density_second_derivs_3d_nohalo
   !> Calculates the derivatives of specific volume for array inputs
   procedure :: calculate_specvol_derivs_array => a_calculate_specvol_derivs_array
   !> Calculates the compressibility for array inputs
@@ -478,6 +482,50 @@ contains
                               drho_ds_dp(js:je), drho_dt_dp(js:je))
 
   end subroutine a_calculate_density_second_derivs_array
+
+  subroutine a_calculate_density_second_derivs_2d_nohalo(this, T, S, pressure, &
+                     drho_ds_ds, drho_ds_dt, drho_dt_dt, drho_ds_dp, drho_dt_dp)
+    class(EOS_base),    intent(in)  :: this       !< This EOS
+    real, intent(in) :: T(:,:)            !< Potential temperature referenced to 0 dbar
+    real, intent(in) :: S(:,:)            !< Salinity [PSU]
+    real, intent(in) :: pressure(:,:)     !< Pressure [Pa]
+    real, intent(out) :: drho_ds_ds(:,:)  !< Partial derivative of beta with respect
+                                          !! to S [kg m-3 PSU-2]
+    real, intent(out) :: drho_ds_dt(:,:)  !< Partial derivative of beta with respect
+                                          !! to T [kg m-3 PSU-1 degC-1]
+    real, intent(out) :: drho_dt_dt(:,:)  !< Partial derivative of alpha with respect
+                                          !! to T [kg m-3 degC-2]
+    real, intent(out) :: drho_ds_dp(:,:)  !< Partial derivative of beta with respect
+                                          !! to pressure [kg m-3 PSU-1 Pa-1] = [s2 m-2 PSU-1]
+    real, intent(out) :: drho_dt_dp(:,:)  !< Partial derivative of alpha with respect
+                                          !! to pressure [kg m-3 degC-1 Pa-1] = [s2 m-2 degC-1]
+
+    call this%calculate_density_second_derivs_elem(T, S, pressure, &
+        drho_ds_ds, drho_ds_dt, drho_dt_dt, drho_ds_dp, drho_dt_dp)
+
+  end subroutine a_calculate_density_second_derivs_2d_nohalo
+
+  subroutine a_calculate_density_second_derivs_3d_nohalo(this, T, S, pressure, &
+                     drho_ds_ds, drho_ds_dt, drho_dt_dt, drho_ds_dp, drho_dt_dp)
+    class(EOS_base),    intent(in)  :: this       !< This EOS
+    real, intent(in) :: T(:,:,:)            !< Potential temperature referenced to 0 dbar
+    real, intent(in) :: S(:,:,:)            !< Salinity [PSU]
+    real, intent(in) :: pressure(:,:,:)     !< Pressure [Pa]
+    real, intent(out) :: drho_ds_ds(:,:,:)  !< Partial derivative of beta with respect
+                                            !! to S [kg m-3 PSU-2]
+    real, intent(out) :: drho_ds_dt(:,:,:)  !< Partial derivative of beta with respect
+                                            !! to T [kg m-3 PSU-1 degC-1]
+    real, intent(out) :: drho_dt_dt(:,:,:)  !< Partial derivative of alpha with respect
+                                            !! to T [kg m-3 degC-2]
+    real, intent(out) :: drho_ds_dp(:,:,:)  !< Partial derivative of beta with respect
+                                            !! to pressure [kg m-3 PSU-1 Pa-1] = [s2 m-2 PSU-1]
+    real, intent(out) :: drho_dt_dp(:,:,:)  !< Partial derivative of alpha with respect
+                                            !! to pressure [kg m-3 degC-1 Pa-1] = [s2 m-2 degC-1]
+
+    call this%calculate_density_second_derivs_elem(T, S, pressure, &
+        drho_ds_ds, drho_ds_dt, drho_dt_dt, drho_ds_dp, drho_dt_dp)
+
+  end subroutine a_calculate_density_second_derivs_3d_nohalo
 
   !> Calculate the partial derivatives of specific volume with temperature and salinity
   !! for array inputs

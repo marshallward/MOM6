@@ -68,6 +68,9 @@ interface calculate_density
   module procedure calculate_density_scalar
   module procedure calculate_density_1d
   module procedure calculate_stanley_density_scalar
+  module procedure calculate_stanley_density_1d
+  module procedure calculate_stanley_density_2d_nohalo
+  module procedure calculate_stanley_density_3d_nohalo
 end interface calculate_density
 
 !> Calculate the density of seawater from T, S, and P when the fields have no
@@ -76,8 +79,6 @@ interface calculate_density_nohalo
   ! TODO: Integrate with the calculate_density interface block.
   module procedure calculate_density_2d_nohalo
   module procedure calculate_density_3d_nohalo
-  module procedure calculate_stanley_density_2d_nohalo
-  module procedure calculate_stanley_density_3d_nohalo
 end interface calculate_density_nohalo
 
 !> Calculates specific volume of sea water from T, S and P
