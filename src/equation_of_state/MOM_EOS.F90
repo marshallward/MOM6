@@ -495,6 +495,89 @@ subroutine calculate_stanley_density_1d(T, S, pressure, Tvar, TScov, Svar, rho, 
 
 end subroutine calculate_stanley_density_1d
 
+
+!> Calls the appropriate subroutine to calculate the density of sea water for 2D array inputs
+!! with no halos, including the variance of T, S and covariance of T-S,
+!! potentially limiting the domain of indices that are worked on.  The
+!! calculation uses only the second order correction in a series as discussed in
+!! Stanley et al., 2020.
+!! If rho_ref is present, the anomaly with respect to rho_ref is returned.
+subroutine calculate_stanley_density_2d_nohalo(T, S, pressure, Tvar, TScov, Svar, rho, EOS, rho_ref, scale)
+  real, intent(in) :: T(:,:)        !< Potential temperature referenced to the surface [C ~> degC]
+  real, intent(in) :: S(:,:)        !< Salinity [S ~> ppt]
+  real, intent(in) :: pressure(:,:) !< Pressure [R L2 T-2 ~> Pa]
+  real, intent(in) :: Tvar(:,:)     !< Variance of potential temperature [C2 ~> degC2]
+  real, intent(in) :: TScov(:,:)    !< Covariance of potential temperature and salinity [C S ~> degC ppt]
+  real, intent(in) :: Svar(:,:)     !< Variance of salinity [S2 ~> ppt2]
+  real, intent(inout) :: rho(:,:)   !< Density (in-situ if pressure is local) [R ~> kg m-3]
+  type(EOS_type), intent(in) :: EOS !< Equation of state structure
+  real,                  optional, intent(in) :: rho_ref !< A reference density [R ~> kg m-3]
+  real,                  optional, intent(in) :: scale !< A multiplicative factor by which to scale density
+                                                   !! in combination with scaling stored in EOS [various]
+  ! Local variables
+  real, dimension(size(T,1), size(T,2)) :: &
+    d2RdTT, &   ! Second derivative of density with temperature [R C-2 ~> kg m-3 degC-2]
+    d2RdST, &   ! Second derivative of density with temperature and salinity [R S-1 C-1 ~> kg m-3 degC-1 ppt-1]
+    d2RdSS, &   ! Second derivative of density with salinity [R S-2 ~> kg m-3 ppt-2]
+    d2RdSp, &   ! Second derivative of density with salinity and pressure [T2 S-1 L-2 ~> kg m-3 ppt-1 Pa-1]
+    d2RdTp      ! Second derivative of density with temperature and pressure [T2 C-1 L-2 ~> kg m-3 degC-1 Pa-1]
+
+  call calculate_density_2d_nohalo(T, S, pressure, rho, EOS, rho_ref)
+  call calculate_density_second_derivs_2d_nohalo(T, S, pressure, d2RdSS, d2RdST, d2RdTT, d2RdSp, d2RdTP, EOS)
+
+  ! Equation 25 of Stanley et al., 2020.
+  rho(:,:) = rho(:,:) + ( &
+      0.5 * d2RdTT(:,:) * Tvar(:,:) &
+      + (d2RdST(:,:) * TScov(:,:) + 0.5 * d2RdSS(:,:) * Svar(:,:)) &
+  )
+
+  if (present(scale)) then ; if (scale /= 1.0) then
+    rho(:,:) = scale * rho(:,:)
+  endif ; endif
+end subroutine calculate_stanley_density_2d_nohalo
+
+
+!> Calls the appropriate subroutine to calculate the density of sea water for 3D array inputs
+!! with no halos, including the variance of T, S and covariance of T-S,
+!! potentially limiting the domain of indices that are worked on.  The
+!! calculation uses only the second order correction in a series as discussed in
+!! Stanley et al., 2020.
+!! If rho_ref is present, the anomaly with respect to rho_ref is returned.
+subroutine calculate_stanley_density_3d_nohalo(T, S, pressure, Tvar, TScov, Svar, rho, EOS, rho_ref, scale)
+  real, intent(in) :: T(:,:,:)        !< Potential temperature referenced to the surface [C ~> degC]
+  real, intent(in) :: S(:,:,:)        !< Salinity [S ~> ppt]
+  real, intent(in) :: pressure(:,:,:) !< Pressure [R L2 T-2 ~> Pa]
+  real, intent(in) :: Tvar(:,:,:)     !< Variance of potential temperature [C2 ~> degC2]
+  real, intent(in) :: TScov(:,:,:)    !< Covariance of potential temperature and salinity [C S ~> degC ppt]
+  real, intent(in) :: Svar(:,:,:)     !< Variance of salinity [S2 ~> ppt2]
+  real, intent(inout) :: rho(:,:,:)   !< Density (in-situ if pressure is local) [R ~> kg m-3]
+  type(EOS_type),        intent(in) :: EOS      !< Equation of state structure
+  real,                  optional, intent(in) :: rho_ref !< A reference density [R ~> kg m-3]
+  real,                  optional, intent(in) :: scale !< A multiplicative factor by which to scale density
+                                                   !! in combination with scaling stored in EOS [various]
+  ! Local variables
+  real, dimension(size(T,1), size(T,2), size(T,3)) :: &
+    d2RdTT, &   ! Second derivative of density with temperature [R C-2 ~> kg m-3 degC-2]
+    d2RdST, &   ! Second derivative of density with temperature and salinity [R S-1 C-1 ~> kg m-3 degC-1 ppt-1]
+    d2RdSS, &   ! Second derivative of density with salinity [R S-2 ~> kg m-3 ppt-2]
+    d2RdSp, &   ! Second derivative of density with salinity and pressure [T2 S-1 L-2 ~> kg m-3 ppt-1 Pa-1]
+    d2RdTp      ! Second derivative of density with temperature and pressure [T2 C-1 L-2 ~> kg m-3 degC-1 Pa-1]
+
+  call calculate_density_3d_nohalo(T, S, pressure, rho, EOS, rho_ref)
+  call calculate_density_second_derivs_3d_nohalo(T, S, pressure, d2RdSS, d2RdST, d2RdTT, d2RdSp, d2RdTP, EOS)
+
+  ! Equation 25 of Stanley et al., 2020.
+  rho(:,:,:) = rho(:,:,:) + ( &
+      0.5 * d2RdTT(:,:,:) * Tvar(:,:,:) &
+      + (d2RdST(:,:,:) * TScov(:,:,:) + 0.5 * d2RdSS(:,:,:) * Svar(:,:,:)) &
+  )
+
+  if (present(scale)) then ; if (scale /= 1.0) then
+    rho(:,:,:) = scale * rho(:,:,:)
+  endif ; endif
+end subroutine calculate_stanley_density_3d_nohalo
+
+
 !> Calls the appropriate subroutine to calculate the specific volume of sea water
 !! for 1-D array inputs.
 subroutine calculate_spec_vol_array(T, S, pressure, specvol, start, npts, EOS, spv_ref, scale)
