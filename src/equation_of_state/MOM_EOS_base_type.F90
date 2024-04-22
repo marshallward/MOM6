@@ -363,11 +363,10 @@ contains
     real, intent(out) :: specvol(:,:) !< In situ specific volume [m3 kg-1]
     real, optional, intent(in)  :: spv_ref  !< A reference specific volume [m3 kg-1]
 
-    ! TODO: All the (:,:) can probably be removed
     if (present(spv_ref)) then
-      specvol(:,:) = this%spec_vol_anomaly_elem(T(:,:), S(:,:), pressure(:,:), spv_ref)
+      specvol(:,:) = this%spec_vol_anomaly_elem(T, S, pressure, spv_ref)
     else
-      specvol(:,:) = this%spec_vol_elem(T(:,:), S(:,:), pressure(:,:))
+      specvol(:,:) = this%spec_vol_elem(T, S, pressure)
     endif
   end subroutine a_calculate_spec_vol_2d_nohalo
 
@@ -380,11 +379,10 @@ contains
     real, intent(out) :: specvol(:,:,:) !< In situ specific volume [m3 kg-1]
     real, optional, intent(in)  :: spv_ref  !< A reference specific volume [m3 kg-1]
 
-    ! TODO: All the (:,:,:) can probably be removed
     if (present(spv_ref)) then
-      specvol(:,:,:) = this%spec_vol_anomaly_elem(T(:,:,:), S(:,:,:), pressure(:,:,:), spv_ref)
+      specvol(:,:,:) = this%spec_vol_anomaly_elem(T, S, pressure, spv_ref)
     else
-      specvol(:,:,:) = this%spec_vol_elem(T(:,:,:), S(:,:,:), pressure(:,:,:))
+      specvol(:,:,:) = this%spec_vol_elem(T, S, pressure)
     endif
   end subroutine a_calculate_spec_vol_3d_nohalo
 
