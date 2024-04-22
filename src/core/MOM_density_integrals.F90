@@ -1514,15 +1514,15 @@ subroutine int_spec_vol_dp_generic_plm(T_t, T_b, S_t, S_b, p_t, p_b, alpha_ref, 
 ! Boole's rule to do the horizontal integrals, and from a truncation in the
 ! series for log(1-eps/1+eps) that assumes that |eps| < 0.34.
 
-  real :: T5((5*HI%iscB+1):(5*(HI%iecB+2)))  ! Temperatures along a line of subgrid locations [C ~> degC]
-  real :: S5((5*HI%iscB+1):(5*(HI%iecB+2)))  ! Salinities along a line of subgrid locations [S ~> ppt]
-  real :: p5((5*HI%iscB+1):(5*(HI%iecB+2)))  ! Pressures along a line of subgrid locations [R L2 T-2 ~> Pa]
-  real :: a5((5*HI%iscB+1):(5*(HI%iecB+2)))  ! Specific volumes anomalies along a line of subgrid
+  real :: T5(5,HI%iscB:HI%iecB+1)  ! Temperatures along a line of subgrid locations [C ~> degC]
+  real :: S5(5,HI%iscB:HI%iecB+1)  ! Salinities along a line of subgrid locations [S ~> ppt]
+  real :: p5(5,HI%iscB:HI%iecB+1)  ! Pressures along a line of subgrid locations [R L2 T-2 ~> Pa]
+  real :: a5(5,HI%iscB:HI%iecB+1)  ! Specific volumes anomalies along a line of subgrid
                                              ! locations [R-1 ~> m3 kg-3]
-  real :: T15((15*HI%iscB+1):(15*(HI%iecB+1))) ! Temperatures at an array of subgrid locations [C ~> degC]
-  real :: S15((15*HI%iscB+1):(15*(HI%iecB+1))) ! Salinities at an array of subgrid locations [S ~> ppt]
-  real :: p15((15*HI%iscB+1):(15*(HI%iecB+1))) ! Pressures at an array of subgrid locations [R L2 T-2 ~> Pa]
-  real :: a15((15*HI%iscB+1):(15*(HI%iecB+1))) ! Specific volumes at an array of subgrid locations [R ~> kg m-3]
+  real :: T15(5,2:4,HI%iscB:HI%iecB) ! Temperatures at an array of subgrid locations [C ~> degC]
+  real :: S15(5,2:4,HI%iscB:HI%iecB) ! Salinities at an array of subgrid locations [S ~> ppt]
+  real :: p15(5,2:4,HI%iscB:HI%iecB) ! Pressures at an array of subgrid locations [R L2 T-2 ~> Pa]
+  real :: a15(5,2:4,HI%iscB:HI%iecB) ! Specific volumes at an array of subgrid locations [R ~> kg m-3]
   real :: wt_t(5), wt_b(5) ! Weights of top and bottom values at quadrature points [nondim]
   real :: T_top, T_bot ! Horizontally interpolated temperature at the cell top and bottom [C ~> degC]
   real :: S_top, S_bot ! Horizontally interpolated salinity at the cell top and bottom [S ~> ppt]
@@ -1542,10 +1542,7 @@ subroutine int_spec_vol_dp_generic_plm(T_t, T_b, S_t, S_b, p_t, p_b, alpha_ref, 
                      ! 5 sub-column locations [L2 T-2 ~> m2 s-2]
   real, parameter :: C1_90 = 1.0/90.0  ! A rational constant [nondim]
   logical :: do_massWeight ! Indicates whether to do mass weighting.
-  integer, dimension(2) :: EOSdom_h5  ! The 5-point h-point i-computational domain for the equation of state
-  integer, dimension(2) :: EOSdom_q15 ! The 3x5-point q-point i-computational domain for the equation of state
-  integer, dimension(2) :: EOSdom_h15 ! The 3x5-point h-point i-computational domain for the equation of state
-  integer :: Isq, Ieq, Jsq, Jeq, i, j, m, n, pos
+  integer :: Isq, Ieq, Jsq, Jeq, i, j, m, n
 
   Isq = HI%IscB ; Ieq = HI%IecB ; Jsq = HI%JscB ; Jeq = HI%JecB
 
@@ -1557,30 +1554,25 @@ subroutine int_spec_vol_dp_generic_plm(T_t, T_b, S_t, S_b, p_t, p_b, alpha_ref, 
     wt_b(n) = 1.0 - wt_t(n)
   enddo
 
-  ! Set the loop ranges for equation of state calculations at various points.
-  EOSdom_h5(1) = 1 ; EOSdom_h5(2) = 5*(Ieq-Isq+2)
-  EOSdom_q15(1) = 1 ; EOSdom_q15(2) = 15*(Ieq-Isq+1)
-  EOSdom_h15(1) = 1 ; EOSdom_h15(2) = 15*(HI%iec-HI%isc+1)
-
   ! 1. Compute vertical integrals
   do j=Jsq,Jeq+1
     do i=Isq,Ieq+1
       do n=1,5 ! T, S and p are linearly interpolated in the vertical.
-        p5(i*5+n) = wt_t(n) * p_t(i,j) + wt_b(n) * p_b(i,j)
-        S5(i*5+n) = wt_t(n) * S_t(i,j) + wt_b(n) * S_b(i,j)
-        T5(i*5+n) = wt_t(n) * T_t(i,j) + wt_b(n) * T_b(i,j)
+        p5(n,i) = wt_t(n) * p_t(i,j) + wt_b(n) * p_b(i,j)
+        S5(n,i) = wt_t(n) * S_t(i,j) + wt_b(n) * S_b(i,j)
+        T5(n,i) = wt_t(n) * T_t(i,j) + wt_b(n) * T_b(i,j)
       enddo
     enddo
-    call calculate_spec_vol(T5, S5, p5, a5, EOS, EOSdom_h5, spv_ref=alpha_ref)
+    call calculate_spec_vol(T5, S5, p5, a5, EOS, spv_ref=alpha_ref)
     do i=Isq,Ieq+1
       ! Use Boole's rule to estimate the interface height anomaly change.
       dp = p_b(i,j) - p_t(i,j)
-      alpha_anom = C1_90*((7.0*(a5(i*5+1)+a5(i*5+5)) + 32.0*(a5(i*5+2)+a5(i*5+4))) + 12.0*a5(i*5+3))
+      alpha_anom = C1_90*((7.0*(a5(1,i)+a5(5,i)) + 32.0*(a5(2,i)+a5(4,i))) + 12.0*a5(3,i))
       dza(i,j) = dp*alpha_anom
       ! Use a Boole's-rule-like fifth-order accurate estimate of the double integral of
       ! the interface height anomaly.
       if (present(intp_dza)) intp_dza(i,j) = 0.5*dp**2 * &
-            (alpha_anom - C1_90*(16.0*(a5(i*5+4)-a5(i*5+2)) + 7.0*(a5(i*5+5)-a5(i*5+1))) )
+            (alpha_anom - C1_90*(16.0*(a5(4,i)-a5(2,i)) + 7.0*(a5(5,i)-a5(1,i))) )
     enddo
   enddo
 
@@ -1621,25 +1613,23 @@ subroutine int_spec_vol_dp_generic_plm(T_t, T_b, S_t, S_b, p_t, p_b, alpha_ref, 
         dp_90(m,I) = C1_90*(P_bot - P_top)
 
         ! Salinity, temperature and pressure with linear interpolation in the vertical.
-        pos = i*15+(m-2)*5
         do n=1,5
-          p15(pos+n) = wt_t(n) * P_top + wt_b(n) * P_bot
-          S15(pos+n) = wt_t(n) * S_top + wt_b(n) * S_bot
-          T15(pos+n) = wt_t(n) * T_top + wt_b(n) * T_bot
+          p15(n,m,i) = wt_t(n) * P_top + wt_b(n) * P_bot
+          S15(n,m,i) = wt_t(n) * S_top + wt_b(n) * S_bot
+          T15(n,m,i) = wt_t(n) * T_top + wt_b(n) * T_bot
         enddo
       enddo
     enddo
 
-    call calculate_spec_vol(T15, S15, p15, a15, EOS, EOSdom_q15, spv_ref=alpha_ref)
+    call calculate_spec_vol(T15, S15, p15, a15, EOS, spv_ref=alpha_ref)
 
     do I=Isq,Ieq
       intp(1) = dza(i,j) ; intp(5) = dza(i+1,j)
       do m=2,4
         ! Use Boole's rule to estimate the interface height anomaly change.
         ! The integrals at the ends of the segment are already known.
-        pos = I*15+(m-2)*5
-        intp(m) = dp_90(m,I)*((7.0*(a15(pos+1)+a15(pos+5)) + &
-                               32.0*(a15(pos+2)+a15(pos+4))) + 12.0*a15(pos+3))
+        intp(m) = dp_90(m,I)*((7.0*(a15(1,m,i)+a15(5,m,i)) + &
+                               32.0*(a15(2,m,i)+a15(4,m,i))) + 12.0*a15(3,m,i))
       enddo
       ! Use Boole's rule to integrate the interface height anomaly values in x.
       intx_dza(I,j) = C1_90*((7.0*(intp(1)+intp(5)) + 32.0*(intp(2)+intp(4))) + &
@@ -1682,26 +1672,24 @@ subroutine int_spec_vol_dp_generic_plm(T_t, T_b, S_t, S_b, p_t, p_b, alpha_ref, 
         dp_90(m,i) = C1_90*(P_bot - P_top)
 
         ! Salinity, temperature and pressure with linear interpolation in the vertical.
-        pos = i*15+(m-2)*5
         do n=1,5
-          p15(pos+n) = wt_t(n) * P_top + wt_b(n) * P_bot
-          S15(pos+n) = wt_t(n) * S_top + wt_b(n) * S_bot
-          T15(pos+n) = wt_t(n) * T_top + wt_b(n) * T_bot
+          p15(n,m,i) = wt_t(n) * P_top + wt_b(n) * P_bot
+          S15(n,m,i) = wt_t(n) * S_top + wt_b(n) * S_bot
+          T15(n,m,i) = wt_t(n) * T_top + wt_b(n) * T_bot
         enddo
       enddo
     enddo
 
-    call calculate_spec_vol(T15(15*HI%isc+1:), S15(15*HI%isc+1:), p15(15*HI%isc+1:), &
-                            a15(15*HI%isc+1:), EOS, EOSdom_h15, spv_ref=alpha_ref)
+    call calculate_spec_vol(T15(:,:,HI%isc:HI%iec), S15(:,:,HI%isc:HI%iec), &
+        p15(:,:,HI%isc:HI%iec), a15(:,:,HI%isc:HI%iec), EOS, spv_ref=alpha_ref)
 
     do i=HI%isc,HI%iec
       intp(1) = dza(i,j) ; intp(5) = dza(i,j+1)
       do m=2,4
         ! Use Boole's rule to estimate the interface height anomaly change.
         ! The integrals at the ends of the segment are already known.
-        pos = i*15+(m-2)*5
-        intp(m) = dp_90(m,i) * ((7.0*(a15(pos+1)+a15(pos+5)) + &
-                                 32.0*(a15(pos+2)+a15(pos+4))) + 12.0*a15(pos+3))
+        intp(m) = dp_90(m,i) * ((7.0*(a15(1,m,i)+a15(5,m,i)) + &
+                                 32.0*(a15(2,m,i)+a15(4,m,i))) + 12.0*a15(3,m,i))
       enddo
       ! Use Boole's rule to integrate the interface height anomaly values in x.
       inty_dza(i,J) = C1_90*((7.0*(intp(1)+intp(5)) + 32.0*(intp(2)+intp(4))) + &
