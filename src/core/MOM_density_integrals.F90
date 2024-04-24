@@ -263,7 +263,7 @@ subroutine int_density_dz_generic_pcm(T, S, z_t, z_b, rho_ref, rho_0, G_e, HI, &
         do n=2,5
           T15(n,m,i) = T15(1,m,i)
           S15(n,m,i) = S15(1,m,i)
-          p15(n,m,i) = p15(n-1,m,i) + GxRho*0.25*dz
+          p15(n,m,i) = p15(n-1,m,i) + GxRho*0.25*dz_x(m,i)
         enddo
       enddo
     enddo
@@ -327,7 +327,7 @@ subroutine int_density_dz_generic_pcm(T, S, z_t, z_b, rho_ref, rho_0, G_e, HI, &
         do n=2,5
           T15(n,m,i) = T15(1,m,i)
           S15(n,m,i) = S15(1,m,i)
-          p15(n,m,i) = p15(n-1,m,i) + GxRho*0.25*dz
+          p15(n,m,i) = p15(n-1,m,i) + GxRho*0.25*dz_y(m,i)
         enddo
       enddo
     enddo
