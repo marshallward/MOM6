@@ -65,14 +65,20 @@ public get_EOS_name
 interface calculate_density
   module procedure calculate_density_scalar
   module procedure calculate_density_1d
+  module procedure calculate_density_2d_nohalo
+  module procedure calculate_density_3d_nohalo
   module procedure calculate_stanley_density_scalar
   module procedure calculate_stanley_density_1d
+  module procedure calculate_stanley_density_2d_nohalo
+  module procedure calculate_stanley_density_3d_nohalo
 end interface calculate_density
 
 !> Calculates specific volume of sea water from T, S and P
 interface calculate_spec_vol
   module procedure calc_spec_vol_scalar
   module procedure calc_spec_vol_1d
+  module procedure calc_spec_vol_2d_nohalo
+  module procedure calc_spec_vol_3d_nohalo
 end interface calculate_spec_vol
 
 !> Calculate the derivatives of density with temperature and salinity from T, S, and P
@@ -89,7 +95,10 @@ end interface calculate_specific_vol_derivs
 !> Calculates the second derivatives of density with various combinations of temperature,
 !! salinity, and pressure from T, S and P
 interface calculate_density_second_derivs
-  module procedure calculate_density_second_derivs_scalar, calculate_density_second_derivs_1d
+  module procedure calculate_density_second_derivs_scalar
+  module procedure calculate_density_second_derivs_1d
+  module procedure calculate_density_second_derivs_2d_nohalo
+  module procedure calculate_density_second_derivs_3d_nohalo
 end interface calculate_density_second_derivs
 
 !> Calculates the freezing point of sea water from T, S and P
@@ -255,7 +264,6 @@ subroutine calculate_density_scalar(T, S, pressure, rho, EOS, rho_ref, scale)
   rho_scale = EOS%kg_m3_to_R
   if (present(scale)) rho_scale = rho_scale * scale
   rho = rho_scale * rho_mks
-
 end subroutine calculate_density_scalar
 
 !> Calls the appropriate subroutine to calculate density of sea water for scalar inputs
@@ -292,6 +300,7 @@ subroutine calculate_stanley_density_scalar(T, S, pressure, Tvar, TScov, Svar, r
   if (present(scale)) rho = rho * scale
 
 end subroutine calculate_stanley_density_scalar
+
 
 !> Calls the appropriate subroutine to calculate the density of sea water for 1-D array inputs,
 !! potentially limiting the domain of indices that are worked on.
@@ -344,6 +353,89 @@ subroutine calculate_density_1d(T, S, pressure, rho, EOS, dom, rho_ref, scale)
 
 end subroutine calculate_density_1d
 
+
+!> Calculate the density of seawater in a contiguous 2D array (i.e. no halos).
+!! If rho_ref is present, then the anomaly with respect to rho_ref is returned.
+subroutine calculate_density_2d_nohalo(T, S, pressure, rho, EOS, rho_ref, scale)
+  real, intent(in) :: T(:,:)              !< Potential temperature referenced to the surface [C ~> degC]
+  real, intent(in) :: S(:,:)              !< Salinity [S ~> ppt]
+  real, intent(in) :: pressure(:,:)       !< Pressure [R L2 T-2 ~> Pa]
+  real, intent(inout) :: rho(:,:)         !< Density (in-situ if pressure is local) [R ~> kg m-3]
+  type(EOS_type), intent(in) :: EOS       !< Equation of state structure
+  real,  optional, intent(in) :: rho_ref  !< A reference density [R ~> kg m-3]
+  real,  optional, intent(in) :: scale    !< A multiplicative factor by which to scale density
+                                          !! in combination with scaling stored in EOS [various]
+  ! Local variables
+  real :: rho_scale ! A factor to convert density from kg m-3 to the desired units [R m3 kg-1 ~> 1]
+  real :: pres(size(rho, 1), size(rho, 2))  ! Pressure converted to [Pa]
+  real :: Ta(size(rho, 1), size(rho, 2))    ! Temperature converted to [degC]
+  real :: Sa(size(rho, 1), size(rho, 2))    ! Salinity converted to [ppt]
+
+  if (all([EOS%RL2_T2_to_Pa, EOS%R_to_kg_m3, EOS%C_to_degC, EOS%S_to_ppt] == 1.0)) then
+    call EOS%type%calculate_density_2d_nohalo(T, S, pressure, rho, rho_ref=rho_ref)
+  else
+    pres(:,:) = EOS%RL2_T2_to_Pa * pressure(:,:)
+    Ta(:,:) = EOS%C_to_degC * T(:,:)
+    Sa(:,:) = EOS%S_to_ppt * S(:,:)
+
+    if (present(rho_ref)) then
+      call EOS%type%calculate_density_2d_nohalo(Ta, Sa, pres, rho, &
+          rho_ref=EOS%R_to_kg_m3*rho_ref)
+    else
+      call EOS%type%calculate_density_2d_nohalo(Ta, Sa, pres, rho)
+    endif
+  endif
+
+  rho_scale = EOS%kg_m3_to_R
+  if (present(scale)) rho_scale = rho_scale * scale
+
+  if (rho_scale /= 1.0) then
+    rho(:,:) = rho_scale * rho(:,:)
+  endif
+end subroutine calculate_density_2d_nohalo
+
+
+!> Calculate the density of seawater in a contiguous 3D array (i.e. no halos).
+!! If rho_ref is present, then the anomaly with respect to rho_ref is returned.
+subroutine calculate_density_3d_nohalo(T, S, pressure, rho, EOS, rho_ref, scale)
+  real, intent(in) :: T(:,:,:)            !< Potential temperature referenced to the surface [C ~> degC]
+  real, intent(in) :: S(:,:,:)            !< Salinity [S ~> ppt]
+  real, intent(in) :: pressure(:,:,:)     !< Pressure [R L2 T-2 ~> Pa]
+  real, intent(inout) :: rho(:,:,:)       !< Density (in-situ if pressure is local) [R ~> kg m-3]
+  type(EOS_type), intent(in) :: EOS       !< Equation of state structure
+  real,  optional, intent(in) :: rho_ref  !< A reference density [R ~> kg m-3]
+  real,  optional, intent(in) :: scale    !< A multiplicative factor by which to scale density
+                                          !! in combination with scaling stored in EOS [various]
+  ! Local variables
+  real :: rho_scale ! A factor to convert density from kg m-3 to the desired units [R m3 kg-1 ~> 1]
+  real :: pres(size(rho,1), size(rho,2), size(rho,3))  ! Pressure converted to [Pa]
+  real :: Ta(size(rho,1), size(rho,2), size(rho,3))    ! Temperature converted to [degC]
+  real :: Sa(size(rho,1), size(rho,2), size(rho,3))    ! Salinity converted to [ppt]
+
+  if (all([EOS%RL2_T2_to_Pa, EOS%R_to_kg_m3, EOS%C_to_degC, EOS%S_to_ppt] == 1.0)) then
+    call EOS%type%calculate_density_3d_nohalo(T, S, pressure, rho, rho_ref=rho_ref)
+  else
+    pres(:,:,:) = EOS%RL2_T2_to_Pa * pressure(:,:,:)
+    Ta(:,:,:) = EOS%C_to_degC * T(:,:,:)
+    Sa(:,:,:) = EOS%S_to_ppt * S(:,:,:)
+
+    if (present(rho_ref)) then
+      call EOS%type%calculate_density_3d_nohalo(Ta, Sa, pres, rho, &
+          rho_ref=EOS%R_to_kg_m3*rho_ref)
+    else
+      call EOS%type%calculate_density_3d_nohalo(Ta, Sa, pres, rho)
+    endif
+  endif
+
+  rho_scale = EOS%kg_m3_to_R
+  if (present(scale)) rho_scale = rho_scale * scale
+
+  if (rho_scale /= 1.0) then
+    rho(:,:,:) = rho_scale * rho(:,:,:)
+  endif
+end subroutine calculate_density_3d_nohalo
+
+
 !> Calls the appropriate subroutine to calculate the density of sea water for 1-D array inputs
 !! including the variance of T, S and covariance of T-S,
 !! potentially limiting the domain of indices that are worked on.
@@ -393,6 +485,89 @@ subroutine calculate_stanley_density_1d(T, S, pressure, Tvar, TScov, Svar, rho, 
 
 end subroutine calculate_stanley_density_1d
 
+
+!> Calls the appropriate subroutine to calculate the density of sea water for 2D array inputs
+!! with no halos, including the variance of T, S and covariance of T-S,
+!! potentially limiting the domain of indices that are worked on.  The
+!! calculation uses only the second order correction in a series as discussed in
+!! Stanley et al., 2020.
+!! If rho_ref is present, the anomaly with respect to rho_ref is returned.
+subroutine calculate_stanley_density_2d_nohalo(T, S, pressure, Tvar, TScov, Svar, rho, EOS, rho_ref, scale)
+  real, intent(in) :: T(:,:)        !< Potential temperature referenced to the surface [C ~> degC]
+  real, intent(in) :: S(:,:)        !< Salinity [S ~> ppt]
+  real, intent(in) :: pressure(:,:) !< Pressure [R L2 T-2 ~> Pa]
+  real, intent(in) :: Tvar(:,:)     !< Variance of potential temperature [C2 ~> degC2]
+  real, intent(in) :: TScov(:,:)    !< Covariance of potential temperature and salinity [C S ~> degC ppt]
+  real, intent(in) :: Svar(:,:)     !< Variance of salinity [S2 ~> ppt2]
+  real, intent(inout) :: rho(:,:)   !< Density (in-situ if pressure is local) [R ~> kg m-3]
+  type(EOS_type), intent(in) :: EOS !< Equation of state structure
+  real,                  optional, intent(in) :: rho_ref !< A reference density [R ~> kg m-3]
+  real,                  optional, intent(in) :: scale !< A multiplicative factor by which to scale density
+                                                   !! in combination with scaling stored in EOS [various]
+  ! Local variables
+  real, dimension(size(T,1), size(T,2)) :: &
+    d2RdTT, &   ! Second derivative of density with temperature [R C-2 ~> kg m-3 degC-2]
+    d2RdST, &   ! Second derivative of density with temperature and salinity [R S-1 C-1 ~> kg m-3 degC-1 ppt-1]
+    d2RdSS, &   ! Second derivative of density with salinity [R S-2 ~> kg m-3 ppt-2]
+    d2RdSp, &   ! Second derivative of density with salinity and pressure [T2 S-1 L-2 ~> kg m-3 ppt-1 Pa-1]
+    d2RdTp      ! Second derivative of density with temperature and pressure [T2 C-1 L-2 ~> kg m-3 degC-1 Pa-1]
+
+  call calculate_density_2d_nohalo(T, S, pressure, rho, EOS, rho_ref)
+  call calculate_density_second_derivs_2d_nohalo(T, S, pressure, d2RdSS, d2RdST, d2RdTT, d2RdSp, d2RdTP, EOS)
+
+  ! Equation 25 of Stanley et al., 2020.
+  rho(:,:) = rho(:,:) + ( &
+      0.5 * d2RdTT(:,:) * Tvar(:,:) &
+      + (d2RdST(:,:) * TScov(:,:) + 0.5 * d2RdSS(:,:) * Svar(:,:)) &
+  )
+
+  if (present(scale)) then ; if (scale /= 1.0) then
+    rho(:,:) = scale * rho(:,:)
+  endif ; endif
+end subroutine calculate_stanley_density_2d_nohalo
+
+
+!> Calls the appropriate subroutine to calculate the density of sea water for 3D array inputs
+!! with no halos, including the variance of T, S and covariance of T-S,
+!! potentially limiting the domain of indices that are worked on.  The
+!! calculation uses only the second order correction in a series as discussed in
+!! Stanley et al., 2020.
+!! If rho_ref is present, the anomaly with respect to rho_ref is returned.
+subroutine calculate_stanley_density_3d_nohalo(T, S, pressure, Tvar, TScov, Svar, rho, EOS, rho_ref, scale)
+  real, intent(in) :: T(:,:,:)        !< Potential temperature referenced to the surface [C ~> degC]
+  real, intent(in) :: S(:,:,:)        !< Salinity [S ~> ppt]
+  real, intent(in) :: pressure(:,:,:) !< Pressure [R L2 T-2 ~> Pa]
+  real, intent(in) :: Tvar(:,:,:)     !< Variance of potential temperature [C2 ~> degC2]
+  real, intent(in) :: TScov(:,:,:)    !< Covariance of potential temperature and salinity [C S ~> degC ppt]
+  real, intent(in) :: Svar(:,:,:)     !< Variance of salinity [S2 ~> ppt2]
+  real, intent(inout) :: rho(:,:,:)   !< Density (in-situ if pressure is local) [R ~> kg m-3]
+  type(EOS_type),        intent(in) :: EOS      !< Equation of state structure
+  real,                  optional, intent(in) :: rho_ref !< A reference density [R ~> kg m-3]
+  real,                  optional, intent(in) :: scale !< A multiplicative factor by which to scale density
+                                                   !! in combination with scaling stored in EOS [various]
+  ! Local variables
+  real, dimension(size(T,1), size(T,2), size(T,3)) :: &
+    d2RdTT, &   ! Second derivative of density with temperature [R C-2 ~> kg m-3 degC-2]
+    d2RdST, &   ! Second derivative of density with temperature and salinity [R S-1 C-1 ~> kg m-3 degC-1 ppt-1]
+    d2RdSS, &   ! Second derivative of density with salinity [R S-2 ~> kg m-3 ppt-2]
+    d2RdSp, &   ! Second derivative of density with salinity and pressure [T2 S-1 L-2 ~> kg m-3 ppt-1 Pa-1]
+    d2RdTp      ! Second derivative of density with temperature and pressure [T2 C-1 L-2 ~> kg m-3 degC-1 Pa-1]
+
+  call calculate_density_3d_nohalo(T, S, pressure, rho, EOS, rho_ref)
+  call calculate_density_second_derivs_3d_nohalo(T, S, pressure, d2RdSS, d2RdST, d2RdTT, d2RdSp, d2RdTP, EOS)
+
+  ! Equation 25 of Stanley et al., 2020.
+  rho(:,:,:) = rho(:,:,:) + ( &
+      0.5 * d2RdTT(:,:,:) * Tvar(:,:,:) &
+      + (d2RdST(:,:,:) * TScov(:,:,:) + 0.5 * d2RdSS(:,:,:) * Svar(:,:,:)) &
+  )
+
+  if (present(scale)) then ; if (scale /= 1.0) then
+    rho(:,:,:) = scale * rho(:,:,:)
+  endif ; endif
+end subroutine calculate_stanley_density_3d_nohalo
+
+
 !> Calls the appropriate subroutine to calculate the specific volume of sea water
 !! for 1-D array inputs.
 subroutine calculate_spec_vol_array(T, S, pressure, specvol, start, npts, EOS, spv_ref, scale)
@@ -434,29 +609,30 @@ subroutine calc_spec_vol_scalar(T, S, pressure, specvol, EOS, spv_ref, scale)
   real, optional, intent(in)  :: scale    !< A multiplicative factor by which to scale specific
                                           !! volume in combination with scaling stored in EOS [various]
 
-  real, dimension(1) :: Ta   ! Rescaled single element array version of temperature [degC]
-  real, dimension(1) :: Sa   ! Rescaled single element array version of salinity [ppt]
-  real, dimension(1) :: pres ! Rescaled single element array version of pressure [Pa]
-  real, dimension(1) :: spv  ! Rescaled single element array version of specific volume [m3 kg-1]
+  real :: Ta   ! Rescaled single element array version of temperature [degC]
+  real :: Sa   ! Rescaled single element array version of salinity [ppt]
+  real :: pres ! Rescaled single element array version of pressure [Pa]
+  real :: spv_mks  ! Rescaled single element array version of specific volume [m3 kg-1]
   real :: spv_scale ! A factor to convert specific volume from m3 kg-1 to the desired units [kg R-1 m-3 ~> 1]
 
-  pres(1) = EOS%RL2_T2_to_Pa * pressure
-  Ta(1) = EOS%C_to_degC * T ; Sa(1) = EOS%S_to_ppt * S
+  pres = EOS%RL2_T2_to_Pa * pressure
+  Ta = EOS%C_to_degC * T
+  Sa = EOS%S_to_ppt * S
 
   if (present(spv_ref)) then
-    call calculate_spec_vol_array(Ta, Sa, pres, spv, 1, 1, EOS, EOS%kg_m3_to_R*spv_ref)
+    ! TODO: Use the elemental functions?  That is what calculate_density does.
+    call EOS%type%calculate_spec_vol_scalar(Ta, Sa, pres, spv_mks, &
+        spv_ref=EOS%kg_m3_to_R*spv_ref)
   else
-    call calculate_spec_vol_array(Ta, Sa, pres, spv, 1, 1, EOS)
+    call EOS%type%calculate_spec_vol_scalar(Ta, Sa, pres, spv_mks)
   endif
-  specvol = spv(1)
 
+  ! Rescale the output density to the desired units.
   spv_scale = EOS%R_to_kg_m3
   if (present(scale)) spv_scale = spv_scale * scale
-  if (spv_scale /= 1.0) then
-    specvol = spv_scale * specvol
-  endif
-
+  specvol = spv_scale * spv_mks
 end subroutine calc_spec_vol_scalar
+
 
 !> Calls the appropriate subroutine to calculate the specific volume of sea water for 1-D array
 !! inputs, potentially limiting the domain of indices that are worked on.
@@ -487,7 +663,7 @@ subroutine calc_spec_vol_1d(T, S, pressure, specvol, EOS, dom, spv_ref, scale)
 
   if ((EOS%RL2_T2_to_Pa == 1.0) .and. (EOS%kg_m3_to_R == 1.0) .and. &
       (EOS%C_to_degC == 1.0) .and. (EOS%S_to_ppt == 1.0)) then
-    call calculate_spec_vol_array(T, S, pressure, specvol, is, npts, EOS, spv_ref)
+    call EOS%type%calculate_spec_vol_array(T, S, pressure, specvol, is, npts, spv_ref)
   else ! This is the same as above, but with some extra work to rescale variables.
     do i=is,ie
       pres(i) = EOS%RL2_T2_to_Pa * pressure(i)
@@ -495,11 +671,12 @@ subroutine calc_spec_vol_1d(T, S, pressure, specvol, EOS, dom, spv_ref, scale)
       Sa(i) = EOS%S_to_ppt * S(i)
     enddo
     if (present(spv_ref)) then
-      call calculate_spec_vol_array(Ta, Sa, pres, specvol, is, npts, EOS, EOS%kg_m3_to_R*spv_ref)
+      call EOS%type%calculate_spec_vol_array(Ta, Sa, pres, specvol, is, npts, &
+          spv_ref=EOS%kg_m3_to_R*spv_ref)
     else
       ! There is rescaling of variables, but spv_ref is not present. Passing a 0 value of spv_ref
       ! changes answers at roundoff for some equations of state, like Wright and UNESCO.
-      call calculate_spec_vol_array(Ta, Sa, pres, specvol, is, npts, EOS)
+      call EOS%type%calculate_spec_vol_array(Ta, Sa, pres, specvol, is, npts)
     endif
   endif
 
@@ -510,6 +687,94 @@ subroutine calc_spec_vol_1d(T, S, pressure, specvol, EOS, dom, spv_ref, scale)
   enddo ; endif
 
 end subroutine calc_spec_vol_1d
+
+
+!> Calculate the specific volume of sea water in a contiguous 2D array (i.e. no
+!! halos), potentially limiting the domain of indices that are worked on.
+subroutine calc_spec_vol_2d_nohalo(T, S, pressure, specvol, EOS, spv_ref, scale)
+  real, intent(in) :: T(:,:)          !< Potential temperature referenced to the surface [C ~> degC]
+  real, intent(in) :: S(:,:)          !< Salinity [S ~> ppt]
+  real, intent(in) :: pressure(:,:)   !< Pressure [R L2 T-2 ~> Pa]
+  real, intent(inout) :: specvol(:,:) !< In situ specific volume [R-1 ~> m3 kg-1]
+  type(EOS_type),        intent(in)    :: EOS      !< Equation of state structure
+  real,                  optional, intent(in) :: spv_ref !< A reference specific volume [R-1 ~> m3 kg-1]
+  real,                  optional, intent(in) :: scale !< A multiplicative factor by which to scale
+                                                       !! output specific volume in combination with
+                                                       !! scaling stored in EOS [various]
+  ! Local variables
+  real, dimension(size(pressure,1), size(pressure,2)) :: pres  ! Pressure converted to [Pa]
+  real, dimension(size(T,1), size(T,2)) :: Ta    ! Temperature converted to [degC]
+  real, dimension(size(S,1), size(S,2)) :: Sa    ! Salinity converted to [ppt]
+  real :: spv_scale ! A factor to convert specific volume from m3 kg-1 to the desired units [kg m-3 R-1 ~> 1]
+
+  if (all([EOS%RL2_T2_to_Pa, EOS%kg_m3_to_R, EOS%C_to_degC, EOS%S_to_ppt] == 1.0)) then
+    call EOS%type%calculate_spec_vol_2d_nohalo(T, S, pressure, specvol, spv_ref)
+  else
+    pres(:,:) = EOS%RL2_T2_to_Pa * pressure(:,:)
+    Ta(:,:) = EOS%C_to_degC * T(:,:)
+    Sa(:,:) = EOS%S_to_ppt * S(:,:)
+
+    if (present(spv_ref)) then
+      call EOS%type%calculate_spec_vol_2d_nohalo(Ta, Sa, pres, specvol, &
+          spv_ref=EOS%kg_m3_to_R*spv_ref)
+    else
+      ! There is rescaling of variables, but spv_ref is not present. Passing a 0 value of spv_ref
+      ! changes answers at roundoff for some equations of state, like Wright and UNESCO.
+      call EOS%type%calculate_spec_vol_2d_nohalo(Ta, Sa, pres, specvol)
+    endif
+  endif
+
+  spv_scale = EOS%R_to_kg_m3
+  if (present(scale)) spv_scale = spv_scale * scale
+
+  if (spv_scale /= 1.0) then
+    specvol(:,:) = spv_scale * specvol(:,:)
+  endif
+end subroutine calc_spec_vol_2d_nohalo
+
+
+!> Calculate the specific volume of sea water in a contiguous 3D array (i.e. no
+!! halos), potentially limiting the domain of indices that are worked on.
+subroutine calc_spec_vol_3d_nohalo(T, S, pressure, specvol, EOS, spv_ref, scale)
+  real, intent(in) :: T(:,:,:)          !< Potential temperature referenced to the surface [C ~> degC]
+  real, intent(in) :: S(:,:,:)          !< Salinity [S ~> ppt]
+  real, intent(in) :: pressure(:,:,:)   !< Pressure [R L2 T-2 ~> Pa]
+  real, intent(inout) :: specvol(:,:,:) !< In situ specific volume [R-1 ~> m3 kg-1]
+  type(EOS_type), intent(in) :: EOS     !< Equation of state structure
+  real,                  optional, intent(in) :: spv_ref !< A reference specific volume [R-1 ~> m3 kg-1]
+  real,                  optional, intent(in) :: scale !< A multiplicative factor by which to scale
+                                                       !! output specific volume in combination with
+                                                       !! scaling stored in EOS [various]
+  ! Local variables
+  real, dimension(size(pressure,1), size(pressure,2), size(pressure,3)) :: pres  ! Pressure converted to [Pa]
+  real, dimension(size(T,1), size(T,2), size(T,3)) :: Ta   ! Temperature converted to [degC]
+  real, dimension(size(S,1), size(S,2), size(S,3)) :: Sa   ! Salinity converted to [ppt]
+  real :: spv_scale ! A factor to convert specific volume from m3 kg-1 to the desired units [kg m-3 R-1 ~> 1]
+
+  if (all([EOS%RL2_T2_to_Pa, EOS%kg_m3_to_R, EOS%C_to_degC, EOS%S_to_ppt] == 1.0)) then
+    call EOS%type%calculate_spec_vol_3d_nohalo(T, S, pressure, specvol, spv_ref)
+  else
+    pres(:,:,:) = EOS%RL2_T2_to_Pa * pressure(:,:,:)
+    Ta(:,:,:) = EOS%C_to_degC * T(:,:,:)
+    Sa(:,:,:) = EOS%S_to_ppt * S(:,:,:)
+
+    if (present(spv_ref)) then
+      call EOS%type%calculate_spec_vol_3d_nohalo(Ta, Sa, pres, specvol, &
+          spv_ref=EOS%kg_m3_to_R*spv_ref)
+    else
+      ! There is rescaling of variables, but spv_ref is not present. Passing a 0 value of spv_ref
+      ! changes answers at roundoff for some equations of state, like Wright and UNESCO.
+      call EOS%type%calculate_spec_vol_3d_nohalo(Ta, Sa, pres, specvol)
+    endif
+  endif
+
+  spv_scale = EOS%R_to_kg_m3
+  if (present(scale)) spv_scale = spv_scale * scale
+
+  if (spv_scale /= 1.0) then
+    specvol(:,:,:) = spv_scale * specvol(:,:,:)
+  endif
+end subroutine calc_spec_vol_3d_nohalo
 
 
 !> Calls the appropriate subroutine to calculate the freezing point for scalar inputs.
@@ -940,6 +1205,145 @@ subroutine calculate_density_second_derivs_scalar(T, S, pressure, drho_dS_dS, dr
   endif
 
 end subroutine calculate_density_second_derivs_scalar
+
+
+!> Calls the appropriate subroutine to calculate density second derivatives for 1-D array inputs.
+subroutine calculate_density_second_derivs_2d_nohalo(T, S, pressure, drho_dS_dS, drho_dS_dT, drho_dT_dT, &
+                                                     drho_dS_dP, drho_dT_dP, EOS, scale)
+  real, intent(in)  :: T(:,:) !< Potential temperature referenced to the surface [C ~> degC]
+  real, intent(in)  :: S(:,:) !< Salinity [S ~> ppt]
+  real, intent(in)  :: pressure(:,:)   !< Pressure [R L2 T-2 ~> Pa]
+  real, intent(inout) :: drho_dS_dS(:,:) !< Partial derivative of beta with respect to S
+                                         !! [R S-2 ~> kg m-3 ppt-2]
+  real, intent(inout) :: drho_dS_dT(:,:) !< Partial derivative of beta with respect to T
+                                         !! [R S-1 C-1 ~> kg m-3 ppt-1 degC-1]
+  real, intent(inout) :: drho_dT_dT(:,:) !< Partial derivative of alpha with respect to T
+                                         !! [R C-2 ~> kg m-3 degC-2]
+  real, intent(inout) :: drho_dS_dP(:,:) !< Partial derivative of beta with respect to pressure
+                                         !! [T2 S-1 L-2 ~> kg m-3 ppt-1 Pa-1]
+  real, intent(inout) :: drho_dT_dP(:,:) !< Partial derivative of alpha with respect to pressure
+                                         !! [T2 C-1 L-2 ~> kg m-3 degC-1 Pa-1]
+  type(EOS_type),     intent(in)    :: EOS        !< Equation of state structure
+  real,     optional, intent(in)    :: scale      !< A multiplicative factor by which to scale density
+                                                  !! in combination with scaling stored in EOS [various]
+  ! Local variables
+  real, dimension(size(T,1), size(T,2)) :: pres  ! Pressure converted to [Pa]
+  real, dimension(size(T,1), size(T,2)) :: Ta    ! Temperature converted to [degC]
+  real, dimension(size(T,1), size(T,2)) :: Sa    ! Salinity converted to [ppt]
+  real :: rho_scale ! A factor to convert density from kg m-3 to the desired units [R m3 kg-1 ~> 1]
+
+  if (.not. allocated(EOS%type)) call MOM_error(FATAL, &
+              "calculate_density_second_derivs: EOS%form_of_EOS is not valid.")
+
+  if (all([EOS%RL2_T2_to_Pa, EOS%C_to_degC, EOS%S_to_ppt] == 1.0)) then
+    call EOS%type%calculate_density_second_derivs_2d_nohalo(T, S, pressure, &
+        drho_dS_dS, drho_dS_dT, drho_dT_dT, drho_dS_dP, drho_dT_dP)
+  else
+    pres(:,:) = EOS%RL2_T2_to_Pa * pressure(:,:)
+    Ta(:,:) = EOS%C_to_degC * T(:,:)
+    Sa(:,:) = EOS%S_to_ppt * S(:,:)
+    call EOS%type%calculate_density_second_derivs_2d_nohalo(Ta, Sa, pres, &
+        drho_dS_dS, drho_dS_dT, drho_dT_dT, drho_dS_dP, drho_dT_dP)
+  endif
+
+  rho_scale = EOS%kg_m3_to_R
+  if (present(scale)) rho_scale = rho_scale * scale
+
+  if (rho_scale /= 1.0) then
+    drho_dS_dS(:,:) = rho_scale * drho_dS_dS(:,:)
+    drho_dS_dT(:,:) = rho_scale * drho_dS_dT(:,:)
+    drho_dT_dT(:,:) = rho_scale * drho_dT_dT(:,:)
+    drho_dS_dP(:,:) = rho_scale * drho_dS_dP(:,:)
+    drho_dT_dP(:,:) = rho_scale * drho_dT_dP(:,:)
+  endif
+
+  if (EOS%RL2_T2_to_Pa /= 1.0) then
+    drho_dS_dP(:,:) = EOS%RL2_T2_to_Pa * drho_dS_dP(:,:)
+    drho_dT_dP(:,:) = EOS%RL2_T2_to_Pa * drho_dT_dP(:,:)
+  endif
+
+  if (EOS%C_to_degC /= 1.0) then
+    drho_dS_dT(:,:) = EOS%C_to_degC * drho_dS_dT(:,:)
+    drho_dT_dT(:,:) = EOS%C_to_degC**2 * drho_dT_dT(:,:)
+    drho_dT_dP(:,:) = EOS%C_to_degC * drho_dT_dP(:,:)
+  endif
+
+  if (EOS%S_to_ppt /= 1.0) then
+    drho_dS_dS(:,:) = EOS%S_to_ppt**2 * drho_dS_dS(:,:)
+    drho_dS_dT(:,:) = EOS%S_to_ppt * drho_dS_dT(:,:)
+    drho_dS_dP(:,:) = EOS%S_to_ppt * drho_dS_dP(:,:)
+  endif
+end subroutine calculate_density_second_derivs_2d_nohalo
+
+
+!> Calls the appropriate subroutine to calculate density second derivatives for 1-D array inputs.
+subroutine calculate_density_second_derivs_3d_nohalo(T, S, pressure, drho_dS_dS, drho_dS_dT, drho_dT_dT, &
+                                                     drho_dS_dP, drho_dT_dP, EOS, scale)
+  real, intent(in)  :: T(:,:,:)             !< Potential temperature referenced to the surface [C ~> degC]
+  real, intent(in)  :: S(:,:,:)             !< Salinity [S ~> ppt]
+  real, intent(in)  :: pressure(:,:,:)      !< Pressure [R L2 T-2 ~> Pa]
+  real, intent(inout) :: drho_dS_dS(:,:,:)  !< Partial derivative of beta with respect to S
+                                            !! [R S-2 ~> kg m-3 ppt-2]
+  real, intent(inout) :: drho_dS_dT(:,:,:)  !< Partial derivative of beta with respect to T
+                                            !! [R S-1 C-1 ~> kg m-3 ppt-1 degC-1]
+  real, intent(inout) :: drho_dT_dT(:,:,:)  !< Partial derivative of alpha with respect to T
+                                            !! [R C-2 ~> kg m-3 degC-2]
+  real, intent(inout) :: drho_dS_dP(:,:,:)  !< Partial derivative of beta with respect to pressure
+                                            !! [T2 S-1 L-2 ~> kg m-3 ppt-1 Pa-1]
+  real, intent(inout) :: drho_dT_dP(:,:,:)  !< Partial derivative of alpha with respect to pressure
+                                            !! [T2 C-1 L-2 ~> kg m-3 degC-1 Pa-1]
+  type(EOS_type),     intent(in)    :: EOS        !< Equation of state structure
+  real,     optional, intent(in)    :: scale      !< A multiplicative factor by which to scale density
+                                                  !! in combination with scaling stored in EOS [various]
+  ! Local variables
+  real, dimension(size(T,1), size(T,2), size(T,3)) :: pres  ! Pressure converted to [Pa]
+  real, dimension(size(T,1), size(T,2), size(T,3)) :: Ta    ! Temperature converted to [degC]
+  real, dimension(size(T,1), size(T,2), size(T,3)) :: Sa    ! Salinity converted to [ppt]
+  real :: rho_scale ! A factor to convert density from kg m-3 to the desired units [R m3 kg-1 ~> 1]
+
+  if (.not. allocated(EOS%type)) call MOM_error(FATAL, &
+              "calculate_density_second_derivs: EOS%form_of_EOS is not valid.")
+
+  if (all([EOS%RL2_T2_to_Pa, EOS%C_to_degC, EOS%S_to_ppt] == 1.0)) then
+    call EOS%type%calculate_density_second_derivs_3d_nohalo(T, S, pressure, &
+        drho_dS_dS, drho_dS_dT, drho_dT_dT, drho_dS_dP, drho_dT_dP)
+  else
+    pres(:,:,:) = EOS%RL2_T2_to_Pa * pressure(:,:,:)
+    Ta(:,:,:) = EOS%C_to_degC * T(:,:,:)
+    Sa(:,:,:) = EOS%S_to_ppt * S(:,:,:)
+    call EOS%type%calculate_density_second_derivs_3d_nohalo(Ta, Sa, pres, &
+        drho_dS_dS, drho_dS_dT, drho_dT_dT, drho_dS_dP, drho_dT_dP)
+  endif
+
+  rho_scale = EOS%kg_m3_to_R
+  if (present(scale)) rho_scale = rho_scale * scale
+
+  if (rho_scale /= 1.0) then
+    drho_dS_dS(:,:,:) = rho_scale * drho_dS_dS(:,:,:)
+    drho_dS_dT(:,:,:) = rho_scale * drho_dS_dT(:,:,:)
+    drho_dT_dT(:,:,:) = rho_scale * drho_dT_dT(:,:,:)
+    drho_dS_dP(:,:,:) = rho_scale * drho_dS_dP(:,:,:)
+    drho_dT_dP(:,:,:) = rho_scale * drho_dT_dP(:,:,:)
+  endif
+
+  if (EOS%RL2_T2_to_Pa /= 1.0) then
+    drho_dS_dP(:,:,:) = EOS%RL2_T2_to_Pa * drho_dS_dP(:,:,:)
+    drho_dT_dP(:,:,:) = EOS%RL2_T2_to_Pa * drho_dT_dP(:,:,:)
+  endif
+
+  if (EOS%C_to_degC /= 1.0) then
+    drho_dS_dT(:,:,:) = EOS%C_to_degC * drho_dS_dT(:,:,:)
+    drho_dT_dT(:,:,:) = EOS%C_to_degC**2 * drho_dT_dT(:,:,:)
+    drho_dT_dP(:,:,:) = EOS%C_to_degC * drho_dT_dP(:,:,:)
+  endif
+
+  if (EOS%S_to_ppt /= 1.0) then
+    drho_dS_dS(:,:,:) = EOS%S_to_ppt**2 * drho_dS_dS(:,:,:)
+    drho_dS_dT(:,:,:) = EOS%S_to_ppt * drho_dS_dT(:,:,:)
+    drho_dS_dP(:,:,:) = EOS%S_to_ppt * drho_dS_dP(:,:,:)
+  endif
+end subroutine calculate_density_second_derivs_3d_nohalo
+
 
 !> Calls the appropriate subroutine to calculate specific volume derivatives for an array.
 subroutine calculate_spec_vol_derivs_array(T, S, pressure, dSV_dT, dSV_dS, start, npts, EOS)
