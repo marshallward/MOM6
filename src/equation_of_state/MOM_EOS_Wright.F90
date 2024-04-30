@@ -61,9 +61,10 @@ contains
 
   !> Local implementation of generic calculate_density_array for efficiency
   procedure :: calculate_density_array => calculate_density_array_buggy_Wright
+  !> Calculates the in-situ density or density anomaly for array inputs of generic rank
+  procedure :: calculate_density_as_array => calculate_density_as_array_buggy_Wright
   !> Local implementation of generic calculate_spec_vol_array for efficiency
   procedure :: calculate_spec_vol_array => calculate_spec_vol_array_buggy_Wright
-
 end type buggy_Wright_EOS
 
 contains
@@ -872,6 +873,7 @@ subroutine int_spec_vol_dp_wright(T, S, p_t, p_b, spv_ref, HI, dza, &
   enddo ; enddo ; endif
 end subroutine int_spec_vol_dp_wright
 
+
 !> Calculate the in-situ density for 1D arraya inputs and outputs.
 subroutine calculate_density_array_buggy_Wright(this, T, S, pressure, rho, start, npts, rho_ref)
   class(buggy_Wright_EOS),  intent(in) :: this !< This EOS
@@ -895,8 +897,31 @@ subroutine calculate_density_array_buggy_Wright(this, T, S, pressure, rho, start
       rho(j) = density_elem_buggy_Wright(this, T(j), S(j), pressure(j))
     enddo
   endif
-
 end subroutine calculate_density_array_buggy_Wright
+
+
+subroutine calculate_density_as_array_buggy_Wright(this, nvals, T, S, p, rho, rho_ref)
+  class(buggy_Wright_EOS), intent(in) :: this   !< This EOS
+  integer, intent(in) :: nvals  !< Size of arrays
+  real, intent(in) :: T(*)      !< Potential temperature relative to the surface [degC]
+  real, intent(in) :: S(*)      !< Salinity [PSU]
+  real, intent(in) :: p(*)      !< Pressure [Pa]
+  real, intent(out) :: rho(*)   !< In situ density [kg m-3]
+  real, optional, intent(in) :: rho_ref  !< A reference density [kg m-3]
+
+  integer :: i
+
+  if (present(rho_ref)) then
+    do i = 1, nvals
+      rho(i) = density_anomaly_elem_buggy_Wright(this, T(i), S(i), p(i), rho_ref)
+    enddo
+  else
+    do i = 1, nvals
+      rho(i) = density_elem_buggy_Wright(this, T(i), S(i), p(i))
+    enddo
+  endif
+end subroutine calculate_density_as_array_buggy_Wright
+
 
 !> Calculate the in-situ specific volume for 1D array inputs and outputs.
 subroutine calculate_spec_vol_array_buggy_Wright(this, T, S, pressure, specvol, start, npts, spv_ref)

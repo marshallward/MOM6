@@ -42,6 +42,8 @@ contains
   procedure :: calculate_density_scalar => a_calculate_density_scalar
   !> Calculates the in-situ density or density anomaly for array inputs [m3 kg-1]
   procedure :: calculate_density_array => a_calculate_density_array
+  !> Calculates the in-situ density or density anomaly for array inputs of generic rank [m3 kg-1]
+  procedure :: calculate_density_as_array => a_calculate_density_as_array
   !> Calculates the in-situ density or density anomaly for 2D array inputs without halos [m3 kg-1]
   procedure :: calculate_density_2d_nohalo => a_calculate_density_2d_nohalo
   !> Calculates the in-situ density or density anomaly for 3D array inputs without halos [m3 kg-1]
@@ -224,6 +226,7 @@ contains
 
   !> Calculate the in-situ density for scalar inputs and outputs.
   subroutine a_calculate_density_scalar(this, T, S, pressure, rho, rho_ref)
+    !TODO: Can this use *_as_array?
     class(EOS_base), intent(in) :: this     !< This EOS
     real,           intent(in)  :: T        !< Potential temperature relative to the surface [degC]
     real,           intent(in)  :: S        !< Salinity [PSU]
@@ -241,6 +244,7 @@ contains
 
   !> Calculate the in-situ density for 1D arraya inputs and outputs.
   subroutine a_calculate_density_array(this, T, S, pressure, rho, start, npts, rho_ref)
+    !TODO: Can this use *_as_array?
     class(EOS_base), intent(in) :: this     !< This EOS
     real, dimension(:), intent(in)  :: T        !< Potential temperature relative to the surface [degC]
     real, dimension(:), intent(in)  :: S        !< Salinity [PSU]
@@ -261,39 +265,60 @@ contains
     else
       rho(js:je) = this%density_elem(T(js:je), S(js:je), pressure(js:je))
     endif
-
   end subroutine a_calculate_density_array
 
-  !> Calculate the in-situ density for 2D arrays without halos.
-  subroutine a_calculate_density_2d_nohalo(this, T, S, pressure, rho, rho_ref)
+  !> Calculate the in-situ density from a generic input field as if it were a
+  !! 1D array.
+  subroutine a_calculate_density_as_array(this, nvals, T, S, p, rho, rho_ref)
     class(EOS_base), intent(in) :: this   !< This EOS
-    real, intent(in) :: T(:,:)        !< Potential temperature relative to the surface [degC]
-    real, intent(in) :: S(:,:)        !< Salinity [PSU]
-    real, intent(in) :: pressure(:,:) !< Pressure [Pa]
-    real, intent(out) :: rho(:,:)     !< In situ density [kg m-3]
+    integer, intent(in) :: nvals    !< Size of arrays
+    real, intent(in) :: T(*)        !< Potential temperature relative to the surface [degC]
+    real, intent(in) :: S(*)        !< Salinity [PSU]
+    real, intent(in) :: p(*) !< Pressure [Pa]
+    real, intent(out) :: rho(*)     !< In situ density [kg m-3]
     real, optional, intent(in) :: rho_ref  !< A reference density [kg m-3]
 
+    integer :: i
+
     if (present(rho_ref)) then
-      rho(:,:) = this%density_anomaly_elem(T(:,:), S(:,:), pressure(:,:), rho_ref)
+      do i = 1, nvals
+        rho(i) = this%density_anomaly_elem(T(i), S(i), p(i), rho_ref)
+      enddo
     else
-      rho(:,:) = this%density_elem(T(:,:), S(:,:), pressure(:,:))
+      do i = 1, nvals
+        rho(i) = this%density_elem(T(i), S(i), p(i))
+      enddo
     endif
+  end subroutine a_calculate_density_as_array
+
+  !> Calculate the in-situ density for 2D arrays without halos.
+  subroutine a_calculate_density_2d_nohalo(this, T, S, p, rho, rho_ref)
+    class(EOS_base), intent(in) :: this     !< This EOS
+    real, contiguous, intent(in) :: T(:,:)  !< Potential temperature relative to the surface [degC]
+    real, contiguous, intent(in) :: S(:,:)  !< Salinity [PSU]
+    real, contiguous, intent(in) :: p(:,:)  !< Pressure [Pa]
+    real, contiguous, intent(out) :: rho(:,:)   !< In situ density [kg m-3]
+    real, optional, intent(in) :: rho_ref  !< A reference density [kg m-3]
+
+    integer :: nvals  ! Total number of values in each array
+
+    nvals = size(T)
+    call this%calculate_density_as_array(nvals, T, S, p, rho, rho_ref)
   end subroutine a_calculate_density_2d_nohalo
 
   !> Calculate the in-situ density for 2D arrays without halos.
-  subroutine a_calculate_density_3d_nohalo(this, T, S, pressure, rho, rho_ref)
-    class(EOS_base), intent(in) :: this   !< This EOS
-    real, intent(in) :: T(:,:,:)        !< Potential temperature relative to the surface [degC]
-    real, intent(in) :: S(:,:,:)        !< Salinity [PSU]
-    real, intent(in) :: pressure(:,:,:) !< Pressure [Pa]
-    real, intent(out) :: rho(:,:,:)     !< In situ density [kg m-3]
+  subroutine a_calculate_density_3d_nohalo(this, T, S, p, rho, rho_ref)
+    class(EOS_base), intent(in) :: this       !< This EOS
+    real, contiguous, intent(in) :: T(:,:,:)  !< Potential temperature relative to the surface [degC]
+    real, contiguous, intent(in) :: S(:,:,:)  !< Salinity [PSU]
+    real, contiguous, intent(in) :: p(:,:,:)  !< Pressure [Pa]
+    real, contiguous, intent(out) :: rho(:,:,:)   !< In situ density [kg m-3]
     real, optional, intent(in) :: rho_ref  !< A reference density [kg m-3]
 
-    if (present(rho_ref)) then
-      rho(:,:,:) = this%density_anomaly_elem(T(:,:,:), S(:,:,:), pressure(:,:,:), rho_ref)
-    else
-      rho(:,:,:) = this%density_elem(T(:,:,:), S(:,:,:), pressure(:,:,:))
-    endif
+    integer :: nvals  ! Total number of values in each array
+
+    nvals = size(T)
+    call this%calculate_density_as_array(nvals, T, S, p, rho, rho_ref)
   end subroutine a_calculate_density_3d_nohalo
 
   !> In situ specific volume [m3 kg-1]
