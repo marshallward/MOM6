@@ -59,8 +59,6 @@ contains
   !> Implementation of the range query function
   procedure :: EOS_fit_range => EOS_fit_range_buggy_Wright
 
-  !> Local implementation of generic calculate_density_array for efficiency
-  procedure :: calculate_density_array => calculate_density_array_buggy_Wright
   !> Calculates the in-situ density or density anomaly for array inputs of generic rank
   procedure :: calculate_density_as_array => calculate_density_as_array_buggy_Wright
   !> Local implementation of generic calculate_spec_vol_array for efficiency
@@ -874,32 +872,6 @@ subroutine int_spec_vol_dp_wright(T, S, p_t, p_b, spv_ref, HI, dza, &
 end subroutine int_spec_vol_dp_wright
 
 
-!> Calculate the in-situ density for 1D arraya inputs and outputs.
-subroutine calculate_density_array_buggy_Wright(this, T, S, pressure, rho, start, npts, rho_ref)
-  class(buggy_Wright_EOS),  intent(in) :: this !< This EOS
-  real, dimension(:), intent(in)  :: T         !< Potential temperature relative to the surface [degC]
-  real, dimension(:), intent(in)  :: S         !< Salinity [PSU]
-  real, dimension(:), intent(in)  :: pressure  !< Pressure [Pa]
-  real, dimension(:), intent(out) :: rho       !< In situ density [kg m-3]
-  integer,            intent(in)  :: start     !< The starting index for calculations
-  integer,            intent(in)  :: npts      !< The number of values to calculate
-  real,     optional, intent(in)  :: rho_ref   !< A reference density [kg m-3]
-
-  ! Local variables
-  integer :: j
-
-  if (present(rho_ref)) then
-    do j = start, start+npts-1
-      rho(j) = density_anomaly_elem_buggy_Wright(this, T(j), S(j), pressure(j), rho_ref)
-    enddo
-  else
-    do j = start, start+npts-1
-      rho(j) = density_elem_buggy_Wright(this, T(j), S(j), pressure(j))
-    enddo
-  endif
-end subroutine calculate_density_array_buggy_Wright
-
-
 subroutine calculate_density_as_array_buggy_Wright(this, nvals, T, S, p, rho, rho_ref)
   class(buggy_Wright_EOS), intent(in) :: this   !< This EOS
   integer, intent(in) :: nvals  !< Size of arrays
@@ -912,13 +884,9 @@ subroutine calculate_density_as_array_buggy_Wright(this, nvals, T, S, p, rho, rh
   integer :: i
 
   if (present(rho_ref)) then
-    do i = 1, nvals
-      rho(i) = density_anomaly_elem_buggy_Wright(this, T(i), S(i), p(i), rho_ref)
-    enddo
+    rho(:nvals) = density_anomaly_elem_buggy_Wright(this, T(:nvals), S(:nvals), p(:nvals), rho_ref)
   else
-    do i = 1, nvals
-      rho(i) = density_elem_buggy_Wright(this, T(i), S(i), p(i))
-    enddo
+    rho(:nvals) = density_elem_buggy_Wright(this, T(:nvals), S(:nvals), p(:nvals))
   endif
 end subroutine calculate_density_as_array_buggy_Wright
 

@@ -242,6 +242,26 @@ contains
 
   end subroutine a_calculate_density_scalar
 
+  !> Calculate the in-situ density from a generic input field as if it were a
+  !! 1D array.
+  subroutine a_calculate_density_as_array(this, nvals, T, S, p, rho, rho_ref)
+    class(EOS_base), intent(in) :: this   !< This EOS
+    integer, intent(in) :: nvals    !< Size of arrays
+    real, intent(in) :: T(*)        !< Potential temperature relative to the surface [degC]
+    real, intent(in) :: S(*)        !< Salinity [PSU]
+    real, intent(in) :: p(*)        !< Pressure [Pa]
+    real, intent(out) :: rho(*)     !< In situ density [kg m-3]
+    real, optional, intent(in) :: rho_ref  !< A reference density [kg m-3]
+
+    integer :: i
+
+    if (present(rho_ref)) then
+      rho(:nvals) = this%density_anomaly_elem(T(:nvals), S(:nvals), p(:nvals), rho_ref)
+    else
+      rho(:nvals) = this%density_elem(T(:nvals), S(:nvals), p(:nvals))
+    endif
+  end subroutine a_calculate_density_as_array
+
   !> Calculate the in-situ density for 1D arraya inputs and outputs.
   subroutine a_calculate_density_array(this, T, S, pressure, rho, start, npts, rho_ref)
     !TODO: Can this use *_as_array?
@@ -254,42 +274,9 @@ contains
     integer,            intent(in)  :: npts     !< The number of values to calculate
     real,     optional, intent(in)  :: rho_ref  !< A reference density [kg m-3]
 
-    ! Local variables
-    integer :: js, je
-
-    js = start
-    je = start+npts-1
-
-    if (present(rho_ref)) then
-      rho(js:je) = this%density_anomaly_elem(T(js:je), S(js:je), pressure(js:je), rho_ref)
-    else
-      rho(js:je) = this%density_elem(T(js:je), S(js:je), pressure(js:je))
-    endif
+    call this%calculate_density_as_array(npts, T(start:), S(start:), &
+        pressure(start:), rho(start:), rho_ref)
   end subroutine a_calculate_density_array
-
-  !> Calculate the in-situ density from a generic input field as if it were a
-  !! 1D array.
-  subroutine a_calculate_density_as_array(this, nvals, T, S, p, rho, rho_ref)
-    class(EOS_base), intent(in) :: this   !< This EOS
-    integer, intent(in) :: nvals    !< Size of arrays
-    real, intent(in) :: T(*)        !< Potential temperature relative to the surface [degC]
-    real, intent(in) :: S(*)        !< Salinity [PSU]
-    real, intent(in) :: p(*) !< Pressure [Pa]
-    real, intent(out) :: rho(*)     !< In situ density [kg m-3]
-    real, optional, intent(in) :: rho_ref  !< A reference density [kg m-3]
-
-    integer :: i
-
-    if (present(rho_ref)) then
-      do i = 1, nvals
-        rho(i) = this%density_anomaly_elem(T(i), S(i), p(i), rho_ref)
-      enddo
-    else
-      do i = 1, nvals
-        rho(i) = this%density_elem(T(i), S(i), p(i))
-      enddo
-    endif
-  end subroutine a_calculate_density_as_array
 
   !> Calculate the in-situ density for 2D arrays without halos.
   subroutine a_calculate_density_2d_nohalo(this, T, S, p, rho, rho_ref)
