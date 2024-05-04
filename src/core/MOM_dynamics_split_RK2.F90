@@ -319,7 +319,7 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
                                                                    !! since last tracer advection [H L2 ~> m3 or kg]
   real, dimension(SZI_(G),SZJ_(G)),  intent(out)   :: eta_av       !< Free surface height or column mass
                                                                    !! averaged over time step [H ~> m or kg m-2]
-  type(MOM_dyn_split_RK2_CS),        pointer       :: CS           !< Module control structure
+  type(MOM_dyn_split_RK2_CS), target, intent(inout) :: CS          !< Module control structure
   logical,                           intent(in)    :: calc_dtbt    !< If true, recalculate the barotropic time step
   type(VarMix_CS),                   intent(inout) :: VarMix       !< Variable mixing control structure
   type(MEKE_type),                   intent(inout) :: MEKE         !< MEKE fields
@@ -1176,7 +1176,7 @@ subroutine register_restarts_dyn_split_RK2(HI, GV, US, param_file, CS, restart_C
   type(verticalGrid_type),       intent(in)    :: GV         !< ocean vertical grid structure
   type(unit_scale_type),         intent(in)    :: US         !< A dimensional unit scaling type
   type(param_file_type),         intent(in)    :: param_file !< parameter file
-  type(MOM_dyn_split_RK2_CS),    pointer       :: CS         !< module control structure
+  type(MOM_dyn_split_RK2_CS),    intent(inout) :: CS         !< module control structure
   type(MOM_restart_CS),          intent(inout) :: restart_CS !< MOM restart control structure
   real, dimension(SZIB_(HI),SZJ_(HI),SZK_(GV)), &
                          target, intent(inout) :: uh !< zonal volume or mass transport [H L2 T-1 ~> m3 s-1 or kg s-1]
@@ -1191,14 +1191,6 @@ subroutine register_restarts_dyn_split_RK2(HI, GV, US, param_file, CS, restart_C
 
   isd  = HI%isd  ; ied  = HI%ied  ; jsd  = HI%jsd  ; jed  = HI%jed ; nz = GV%ke
   IsdB = HI%IsdB ; IedB = HI%IedB ; JsdB = HI%JsdB ; JedB = HI%JedB
-
-  ! This is where a control structure specific to this module would be allocated.
-  if (associated(CS)) then
-    call MOM_error(WARNING, "register_restarts_dyn_split_RK2 called with an associated "// &
-                             "control structure.")
-    return
-  endif
-  allocate(CS)
 
   ALLOC_(CS%diffu(IsdB:IedB,jsd:jed,nz)) ; CS%diffu(:,:,:) = 0.0
   ALLOC_(CS%diffv(isd:ied,JsdB:JedB,nz)) ; CS%diffv(:,:,:) = 0.0
@@ -1266,7 +1258,7 @@ end subroutine register_restarts_dyn_split_RK2
 subroutine remap_dyn_split_RK2_aux_vars(G, GV, CS, h_old_u, h_old_v, h_new_u, h_new_v, ALE_CSp)
   type(ocean_grid_type),            intent(inout) :: G        !< ocean grid structure
   type(verticalGrid_type),          intent(in)    :: GV       !< ocean vertical grid structure
-  type(MOM_dyn_split_RK2_CS),       pointer       :: CS       !< module control structure
+  type(MOM_dyn_split_RK2_CS),       intent(inout) :: CS       !< module control structure
   real, dimension(SZIB_(G),SZJ_(G),SZK_(GV)), &
                                     intent(in)    :: h_old_u  !< Source grid thickness at zonal
                                                               !! velocity points [H ~> m or kg m-2]
@@ -1318,7 +1310,7 @@ subroutine initialize_dyn_split_RK2(u, v, h, uh, vh, eta, Time, G, GV, US, param
   type(time_type),          target, intent(in)    :: Time       !< current model time
   type(param_file_type),            intent(in)    :: param_file !< parameter file for parsing
   type(diag_ctrl),          target, intent(inout) :: diag       !< to control diagnostics
-  type(MOM_dyn_split_RK2_CS),       pointer       :: CS         !< module control structure
+  type(MOM_dyn_split_RK2_CS), target, intent(inout) :: CS       !< module control structure
   type(MOM_restart_CS),             intent(inout) :: restart_CS !< MOM restart control structure
   real,                             intent(in)    :: dt         !< time step [T ~> s]
   type(accel_diag_ptrs),    target, intent(inout) :: Accel_diag !< points to momentum equation terms for
@@ -1360,8 +1352,6 @@ subroutine initialize_dyn_split_RK2(u, v, h, uh, vh, eta, Time, G, GV, US, param
   isd  = G%isd  ; ied  = G%ied  ; jsd  = G%jsd  ; jed  = G%jed
   IsdB = G%IsdB ; IedB = G%IedB ; JsdB = G%JsdB ; JedB = G%JedB
 
-  if (.not.associated(CS)) call MOM_error(FATAL, &
-      "initialize_dyn_split_RK2 called with an unassociated control structure.")
   if (CS%module_is_initialized) then
     call MOM_error(WARNING, "initialize_dyn_split_RK2 called with a control "// &
                             "structure that has already been initialized.")
@@ -1802,7 +1792,7 @@ end subroutine initialize_dyn_split_RK2
 
 !> Close the dyn_split_RK2 module
 subroutine end_dyn_split_RK2(CS)
-  type(MOM_dyn_split_RK2_CS), pointer :: CS  !< module control structure
+  type(MOM_dyn_split_RK2_CS), intent(inout) :: CS  !< module control structure
 
   call barotropic_end(CS%barotropic_CSp)
 
@@ -1830,8 +1820,6 @@ subroutine end_dyn_split_RK2(CS)
 
   call dealloc_BT_cont_type(CS%BT_cont)
   deallocate(CS%AD_pred)
-
-  deallocate(CS)
 end subroutine end_dyn_split_RK2
 
 

@@ -218,7 +218,7 @@ subroutine step_MOM_dyn_unsplit(u, v, h, tv, visc, Time_local, dt, forces, &
                                                    !! transport since the last tracer advection [H L2 ~> m3 or kg].
   real, dimension(SZI_(G),SZJ_(G)), intent(out) :: eta_av !< The time-mean free surface height or
                                                    !! column mass [H ~> m or kg m-2].
-  type(MOM_dyn_unsplit_CS), pointer      :: CS     !< The control structure set up by
+  type(MOM_dyn_unsplit_CS), intent(inout) :: CS    !< The control structure set up by
                                                    !! initialize_dyn_unsplit.
   type(VarMix_CS),         intent(inout) :: VarMix !< Variable mixing control structure
   type(MEKE_type),         intent(inout) :: MEKE   !< MEKE fields
@@ -542,21 +542,13 @@ subroutine register_restarts_dyn_unsplit(HI, GV, param_file, CS)
   type(verticalGrid_type),   intent(in) :: GV         !< The ocean's vertical grid structure.
   type(param_file_type),     intent(in) :: param_file !< A structure to parse for
                                                       !! run-time parameters.
-  type(MOM_dyn_unsplit_CS),  pointer    :: CS         !< The control structure set up by
+  type(MOM_dyn_unsplit_CS), intent(inout) :: CS       !< The control structure set up by
                                                       !! initialize_dyn_unsplit.
 
   character(len=48) :: thickness_units, flux_units
   integer :: isd, ied, jsd, jed, nz, IsdB, IedB, JsdB, JedB
   isd = HI%isd ; ied = HI%ied ; jsd = HI%jsd ; jed = HI%jed ; nz = GV%ke
   IsdB = HI%IsdB ; IedB = HI%IedB ; JsdB = HI%JsdB ; JedB = HI%JedB
-
-  ! This is where a control structure that is specific to this module is allocated.
-  if (associated(CS)) then
-    call MOM_error(WARNING, "register_restarts_dyn_unsplit called with an associated "// &
-                             "control structure.")
-    return
-  endif
-  allocate(CS)
 
   ALLOC_(CS%diffu(IsdB:IedB,jsd:jed,nz)) ; CS%diffu(:,:,:) = 0.0
   ALLOC_(CS%diffv(isd:ied,JsdB:JedB,nz)) ; CS%diffv(:,:,:) = 0.0
@@ -591,7 +583,7 @@ subroutine initialize_dyn_unsplit(u, v, h, Time, G, GV, US, param_file, diag, CS
                                                               !! for run-time parameters.
   type(diag_ctrl),        target, intent(inout) :: diag       !< A structure that is used to
                                                               !! regulate diagnostic output.
-  type(MOM_dyn_unsplit_CS),       pointer       :: CS         !< The control structure set up
+  type(MOM_dyn_unsplit_CS), target, intent(inout) :: CS       !< The control structure set up
                                                               !! by initialize_dyn_unsplit.
   type(accel_diag_ptrs),  target, intent(inout) :: Accel_diag !< A set of pointers to the various
                                      !! accelerations in the momentum equations, which can be used
@@ -637,8 +629,6 @@ subroutine initialize_dyn_unsplit(u, v, h, Time, G, GV, US, param_file, diag, CS
   isd = G%isd ; ied = G%ied ; jsd = G%jsd ; jed = G%jed ; nz = GV%ke
   IsdB = G%IsdB ; IedB = G%IedB ; JsdB = G%JsdB ; JedB = G%JedB
 
-  if (.not.associated(CS)) call MOM_error(FATAL, &
-      "initialize_dyn_unsplit called with an unassociated control structure.")
   if (CS%module_is_initialized) then
     call MOM_error(WARNING, "initialize_dyn_unsplit called with a control "// &
                             "structure that has already been initialized.")
@@ -755,8 +745,8 @@ end subroutine initialize_dyn_unsplit
 
 !> Clean up and deallocate memory associated with the unsplit dynamics module.
 subroutine end_dyn_unsplit(CS)
-  type(MOM_dyn_unsplit_CS), pointer :: CS !< unsplit dynamics control structure that
-                                          !! will be deallocated in this subroutine.
+  type(MOM_dyn_unsplit_CS), intent(inout) :: CS
+    !< unsplit dynamics control structure that will be deallocated in this subroutine.
 
   DEALLOC_(CS%diffu) ; DEALLOC_(CS%diffv)
   DEALLOC_(CS%CAu)   ; DEALLOC_(CS%CAv)
@@ -764,8 +754,6 @@ subroutine end_dyn_unsplit(CS)
 
   if (CS%calculate_SAL) call SAL_end(CS%SAL_CSp)
   if (CS%use_tides) call tidal_forcing_end(CS%tides_CSp)
-
-  deallocate(CS)
 end subroutine end_dyn_unsplit
 
 end module MOM_dynamics_unsplit

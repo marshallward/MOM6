@@ -381,13 +381,13 @@ type, public :: MOM_control_struct ; private
 
   ! The remainder of this type provides pointers to child module control structures.
 
-  type(MOM_dyn_unsplit_CS),      pointer :: dyn_unsplit_CSp => NULL()
+  type(MOM_dyn_unsplit_CS) :: dyn_unsplit_CS
     !< Pointer to the control structure used for the unsplit dynamics
-  type(MOM_dyn_unsplit_RK2_CS),  pointer :: dyn_unsplit_RK2_CSp => NULL()
+  type(MOM_dyn_unsplit_RK2_CS) :: dyn_unsplit_RK2_CS
     !< Pointer to the control structure used for the unsplit RK2 dynamics
-  type(MOM_dyn_split_RK2_CS),    pointer :: dyn_split_RK2_CSp => NULL()
+  type(MOM_dyn_split_RK2_CS) :: dyn_split_RK2_CS
     !< Pointer to the control structure used for the mode-split RK2 dynamics
-  type(MOM_dyn_split_RK2b_CS),    pointer :: dyn_split_RK2b_CSp => NULL()
+  type(MOM_dyn_split_RK2b_CS) :: dyn_split_RK2b_CS
     !< Pointer to the control structure used for an alternate version of the mode-split RK2 dynamics
   type(thickness_diffuse_CS) :: thickness_diffuse_CSp
     !< Pointer to the control structure used for the isopycnal height diffusive transport.
@@ -1233,12 +1233,12 @@ subroutine step_MOM_dynamics(forces, p_surf_begin, p_surf_end, dt, dt_thermo, &
     if (CS%use_alt_split) then
       call step_MOM_dyn_split_RK2b(u, v, h, CS%tv, CS%visc, Time_local, dt, forces, &
                   p_surf_begin, p_surf_end, CS%uh, CS%vh, CS%uhtr, CS%vhtr, &
-                  CS%eta_av_bc, G, GV, US, CS%dyn_split_RK2b_CSp, calc_dtbt, CS%VarMix, &
+                  CS%eta_av_bc, G, GV, US, CS%dyn_split_RK2b_CS, calc_dtbt, CS%VarMix, &
                   CS%MEKE, CS%thickness_diffuse_CSp, CS%pbv, waves=waves)
     else
       call step_MOM_dyn_split_RK2(u, v, h, CS%tv, CS%visc, Time_local, dt, forces, &
                   p_surf_begin, p_surf_end, CS%uh, CS%vh, CS%uhtr, CS%vhtr, &
-                  CS%eta_av_bc, G, GV, US, CS%dyn_split_RK2_CSp, calc_dtbt, CS%VarMix, &
+                  CS%eta_av_bc, G, GV, US, CS%dyn_split_RK2_CS, calc_dtbt, CS%VarMix, &
                   CS%MEKE, CS%thickness_diffuse_CSp, CS%pbv, waves=waves)
     endif
     if (showCallTree) call callTree_waypoint("finished step_MOM_dyn_split (step_MOM)")
@@ -1254,11 +1254,11 @@ subroutine step_MOM_dynamics(forces, p_surf_begin, p_surf_end, dt, dt_thermo, &
     if (CS%use_RK2) then
       call step_MOM_dyn_unsplit_RK2(u, v, h, CS%tv, CS%visc, Time_local, dt, forces, &
                p_surf_begin, p_surf_end, CS%uh, CS%vh, CS%uhtr, CS%vhtr, &
-               CS%eta_av_bc, G, GV, US, CS%dyn_unsplit_RK2_CSp, CS%VarMix, CS%MEKE, CS%pbv)
+               CS%eta_av_bc, G, GV, US, CS%dyn_unsplit_RK2_CS, CS%VarMix, CS%MEKE, CS%pbv)
     else
       call step_MOM_dyn_unsplit(u, v, h, CS%tv, CS%visc, Time_local, dt, forces, &
                p_surf_begin, p_surf_end, CS%uh, CS%vh, CS%uhtr, CS%vhtr, &
-               CS%eta_av_bc, G, GV, US, CS%dyn_unsplit_CSp, CS%VarMix, CS%MEKE, CS%pbv, Waves=Waves)
+               CS%eta_av_bc, G, GV, US, CS%dyn_unsplit_CS, CS%VarMix, CS%MEKE, CS%pbv, Waves=Waves)
     endif
     if (showCallTree) call callTree_waypoint("finished step_MOM_dyn_unsplit (step_MOM)")
 
@@ -1667,10 +1667,10 @@ subroutine step_MOM_thermo(CS, G, GV, US, u, v, h, tv, fluxes, dtdia, &
 
       if (CS%remap_aux_vars) then
         if (CS%split .and. CS%use_alt_split) then
-          call remap_dyn_split_RK2b_aux_vars(G, GV, CS%dyn_split_RK2b_CSp, h_old_u, h_old_v, &
+          call remap_dyn_split_RK2b_aux_vars(G, GV, CS%dyn_split_RK2b_CS, h_old_u, h_old_v, &
                                              h_new_u, h_new_v, CS%ALE_CSp)
         elseif (CS%split) then
-          call remap_dyn_split_RK2_aux_vars(G, GV, CS%dyn_split_RK2_CSp, h_old_u, h_old_v, h_new_u, h_new_v, CS%ALE_CSp)
+          call remap_dyn_split_RK2_aux_vars(G, GV, CS%dyn_split_RK2_CS, h_old_u, h_old_v, h_new_u, h_new_v, CS%ALE_CSp)
         endif
 
         if (associated(CS%OBC)) then
@@ -2802,16 +2802,16 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, &
   call set_restart_fields(GV, US, param_file, CS, restart_CSp)
   if (CS%split .and. CS%use_alt_split) then
     call register_restarts_dyn_split_RK2b(HI, GV, US, param_file, &
-             CS%dyn_split_RK2b_CSp, restart_CSp, CS%uh, CS%vh)
+             CS%dyn_split_RK2b_CS, restart_CSp, CS%uh, CS%vh)
   elseif (CS%split) then
     call register_restarts_dyn_split_RK2(HI, GV, US, param_file, &
-             CS%dyn_split_RK2_CSp, restart_CSp, CS%uh, CS%vh)
+             CS%dyn_split_RK2_CS, restart_CSp, CS%uh, CS%vh)
   elseif (CS%use_RK2) then
     call register_restarts_dyn_unsplit_RK2(HI, GV, param_file, &
-           CS%dyn_unsplit_RK2_CSp)
+           CS%dyn_unsplit_RK2_CS)
   else
     call register_restarts_dyn_unsplit(HI, GV, param_file, &
-           CS%dyn_unsplit_CSp)
+           CS%dyn_unsplit_CS)
   endif
 
   ! This subroutine calls user-specified tracer registration routines.
@@ -3222,13 +3222,13 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, &
     allocate(eta(SZI_(G),SZJ_(G)), source=0.0)
     if (CS%use_alt_split) then
       call initialize_dyn_split_RK2b(CS%u, CS%v, CS%h, CS%uh, CS%vh, eta, Time, &
-              G, GV, US, param_file, diag, CS%dyn_split_RK2b_CSp, restart_CSp, &
+              G, GV, US, param_file, diag, CS%dyn_split_RK2b_CS, restart_CSp, &
               CS%dt, CS%ADp, CS%CDp, MOM_internal_state, CS%VarMix, CS%MEKE, &
               CS%thickness_diffuse_CSp, CS%OBC, CS%update_OBC_CSp, CS%ALE_CSp, CS%set_visc_CSp, &
               CS%visc, dirs, CS%ntrunc, CS%pbv, calc_dtbt=calc_dtbt, cont_stencil=CS%cont_stencil)
     else
       call initialize_dyn_split_RK2(CS%u, CS%v, CS%h, CS%uh, CS%vh, eta, Time, &
-              G, GV, US, param_file, diag, CS%dyn_split_RK2_CSp, restart_CSp, &
+              G, GV, US, param_file, diag, CS%dyn_split_RK2_CS, restart_CSp, &
               CS%dt, CS%ADp, CS%CDp, MOM_internal_state, CS%VarMix, CS%MEKE, &
               CS%thickness_diffuse_CSp, CS%OBC, CS%update_OBC_CSp, CS%ALE_CSp, CS%set_visc_CSp, &
               CS%visc, dirs, CS%ntrunc, CS%pbv, calc_dtbt=calc_dtbt, cont_stencil=CS%cont_stencil)
@@ -3247,13 +3247,13 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, &
     endif
   elseif (CS%use_RK2) then
     call initialize_dyn_unsplit_RK2(CS%u, CS%v, CS%h, Time, G, GV, US,     &
-            param_file, diag, CS%dyn_unsplit_RK2_CSp,                      &
+            param_file, diag, CS%dyn_unsplit_RK2_CS,                       &
             CS%ADp, CS%CDp, MOM_internal_state, CS%OBC,                    &
             CS%update_OBC_CSp, CS%ALE_CSp, CS%set_visc_CSp, CS%visc, dirs, &
             CS%ntrunc, cont_stencil=CS%cont_stencil)
   else
     call initialize_dyn_unsplit(CS%u, CS%v, CS%h, Time, G, GV, US,         &
-            param_file, diag, CS%dyn_unsplit_CSp,                          &
+            param_file, diag, CS%dyn_unsplit_CS,                           &
             CS%ADp, CS%CDp, MOM_internal_state, CS%OBC,                    &
             CS%update_OBC_CSp, CS%ALE_CSp, CS%set_visc_CSp, CS%visc, dirs, &
             CS%ntrunc, cont_stencil=CS%cont_stencil)
@@ -4170,13 +4170,13 @@ subroutine MOM_end(CS)
   if (CS%offline_tracer_mode) call offline_transport_end(CS%offline_CSp)
 
   if (CS%split .and. CS%use_alt_split) then
-    call end_dyn_split_RK2b(CS%dyn_split_RK2b_CSp)
+    call end_dyn_split_RK2b(CS%dyn_split_RK2b_CS)
   elseif (CS%split) then
-    call end_dyn_split_RK2(CS%dyn_split_RK2_CSp)
+    call end_dyn_split_RK2(CS%dyn_split_RK2_CS)
   elseif (CS%use_RK2) then
-    call end_dyn_unsplit_RK2(CS%dyn_unsplit_RK2_CSp)
+    call end_dyn_unsplit_RK2(CS%dyn_unsplit_RK2_CS)
   else
-    call end_dyn_unsplit(CS%dyn_unsplit_CSp)
+    call end_dyn_unsplit(CS%dyn_unsplit_CS)
   endif
 
   if (CS%use_particles) then
