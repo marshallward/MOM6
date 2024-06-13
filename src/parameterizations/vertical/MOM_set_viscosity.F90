@@ -31,6 +31,8 @@ use MOM_unit_scaling,  only : unit_scale_type
 use MOM_variables,     only : thermo_var_ptrs, vertvisc_type, porous_barrier_type
 use MOM_verticalGrid,  only : verticalGrid_type
 
+use MOM_checksums, only : zchksum
+
 implicit none ; private
 
 #include <MOM_memory.h>
@@ -275,7 +277,9 @@ subroutine set_viscous_BBL(u, v, h, tv, visc, G, GV, US, CS, pbv)
                            ! open areas that must be integrated [Z ~> m].
   real :: vol              ! The volume below the interface whose normalized
                            ! width is being sought [Z ~> m].
-  real :: vol_below        ! The volume below the interface below the one that
+  !real :: vol_below        ! The volume below the interface below the one that
+  !                         ! is currently under consideration [Z ~> m].
+  real :: vol_below(SZK_(GV)+1) ! The volume below the interface below the one that
                            ! is currently under consideration [Z ~> m].
   real :: Vol_err          ! The error in the volume with the latest estimate of
                            ! L, or the error for the interface below [Z ~> m].
@@ -896,6 +900,13 @@ subroutine set_viscous_BBL(u, v, h, tv, visc, G, GV, US, CS, pbv)
         ! Each cell extends from x=-1/2 to 1/2, and has a topography
         ! given by D(x) = crv*x^2 + slope*x + D - crv/12.
 
+        L(nz+1) = 0.0 ; vol = 0.0 ; Vol_err = 0.0 ; BBL_visc_frac = 0.0
+        ! Determine the normalized open length at each interface.
+        vol_below(nz+1) = 0.
+        do K=nz,1,-1
+          vol_below(K) = vol_below(K+1) + dz_vel(i,k)
+        enddo
+
         ! Calculate the volume above which the entire cell is open and the
         ! other volumes at which the equation that is solved for L changes.
         if (crv > 0.0) then
@@ -926,13 +937,10 @@ subroutine set_viscous_BBL(u, v, h, tv, visc, G, GV, US, CS, pbv)
           Ibma_2 = 2.0 / (slope - crv)
         endif
 
-        L(nz+1) = 0.0 ; vol = 0.0 ; Vol_err = 0.0 ; BBL_visc_frac = 0.0
-        ! Determine the normalized open length at each interface.
         do K=nz,1,-1
-          vol_below = vol
-
-          vol = vol + dz_vel(i,k)
-          h_vel_pos = h_vel(i,k) + h_neglect
+          !vol = vol + dz_vel(i,k)
+          !h_vel_pos = h_vel(i,k) + h_neglect
+          vol = vol_below(K)
 
           if (vol >= Vol_open) then ; L(K) = 1.0
           elseif (crv == 0) then ! The bottom has no curvature.
@@ -973,10 +981,10 @@ subroutine set_viscous_BBL(u, v, h, tv, visc, G, GV, US, CS, pbv)
               !  Vol_err = 0.5*(L(K+1)*L(K+1))*(slope + crv_3*(3.0-4.0*L(K+1))) - vol_below
               ! Change to ...
               !   if (min(vol_below + Vol_err, vol) <= Vol_direct) then ?
-              if (vol_below + Vol_err <= Vol_direct) then
+              if (vol_below(K+1) + Vol_err <= Vol_direct) then
                 L0 = L_direct ; Vol_0 = Vol_direct
               else
-                L0 = L(K+1) ; Vol_0 = vol_below + Vol_err
+                L0 = L(K+1) ; Vol_0 = vol_below(K+1) + Vol_err
                 ! Change to   Vol_0 = min(vol_below + Vol_err, vol) ?
               endif
 
@@ -1042,6 +1050,11 @@ subroutine set_viscous_BBL(u, v, h, tv, visc, G, GV, US, CS, pbv)
               endif ! end of 1-boundary alternatives.
             endif ! end of a<0 cases.
           endif
+        enddo ! k loop to determine L(K).
+
+        ! Move BBL_visc_frac = 0 here?
+        do K=nz,1,-1
+          h_vel_pos = h_vel(i,k) + h_neglect
 
           !modify L(K) for porous barrier parameterization
           if (m==1) then ; L(K) = L(K)*pbv%por_layer_widthU(I,j,K)
@@ -1050,8 +1063,8 @@ subroutine set_viscous_BBL(u, v, h, tv, visc, G, GV, US, CS, pbv)
           ! Determine the drag contributing to the bottom boundary layer
           ! and the Rayleigh drag that acts on each layer.
           if (L(K) > L(K+1)) then
-            if (vol_below < Vol_bbl_chan) then
-              BBL_frac = (1.0-vol_below/Vol_bbl_chan)**2
+            if (vol_below(K+1) < Vol_bbl_chan) then
+              BBL_frac = (1.0-vol_below(K+1)/Vol_bbl_chan)**2
               BBL_visc_frac = BBL_visc_frac + BBL_frac*(L(K) - L(K+1))
             else
               BBL_frac = 0.0
