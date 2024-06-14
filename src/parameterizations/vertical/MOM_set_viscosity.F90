@@ -907,9 +907,11 @@ subroutine set_viscous_BBL(u, v, h, tv, visc, G, GV, US, CS, pbv)
           vol_below(K) = vol_below(K+1) + dz_vel(i,k)
         enddo
 
-        ! Calculate the volume above which the entire cell is open and the
-        ! other volumes at which the equation that is solved for L changes.
+        !-------
+
         if (crv > 0.0) then
+          ! AFAIK this is *identical* to dev/gfdl.
+          ! Only change was vol -> vol_below(k).  (vectorization??)
           if (slope >= crv) then
             Vol_open = D_vel - Dm ; Vol_2_reg = Vol_open
           else
@@ -921,10 +923,74 @@ subroutine set_viscous_BBL(u, v, h, tv, visc, G, GV, US, CS, pbv)
           C24_crv = 24.0/crv ; Iapb = 1.0/(crv+slope)
           apb_4a = (slope+crv)/(4.0*crv) ; a2x48_apb3 = (48.0*(crv*crv))*(Iapb**3)
           ax2_3apb = 2.0*C1_3*crv*Iapb
+
+          do K=nz,1,-1
+            vol = vol_below(K)
+
+            if (vol_below(K) >= Vol_open) then
+              L(K) = 1.0
+            else
+              ! There may be a minimum depth, and there are
+              ! analytic expressions for L for all cases.
+              if (vol_below(K) < Vol_2_reg) then
+                ! In this case, there is a contiguous open region and
+                !   vol = 0.5*L^2*(slope + crv/3*(3-4L)).
+                if (a2x48_apb3*vol_below(K) < 1e-8) then ! Could be 1e-7?
+                  ! There is a very good approximation here for massless layers.
+                  L0 = sqrt(2.0*vol_below(K)*Iapb) ; L(K) = L0*(1.0 + ax2_3apb*L0)
+                else
+                  L(K) = apb_4a * (1.0 - &
+                           2.0 * cos(C1_3*acos(a2x48_apb3*vol_below(K) - 1.0) - C2pi_3))
+                endif
+                ! To check the answers.
+                ! Vol_err = 0.5*(L(K)*L(K))*(slope + crv_3*(3.0-4.0*L(K))) - vol
+              else ! There are two separate open regions.
+                !   vol = slope^2/4crv + crv/12 - (crv/12)*(1-L)^2*(1+2L)
+                ! At the deepest volume, L = slope/crv, at the top L = 1.
+                !L(K) = 0.5 - cos(C1_3*acos(1.0 - C24_crv*(Vol_open - vol)) - C2pi_3)
+                tmp_val_m1_to_p1 = 1.0 - C24_crv*(Vol_open - vol_below(K))
+                tmp_val_m1_to_p1 = max(-1., min(1., tmp_val_m1_to_p1))
+                L(K) = 0.5 - cos(C1_3*acos(tmp_val_m1_to_p1) - C2pi_3)
+                ! To check the answers.
+                ! Vol_err = Vol_open - 0.25*crv_3*(1.0+2.0*L(K)) * (1.0-L(K))**2 - vol
+              endif
+            endif
+          enddo
         elseif (crv == 0.0) then
-          Vol_open = 0.5*slope
-          if (slope > 0) Iapb = 1.0/slope
-        else ! crv < 0.0
+          ! old
+          !Vol_open = 0.5*slope
+          !if (slope > 0) Iapb = 1.0/slope
+
+          !do K=nz,1,-1
+          !  vol = vol_below(K)
+
+          !  if (vol >= Vol_open) then
+          !    L(K) = 1.0
+          !  else
+          !    L(K) = sqrt(2.0*vol*Iapb)
+          !  endif
+          !enddo
+
+          ! New (mostly)
+          ! 1. No slope = abs(Dp - Dm)
+          ! 2. L(nz+1) = 0. outside of branch/loop
+          ! 3. Rename I_slope to Iapb
+          if (slope == 0.0) then
+            L(1:nz) = 1.0
+          else
+            Vol_open = 0.5*slope
+            Iapb = 1.0 / slope
+
+            do K=nz,1,-1
+              if (vol_below(K) >= Vol_open) then ; L(K) = 1.0
+              else
+                ! With a uniformly sloping bottom, the calculation of L(K) is the solution of a simple quadratic equation.
+                L(K) = sqrt(2.0*vol_below(K)*Iapb)
+              endif
+            enddo
+          endif
+          !---
+        else
           Vol_open = D_vel - Dm
           if (slope >= -crv) then
             Iapb = 1.0e30*US%Z_to_m ; if (slope+crv /= 0.0) Iapb = 1.0/(crv+slope)
@@ -935,122 +1001,239 @@ subroutine set_viscous_BBL(u, v, h, tv, visc, G, GV, US, CS, pbv)
             Vol_direct = -C1_6*crv*L_direct**3
           endif
           Ibma_2 = 2.0 / (slope - crv)
+
+          do K=nz,1,-1
+            vol = vol_below(K)
+
+            if (vol >= Vol_open) then
+              L(K) = 1.0
+            else
+              if (vol <= Vol_direct) then
+                ! Both edges of the cell are bounded by walls.
+                L(K) = (-0.25*C24_crv*vol)**C1_3
+              else
+                ! x_R is at 1/2 but x_L is in the interior & L is found by solving
+                !   vol = 0.5*L^2*(slope + crv/3*(3-4L))
+
+                !  Vol_err = 0.5*(L(K+1)*L(K+1))*(slope + crv_3*(3.0-4.0*L(K+1))) - vol_below
+                ! Change to ...
+                !   if (min(vol_below + Vol_err, vol) <= Vol_direct) then ?
+                if (vol_below(K+1) + Vol_err <= Vol_direct) then
+                  L0 = L_direct ; Vol_0 = Vol_direct
+                else
+                  L0 = L(K+1) ; Vol_0 = vol_below(K+1) + Vol_err
+                  ! Change to   Vol_0 = min(vol_below + Vol_err, vol) ?
+                endif
+
+                !   Try a relatively simple solution that usually works well
+                ! for massless layers.
+                dV_dL2 = 0.5*(slope+crv) - crv*L0 ; dVol = (vol-Vol_0)
+           !    dV_dL2 = 0.5*(slope+crv) - crv*L0 ; dVol = max(vol-Vol_0, 0.0)
+
+                use_L0 = .false.
+                do_one_L_iter = .false.
+                if (CS%answer_date < 20190101) then
+                  curv_tol = GV%Angstrom_Z*dV_dL2**2 &
+                             * (0.25 * dV_dL2 * GV%Angstrom_Z - crv * L0 * dVol)
+                  do_one_L_iter = (crv * crv * dVol**3) < curv_tol
+                else
+                  ! The following code is more robust when GV%Angstrom_H=0, but
+                  ! it changes answers.
+                  use_L0 = (dVol <= 0.)
+
+                  Vol_tol = max(0.5 * GV%Angstrom_Z + dz_neglect, 1e-14 * vol)
+                  Vol_quit = max(0.9 * GV%Angstrom_Z + dz_neglect, 1e-14 * vol)
+
+                  curv_tol = Vol_tol * dV_dL2**2 &
+                             * (dV_dL2 * Vol_tol - 2.0 * crv * L0 * dVol)
+                  do_one_L_iter = (crv * crv * dVol**3) < curv_tol
+                endif
+
+                if (use_L0) then
+                  L(K) = L0
+                  Vol_err = 0.5*(L(K)*L(K))*(slope + crv_3*(3.0-4.0*L(K))) - vol
+                elseif (do_one_L_iter) then
+                  ! One iteration of Newton's method should give an estimate
+                  ! that is accurate to within Vol_tol.
+                  L(K) = sqrt(L0*L0 + dVol / dV_dL2)
+                  Vol_err = 0.5*(L(K)*L(K))*(slope + crv_3*(3.0-4.0*L(K))) - vol
+                else
+                  if (dV_dL2*(1.0-L0*L0) < dVol + &
+                      dV_dL2 * (Vol_open - Vol)*Ibma_2) then
+                    L_max = sqrt(1.0 - (Vol_open - Vol)*Ibma_2)
+                  else
+                    L_max = sqrt(L0*L0 + dVol / dV_dL2)
+                  endif
+                  L_min = sqrt(L0*L0 + dVol / (0.5*(slope+crv) - crv*L_max))
+
+                  Vol_err_min = 0.5*(L_min**2)*(slope + crv_3*(3.0-4.0*L_min)) - vol
+                  Vol_err_max = 0.5*(L_max**2)*(slope + crv_3*(3.0-4.0*L_max)) - vol
+           !      if ((abs(Vol_err_min) <= Vol_quit) .or. (Vol_err_min >= Vol_err_max)) then
+                  if (abs(Vol_err_min) <= Vol_quit) then
+                    L(K) = L_min ; Vol_err = Vol_err_min
+                  else
+                    L(K) = sqrt((L_min**2*Vol_err_max - L_max**2*Vol_err_min) / &
+                                (Vol_err_max - Vol_err_min))
+                    do itt=1,maxitt
+                      Vol_err = 0.5*(L(K)*L(K))*(slope + crv_3*(3.0-4.0*L(K))) - vol
+                      if (abs(Vol_err) <= Vol_quit) exit
+                      ! Take a Newton's method iteration. This equation has proven
+                      ! robust enough not to need bracketing.
+                      L(K) = L(K) - Vol_err / (L(K)* (slope + crv - 2.0*crv*L(K)))
+                      ! This would be a Newton's method iteration for L^2:
+                      !   L(K) = sqrt(L(K)*L(K) - Vol_err / (0.5*(slope+crv) - crv*L(K)))
+                    enddo
+                  endif ! end of iterative solver
+                endif ! end of 1-boundary alternatives.
+              endif ! end of a<0 cases.
+            endif
+          enddo
         endif
 
+        !! Calculate the volume above which the entire cell is open and the
+        !! other volumes at which the equation that is solved for L changes.
+        !if (crv > 0.0) then
+        !  if (slope >= crv) then
+        !    Vol_open = D_vel - Dm ; Vol_2_reg = Vol_open
+        !  else
+        !    tmp = slope/crv
+        !    Vol_open = 0.25*slope*tmp + C1_12*crv
+        !    Vol_2_reg = 0.5*tmp**2 * (crv - C1_3*slope)
+        !  endif
+        !  ! Define some combinations of crv & slope for later use.
+        !  C24_crv = 24.0/crv ; Iapb = 1.0/(crv+slope)
+        !  apb_4a = (slope+crv)/(4.0*crv) ; a2x48_apb3 = (48.0*(crv*crv))*(Iapb**3)
+        !  ax2_3apb = 2.0*C1_3*crv*Iapb
+        !elseif (crv == 0.0) then
+        !  Vol_open = 0.5*slope
+        !  if (slope > 0) Iapb = 1.0/slope
+        !else ! crv < 0.0
+        !  Vol_open = D_vel - Dm
+        !  if (slope >= -crv) then
+        !    Iapb = 1.0e30*US%Z_to_m ; if (slope+crv /= 0.0) Iapb = 1.0/(crv+slope)
+        !    Vol_direct = 0.0 ; L_direct = 0.0 ; C24_crv = 0.0
+        !  else
+        !    C24_crv = 24.0/crv ; Iapb = 1.0/(crv+slope)
+        !    L_direct = 1.0 + slope/crv ! L_direct < 1 because crv < 0
+        !    Vol_direct = -C1_6*crv*L_direct**3
+        !  endif
+        !  Ibma_2 = 2.0 / (slope - crv)
+        !endif
+
         do K=nz,1,-1
-          !vol = vol + dz_vel(i,k)
-          !h_vel_pos = h_vel(i,k) + h_neglect
-          vol = vol_below(K)
+          !vol = vol_below(K)
 
-          if (vol >= Vol_open) then ; L(K) = 1.0
-          elseif (crv == 0) then ! The bottom has no curvature.
-            L(K) = sqrt(2.0*vol*Iapb)
-          elseif (crv > 0) then
-            ! There may be a minimum depth, and there are
-            ! analytic expressions for L for all cases.
-            if (vol < Vol_2_reg) then
-              ! In this case, there is a contiguous open region and
-              !   vol = 0.5*L^2*(slope + crv/3*(3-4L)).
-              if (a2x48_apb3*vol < 1e-8) then ! Could be 1e-7?
-                ! There is a very good approximation here for massless layers.
-                L0 = sqrt(2.0*vol*Iapb) ; L(K) = L0*(1.0 + ax2_3apb*L0)
-              else
-                L(K) = apb_4a * (1.0 - &
-                         2.0 * cos(C1_3*acos(a2x48_apb3*vol - 1.0) - C2pi_3))
-              endif
-              ! To check the answers.
-              ! Vol_err = 0.5*(L(K)*L(K))*(slope + crv_3*(3.0-4.0*L(K))) - vol
-            else ! There are two separate open regions.
-              !   vol = slope^2/4crv + crv/12 - (crv/12)*(1-L)^2*(1+2L)
-              ! At the deepest volume, L = slope/crv, at the top L = 1.
-              !L(K) = 0.5 - cos(C1_3*acos(1.0 - C24_crv*(Vol_open - vol)) - C2pi_3)
-              tmp_val_m1_to_p1 = 1.0 - C24_crv*(Vol_open - vol)
-              tmp_val_m1_to_p1 = max(-1., min(1., tmp_val_m1_to_p1))
-              L(K) = 0.5 - cos(C1_3*acos(tmp_val_m1_to_p1) - C2pi_3)
-              ! To check the answers.
-              ! Vol_err = Vol_open - 0.25*crv_3*(1.0+2.0*L(K)) * (1.0-L(K))**2 - vol
-            endif
-          else ! a < 0.
-            if (vol <= Vol_direct) then
-              ! Both edges of the cell are bounded by walls.
-              L(K) = (-0.25*C24_crv*vol)**C1_3
-            else
-              ! x_R is at 1/2 but x_L is in the interior & L is found by solving
-              !   vol = 0.5*L^2*(slope + crv/3*(3-4L))
+          !if (vol >= Vol_open) then ; L(K) = 1.0
+          !elseif (crv == 0) then ! The bottom has no curvature.
+          !  L(K) = sqrt(2.0*vol*Iapb)
+          !elseif (crv > 0) then
+          !  ! There may be a minimum depth, and there are
+          !  ! analytic expressions for L for all cases.
+          !  if (vol < Vol_2_reg) then
+          !    ! In this case, there is a contiguous open region and
+          !    !   vol = 0.5*L^2*(slope + crv/3*(3-4L)).
+          !    if (a2x48_apb3*vol < 1e-8) then ! Could be 1e-7?
+          !      ! There is a very good approximation here for massless layers.
+          !      L0 = sqrt(2.0*vol*Iapb) ; L(K) = L0*(1.0 + ax2_3apb*L0)
+          !    else
+          !      L(K) = apb_4a * (1.0 - &
+          !               2.0 * cos(C1_3*acos(a2x48_apb3*vol - 1.0) - C2pi_3))
+          !    endif
+          !    ! To check the answers.
+          !    ! Vol_err = 0.5*(L(K)*L(K))*(slope + crv_3*(3.0-4.0*L(K))) - vol
+          !  else ! There are two separate open regions.
+          !    !   vol = slope^2/4crv + crv/12 - (crv/12)*(1-L)^2*(1+2L)
+          !    ! At the deepest volume, L = slope/crv, at the top L = 1.
+          !    !L(K) = 0.5 - cos(C1_3*acos(1.0 - C24_crv*(Vol_open - vol)) - C2pi_3)
+          !    tmp_val_m1_to_p1 = 1.0 - C24_crv*(Vol_open - vol)
+          !    tmp_val_m1_to_p1 = max(-1., min(1., tmp_val_m1_to_p1))
+          !    L(K) = 0.5 - cos(C1_3*acos(tmp_val_m1_to_p1) - C2pi_3)
+          !    ! To check the answers.
+          !    ! Vol_err = Vol_open - 0.25*crv_3*(1.0+2.0*L(K)) * (1.0-L(K))**2 - vol
+          !  endif
+          !else ! a < 0.
+          !  if (vol <= Vol_direct) then
+          !    ! Both edges of the cell are bounded by walls.
+          !    L(K) = (-0.25*C24_crv*vol)**C1_3
+          !  else
+          !    ! x_R is at 1/2 but x_L is in the interior & L is found by solving
+          !    !   vol = 0.5*L^2*(slope + crv/3*(3-4L))
 
-              !  Vol_err = 0.5*(L(K+1)*L(K+1))*(slope + crv_3*(3.0-4.0*L(K+1))) - vol_below
-              ! Change to ...
-              !   if (min(vol_below + Vol_err, vol) <= Vol_direct) then ?
-              if (vol_below(K+1) + Vol_err <= Vol_direct) then
-                L0 = L_direct ; Vol_0 = Vol_direct
-              else
-                L0 = L(K+1) ; Vol_0 = vol_below(K+1) + Vol_err
-                ! Change to   Vol_0 = min(vol_below + Vol_err, vol) ?
-              endif
+          !    !  Vol_err = 0.5*(L(K+1)*L(K+1))*(slope + crv_3*(3.0-4.0*L(K+1))) - vol_below
+          !    ! Change to ...
+          !    !   if (min(vol_below + Vol_err, vol) <= Vol_direct) then ?
+          !    if (vol_below(K+1) + Vol_err <= Vol_direct) then
+          !      L0 = L_direct ; Vol_0 = Vol_direct
+          !    else
+          !      L0 = L(K+1) ; Vol_0 = vol_below(K+1) + Vol_err
+          !      ! Change to   Vol_0 = min(vol_below + Vol_err, vol) ?
+          !    endif
 
-              !   Try a relatively simple solution that usually works well
-              ! for massless layers.
-              dV_dL2 = 0.5*(slope+crv) - crv*L0 ; dVol = (vol-Vol_0)
-           !  dV_dL2 = 0.5*(slope+crv) - crv*L0 ; dVol = max(vol-Vol_0, 0.0)
+          !    !   Try a relatively simple solution that usually works well
+          !    ! for massless layers.
+          !    dV_dL2 = 0.5*(slope+crv) - crv*L0 ; dVol = (vol-Vol_0)
+          ! !  dV_dL2 = 0.5*(slope+crv) - crv*L0 ; dVol = max(vol-Vol_0, 0.0)
 
-              use_L0 = .false.
-              do_one_L_iter = .false.
-              if (CS%answer_date < 20190101) then
-                curv_tol = GV%Angstrom_Z*dV_dL2**2 &
-                           * (0.25 * dV_dL2 * GV%Angstrom_Z - crv * L0 * dVol)
-                do_one_L_iter = (crv * crv * dVol**3) < curv_tol
-              else
-                ! The following code is more robust when GV%Angstrom_H=0, but
-                ! it changes answers.
-                use_L0 = (dVol <= 0.)
+          !    use_L0 = .false.
+          !    do_one_L_iter = .false.
+          !    if (CS%answer_date < 20190101) then
+          !      curv_tol = GV%Angstrom_Z*dV_dL2**2 &
+          !                 * (0.25 * dV_dL2 * GV%Angstrom_Z - crv * L0 * dVol)
+          !      do_one_L_iter = (crv * crv * dVol**3) < curv_tol
+          !    else
+          !      ! The following code is more robust when GV%Angstrom_H=0, but
+          !      ! it changes answers.
+          !      use_L0 = (dVol <= 0.)
 
-                Vol_tol = max(0.5 * GV%Angstrom_Z + dz_neglect, 1e-14 * vol)
-                Vol_quit = max(0.9 * GV%Angstrom_Z + dz_neglect, 1e-14 * vol)
+          !      Vol_tol = max(0.5 * GV%Angstrom_Z + dz_neglect, 1e-14 * vol)
+          !      Vol_quit = max(0.9 * GV%Angstrom_Z + dz_neglect, 1e-14 * vol)
 
-                curv_tol = Vol_tol * dV_dL2**2 &
-                           * (dV_dL2 * Vol_tol - 2.0 * crv * L0 * dVol)
-                do_one_L_iter = (crv * crv * dVol**3) < curv_tol
-              endif
+          !      curv_tol = Vol_tol * dV_dL2**2 &
+          !                 * (dV_dL2 * Vol_tol - 2.0 * crv * L0 * dVol)
+          !      do_one_L_iter = (crv * crv * dVol**3) < curv_tol
+          !    endif
 
-              if (use_L0) then
-                L(K) = L0
-                Vol_err = 0.5*(L(K)*L(K))*(slope + crv_3*(3.0-4.0*L(K))) - vol
-              elseif (do_one_L_iter) then
-                ! One iteration of Newton's method should give an estimate
-                ! that is accurate to within Vol_tol.
-                L(K) = sqrt(L0*L0 + dVol / dV_dL2)
-                Vol_err = 0.5*(L(K)*L(K))*(slope + crv_3*(3.0-4.0*L(K))) - vol
-              else
-                if (dV_dL2*(1.0-L0*L0) < dVol + &
-                    dV_dL2 * (Vol_open - Vol)*Ibma_2) then
-                  L_max = sqrt(1.0 - (Vol_open - Vol)*Ibma_2)
-                else
-                  L_max = sqrt(L0*L0 + dVol / dV_dL2)
-                endif
-                L_min = sqrt(L0*L0 + dVol / (0.5*(slope+crv) - crv*L_max))
+          !    if (use_L0) then
+          !      L(K) = L0
+          !      Vol_err = 0.5*(L(K)*L(K))*(slope + crv_3*(3.0-4.0*L(K))) - vol
+          !    elseif (do_one_L_iter) then
+          !      ! One iteration of Newton's method should give an estimate
+          !      ! that is accurate to within Vol_tol.
+          !      L(K) = sqrt(L0*L0 + dVol / dV_dL2)
+          !      Vol_err = 0.5*(L(K)*L(K))*(slope + crv_3*(3.0-4.0*L(K))) - vol
+          !    else
+          !      if (dV_dL2*(1.0-L0*L0) < dVol + &
+          !          dV_dL2 * (Vol_open - Vol)*Ibma_2) then
+          !        L_max = sqrt(1.0 - (Vol_open - Vol)*Ibma_2)
+          !      else
+          !        L_max = sqrt(L0*L0 + dVol / dV_dL2)
+          !      endif
+          !      L_min = sqrt(L0*L0 + dVol / (0.5*(slope+crv) - crv*L_max))
 
-                Vol_err_min = 0.5*(L_min**2)*(slope + crv_3*(3.0-4.0*L_min)) - vol
-                Vol_err_max = 0.5*(L_max**2)*(slope + crv_3*(3.0-4.0*L_max)) - vol
-           !    if ((abs(Vol_err_min) <= Vol_quit) .or. (Vol_err_min >= Vol_err_max)) then
-                if (abs(Vol_err_min) <= Vol_quit) then
-                  L(K) = L_min ; Vol_err = Vol_err_min
-                else
-                  L(K) = sqrt((L_min**2*Vol_err_max - L_max**2*Vol_err_min) / &
-                              (Vol_err_max - Vol_err_min))
-                  do itt=1,maxitt
-                    Vol_err = 0.5*(L(K)*L(K))*(slope + crv_3*(3.0-4.0*L(K))) - vol
-                    if (abs(Vol_err) <= Vol_quit) exit
-                    ! Take a Newton's method iteration. This equation has proven
-                    ! robust enough not to need bracketing.
-                    L(K) = L(K) - Vol_err / (L(K)* (slope + crv - 2.0*crv*L(K)))
-                    ! This would be a Newton's method iteration for L^2:
-                    !   L(K) = sqrt(L(K)*L(K) - Vol_err / (0.5*(slope+crv) - crv*L(K)))
-                  enddo
-                endif ! end of iterative solver
-              endif ! end of 1-boundary alternatives.
-            endif ! end of a<0 cases.
-          endif
+          !      Vol_err_min = 0.5*(L_min**2)*(slope + crv_3*(3.0-4.0*L_min)) - vol
+          !      Vol_err_max = 0.5*(L_max**2)*(slope + crv_3*(3.0-4.0*L_max)) - vol
+          ! !    if ((abs(Vol_err_min) <= Vol_quit) .or. (Vol_err_min >= Vol_err_max)) then
+          !      if (abs(Vol_err_min) <= Vol_quit) then
+          !        L(K) = L_min ; Vol_err = Vol_err_min
+          !      else
+          !        L(K) = sqrt((L_min**2*Vol_err_max - L_max**2*Vol_err_min) / &
+          !                    (Vol_err_max - Vol_err_min))
+          !        do itt=1,maxitt
+          !          Vol_err = 0.5*(L(K)*L(K))*(slope + crv_3*(3.0-4.0*L(K))) - vol
+          !          if (abs(Vol_err) <= Vol_quit) exit
+          !          ! Take a Newton's method iteration. This equation has proven
+          !          ! robust enough not to need bracketing.
+          !          L(K) = L(K) - Vol_err / (L(K)* (slope + crv - 2.0*crv*L(K)))
+          !          ! This would be a Newton's method iteration for L^2:
+          !          !   L(K) = sqrt(L(K)*L(K) - Vol_err / (0.5*(slope+crv) - crv*L(K)))
+          !        enddo
+          !      endif ! end of iterative solver
+          !    endif ! end of 1-boundary alternatives.
+          !  endif ! end of a<0 cases.
+          !endif
         enddo ! k loop to determine L(K).
+
+        !-----
 
         ! Move BBL_visc_frac = 0 here?
         do K=nz,1,-1
