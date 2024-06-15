@@ -896,7 +896,7 @@ subroutine set_viscous_BBL(u, v, h, tv, visc, G, GV, US, CS, pbv)
         ! Each cell extends from x=-1/2 to 1/2, and has a topography
         ! given by D(x) = crv*x^2 + slope*x + D - crv/12.
 
-        L(nz+1) = 0.0 ; vol = 0.0 ; Vol_err = 0.0
+        L(nz+1) = 0.0 ; Vol_err = 0.0
 
         !-------
         ! Determine the normalized open length at each interface.
@@ -978,16 +978,12 @@ subroutine set_viscous_BBL(u, v, h, tv, visc, G, GV, US, CS, pbv)
           Ibma_2 = 2.0 / (slope - crv)
 
           do K=nz,1,-1
-            ! NOTE Commenting this line changes answers!
-            !   How is that possible??
-            vol = vol_below(K)
-
             if (vol_below(K) >= Vol_open) then
               L(K) = 1.0
             else
               if (vol_below(K) <= Vol_direct) then
                 ! Both edges of the cell are bounded by walls.
-                L(K) = (-0.25*C24_crv*vol)**C1_3
+                L(K) = (-0.25*C24_crv*vol_below(K))**C1_3
               else
                 ! x_R is at 1/2 but x_L is in the interior & L is found by solving
                 !   vol = 0.5*L^2*(slope + crv/3*(3-4L))
@@ -1004,7 +1000,7 @@ subroutine set_viscous_BBL(u, v, h, tv, visc, G, GV, US, CS, pbv)
 
                 !   Try a relatively simple solution that usually works well
                 ! for massless layers.
-                dV_dL2 = 0.5*(slope+crv) - crv*L0 ; dVol = (vol-Vol_0)
+                dV_dL2 = 0.5*(slope+crv) - crv*L0 ; dVol = (vol_below(K)-Vol_0)
            !    dV_dL2 = 0.5*(slope+crv) - crv*L0 ; dVol = max(vol-Vol_0, 0.0)
 
                 use_L0 = .false.
@@ -1019,8 +1015,8 @@ subroutine set_viscous_BBL(u, v, h, tv, visc, G, GV, US, CS, pbv)
                   use_L0 = (dVol <= 0.)
 
                   ! NOTE dz_neglect vs GV%dZ_subroundoff?
-                  Vol_tol = max(0.5 * GV%Angstrom_Z + dz_neglect, 1e-14 * vol)
-                  Vol_quit = max(0.9 * GV%Angstrom_Z + dz_neglect, 1e-14 * vol)
+                  Vol_tol = max(0.5 * GV%Angstrom_Z + dz_neglect, 1e-14 * vol_below(K))
+                  Vol_quit = max(0.9 * GV%Angstrom_Z + dz_neglect, 1e-14 * vol_below(K))
 
                   curv_tol = Vol_tol * dV_dL2**2 &
                              * (dV_dL2 * Vol_tol - 2.0 * crv * L0 * dVol)
