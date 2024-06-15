@@ -866,12 +866,11 @@ subroutine set_viscous_BBL(u, v, h, tv, visc, G, GV, US, CS, pbv)
       if (CS%body_force_drag) bbl_thick = dz_bbl_drag(i)
 
       if (CS%Channel_drag) then
-        ! The drag within the bottommost Vol_bbl_chan is applied as a part of
-        ! an enhanced bottom viscosity, while above this the drag is applied
-        ! directly to the layers in question as a Rayleigh drag term.
 
-        ! Restrict the volume over which the channel drag is applied.
-        if (CS%Chan_drag_max_vol >= 0.0) Vol_bbl_chan = min(Vol_bbl_chan, CS%Chan_drag_max_vol)
+        vol_below(nz+1) = 0.0
+        do K=nz,1,-1
+          vol_below(K) = vol_below(K+1) + dz_vel(i,k)
+        enddo
 
         !### The harmonic mean edge depths here are not invariant to offsets!
         if (m==1) then
@@ -897,14 +896,10 @@ subroutine set_viscous_BBL(u, v, h, tv, visc, G, GV, US, CS, pbv)
         ! Each cell extends from x=-1/2 to 1/2, and has a topography
         ! given by D(x) = crv*x^2 + slope*x + D - crv/12.
 
-        L(nz+1) = 0.0 ; vol = 0.0 ; Vol_err = 0.0 ; BBL_visc_frac = 0.0
-        ! Determine the normalized open length at each interface.
-        vol_below(nz+1) = 0.
-        do K=nz,1,-1
-          vol_below(K) = vol_below(K+1) + dz_vel(i,k)
-        enddo
+        L(nz+1) = 0.0 ; vol = 0.0 ; Vol_err = 0.0
 
         !-------
+        ! Determine the normalized open length at each interface.
 
         if (crv > 0.0) then
           ! AFAIK this is *identical* to dev/gfdl.
@@ -922,8 +917,6 @@ subroutine set_viscous_BBL(u, v, h, tv, visc, G, GV, US, CS, pbv)
           ax2_3apb = 2.0*C1_3*crv*Iapb
 
           do K=nz,1,-1
-            vol = vol_below(K)
-
             if (vol_below(K) >= Vol_open) then
               L(K) = 1.0
             else
@@ -954,26 +947,7 @@ subroutine set_viscous_BBL(u, v, h, tv, visc, G, GV, US, CS, pbv)
             endif
           enddo
         elseif (crv == 0.0) then
-          ! old
-          !Vol_open = 0.5*slope
-          !if (slope > 0) Iapb = 1.0/slope
-
-          !do K=nz,1,-1
-          !  vol = vol_below(K)
-
-          !  if (vol >= Vol_open) then
-          !    L(K) = 1.0
-          !  else
-          !    L(K) = sqrt(2.0*vol*Iapb)
-          !  endif
-          !enddo
-
-          ! New (mostly)
-          ! 1. No slope = abs(Dp - Dm)
-          ! 2. L(nz+1) = 0. outside of branch/loop
-          ! 3. Rename I_slope to Iapb
-
-          ! trying... (risky, but seems unused outside of crv-select
+          ! (risky to overwrite, but seems unused outside of crv if-blocks)
           slope = abs(Dp - Dm)
 
           if (slope == 0.0) then
@@ -1004,6 +978,8 @@ subroutine set_viscous_BBL(u, v, h, tv, visc, G, GV, US, CS, pbv)
           Ibma_2 = 2.0 / (slope - crv)
 
           do K=nz,1,-1
+            ! NOTE Commenting this line changes answers!
+            !   How is that possible??
             vol = vol_below(K)
 
             if (vol_below(K) >= Vol_open) then
@@ -1093,11 +1069,17 @@ subroutine set_viscous_BBL(u, v, h, tv, visc, G, GV, US, CS, pbv)
         endif
 
         !-----
+        ! Determine the Rayliegh drag contributions.
 
-        ! Move BBL_visc_frac = 0 here?
+        ! The drag within the bottommost Vol_bbl_chan is applied as a part of an enhanced bottom
+        ! viscosity, while above this the drag is applied directly to the layers in question as a
+        ! Rayleigh drag term.
+
+        ! Restrict the volume over which the channel drag is applied from the previously determined valu.e
+        if (CS%Chan_drag_max_vol >= 0.0) Vol_bbl_chan = min(Vol_bbl_chan, CS%Chan_drag_max_vol)
+
+        BBL_visc_frac = 0.0
         do K=nz,1,-1
-          h_vel_pos = h_vel(i,k) + h_neglect
-
           !modify L(K) for porous barrier parameterization
           if (m==1) then ; L(K) = L(K)*pbv%por_layer_widthU(I,j,K)
           else ; L(K) = L(K)*pbv%por_layer_widthV(i,J,K); endif
@@ -1118,6 +1100,7 @@ subroutine set_viscous_BBL(u, v, h, tv, visc, G, GV, US, CS, pbv)
               cdrag_conv = cdrag_L_to_H
             endif
 
+            h_vel_pos = h_vel(i,k) + h_neglect
             if (m==1) then ; Cell_width = G%dy_Cu(I,j)*pbv%por_face_areaU(I,j,k)
             else ; Cell_width = G%dx_Cv(i,J)*pbv%por_face_areaV(i,J,k) ; endif
             gam = 1.0 - L(K+1)/L(K)
