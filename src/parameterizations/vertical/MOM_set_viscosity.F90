@@ -902,54 +902,6 @@ subroutine set_viscous_BBL(u, v, h, tv, visc, G, GV, US, CS, pbv)
         if (crv == 0.0) then
           call find_L_open_uniform_slope(vol_below, Dp, Dm, L, GV)
         elseif (crv > 0.0) then
-          !! AFAIK this is *identical* to dev/gfdl.
-          !!   Only change was vol -> vol_below(k).
-          !if (slope >= crv) then
-          !  Vol_open = D_vel - Dm ; Vol_2_reg = Vol_open
-          !else
-          !  tmp = slope/crv
-          !  Vol_open = 0.25*slope*tmp + C1_12*crv
-          !  Vol_2_reg = 0.5*tmp**2 * (crv - C1_3*slope)
-          !endif
-          !! Define some combinations of crv & slope for later use.
-          !C24_crv = 24.0/crv ; Iapb = 1.0/(crv+slope)
-          !apb_4a = (slope+crv)/(4.0*crv) ; a2x48_apb3 = (48.0*(crv*crv))*(Iapb**3)
-          !!apb_4a = (slope+crv)/(4.0*crv) ; a2x48_apb3 = (48.0*(crv*crv))*(Iapb*Iapb*Iapb)
-          !ax2_3apb = 2.0*C1_3*crv*Iapb
-
-          !do K=nz,1,-1
-          !  if (vol_below(K) >= Vol_open) then
-          !    L(K) = 1.0
-          !  else
-          !    ! There may be a minimum depth, and there are
-          !    ! analytic expressions for L for all cases.
-          !    if (vol_below(K) < Vol_2_reg) then
-          !      ! In this case, there is a contiguous open region and
-          !      !   vol = 0.5*L^2*(slope + crv/3*(3-4L)).
-          !      if (a2x48_apb3*vol_below(K) < 1e-8) then ! Could be 1e-7?
-          !        ! There is a very good approximation here for massless layers.
-          !        L0 = sqrt(2.0*vol_below(K)*Iapb) ; L(K) = L0*(1.0 + ax2_3apb*L0)
-          !      else
-          !        L(K) = apb_4a * (1.0 - &
-          !                 2.0 * cos(C1_3*acos(a2x48_apb3*vol_below(K) - 1.0) - C2pi_3))
-          !      endif
-          !      ! To check the answers.
-          !      ! Vol_err = 0.5*(L(K)*L(K))*(slope + crv_3*(3.0-4.0*L(K))) - vol
-          !    else ! There are two separate open regions.
-          !      !   vol = slope^2/4crv + crv/12 - (crv/12)*(1-L)^2*(1+2L)
-          !      ! At the deepest volume, L = slope/crv, at the top L = 1.
-          !      !L(K) = 0.5 - cos(C1_3*acos(1.0 - C24_crv*(Vol_open - vol)) - C2pi_3)
-          !      tmp_val_m1_to_p1 = 1.0 - C24_crv*(Vol_open - vol_below(K))
-          !      tmp_val_m1_to_p1 = max(-1., min(1., tmp_val_m1_to_p1))
-          !      L(K) = 0.5 - cos(C1_3*acos(tmp_val_m1_to_p1) - C2pi_3)
-          !      ! To check the answers.
-          !      ! Vol_err = Vol_open - 0.25*crv_3*(1.0+2.0*L(K)) * (1.0-L(K))**2 - vol
-          !    endif
-          !  endif
-          !enddo
-
-          ! NOTE This appears to give a different answer, despite being
-          !   apparently identical to the above code.
           call find_L_open_concave_analytic(vol_below, D_vel, Dp, Dm, C2pi_3, L, GV)
         else ! crv < 0.0
           Vol_open = D_vel - Dm
