@@ -497,8 +497,7 @@ subroutine calc_slope_functions(h, tv, dt, G, GV, US, CS, OBC)
                                   CS%slope_x, CS%slope_y, N2_u=N2_u, N2_v=N2_v, halo=1, OBC=OBC)
       call calc_Visbeck_coeffs_old(h, CS%slope_x, CS%slope_y, N2_u, N2_v, G, GV, US, CS)
     else
-      !call calc_isoneutral_slopes(G, GV, h, e, tv, dt*CS%kappa_smooth, CS%slope_x, CS%slope_y)
-      call calc_slope_functions_using_just_e(h, G, GV, US, CS, e, .true.)
+      call calc_slope_functions_using_just_e(h, G, GV, US, CS, e)
     endif
   endif
 
@@ -821,7 +820,7 @@ end subroutine calc_Eady_growth_rate_2D
 
 !> The original calc_slope_function() that calculated slopes using
 !! interface positions only, not accounting for density variations.
-subroutine calc_slope_functions_using_just_e(h, G, GV, US, CS, e, calculate_slopes)
+subroutine calc_slope_functions_using_just_e(h, G, GV, US, CS, e)
   type(ocean_grid_type),                       intent(inout) :: G  !< Ocean grid structure
   type(verticalGrid_type),                     intent(in)    :: GV !< Vertical grid structure
   real, dimension(SZI_(G),SZJ_(G),SZK_(GV)),   intent(inout) :: h  !< Layer thickness [H ~> m or kg m-2]
@@ -829,8 +828,6 @@ subroutine calc_slope_functions_using_just_e(h, G, GV, US, CS, e, calculate_slop
   type(VarMix_CS),                             intent(inout) :: CS !< Variable mixing control structure
   real, dimension(SZI_(G),SZJ_(G),SZK_(GV)+1), intent(in)    :: e  !< Interface position [Z ~> m]
   ! type(thermo_var_ptrs),                     intent(in)    :: tv !< Thermodynamic variables
-  logical,                                     intent(in)    :: calculate_slopes !< If true, calculate slopes
-                                                                   !! internally otherwise use slopes stored in CS
   ! Local variables
   real :: E_x(SZIB_(G),SZJ_(G))  ! X-slope of interface at u points [Z L-1 ~> nondim] (for diagnostics)
   real :: E_y(SZI_(G),SZJB_(G))  ! Y-slope of interface at v points [Z L-1 ~> nondim] (for diagnostics)
@@ -894,28 +891,17 @@ subroutine calc_slope_functions_using_just_e(h, G, GV, US, CS, e, calculate_slop
   !$OMP parallel do default(shared) private(E_x,E_y,S2,Hdn,Hup,H_geom,N2)
   do k=nz,CS%VarMix_Ktop,-1
 
-    if (calculate_slopes) then
-      ! Calculate the interface slopes E_x and E_y and u- and v- points respectively
-      do j=js-1,je+1 ; do I=is-1,ie
-        E_x(I,j) = (e(i+1,j,K)-e(i,j,K))*G%IdxCu(I,j)
-        ! Mask slopes where interface intersects topography
-        if (min(h(i,j,k),h(i+1,j,k)) < H_cutoff) E_x(I,j) = 0.
-      enddo ; enddo
-      do J=js-1,je ; do i=is-1,ie+1
-        E_y(i,J) = (e(i,j+1,K)-e(i,j,K))*G%IdyCv(i,J)
-        ! Mask slopes where interface intersects topography
-        if (min(h(i,j,k),h(i,j+1,k)) < H_cutoff) E_y(i,J) = 0.
-      enddo ; enddo
-    else ! This branch is not used.
-      do j=js-1,je+1 ; do I=is-1,ie
-        E_x(I,j) = CS%slope_x(I,j,k)
-        if (min(h(i,j,k),h(i+1,j,k)) < H_cutoff) E_x(I,j) = 0.
-      enddo ; enddo
-      do J=js-1,je ; do i=is-1,ie+1
-        E_y(i,J) = CS%slope_y(i,J,k)
-        if (min(h(i,j,k),h(i,j+1,k)) < H_cutoff) E_y(i,J) = 0.
-      enddo ; enddo
-    endif
+    ! Calculate the interface slopes E_x and E_y and u- and v- points respectively
+    do j=js-1,je+1 ; do I=is-1,ie
+      E_x(I,j) = (e(i+1,j,K)-e(i,j,K))*G%IdxCu(I,j)
+      ! Mask slopes where interface intersects topography
+      if (min(h(i,j,k),h(i+1,j,k)) < H_cutoff) E_x(I,j) = 0.
+    enddo ; enddo
+    do J=js-1,je ; do i=is-1,ie+1
+      E_y(i,J) = (e(i,j+1,K)-e(i,j,K))*G%IdyCv(i,J)
+      ! Mask slopes where interface intersects topography
+      if (min(h(i,j,k),h(i,j+1,k)) < H_cutoff) E_y(i,J) = 0.
+    enddo ; enddo
 
     ! Calculate N*S*h from this layer and add to the sum
     do j=js,je ; do I=is-1,ie
@@ -1204,6 +1190,7 @@ subroutine VarMix_init(Time, G, GV, US, param_file, diag, CS)
                               ! mode wave speed as the starting point for iterations.
   real :: Stanley_coeff    ! Coefficient relating the temperature gradient and sub-gridscale
                            ! temperature variance [nondim]
+  logical :: om4_remap_via_sub_cells ! Use the OM4-era ramap_via_sub_cells for calculating the EBT structure
   ! This include declares and sets the variable "version".
 # include "version_variable.h"
   character(len=40)  :: mdl = "MOM_lateral_mixing_coeffs" ! This module's name.
@@ -1607,10 +1594,14 @@ subroutine VarMix_init(Time, G, GV, US, param_file, diag, CS)
     call get_param(param_file, mdl, "INTERNAL_WAVE_SPEED_BETTER_EST", better_speed_est, &
                  "If true, use a more robust estimate of the first mode wave speed as the "//&
                  "starting point for iterations.", default=.true.)
+    call get_param(param_file, mdl, "EBT_REMAPPING_USE_OM4_SUBCELLS", om4_remap_via_sub_cells, &
+                 "If true, use the OM4 remapping-via-subcells algorithm for calculating EBT structure. "//&
+                 "See REMAPPING_USE_OM4_SUBCELLS for details. "//&
+                 "We recommend setting this option to false.", default=.true.)
     call wave_speed_init(CS%wave_speed, use_ebt_mode=CS%Resoln_use_ebt, &
                          mono_N2_depth=N2_filter_depth, remap_answer_date=remap_answer_date, &
                          better_speed_est=better_speed_est, min_speed=wave_speed_min, &
-                         wave_speed_tol=wave_speed_tol)
+                         om4_remap_via_sub_cells=om4_remap_via_sub_cells, wave_speed_tol=wave_speed_tol)
   endif
 
   ! Leith parameters
