@@ -50,8 +50,8 @@ type, public :: hor_visc_CS ; private
                              !! limited to guarantee stability.
   logical :: better_bound_Kh !< If true, use a more careful bounding of the
                              !! Laplacian viscosity to guarantee stability.
-  logical :: bound_Kh_with_MEKE !! If true, bounds the Laplacian viscosity using an expression
-                             !< that is proportional to the EKE.
+  logical :: EY24_EBT_BS     !! If true, use an equivalent barotropic (EBT) mode backscatter scheme
+                             !< in MEKE; developed by Yankovsky et al. 2024
   logical :: bound_Ah        !< If true, the biharmonic coefficient is locally
                              !! limited to guarantee stability.
   logical :: better_bound_Ah !< If true, use a more careful bounding of the
@@ -62,8 +62,7 @@ type, public :: hor_visc_CS ; private
                              !! the viscosity bounds to the theoretical maximum
                              !! for stability without considering other terms [nondim].
                              !! The default is 0.8.
-  real    :: bound_Kh_with_MEKE_coef  !< A nondimensional coefficient to make the MEKE bound on the
-                             !! Laplacian viscosity stricter.
+  real    :: EY24_EBT_BS_coef  !< A nondimensional tuning coefficient for the backscatter term
                              !! The default is 1.0.
   real    :: KS_coef         !! A nondimensional coefficient on the biharmonic viscosity that sets the
                              !< kill switch for backscatter. Default is 1.0.
@@ -247,7 +246,6 @@ type, public :: hor_visc_CS ; private
   integer :: id_visc_limit_h_flag = -1, id_visc_limit_q_flag = -1
   integer :: id_visc_limit_h_frac = -1, id_visc_limit_q_frac = -1
   integer :: id_BS_coeff_h = -1, id_BS_coeff_q = -1
-  integer :: id_delu_mag
   !>@}
 
 end type hor_visc_CS
@@ -339,8 +337,7 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
     m_leithy, &   ! Kh=m_leithy*Ah in Leith+E parameterization [L-2 ~> m-2]
     Ah_sq, &      ! The square of the biharmonic viscosity [L8 T-2 ~> m8 s-2]
     htot, &       ! The total thickness of all layers [H ~> m or kg m-2]
-    str_xx_BS, &      ! The diagonal term in the stress tensor due to backscatter [H L2 T-2 ~> m3 s-2 or kg s-2]
-    d_str_h     ! Stress tensor update [H L2 T-2 ~> m3 s-2 or kg s-2]
+    str_xx_BS      ! The diagonal term in the stress tensor due to backscatter [H L2 T-2 ~> m3 s-2 or kg s-2]
   real :: Del2vort_h ! Laplacian of vorticity at h-points [L-2 T-1 ~> m-2 s-1]
   real :: grad_vel_mag_bt_h ! Magnitude of the barotropic velocity gradient tensor squared at h-points [T-2 ~> s-2]
   real :: boundary_mask_h ! A mask that zeroes out cells with at least one land edge [nondim]
@@ -366,8 +363,7 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
     hq, &          ! harmonic mean of the harmonic means of the u- & v point thicknesses [H ~> m or kg m-2]
                    ! This form guarantees that hq/hu < 4.
     GME_effic_q, & ! The filtered efficiency of the GME terms at q points [nondim]
-    str_xy_BS, &      ! The cross term in the stress tensor due to backscatter [H L2 T-2 ~> m3 s-2 or kg s-2]
-    d_str_q     ! Stress tensor update [H L2 T-2 ~> m3 s-2 or kg s-2]
+    str_xy_BS      ! The cross term in the stress tensor due to backscatter [H L2 T-2 ~> m3 s-2 or kg s-2]
   real :: grad_vel_mag_bt_q ! Magnitude of the barotropic velocity gradient tensor squared at q-points [T-2 ~> s-2]
   real :: boundary_mask_q ! A mask that zeroes out cells with at least one land edge [nondim]
 
@@ -377,9 +373,9 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
     vort_xy_q, & ! vertical vorticity at corner points [T-1 ~> s-1]
     sh_xy_q,   & ! horizontal shearing strain at corner points [T-1 ~> s-1]
     GME_coeff_q, &  !< GME coeff. at q-points [L2 T-1 ~> m2 s-1]
-    visc_limit_q, &
-    visc_limit_q_flag, &
-    visc_limit_q_frac, &
+    visc_limit_q, &  ! used to stabilize the EY24_EBT_BS backscatter
+    visc_limit_q_flag, & ! determines whether backscatter is shut off
+    visc_limit_q_frac, & ! determines how close backscatter is to shutting off
     BS_coeff_q, &  ! A diagnostic array of the backscatter coefficient [L2 T-1 ~> m2 s-1]
     ShSt         ! A diagnostic array of shear stress [T-1 ~> s-1].
   real, dimension(SZIB_(G),SZJ_(G),SZK_(GV)+1) :: &
@@ -398,15 +394,14 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
     div_xx_h,      & ! horizontal divergence [T-1 ~> s-1]
     sh_xx_h,       & ! horizontal tension (du/dx - dv/dy) including metric terms [T-1 ~> s-1]
     NoSt, &          ! A diagnostic array of normal stress [T-1 ~> s-1].
-    BS_coeff_h, &   ! A diagnostic array of the backscatter coefficient [L2 T-1 ~> m2 s-1]
-    delu_mag
+    BS_coeff_h       ! A diagnostic array of the backscatter coefficient [L2 T-1 ~> m2 s-1]
   real, dimension(SZI_(G),SZJ_(G),SZK_(G)) :: &
     grid_Re_Kh, &    ! Grid Reynolds number for Laplacian horizontal viscosity at h points [nondim]
     grid_Re_Ah, &    ! Grid Reynolds number for Biharmonic horizontal viscosity at h points [nondim]
     GME_coeff_h, &   ! GME coefficient at h-points [L2 T-1 ~> m2 s-1]
-    visc_limit_h, &
-    visc_limit_h_flag, &
-    visc_limit_h_frac
+    visc_limit_h, &  ! Used to stabilize the EY24_EBT_BS backscatter
+    visc_limit_h_flag, & ! determines whether backscatter is shut off
+    visc_limit_h_frac    ! determines how close backscatter is to shutting off
   real, dimension(SZIB_(G),SZJ_(G),SZK_(GV)) :: &
     u_smooth         ! Zonal velocity, smoothed with a spatial low-pass filter [L T-1 ~> m s-1]
   real, dimension(SZI_(G),SZJB_(G),SZK_(GV)) :: &
@@ -1180,6 +1175,19 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
         Kh(i,j) = max(Kh(i,j), CS%Kh_bg_min)
       enddo ; enddo
 
+      if (use_MEKE_Ku .and. .not. CS%EY24_EBT_BS) then
+        ! *Add* the MEKE contribution (which might be negative)
+        if (CS%res_scale_MEKE) then
+          do j=js_Kh,je_Kh ; do i=is_Kh,ie_Kh
+            Kh(i,j) = Kh(i,j) + MEKE%Ku(i,j) * VarMix%Res_fn_h(i,j)
+          enddo ; enddo
+        else
+          do j=js_Kh,je_Kh ; do i=is_Kh,ie_Kh
+            Kh(i,j) = Kh(i,j) + MEKE%Ku(i,j)
+          enddo ; enddo
+        endif
+      endif
+
       if (CS%anisotropic) then
         do j=js_Kh,je_Kh ; do i=is_Kh,ie_Kh
           ! *Add* the tension component of anisotropic viscosity
@@ -1213,6 +1221,12 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
         enddo ; enddo
       endif
 
+      if (CS%id_Kh_h>0 .or. CS%debug) then
+        do j=js_Kh,je_Kh ; do i=is_Kh,ie_Kh
+          Kh_h(i,j,k) = Kh(i,j)
+        enddo ; enddo
+      endif
+
       if (CS%id_grid_Re_Kh>0) then
         do j=js,je ; do i=is,ie
           KE = 0.125*((u(I,j,k)+u(I-1,j,k))**2 + (v(i,J,k)+v(i,J-1,k))**2)
@@ -1230,12 +1244,6 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
       if (CS%id_sh_xx_h>0) then
         do j=js,je ; do i=is,ie
           sh_xx_h(i,j,k) = sh_xx(i,j)
-        enddo ; enddo
-      endif
-
-      if (CS%id_Kh_h>0 .or. CS%debug) then
-        do j=js_Kh,je_Kh ; do i=is_Kh,ie_Kh
-          Kh_h(i,j,k) = Kh(i,j)
         enddo ; enddo
       endif
 
@@ -1358,17 +1366,10 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
         enddo ; enddo
       endif
 
-      if (CS%Re_Ah > 0.0 .or. CS%bound_Kh_with_MEKE) then
+      if (CS%Re_Ah > 0.0 .or. CS%EY24_EBT_BS) then
         do j=js_Kh,je_Kh ; do i=is_Kh,ie_Kh
-          !KE = 0.125*((u(I,j,k)+u(I-1,j,k))**2 + (v(i,J,k)+v(i,J-1,k))**2)
-          delu_mag(i,j,k) = SQRT( 0.25 * (div_xx(i,j)**2 + sh_xx(i,j)**2 + sh_xy(i,j)**2 + vort_xy(i,j)**2) )
-          !Ah(i,j) = sqrt(KE) * CS%Re_Ah_const_xx(i,j)
-        enddo ; enddo
-      endif
-
-      if (CS%Re_Ah > 0.0) then
-        do j=js_Kh,je_Kh ; do i=is_Kh,ie_Kh
-          Ah(i,j) = (delu_mag(i,j,k) * CS%grid_sp_h2(i,j)**2) / CS%Re_Ah
+          KE = 0.125*((u(I,j,k)+u(I-1,j,k))**2 + (v(i,J,k)+v(i,J-1,k))**2)
+          Ah(i,j) = sqrt(KE) * CS%Re_Ah_const_xx(i,j)
         enddo ; enddo
       endif
 
@@ -1384,7 +1385,7 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
         endif
       endif
 
-      if (CS%bound_Kh_with_MEKE) then
+      if (CS%EY24_EBT_BS) then
           do j=js_Kh,je_Kh ; do i=is_Kh,ie_Kh
             tmp = CS%KS_coef * hrat_min(i,j) * CS%Ah_Max_xx_KS(i,j)
             visc_limit_h(i,j,k) = tmp
@@ -1410,12 +1411,11 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
         enddo ; enddo
       endif
 
-      if ((CS%id_grid_Re_Ah>0) .or. CS%bound_Kh_with_MEKE) then
+      if ((CS%id_grid_Re_Ah>0) .or. CS%EY24_EBT_BS) then
         do j=js,je ; do i=is,ie
           KE = 0.125 * ((u(I,j,k) + u(I-1,j,k))**2 + (v(i,J,k) + v(i,J-1,k))**2)
           grid_Ah = max(Ah(i,j), CS%min_grid_Ah)
-          !grid_Re_Ah(i,j,k) = (sqrt(KE) * CS%grid_sp_h3(i,j)) / grid_Ah
-          grid_Re_Ah(i,j,k) = (delu_mag(i,j,k) * CS%grid_sp_h2(i,j)**2) / grid_Ah
+          grid_Re_Ah(i,j,k) = (sqrt(KE) * CS%grid_sp_h3(i,j)) / grid_Ah
         enddo ; enddo
       endif
 
@@ -1423,7 +1423,6 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
         d_del2u = G%IdyCu(I,j) * Del2u(I,j) - G%IdyCu(I-1,j) * Del2u(I-1,j)
         d_del2v = G%IdxCv(i,J) * Del2v(i,J) - G%IdxCv(i,J-1) * Del2v(i,J-1)
         d_str = Ah(i,j) * (CS%DY_dxT(i,j) * d_del2u - CS%DX_dyT(i,j) * d_del2v)
-        d_str_h(i,j) = d_str
 
         str_xx(i,j) = str_xx(i,j) + d_str
 
@@ -1435,14 +1434,11 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
     endif ! Get biharmonic coefficient at h points and biharmonic part of str_xx
 
     ! Backscatter using MEKE
-      if (CS%bound_Kh_with_MEKE) then
+      if (CS%EY24_EBT_BS) then
         do j=Jsq,Jeq+1 ; do i=Isq,Ieq+1
           if (visc_limit_h_flag(i,j,k) > 0) then
             tmp = 0.
           else
-            !tmp = -2.0 * CS%bound_Kh_with_MEKE_coef * MEKE%MEKE(i,j) / &
-            !       SQRT( 0.5*(div_xx(i,j)**2 + sh_xx(i,j)**2) + &
-            !       0.5* (0.25 * ( (sh_xy(I,J) + sh_xy(I-1,J-1)) + (sh_xy(I-1,J) + sh_xy(I,J-1)) ) )**2 + eps)
             tmp = MEKE%Ku(i,j)
           endif
           Kh_BS(i,j) = tmp * ( VarMix%ebt_struct(i,j,k)**(CS%EBT_power))
@@ -1617,6 +1613,12 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
 
         Kh(I,J) = max(Kh(I,J), CS%Kh_bg_min) ! Place a floor on the viscosity, if desired.
 
+        if (use_MEKE_Ku .and. .not. CS%EY24_EBT_BS) then
+          ! *Add* the MEKE contribution (might be negative)
+          Kh(I,J) = Kh(I,J) + 0.25*( (MEKE%Ku(i,j) + MEKE%Ku(i+1,j+1)) + &
+                           (MEKE%Ku(i+1,j) + MEKE%Ku(i,j+1)) ) * meke_res_fn
+        endif
+
         if (CS%anisotropic) &
           ! *Add* the shear component of anisotropic viscosity
           Kh(I,J) = Kh(I,J) + CS%Kh_aniso * CS%n1n2_q(I,J)**2
@@ -1724,9 +1726,8 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
 
       if (CS%Re_Ah > 0.0) then
         do J=js-1,Jeq ; do I=is-1,Ieq
-          Ah(i,j) = (delu_mag(i,j,k) * CS%grid_sp_h2(i,j)**2) / CS%Re_Ah
-          !KE = 0.125 * ((u(I,j,k) + u(I,j+1,k))**2 + (v(i,J,k) + v(i+1,J,k))**2)
-          !Ah(I,J) = sqrt(KE) * CS%Re_Ah_const_xy(I,J)
+          KE = 0.125 * ((u(I,j,k) + u(I,j+1,k))**2 + (v(i,J,k) + v(i+1,J,k))**2)
+          Ah(I,J) = sqrt(KE) * CS%Re_Ah_const_xy(I,J)
         enddo ; enddo
       endif
 
@@ -1742,7 +1743,7 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
         endif
       endif
 
-      if (CS%bound_Kh_with_MEKE) then
+      if (CS%EY24_EBT_BS) then
           do J=js-1,Jeq ; do I=is-1,Ieq
             tmp = CS%KS_coef *hrat_min(I,J) * CS%Ah_Max_xy_KS(I,J)
             visc_limit_q(I,J,k) = tmp
@@ -1769,7 +1770,6 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
       ! Again, need to initialize str_xy as if its biharmonic
       do J=js-1,Jeq ; do I=is-1,Ieq
         d_str = Ah(I,J) * (dDel2vdx(I,J) + dDel2udy(I,J))
-        d_str_q(I,J) = d_str
 
         str_xy(I,J) = str_xy(I,J) + d_str
 
@@ -1779,20 +1779,15 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
     endif ! Get Ah at q points and biharmonic part of str_xy
 
       ! Backscatter using MEKE
-      if (CS%bound_Kh_with_MEKE) then
+      if (CS%EY24_EBT_BS) then
         !if (grid_Re_Ah(i,j,k) < 1.) then
         do j=Jsq,Jeq+1 ; do i=Isq,Ieq+1
           if (visc_limit_q_flag(I,J,k) > 0) then
             tmp = 0.
           else
-            !tmp = -2.0 * CS%bound_Kh_with_MEKE_coef * &
-            !       0.25 * ( (MEKE%MEKE(i,j) + MEKE%MEKE(i+1,j+1)) + (MEKE%MEKE(i+1,j) + MEKE%MEKE(i,j+1)) ) / &
-            !       SQRT( 0.5 * ( (0.25*( (div_xx(i,j)+div_xx(i+1,j+1)) + (div_xx(i+1,j)+div_xx(i,j+1)) )  )**2 + &
-            !       (0.25*( (sh_xx(i,j)+sh_xx(i+1,j+1)) + (sh_xx(i+1,j)+sh_xx(i,j+1)) )  )**2) + &
-            !       0.5 * sh_xy(I,J)**2 + eps)
             tmp = 0.25*( (MEKE%Ku(i,j) + MEKE%Ku(i+1,j+1)) + (MEKE%Ku(i+1,j) + MEKE%Ku(i,j+1)) )
           endif
-          Kh_BS(I,J) = tmp * ( VarMix%ebt_struct(i,j,k)**(CS%EBT_power))
+          Kh_BS(I,J) = tmp * ( (VarMix%ebt_struct(i,j,k) + VarMix%ebt_struct(i+1,j+1,k)) + (VarMix%ebt_struct(i+1,j,k) + VarMix%ebt_struct(i,j+1,k)) )**(CS%EBT_power)
         enddo ; enddo
 
          do J=js-1,Jeq ; do I=is-1,Ieq
@@ -2126,10 +2121,9 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
   if (CS%id_visc_limit_h_flag>0)      call post_data(CS%id_visc_limit_h_flag, visc_limit_h_flag, CS%diag)
   if (CS%id_visc_limit_q_flag>0)      call post_data(CS%id_visc_limit_q_flag, visc_limit_q_flag, CS%diag)
 
-  if (CS%bound_Kh_with_MEKE) then
+  if (CS%EY24_EBT_BS) then
     if (CS%id_BS_coeff_h>0)      call post_data(CS%id_BS_coeff_h, BS_coeff_h, CS%diag)
     if (CS%id_BS_coeff_q>0)      call post_data(CS%id_BS_coeff_q, BS_coeff_q, CS%diag)
-    if (CS%id_delu_mag>0)      call post_data(CS%id_delu_mag, delu_mag, CS%diag)
   endif
 
   if (CS%debug) then
@@ -2348,13 +2342,13 @@ subroutine hor_visc_init(Time, G, GV, US, param_file, diag, CS, ADp)
                  "If true, the Laplacian coefficient is locally limited "//&
                  "to be stable with a better bounding than just BOUND_KH.", &
                  default=CS%bound_Kh, do_not_log=.not.CS%Laplacian)
-  call get_param(param_file, mdl, "BOUND_KH_WITH_MEKE", CS%bound_Kh_with_MEKE, &
-                 "If true, bounds the Laplacian viscosity using an expression "//&
-                 "that is proportional to the EKE. ", &
+  call get_param(param_file, mdl, "EY24_EBT_BS", CS%EY24_EBT_BS, &
+                 "If true, use the equivalent barotropic backscatter "//&
+                 "developed by Yankovsky et al. (2024). ", &
                  default=.false., do_not_log=.not.CS%Laplacian)
   if (.not.CS%Laplacian) CS%bound_Kh = .false.
   if (.not.CS%Laplacian) CS%better_bound_Kh = .false.
-  if (.not.(CS%Laplacian.and.use_MEKE)) CS%bound_Kh_with_MEKE = .false.
+  if (.not.(CS%Laplacian.and.use_MEKE)) CS%EY24_EBT_BS = .false.
   call get_param(param_file, mdl, "ANISOTROPIC_VISCOSITY", CS%anisotropic, &
                  "If true, allow anistropic viscosity in the Laplacian "//&
                  "horizontal viscosity.", default=.false., &
@@ -2505,17 +2499,17 @@ subroutine hor_visc_init(Time, G, GV, US, param_file, diag, CS, ADp)
                  "viscosity bounds to the theoretical maximum for "//&
                  "stability without considering other terms.", units="nondim", &
                  default=0.8, do_not_log=.not.(CS%better_bound_Ah .or. CS%better_bound_Kh))
-  call get_param(param_file, mdl, "BOUND_KH_WITH_MEKE_COEF", CS%bound_Kh_with_MEKE_coef, &
-                 "A nondimensional coefficient to make the MEKE bound on the Laplacian "//&
-                 "viscosity stricter.", units="nondim", &
-                 default=1.0, do_not_log=.not.(CS%bound_Kh_with_MEKE))
+  call get_param(param_file, mdl, "EY24_EBT_BS_COEF", CS%EY24_EBT_BS_coef, &
+                 "A nondimensional coefficient that tunes the backscatter magnitude "//&
+                 "in the Yankovsky et al. (2024) scheme.", units="nondim", &
+                 default=1.0, do_not_log=.not.(CS%EY24_EBT_BS))
   call get_param(param_file, mdl, "EBT_POWER", CS%EBT_power, &
                  "Power to raise EBT vertical structure to", units="nondim", &
-                 default=1.0, do_not_log=.not.(CS%bound_Kh_with_MEKE))
+                 default=1.0, do_not_log=.not.(CS%EY24_EBT_BS))
   call get_param(param_file, mdl, "KILL_SWITCH_COEF", CS%KS_coef, &
                  "A nondimensional coefficient on the biharmonic viscosity that "// &
                  "sets the kill switch for backscatter. Default is 1.0.", units="nondim", &
-                 default=1.0, do_not_log=.not.(CS%bound_Kh_with_MEKE))
+                 default=1.0, do_not_log=.not.(CS%EY24_EBT_BS))
   call get_param(param_file, mdl, "NOSLIP", CS%no_slip, &
                  "If true, no slip boundary conditions are used; otherwise "//&
                  "free slip boundary conditions are assumed. The "//&
@@ -2584,7 +2578,7 @@ subroutine hor_visc_init(Time, G, GV, US, param_file, diag, CS, ADp)
   call get_param(param_file, mdl, "KILL_SWITCH_TIMESCALE", CS%KS_timescale, &
                  "A timescale for computing the CFL limit for viscosity "// &
                  "that determines when backscatter is shut off. Default is DT.", &
-                 default= dt ,  units="s", scale=US%s_to_T, do_not_log=.not.(CS%bound_Kh_with_MEKE))
+                 default= dt ,  units="s", scale=US%s_to_T, do_not_log=.not.(CS%EY24_EBT_BS))
 
   if (CS%no_slip .and. CS%biharmonic) &
     call MOM_error(FATAL,"ERROR: NOSLIP and BIHARMONIC cannot be defined "// &
@@ -2609,11 +2603,11 @@ subroutine hor_visc_init(Time, G, GV, US, param_file, diag, CS, ADp)
     ALLOC_(CS%grid_sp_h2(isd:ied,jsd:jed))   ; CS%grid_sp_h2(:,:) = 0.0
     ALLOC_(CS%Kh_bg_xx(isd:ied,jsd:jed))     ; CS%Kh_bg_xx(:,:) = 0.0
     ALLOC_(CS%Kh_bg_xy(IsdB:IedB,JsdB:JedB)) ; CS%Kh_bg_xy(:,:) = 0.0
-    if (CS%bound_Kh .or. CS%better_bound_Kh .or. CS%bound_Kh_with_MEKE) then
+    if (CS%bound_Kh .or. CS%better_bound_Kh .or. CS%EY24_EBT_BS) then
       ALLOC_(CS%Kh_Max_xx(Isd:Ied,Jsd:Jed)) ; CS%Kh_Max_xx(:,:) = 0.0
       ALLOC_(CS%Kh_Max_xy(IsdB:IedB,JsdB:JedB)) ; CS%Kh_Max_xy(:,:) = 0.0
     endif
-    if (CS%Smagorinsky_Kh .or. CS%bound_Kh_with_MEKE) then
+    if (CS%Smagorinsky_Kh .or. CS%EY24_EBT_BS) then
       ALLOC_(CS%Laplac2_const_xx(isd:ied,jsd:jed))     ; CS%Laplac2_const_xx(:,:) = 0.0
       ALLOC_(CS%Laplac2_const_xy(IsdB:IedB,JsdB:JedB)) ; CS%Laplac2_const_xy(:,:) = 0.0
     endif
@@ -2671,7 +2665,7 @@ subroutine hor_visc_init(Time, G, GV, US, param_file, diag, CS, ADp)
       ALLOC_(CS%Ah_Max_xx(isd:ied,jsd:jed))     ; CS%Ah_Max_xx(:,:) = 0.0
       ALLOC_(CS%Ah_Max_xy(IsdB:IedB,JsdB:JedB)) ; CS%Ah_Max_xy(:,:) = 0.0
     endif
-    if (CS%bound_Kh_with_MEKE) then
+    if (CS%EY24_EBT_BS) then
       ALLOC_(CS%Ah_Max_xx_KS(isd:ied,jsd:jed))     ; CS%Ah_Max_xx_KS(:,:) = 0.0
       ALLOC_(CS%Ah_Max_xy_KS(IsdB:IedB,JsdB:JedB)) ; CS%Ah_Max_xy_KS(:,:) = 0.0
     endif
@@ -2935,7 +2929,7 @@ subroutine hor_visc_init(Time, G, GV, US, param_file, diag, CS, ADp)
       CS%Ah_Max_xx(I,J) = 0.0
       if (denom > 0.0) then
         CS%Ah_Max_xx(I,J) = CS%bound_coef * 0.5 * Idt / denom
-        if (CS%bound_Kh_with_MEKE) then
+        if (CS%EY24_EBT_BS) then
         CS%Ah_Max_xx_KS(i,j) = CS%bound_coef * 0.5 / (CS%KS_timescale * denom)
         endif
       endif
@@ -2954,7 +2948,7 @@ subroutine hor_visc_init(Time, G, GV, US, param_file, diag, CS, ADp)
       CS%Ah_Max_xy(I,J) = 0.0
       if (denom > 0.0) then
         CS%Ah_Max_xy(I,J) = CS%bound_coef * 0.5 * Idt / denom
-        if (CS%bound_Kh_with_MEKE) then
+        if (CS%EY24_EBT_BS) then
         CS%Ah_Max_xy_KS(i,j) = CS%bound_coef * 0.5 / (CS%KS_timescale * denom)
         endif
       endif
@@ -3093,10 +3087,6 @@ subroutine hor_visc_init(Time, G, GV, US, param_file, diag, CS, ADp)
       'Shearing strain at q Points', 's-1', conversion=US%s_to_T)
     CS%id_sh_xx_h = register_diag_field('ocean_model', 'sh_xx_h', diag%axesTL, Time, &
       'Horizontal tension at h Points', 's-1', conversion=US%s_to_T)
-    if (CS%bound_Kh_with_MEKE) then
-      CS%id_delu_mag = register_diag_field('ocean_model', 'delu_mag', diag%axesTL, Time, &
-        'Velocity gradient norm', 's-1')
-    endif
 
     if (CS%id_grid_Re_Kh > 0) &
       ! Compute a smallest Laplacian viscosity capable of modifying the
@@ -3125,7 +3115,7 @@ subroutine hor_visc_init(Time, G, GV, US, param_file, diag, CS, ADp)
         'W m-2', conversion=US%RZ3_T3_to_W_m2*US%L_to_Z**2)
   endif
 
-  if (CS%bound_Kh_with_MEKE) then
+  if (CS%EY24_EBT_BS) then
     CS%id_BS_coeff_h = register_diag_field('ocean_model', 'BS_coeff_h', diag%axesTL, Time, &
         'Backscatter coefficient at h points', 'm2 s-1')
     CS%id_BS_coeff_q = register_diag_field('ocean_model', 'BS_coeff_q', diag%axesBL, Time, &
@@ -3378,7 +3368,7 @@ subroutine hor_visc_end(CS)
     if (CS%bound_Ah) then
       DEALLOC_(CS%Ah_Max_xx) ; DEALLOC_(CS%Ah_Max_xy)
     endif
-    if (CS%bound_Kh_with_MEKE) then
+    if (CS%EY24_EBT_BS) then
       DEALLOC_(CS%Ah_Max_xx_KS) ; DEALLOC_(CS%Ah_Max_xy_KS)
     endif
     if (CS%Smagorinsky_Ah) then
