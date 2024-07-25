@@ -1366,7 +1366,7 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
         enddo ; enddo
       endif
 
-      if (CS%Re_Ah > 0.0 .or. CS%EY24_EBT_BS) then
+      if (CS%Re_Ah > 0.0) then
         do j=js_Kh,je_Kh ; do i=is_Kh,ie_Kh
           KE = 0.125*((u(I,j,k)+u(I-1,j,k))**2 + (v(i,J,k)+v(i,J-1,k))**2)
           Ah(i,j) = sqrt(KE) * CS%Re_Ah_const_xx(i,j)
@@ -1411,7 +1411,7 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
         enddo ; enddo
       endif
 
-      if ((CS%id_grid_Re_Ah>0) .or. CS%EY24_EBT_BS) then
+      if ((CS%id_grid_Re_Ah>0)) then
         do j=js,je ; do i=is,ie
           KE = 0.125 * ((u(I,j,k) + u(I-1,j,k))**2 + (v(i,J,k) + v(i,J-1,k))**2)
           grid_Ah = max(Ah(i,j), CS%min_grid_Ah)
