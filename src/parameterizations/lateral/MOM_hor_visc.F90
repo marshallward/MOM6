@@ -1179,11 +1179,11 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
         ! *Add* the MEKE contribution (which might be negative)
         if (CS%res_scale_MEKE) then
           do j=js_Kh,je_Kh ; do i=is_Kh,ie_Kh
-            Kh(i,j) = Kh(i,j) + MEKE%Ku(i,j) * VarMix%Res_fn_h(i,j)
+            Kh(i,j) = Kh(i,j) + MEKE%Ku(i,j) * VarMix%Res_fn_h(i,j) * VarMix%BS_struct(i,j,k)
           enddo ; enddo
         else
           do j=js_Kh,je_Kh ; do i=is_Kh,ie_Kh
-            Kh(i,j) = Kh(i,j) + MEKE%Ku(i,j)
+            Kh(i,j) = Kh(i,j) + MEKE%Ku(i,j) * VarMix%BS_struct(i,j,k)
           enddo ; enddo
         endif
       endif
@@ -1615,8 +1615,10 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
 
         if (use_MEKE_Ku .and. .not. CS%EY24_EBT_BS) then
           ! *Add* the MEKE contribution (might be negative)
-          Kh(I,J) = Kh(I,J) + 0.25*( (MEKE%Ku(i,j) + MEKE%Ku(i+1,j+1)) + &
-                           (MEKE%Ku(i+1,j) + MEKE%Ku(i,j+1)) ) * meke_res_fn
+          Kh(I,J) = Kh(I,J) + 0.25*( (MEKE%Ku(i,j)*VarMix%BS_struct(i,j,k)) + &
+                                     (MEKE%Ku(i+1,j+1)*VarMix%BS_struct(i,j,k)) + &
+                                     (MEKE%Ku(i+1,j)*VarMix%BS_struct(i,j,k)) + &
+                                     (MEKE%Ku(i,j+1)*VarMix%BS_struct(i,j,k)) ) * meke_res_fn
         endif
 
         if (CS%anisotropic) &
