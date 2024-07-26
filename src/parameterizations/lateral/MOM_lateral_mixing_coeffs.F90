@@ -231,7 +231,7 @@ subroutine calc_resoln_function(h, tv, G, GV, US, CS)
   real :: dx_term ! A term in the denominator [L2 T-2 ~> m2 s-2] or [m2 s-2]
   integer :: power_2
   integer :: is, ie, js, je, Isq, Ieq, Jsq, Jeq, nz
-  integer :: i, j
+  integer :: i, j, k
   is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec ; nz = GV%ke
   Isq = G%IscB ; Ieq = G%IecB ; Jsq = G%JscB ; Jeq = G%JecB
 
@@ -265,10 +265,6 @@ subroutine calc_resoln_function(h, tv, G, GV, US, CS)
     do k=1,nz ; do j=G%jsd,G%jed ; do i=G%isd,G%ied
       CS%BS_struct(i,j,k) = CS%ebt_struct(i,j,k)**CS%BS_EBT_power
     enddo ; enddo ; enddo
-  else
-    do k=1,nz ; do j=G%jsd,G%jed ; do i=G%isd,G%ied
-      CS%BS_struct(i,j,k) = 1.0
-    enddo ; enddo ; enddo 
   endif  
 
   ! Calculate and store the ratio between deformation radius and grid-spacing
@@ -1324,9 +1320,8 @@ subroutine VarMix_init(Time, G, GV, US, param_file, diag, CS)
                  units="m", default=-1.0, scale=GV%m_to_H)
     allocate(CS%ebt_struct(isd:ied,jsd:jed,GV%ke), source=0.0)
   endif
- ! if (CS%BS_EBT_power>0.) then
   allocate(CS%BS_struct(isd:ied,jsd:jed,GV%ke), source=0.0)
- ! endif
+  CS%BS_struct(:,:,:) = 1.0
 
   if (CS%use_stored_slopes) then
     if (KhTr_Slope_Cff>0. .or. KhTh_Slope_Cff>0.) then
@@ -1677,7 +1672,7 @@ subroutine VarMix_end(CS)
 
   if (CS%Resoln_use_ebt .or. CS%khth_use_ebt_struct .or. CS%kdgl90_use_ebt_struct .or. CS%BS_EBT_power>0.) &
     deallocate(CS%ebt_struct)
-!  if (CS%BS_EBT_power>0.) deallocate(CS%BS_struct)
+  if (allocated(CS%BS_struct)) deallocate(CS%BS_struct)
 
   if (CS%use_stored_slopes) then
     deallocate(CS%slope_x)

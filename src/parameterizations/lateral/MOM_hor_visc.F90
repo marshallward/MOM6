@@ -1441,7 +1441,7 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
           else
             tmp = MEKE%Ku(i,j)
           endif
-          Kh_BS(i,j) = tmp * ( VarMix%ebt_struct(i,j,k)**(CS%EBT_power))
+          Kh_BS(i,j) = tmp * VarMix%BS_struct(i,j,k)
         enddo ; enddo
 
         do j=Jsq,Jeq+1 ; do i=Isq,Ieq+1
@@ -1789,7 +1789,8 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
           else
             tmp = 0.25*( (MEKE%Ku(i,j) + MEKE%Ku(i+1,j+1)) + (MEKE%Ku(i+1,j) + MEKE%Ku(i,j+1)) )
           endif
-          Kh_BS(I,J) = tmp * ( (VarMix%ebt_struct(i,j,k) + VarMix%ebt_struct(i+1,j+1,k)) + (VarMix%ebt_struct(i+1,j,k) + VarMix%ebt_struct(i,j+1,k)) )**(CS%EBT_power)
+          Kh_BS(I,J) = tmp*( (VarMix%BS_struct(i,j,k) + VarMix%BS_struct(i+1,j+1,k)) + &
+                             (VarMix%BS_struct(i+1,j,k) + VarMix%BS_struct(i,j+1,k)) )
         enddo ; enddo
 
          do J=js-1,Jeq ; do I=is-1,Ieq
@@ -2572,9 +2573,6 @@ subroutine hor_visc_init(Time, G, GV, US, param_file, diag, CS, ADp)
                  "A nondimensional coefficient that tunes the backscatter magnitude "//&
                  "in the Yankovsky et al. (2024) scheme.", units="nondim", &
                  default=1.0, do_not_log=.not.(CS%EY24_EBT_BS))
-  call get_param(param_file, mdl, "EBT_POWER", CS%EBT_power, &
-                 "Power to raise EBT vertical structure to", units="nondim", &
-                 default=1.0, do_not_log=.not.(CS%EY24_EBT_BS))
   call get_param(param_file, mdl, "KILL_SWITCH_COEF", CS%KS_coef, &
                  "A nondimensional coefficient on the biharmonic viscosity that "// &
                  "sets the kill switch for backscatter. Default is 1.0.", units="nondim", &
@@ -2999,7 +2997,7 @@ subroutine hor_visc_init(Time, G, GV, US, param_file, diag, CS, ADp)
       if (denom > 0.0) then
         CS%Ah_Max_xx(I,J) = CS%bound_coef * 0.5 * Idt / denom
         if (CS%EY24_EBT_BS) then
-        CS%Ah_Max_xx_KS(i,j) = CS%bound_coef * 0.5 / (CS%KS_timescale * denom)
+          CS%Ah_Max_xx_KS(i,j) = CS%bound_coef * 0.5 / (CS%KS_timescale * denom)
         endif
       endif
 
@@ -3018,7 +3016,7 @@ subroutine hor_visc_init(Time, G, GV, US, param_file, diag, CS, ADp)
       if (denom > 0.0) then
         CS%Ah_Max_xy(I,J) = CS%bound_coef * 0.5 * Idt / denom
         if (CS%EY24_EBT_BS) then
-        CS%Ah_Max_xy_KS(i,j) = CS%bound_coef * 0.5 / (CS%KS_timescale * denom)
+          CS%Ah_Max_xy_KS(i,j) = CS%bound_coef * 0.5 / (CS%KS_timescale * denom)
         endif
       endif
 
