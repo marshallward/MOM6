@@ -1435,11 +1435,10 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
       if (CS%EY24_EBT_BS) then
         do j=Jsq,Jeq+1 ; do i=Isq,Ieq+1
           if (visc_limit_h_flag(i,j,k) > 0) then
-            tmp = 0.
+            Kh_BS(i,j) = 0.
           else
-            tmp = MEKE%Ku(i,j)
+            Kh_BS(i,j) = MEKE%Ku(i,j) * VarMix%BS_struct(i,j,k)
           endif
-          Kh_BS(i,j) = tmp * VarMix%BS_struct(i,j,k)
         enddo ; enddo
 
         do j=Jsq,Jeq+1 ; do i=Isq,Ieq+1
@@ -1613,10 +1612,10 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
 
         if (use_MEKE_Ku .and. .not. CS%EY24_EBT_BS) then
           ! *Add* the MEKE contribution (might be negative)
-          Kh(I,J) = Kh(I,J) + 0.25*( (MEKE%Ku(i,j)*VarMix%BS_struct(i,j,k)) + &
-                                     (MEKE%Ku(i+1,j+1)*VarMix%BS_struct(i,j,k)) + &
-                                     (MEKE%Ku(i+1,j)*VarMix%BS_struct(i,j,k)) + &
-                                     (MEKE%Ku(i,j+1)*VarMix%BS_struct(i,j,k)) ) * meke_res_fn
+          Kh(I,J) = Kh(I,J) + 0.25*( ((MEKE%Ku(i,j)*VarMix%BS_struct(i,j,k)) + &
+                                     (MEKE%Ku(i+1,j+1)*VarMix%BS_struct(i+1,j+1,k))) + &
+                                     ((MEKE%Ku(i+1,j)*VarMix%BS_struct(i+1,j,k)) + &
+                                     (MEKE%Ku(i,j+1)*VarMix%BS_struct(i,j+1,k))) ) * meke_res_fn
         endif
 
         if (CS%anisotropic) &
@@ -1783,12 +1782,13 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
         !if (grid_Re_Ah(i,j,k) < 1.) then
         do j=Jsq,Jeq+1 ; do i=Isq,Ieq+1
           if (visc_limit_q_flag(I,J,k) > 0) then
-            tmp = 0.
+            Kh_BS(I,J) = 0.
           else
-            tmp = 0.25*( (MEKE%Ku(i,j) + MEKE%Ku(i+1,j+1)) + (MEKE%Ku(i+1,j) + MEKE%Ku(i,j+1)) )
+            Kh_BS(I,J) = 0.25*( ((MEKE%Ku(i,j)*VarMix%BS_struct(i,j,k)) + &
+                         (MEKE%Ku(i+1,j+1)*VarMix%BS_struct(i+1,j+1,k))) + &
+                         ((MEKE%Ku(i+1,j)*VarMix%BS_struct(i+1,j,k)) + &
+                         (MEKE%Ku(i,j+1)*VarMix%BS_struct(i,j+1,k))) )
           endif
-          Kh_BS(I,J) = tmp*( (VarMix%BS_struct(i,j,k) + VarMix%BS_struct(i+1,j+1,k)) + &
-                             (VarMix%BS_struct(i+1,j,k) + VarMix%BS_struct(i,j+1,k)) )
         enddo ; enddo
 
          do J=js-1,Jeq ; do I=is-1,Ieq
