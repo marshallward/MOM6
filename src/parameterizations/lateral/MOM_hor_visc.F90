@@ -50,8 +50,9 @@ type, public :: hor_visc_CS ; private
                              !! limited to guarantee stability.
   logical :: better_bound_Kh !< If true, use a more careful bounding of the
                              !! Laplacian viscosity to guarantee stability.
-  logical :: EY24_EBT_BS     !! If true, use a kill switch to control the backscatter scheme
-                             !< in MEKE; developed by Yankovsky et al. 2024
+  logical :: EY24_EBT_BS     !! If true, use an equivalent barotropic backscatter
+                             !! with a stabilizing kill switch in MEKE,
+                             !< developed by Yankovsky et al. 2024
   logical :: bound_Ah        !< If true, the biharmonic coefficient is locally
                              !! limited to guarantee stability.
   logical :: better_bound_Ah !< If true, use a more careful bounding of the
@@ -65,7 +66,6 @@ type, public :: hor_visc_CS ; private
   real    :: KS_coef         !! A nondimensional coefficient on the biharmonic viscosity that sets the
                              !< kill switch for backscatter. Default is 1.0.
   real    :: KS_timescale    !! A timescale for computing CFL limit for turning off backscatter (~DT)
-  real    :: EBT_power       !! Power to raise EBT vertical structure to. Default 1.
   logical :: backscatter_underbound !< If true, the bounds on the biharmonic viscosity are allowed
                              !! to increase where the Laplacian viscosity is negative (due to
                              !! backscatter parameterizations) beyond the largest timestep-dependent
@@ -2411,7 +2411,7 @@ subroutine hor_visc_init(Time, G, GV, US, param_file, diag, CS, ADp)
                  "to be stable with a better bounding than just BOUND_KH.", &
                  default=CS%bound_Kh, do_not_log=.not.CS%Laplacian)
   call get_param(param_file, mdl, "EY24_EBT_BS", CS%EY24_EBT_BS, &
-                 "If true, use the kill switch to control the backscatter "//&
+                 "If true, use the the backscatter scheme (EBT mode with kill switch)"//&
                  "developed by Yankovsky et al. (2024). ", &
                  default=.false., do_not_log=.not.CS%Laplacian)
   if (.not.CS%Laplacian) CS%bound_Kh = .false.
