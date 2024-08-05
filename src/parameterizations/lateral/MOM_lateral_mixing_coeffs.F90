@@ -265,7 +265,7 @@ subroutine calc_resoln_function(h, tv, G, GV, US, CS)
     do k=1,nz ; do j=G%jsd,G%jed ; do i=G%isd,G%ied
       CS%BS_struct(i,j,k) = CS%ebt_struct(i,j,k)**CS%BS_EBT_power
     enddo ; enddo ; enddo
-  endif 
+  endif
 
   ! Calculate and store the ratio between deformation radius and grid-spacing
   ! at h-points [nondim].
