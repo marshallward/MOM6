@@ -668,7 +668,7 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
   !$OMP   KH_u_GME, KH_v_GME, grid_Re_Kh, grid_Re_Ah, NoSt, ShSt, hu_cont, hv_cont &
   !$OMP ) &
   !$OMP private( &
-  !$OMP   i, j, k, n, &
+  !$OMP   i, j, k, n, tmp, &
   !$OMP   dudx, dudy, dvdx, dvdy, sh_xx, sh_xy, h_u, h_v, &
   !$OMP   Del2u, Del2v, DY_dxBu, DX_dyBu, sh_xx_bt, sh_xy_bt, &
   !$OMP   str_xx, str_xy, bhstr_xx, bhstr_xy, str_xx_GME, str_xy_GME, &
@@ -684,7 +684,12 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
   !$OMP   dudx_smooth, dudy_smooth, dvdx_smooth, dvdy_smooth, &
   !$OMP   vort_xy_smooth, vort_xy_dx_smooth, vort_xy_dy_smooth, &
   !$OMP   sh_xx_smooth, sh_xy_smooth, &
-  !$OMP   vert_vort_mag_smooth, m_leithy, Ah_sq, AhLthy &
+  !$OMP   vert_vort_mag_smooth, m_leithy, Ah_sq, AhLthy, &
+  !$OMP   Kh_BS, str_xx_bs, str_xy_bs, bs_coeff_h, bs_coeff_q &
+  !$OMP ) &
+  !$OMP firstprivate( &
+  !$OMP   visc_limit_h, visc_limit_h_frac, visc_limit_h_flag, &
+  !$OMP   visc_limit_q, visc_limit_q_frac, visc_limit_q_flag &
   !$OMP )
   do k=1,nz
 
