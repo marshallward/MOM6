@@ -63,9 +63,9 @@ type, public :: hor_visc_CS ; private
                              !! the viscosity bounds to the theoretical maximum
                              !! for stability without considering other terms [nondim].
                              !! The default is 0.8.
-  real    :: KS_coef         !! A nondimensional coefficient on the biharmonic viscosity that sets the
-                             !< kill switch for backscatter. Default is 1.0.
-  real    :: KS_timescale    !! A timescale for computing CFL limit for turning off backscatter (~DT)
+  real    :: KS_coef         !< A nondimensional coefficient on the biharmonic viscosity that sets the
+                             !! kill switch for backscatter. Default is 1.0.
+  real    :: KS_timescale    !< A timescale for computing CFL limit for turning off backscatter (~DT)
   logical :: backscatter_underbound !< If true, the bounds on the biharmonic viscosity are allowed
                              !! to increase where the Laplacian viscosity is negative (due to
                              !! backscatter parameterizations) beyond the largest timestep-dependent
@@ -1905,7 +1905,7 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
       enddo
     endif
 
-    if (find_FrictWork) then 
+    if (find_FrictWork) then
       if (CS%FrictWork_bug) then ; do j=js,je ; do i=is,ie
       ! Diagnose   str_xx*d_x u - str_yy*d_y v + str_xy*(d_y u + d_x v)
       ! This is the old formulation that includes energy diffusion
@@ -1946,7 +1946,7 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
                        ((u(I,j,k)-u(I,j-1,k))*G%IdyBu(I,J-1)          &
                       + (v(i+1,J-1,k)-v(i,J-1,k))*G%IdxBu(I,J-1)) ) ) )
         endif
-      enddo ; enddo 
+      enddo ; enddo
       else ; do j=js,je ; do i=is,ie
         if (visc_limit_h_flag(i,j,k) > 0) then
           FrictWork(i,j,k) = 0
