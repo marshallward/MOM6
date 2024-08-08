@@ -329,6 +329,7 @@ end subroutine ZB2020_end
 !! which is required for filtering operations
 subroutine ZB2020_copy_gradient_and_thickness(sh_xx, sh_xy, vort_xy, hq, &
                                        G, GV, CS, k)
+  !$acc routine
   type(ocean_grid_type),         intent(in)    :: G      !< The ocean's grid structure.
   type(verticalGrid_type),       intent(in)    :: GV     !< The ocean's vertical grid structure.
   type(ZB2020_CS),               intent(inout) :: CS     !< ZB2020 control structure.
@@ -352,7 +353,7 @@ subroutine ZB2020_copy_gradient_and_thickness(sh_xx, sh_xy, vort_xy, hq, &
   integer :: is, ie, js, je, Isq, Ieq, Jsq, Jeq
   integer :: i, j
 
-  call cpu_clock_begin(CS%id_clock_copy)
+  !!!call cpu_clock_begin(CS%id_clock_copy)
 
   is  = G%isc  ; ie  = G%iec  ; js  = G%jsc  ; je  = G%jec
   Isq = G%IscB ; Ieq = G%IecB ; Jsq = G%JscB ; Jeq = G%JecB
@@ -379,7 +380,7 @@ subroutine ZB2020_copy_gradient_and_thickness(sh_xx, sh_xy, vort_xy, hq, &
     CS%vort_xy(I,J,k) = vort_xy(I,J) * G%mask2dBu(I,J)
   enddo; enddo
 
-  call cpu_clock_end(CS%id_clock_copy)
+  !!!call cpu_clock_end(CS%id_clock_copy)
 
 end subroutine ZB2020_copy_gradient_and_thickness
 

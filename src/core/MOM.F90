@@ -753,6 +753,8 @@ subroutine step_MOM(forces_in, fluxes_in, sfc_state, Time_start, time_int_in, CS
       call calc_resoln_function(h, CS%tv, G, GV, US, CS%VarMix)
       call calc_depth_function(G, CS%VarMix)
       call disable_averaging(CS%diag)
+
+      !$acc enter data copyin(CS%VarMix%Res_fn_h, CS%VarMix%Res_fn_q)
     endif
   endif
   ! advance the random pattern if stochastic physics is active
@@ -1360,6 +1362,7 @@ subroutine step_MOM_dynamics(forces, p_surf_begin, p_surf_end, dt, dt_thermo, &
     call step_forward_MEKE(CS%MEKE, h, CS%VarMix%SN_u, CS%VarMix%SN_v, &
                            CS%visc, dt, G, GV, US, CS%MEKE_CSp, CS%uhtr, CS%vhtr, &
                            CS%u, CS%v, CS%tv, Time_local)
+    !$acc enter data copyin(CS%MEKE%Au)
   endif
   call disable_averaging(CS%diag)
 
@@ -1481,6 +1484,7 @@ subroutine step_MOM_tracer_dyn(CS, G, GV, US, h, Time_local)
     call step_forward_MEKE(CS%MEKE, h, CS%VarMix%SN_u, CS%VarMix%SN_v, &
                            CS%visc, CS%t_dyn_rel_adv, G, GV, US, CS%MEKE_CSp, CS%uhtr, CS%vhtr, &
                            CS%u, CS%v, CS%tv, Time_local)
+    !$acc enter data copyin(CS%MEKE%Au)
   endif
 
   if (associated(CS%tv%T)) then
@@ -1901,6 +1905,8 @@ subroutine step_offline(forces, fluxes, sfc_state, Time_start, time_interval, CS
             call calc_resoln_function(CS%h, CS%tv, G, GV, US, CS%VarMix)
             call calc_depth_function(G, CS%VarMix)
             call calc_slope_functions(CS%h, CS%tv, dt_offline, G, GV, US, CS%VarMix, OBC=CS%OBC)
+
+            !$acc enter data copyin(CS%VarMix%Res_fn_h, CS%VarMix%Res_fn_q)
           endif
           call tracer_hordiff(CS%h, dt_offline, CS%MEKE, CS%VarMix, CS%visc, G, GV, US, &
                               CS%tracer_diff_CSp, CS%tracer_Reg, CS%tv)
@@ -1928,6 +1934,8 @@ subroutine step_offline(forces, fluxes, sfc_state, Time_start, time_interval, CS
             call calc_resoln_function(CS%h, CS%tv, G, GV, US, CS%VarMix)
             call calc_depth_function(G, CS%VarMix)
             call calc_slope_functions(CS%h, CS%tv, dt_offline, G, GV, US, CS%VarMix, OBC=CS%OBC)
+
+            !$acc enter data copyin(CS%VarMix%Res_fn_h, CS%VarMix%Res_fn_q)
           endif
           call tracer_hordiff(CS%h, dt_offline, CS%MEKE, CS%VarMix, CS%visc, G, GV, US, &
               CS%tracer_diff_CSp, CS%tracer_Reg, CS%tv)
@@ -2618,6 +2626,12 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, &
   if (test_grid_copy) then ; allocate(G)
   else ; G => CS%G ; endif
 
+  !$acc enter data copyin(CS%G)
+  !$acc enter data copyin(CS%G%IdxCu, CS%G%IdxCv)
+  !$acc enter data copyin(CS%G%IdyCu, CS%G%IdyCv)
+  !$acc enter data copyin(CS%G%IareaCu, CS%G%IareaCv)
+  !$acc enter data copyin(CS%G%mask2dT)
+
   call callTree_waypoint("domains initialized (initialize_MOM)")
 
   call MOM_debugging_init(param_file)
@@ -3231,9 +3245,12 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, &
   if (CS%use_dbclient) call database_comms_init(param_file, CS%dbcomms_CS)
   CS%useMEKE = MEKE_init(Time, G, GV, US, param_file, diag, CS%dbcomms_CS, CS%MEKE_CSp, CS%MEKE, &
                          restart_CSp, CS%MEKE_in_dynamics)
+  !$acc enter data copyin(CS%MEKE)
 
   call VarMix_init(Time, G, GV, US, param_file, diag, CS%VarMix)
   call set_visc_init(Time, G, GV, US, param_file, diag, CS%visc, CS%set_visc_CSp, restart_CSp, CS%OBC)
+  !$acc enter data copyin(CS%Varmix)
+
   call thickness_diffuse_init(Time, G, GV, US, param_file, diag, CS%CDp, CS%thickness_diffuse_CSp)
   if (CS%interface_filter) &
     call interface_filter_init(Time, G, GV, US, param_file, diag, CS%CDp, CS%interface_filter_CSp)

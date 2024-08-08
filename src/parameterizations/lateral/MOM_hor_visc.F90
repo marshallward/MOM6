@@ -623,6 +623,35 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
     ! call pass_vector(slope_x, slope_y, G%Domain, halo=2)
   endif
 
+  ! TODO: Review these!
+  !   If any are static then they don't need to be copied on every call
+
+  !$acc enter data copyin(CS)
+  !$acc enter data copyin(CS%DY_dxT, CS%DX_dyT)
+  !$acc enter data copyin(CS%DY_dxBu, CS%DX_dyBu)
+  !$acc enter data copyin(CS%dx2h, CS%dx2q)
+  !$acc enter data copyin(CS%dx2h, CS%dx2q, CS%dy2h, CS%dy2q)
+  !$acc enter data copyin(CS%Idxdy2u, CS%Idxdy2v, CS%Idx2dyCu, CS%Idx2dyCv)
+
+  !$acc enter data copyin(CS%Kh_bg_xx, CS%Kh_Max_xx)
+  !$acc enter data copyin(CS%Laplac2_const_xx, CS%Laplac3_const_xx)
+  !$acc enter data copyin(CS%Laplac2_const_xy, CS%Laplac3_const_xy)
+  !$acc enter data copyin(CS%Kh_Max_xx)
+
+  !$acc enter data copyin(CS%Ah_bg_xx, CS%Ah_Max_xx)
+  !$acc enter data copyin(CS%Ah_Max_xy)
+  !$acc enter data copyin(CS%Biharm_const_xx, CS%Biharm_const2_xx)
+  !$acc enter data copyin(CS%Biharm6_const_xx)
+  !$acc enter data copyin(CS%Re_Ah_const_xx)
+  !$acc enter data copyin(CS%reduction_xx)
+
+  !$acc enter data copyin(CS%m_const_leithy)
+
+  !$acc enter data copyin(CS%n1n2_h, CS%n1n1_m_n2n2_h)
+  !$acc enter data copyin(CS%grid_sp_h2, CS%grid_sp_h3)
+
+  !$acc kernels
+
   !$OMP parallel do default(none) &
   !$OMP shared( &
   !$OMP   CS, G, GV, US, OBC, VarMix, MEKE, u, v, h, uh, vh, &
@@ -1284,9 +1313,9 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
 
           if (CS%smooth_Ah) then
             ! Smooth m_leithy.  A single call smoothes twice.
-            call pass_var(m_leithy, G%Domain, halo=2)
+            !!!call pass_var(m_leithy, G%Domain, halo=2)
             call smooth_x9_h(G, m_leithy, zero_land=.true.)
-            call pass_var(m_leithy, G%Domain)
+            !!!call pass_var(m_leithy, G%Domain)
           endif
           ! Get Ah
           do j=js_Kh,je_Kh ; do i=is_Kh,ie_Kh
@@ -1302,10 +1331,10 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
             do j=js_Kh,je_Kh ; do i=is_Kh,ie_Kh
               Ah_sq(i,j) = Ah(i,j)**2
             enddo ; enddo
-            call pass_var(Ah_sq, G%Domain, halo=2)
+            !!!call pass_var(Ah_sq, G%Domain, halo=2)
             ! A single call smoothes twice.
             call smooth_x9_h(G, Ah_sq, zero_land=.false.)
-            call pass_var(Ah_sq, G%Domain)
+            !!!call pass_var(Ah_sq, G%Domain)
             do j=js_Kh,je_Kh ; do i=is_Kh,ie_Kh
               Ah_h(i,j,k) = max(CS%Ah_bg_xx(i,j), sqrt(max(0., Ah_sq(i,j))))
               Ah(i,j)     = Ah_h(i,j,k)
@@ -1969,6 +1998,8 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
 
   enddo ! end of k loop
 
+  !$acc end kernels
+
   ! Offer fields for diagnostic averaging.
   if (CS%id_normstress > 0) call post_data(CS%id_normstress, NoSt, CS%diag)
   if (CS%id_shearstress > 0) call post_data(CS%id_shearstress, ShSt, CS%diag)
@@ -2042,7 +2073,6 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
     call ZB2020_lateral_stress(u, v, h, diffu, diffv, G, GV, CS%ZB2020, &
                                CS%dx2h, CS%dy2h, CS%dx2q, CS%dy2q)
   endif
-
 end subroutine horizontal_viscosity
 
 !> Allocates space for and calculates static variables used by horizontal_viscosity.
@@ -2987,7 +3017,7 @@ subroutine smooth_GME(CS, G, GME_flux_h, GME_flux_q)
       if (xh < 0) then
         ! Update halos if needed, but avoid doing so more often than is needed.
         halosz = min(G%isc-G%isd, G%jsc-G%jsd, 2+CS%num_smooth_gme-s)
-        call pass_var(GME_flux_h, G%Domain, halo=halosz)
+        !!!call pass_var(GME_flux_h, G%Domain, halo=halosz)
         xh = halosz - 2
       endif
       GME_flux_h_original(:,:) = GME_flux_h(:,:)
@@ -3011,7 +3041,7 @@ subroutine smooth_GME(CS, G, GME_flux_h, GME_flux_q)
       if (xq < 0) then
         ! Update halos if needed, but avoid doing so more often than is needed.
         halosz = min(G%isc-G%isd, G%jsc-G%jsd, 2+CS%num_smooth_gme-s)
-        call pass_var(GME_flux_q, G%Domain, position=CORNER, complete=.true., halo=halosz)
+        !!!call pass_var(GME_flux_q, G%Domain, position=CORNER, complete=.true., halo=halosz)
         xq = halosz - 2
       endif
       GME_flux_q_original(:,:) = GME_flux_q(:,:)
