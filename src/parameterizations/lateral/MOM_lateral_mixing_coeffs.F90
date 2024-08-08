@@ -1009,6 +1009,7 @@ end subroutine calc_QG_slopes
 !> Calculates the Leith Laplacian and bi-harmonic viscosity coefficients
 subroutine calc_QG_Leith_viscosity(CS, G, GV, US, h, dz, k, div_xx_dx, div_xx_dy, slope_x, slope_y, &
                                    vort_xy_dx, vort_xy_dy)
+  !$acc routine
   type(VarMix_CS),                           intent(inout) :: CS !< Variable mixing coefficients
   type(ocean_grid_type),                     intent(in)    :: G  !< Ocean grid structure
   type(verticalGrid_type),                   intent(in)    :: GV !< The ocean's vertical grid structure.
@@ -1140,10 +1141,10 @@ subroutine calc_QG_Leith_viscosity(CS, G, GV, US, h, dz, k, div_xx_dx, div_xx_dy
     enddo ; enddo
     ! post diagnostics
 
-    if (k==nz) then
-      if (CS%id_KH_v_QG > 0)  call post_data(CS%id_KH_v_QG, CS%KH_v_QG, CS%diag)
-      if (CS%id_KH_u_QG > 0)  call post_data(CS%id_KH_u_QG, CS%KH_u_QG, CS%diag)
-    endif
+    !!if (k==nz) then
+    !!  if (CS%id_KH_v_QG > 0)  call post_data(CS%id_KH_v_QG, CS%KH_v_QG, CS%diag)
+    !!  if (CS%id_KH_u_QG > 0)  call post_data(CS%id_KH_u_QG, CS%KH_u_QG, CS%diag)
+    !!endif
   endif
 
 end subroutine calc_QG_Leith_viscosity
