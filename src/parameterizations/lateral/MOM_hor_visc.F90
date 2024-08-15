@@ -650,8 +650,6 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
   !$acc enter data copyin(CS%n1n2_h, CS%n1n1_m_n2n2_h)
   !$acc enter data copyin(CS%grid_sp_h2, CS%grid_sp_h3)
 
-  !$acc kernels
-
   !$OMP parallel do default(none) &
   !$OMP shared( &
   !$OMP   CS, G, GV, US, OBC, VarMix, MEKE, u, v, h, uh, vh, &
@@ -685,6 +683,8 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
   !$OMP   sh_xx_smooth, sh_xy_smooth, &
   !$OMP   vert_vort_mag_smooth, m_leithy, Ah_sq, AhLthy &
   !$OMP )
+
+  !$acc kernels present(G)
   do k=1,nz
 
     ! The following are the forms of the horizontal tension and horizontal

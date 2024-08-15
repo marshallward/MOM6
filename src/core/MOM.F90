@@ -1855,6 +1855,18 @@ subroutine step_offline(forces, fluxes, sfc_state, Time_start, time_interval, CS
   ! Grid-related pointer assignments
   G => CS%G ; GV => CS%GV ; US => CS%US
 
+  ! NOTE: Based on usage in horizontal_viscosity(), not necessarily complete
+
+  !$acc enter data copyin(CS%G)
+  !$acc enter data copyin(CS%G%dxT, CS%G%dxCu, CS%G%dxCv, CS%G%dxBu)
+  !$acc enter data copyin(CS%G%IdxT, CS%G%IdxCu, CS%G%IdxCv, CS%G%IdxBu)
+  !$acc enter data copyin(CS%G%dyT, CS%G%dyCu, CS%G%dyCv, CS%G%dyBu)
+  !$acc enter data copyin(CS%G%IdyT, CS%G%IdyCu, CS%G%IdyCv, CS%G%IdyBu)
+  !$acc enter data copyin(CS%G%IareaT, CS%G%IareaCu, CS%G%IareaCv, CS%G%IareaBu)
+  !$acc enter data copyin(CS%G%mask2dT, CS%G%mask2dCu, CS%G%mask2dCv, CS%G%mask2dBu)
+  !$acc enter data copyin(CS%G%CoriolisBu)
+  !$acc enter data copyin(CS%G%dF_dx, CS%G%dF_dy)
+
   is  = G%isc  ; ie  = G%iec  ; js  = G%jsc  ; je  = G%jec ; nz = GV%ke
   isd = G%isd  ; ied = G%ied  ; jsd = G%jsd  ; jed = G%jed
 
@@ -2626,12 +2638,6 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, &
   if (test_grid_copy) then ; allocate(G)
   else ; G => CS%G ; endif
 
-  !$acc enter data copyin(CS%G)
-  !$acc enter data copyin(CS%G%IdxCu, CS%G%IdxCv)
-  !$acc enter data copyin(CS%G%IdyCu, CS%G%IdyCv)
-  !$acc enter data copyin(CS%G%IareaCu, CS%G%IareaCv)
-  !$acc enter data copyin(CS%G%mask2dT)
-
   call callTree_waypoint("domains initialized (initialize_MOM)")
 
   call MOM_debugging_init(param_file)
@@ -2698,6 +2704,17 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, &
   ! dG_in is retained for now so that it can be used with write_ocean_geometry_file() below.
 
   if (is_root_PE()) call check_MOM6_scaling_factors(CS%GV, US)
+
+  ! TODO: Is this necessary?
+  !$acc enter data copyin(CS%G)
+  !$acc enter data copyin(CS%G%dxT, CS%G%dxCu, CS%G%dxCv, CS%G%dxBu)
+  !$acc enter data copyin(CS%G%IdxT, CS%G%IdxCu, CS%G%IdxCv, CS%G%IdxBu)
+  !$acc enter data copyin(CS%G%dyT, CS%G%dyCu, CS%G%dyCv, CS%G%dyBu)
+  !$acc enter data copyin(CS%G%IdyT, CS%G%IdyCu, CS%G%IdyCv, CS%G%IdyBu)
+  !$acc enter data copyin(CS%G%IareaT, CS%G%IareaCu, CS%G%IareaCv, CS%G%IareaBu)
+  !$acc enter data copyin(CS%G%mask2dT, CS%G%mask2dCu, CS%G%mask2dCv, CS%G%mask2dBu)
+  !$acc enter data copyin(CS%G%CoriolisBu)
+  !$acc enter data copyin(CS%G%dF_dx, CS%G%dF_dy)
 
   call callTree_waypoint("grids initialized (initialize_MOM)")
 
@@ -3267,6 +3284,7 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, &
 
   if (CS%split) then
     allocate(eta(SZI_(G),SZJ_(G)), source=0.0)
+
     if (CS%use_alt_split) then
       call initialize_dyn_split_RK2b(CS%u, CS%v, CS%h, CS%tv, CS%uh, CS%vh, eta, Time, &
               G, GV, US, param_file, diag, CS%dyn_split_RK2b_CSp, CS%HA_CSp, restart_CSp, &
