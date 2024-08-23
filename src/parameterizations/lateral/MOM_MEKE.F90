@@ -236,7 +236,8 @@ subroutine step_forward_MEKE(MEKE, h, SN_u, SN_v, visc, dt, G, GV, US, CS, hu, h
   real :: ldamping  ! The MEKE damping rate [T-1 ~> s-1].
   real :: sdt       ! dt to use locally [T ~> s] (could be scaled to accelerate)
   real :: sdt_damp  ! dt for damping [T ~> s] (sdt could be split).
-  real :: sfac      ! A factor needed to compute damping due to Strang splitting [nondim]c
+  real :: sfac      ! A factor needed to compute damping due to Strang splitting [nondim]
+  real :: Isfac     ! Inverse of sfac [nondim]
   logical :: use_drag_rate ! Flag to indicate drag_rate is finite
   integer :: i, j, k, is, ie, js, je, Isq, Ieq, Jsq, Jeq, nz
   real(kind=real32), dimension(size(MEKE%MEKE),NUM_FEATURES) :: features_array ! The array of features
@@ -412,7 +413,6 @@ subroutine step_forward_MEKE(MEKE, h, SN_u, SN_v, visc, dt, G, GV, US, CS, hu, h
     if (allocated(MEKE%mom_src)) then
       !$OMP parallel do default(shared)
       do j=js,je ; do i=is,ie
-        !src(i,j) = src(i,j) - CS%MEKE_FrCoeff*I_mass(i,j)*MEKE%mom_src(i,j)
         src(i,j) = src(i,j) - CS%MEKE_FrCoeff*I_mass(i,j)*MEKE%mom_src(i,j) &
                    - (CS%MEKE_bhFrCoeff-CS%MEKE_FrCoeff)*I_mass(i,j)*MEKE%mom_src_bh(i,j)
         src_mom_lp(i,j) = - CS%MEKE_FrCoeff*I_mass(i,j)*(MEKE%mom_src(i,j)-MEKE%mom_src_bh(i,j))
@@ -483,12 +483,13 @@ subroutine step_forward_MEKE(MEKE, h, SN_u, SN_v, visc, dt, G, GV, US, CS, hu, h
       if (MEKE%MEKE(i,j) < 0.) ldamping = 0.
       ! notice that the above line ensures a damping only if MEKE is positive,
       ! while leaving MEKE unchanged if it is negative
+      Isfac = 1. / (1. + sdt_damp * ldamping)
       MEKE%MEKE(i,j) =  MEKE%MEKE(i,j) / (1.0 + sdt_damp*ldamping)
       MEKE_decay(i,j) = ldamping*G%mask2dT(i,j)
       ldamping_Strang1(i,j) = ldamping
-      src_GM(i,j) = src_GM(i,j) / (1.0 + sdt_damp*ldamping)
-      src_mom_lp(i,j) = src_mom_lp(i,j) / (1.0 + sdt_damp*ldamping)
-      src_mom_bh(i,j) = src_mom_bh(i,j) / (1.0 + sdt_damp*ldamping)
+      src_GM(i,j) = src_GM(i,j) * Isfac
+      src_mom_lp(i,j) = src_mom_lp(i,j) * Isfac
+      src_mom_bh(i,j) = src_mom_bh(i,j) * Isfac
       sfac = ( 1.0 + sdt_damp*ldamping )
       src_btm_drag(i,j) = MEKE_current(i,j) * ( (1.0 - sfac) / ( sdt * sfac ) )
     enddo ; enddo
@@ -661,13 +662,14 @@ subroutine step_forward_MEKE(MEKE, h, SN_u, SN_v, visc, dt, G, GV, US, CS, hu, h
           if (MEKE%MEKE(i,j) < 0.) ldamping = 0.
           ! notice that the above line ensures a damping only if MEKE is positive,
           ! while leaving MEKE unchanged if it is negative
+          Isfac = 1. / (1. + sdt_damp*ldamping)
           MEKE%MEKE(i,j) =  MEKE%MEKE(i,j) / (1.0 + sdt_damp*ldamping)
           MEKE_decay(i,j) = ldamping*G%mask2dT(i,j)
-          src_GM(i,j) = src_GM(i,j) / (1.0 + sdt_damp*ldamping)
-          src_mom_lp(i,j) = src_mom_lp(i,j) / (1.0 + sdt_damp*ldamping)
-          src_mom_bh(i,j) = src_mom_bh(i,j) / (1.0 + sdt_damp*ldamping)
-          src_adv(i,j) = src_adv(i,j) / (1.0 + sdt_damp*ldamping)
-          src_mom_K4(i,j) = src_mom_K4(i,j) / (1.0 + sdt_damp*ldamping)
+          src_GM(i,j) = src_GM(i,j) * Isfac
+          src_mom_lp(i,j) = src_mom_lp(i,j) * Isfac
+          src_mom_bh(i,j) = src_mom_bh(i,j) * Isfac
+          src_adv(i,j) = src_adv(i,j) * Isfac
+          src_mom_K4(i,j) = src_mom_K4(i,j) * Isfac
           sfac = ( 1.0 + sdt_damp*ldamping_Strang1(i,j) ) * ( 1.0 + sdt_damp*ldamping )
           src_btm_drag(i,j) = MEKE_current(i,j) * ( (1.0 - sfac) / ( sdt * sfac ) )
         enddo ; enddo
