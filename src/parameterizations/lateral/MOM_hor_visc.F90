@@ -1915,8 +1915,7 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
       ! Diagnose   str_xx*d_x u - str_yy*d_y v + str_xy*(d_y u + d_x v)
       ! This is the old formulation that includes energy diffusion
         if (visc_limit_h_flag(i,j,k) > 0) then
-          FrictWork(i,j,k) = 0.
-          FrictWork_bh(i,j,k) = 0.
+          FrictWork(i,j,k) = 0
         else
           FrictWork(i,j,k) = GV%H_to_RZ * ( &
                   (str_xx(i,j)*(u(I,j,k)-u(I-1,j,k))*G%IdxT(i,j)     &
@@ -1933,29 +1932,11 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
                   +str_xy(I,J-1)*(                                   &
                        (u(I,j,k)-u(I,j-1,k))*G%IdyBu(I,J-1)          &
                       +(v(i+1,J-1,k)-v(i,J-1,k))*G%IdxBu(I,J-1) )) ) )
-        ! Diagnose   bhstr_xx*d_x u - bhstr_yy*d_y v + bhstr_xy*(d_y u + d_x v)
-        ! This is the old formulation that includes energy diffusion
-          FrictWork_bh(i,j,k) = GV%H_to_RZ * ( &
-                  (bhstr_xx(i,j) * (u(I,j,k)-u(I-1,j,k))*G%IdxT(i,j)    &
-                 - bhstr_xx(i,j) * (v(i,J,k)-v(i,J-1,k))*G%IdyT(i,j))   &
-              + 0.25*((bhstr_xy(I,J) *                                  &
-                       ((u(I,j+1,k)-u(I,j,k))*G%IdyBu(I,J)            &
-                      + (v(i+1,J,k)-v(i,J,k))*G%IdxBu(I,J))           &
-                     + bhstr_xy(I-1,J-1) *                            &
-                       ((u(I-1,j,k)-u(I-1,j-1,k))*G%IdyBu(I-1,J-1)    &
-                      + (v(i,J-1,k)-v(i-1,J-1,k))*G%IdxBu(I-1,J-1)) ) &
-                    + (bhstr_xy(I-1,J) *                              &
-                       ((u(I-1,j+1,k)-u(I-1,j,k))*G%IdyBu(I-1,J)      &
-                      + (v(i,J,k)-v(i-1,J,k))*G%IdxBu(I-1,J))         &
-                     + bhstr_xy(I,J-1) *                              &
-                       ((u(I,j,k)-u(I,j-1,k))*G%IdyBu(I,J-1)          &
-                      + (v(i+1,J-1,k)-v(i,J-1,k))*G%IdxBu(I,J-1)) ) ) )
         endif
       enddo ; enddo
       else ; do j=js,je ; do i=is,ie
         if (visc_limit_h_flag(i,j,k) > 0) then
           FrictWork(i,j,k) = 0
-          FrictWork_bh(i,j,k) = 0
         else
           FrictWork(i,j,k) = GV%H_to_RZ * G%IareaT(i,j) * ( &
             ((str_xx(i,j)*CS%dy2h(i,j) * ( &
@@ -1985,6 +1966,40 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
                    + (CS%dy2q(I,J-1)*((vh(i+1,J-1,k)*G%IareaCv(i+1,J-1)/(h_v(i+1,J-1)+h_neglect)) &
                                     - (vh(i,J-1,k)*G%IareaCv(i,J-1)/(h_v(i,J-1)+h_neglect)))) )) ) )) )
 
+        endif
+      enddo ; enddo ; endif
+    endif
+
+    if (CS%id_FrictWork_bh>0 .or. CS%id_FrictWorkIntz_bh > 0 .or. allocated(MEKE%mom_src_bh)) then
+      if (CS%FrictWork_bug) then ; do j=js,je ; do i=is,ie
+      ! Diagnose   str_xx*d_x u - str_yy*d_y v + str_xy*(d_y u + d_x v)
+      ! This is the old formulation that includes energy diffusion
+        if (visc_limit_h_flag(i,j,k) > 0) then
+          FrictWork_bh(i,j,k) = 0
+        else
+        ! Diagnose   bhstr_xx*d_x u - bhstr_yy*d_y v + bhstr_xy*(d_y u + d_x v)
+        ! This is the old formulation that includes energy diffusion !cyc
+          FrictWork_bh(i,j,k) = GV%H_to_RZ * ( &
+                  (bhstr_xx(i,j) * (u(I,j,k)-u(I-1,j,k))*G%IdxT(i,j)    &
+                 - bhstr_xx(i,j) * (v(i,J,k)-v(i,J-1,k))*G%IdyT(i,j))   &
+              + 0.25*((bhstr_xy(I,J) *                                  &
+                       ((u(I,j+1,k)-u(I,j,k))*G%IdyBu(I,J)            &
+                      + (v(i+1,J,k)-v(i,J,k))*G%IdxBu(I,J))           &
+                     + bhstr_xy(I-1,J-1) *                            &
+                       ((u(I-1,j,k)-u(I-1,j-1,k))*G%IdyBu(I-1,J-1)    &
+                      + (v(i,J-1,k)-v(i-1,J-1,k))*G%IdxBu(I-1,J-1)) ) &
+                    + (bhstr_xy(I-1,J) *                              &
+                       ((u(I-1,j+1,k)-u(I-1,j,k))*G%IdyBu(I-1,J)      &
+                      + (v(i,J,k)-v(i-1,J,k))*G%IdxBu(I-1,J))         &
+                     + bhstr_xy(I,J-1) *                              &
+                       ((u(I,j,k)-u(I,j-1,k))*G%IdyBu(I,J-1)          &
+                      + (v(i+1,J-1,k)-v(i,J-1,k))*G%IdxBu(I,J-1)) ) ) )
+        endif
+      enddo ; enddo
+      else ; do j=js,je ; do i=is,ie
+        if (visc_limit_h_flag(i,j,k) > 0) then
+          FrictWork_bh(i,j,k) = 0
+        else
           ! Diagnose   bhstr_xx*d_x u - bhstr_yy*d_y v + bhstr_xy*(d_y u + d_x v)
           FrictWork_bh(i,j,k) = GV%H_to_RZ * G%IareaT(i,j) * ( &
             ((bhstr_xx(i,j)*CS%dy2h(i,j) * ( &
@@ -2016,7 +2031,6 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
         endif
       enddo ; enddo ; endif
     endif
-
 
 
 
@@ -2112,36 +2126,10 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
             endif
           endif
 
-          MEKE%mom_src(i,j) = MEKE%mom_src(i,j) + GV%H_to_RZ * ( &
-                ((str_xx(i,j)-RoScl*bhstr_xx(i,j))*(u(I,j,k)-u(I-1,j,k))*G%IdxT(i,j)  &
-                -(str_xx(i,j)-RoScl*bhstr_xx(i,j))*(v(i,J,k)-v(i,J-1,k))*G%IdyT(i,j)) &
-              + 0.25*(((str_xy(I,J)-RoScl*bhstr_xy(I,J)) *                            &
-                       ((u(I,j+1,k)-u(I,j,k))*G%IdyBu(I,J)                            &
-                      + (v(i+1,J,k)-v(i,J,k))*G%IdxBu(I,J) )                          &
-                     + (str_xy(I-1,J-1)-RoScl*bhstr_xy(I-1,J-1)) *                    &
-                       ((u(I-1,j,k)-u(I-1,j-1,k))*G%IdyBu(I-1,J-1)                    &
-                      + (v(i,J-1,k)-v(i-1,J-1,k))*G%IdxBu(I-1,J-1)) )                 &
-                    + ((str_xy(I-1,J)-RoScl*bhstr_xy(I-1,J)) *                        &
-                       ((u(I-1,j+1,k)-u(I-1,j,k))*G%IdyBu(I-1,J)                      &
-                      + (v(i,J,k)-v(i-1,J,k))*G%IdxBu(I-1,J))                         &
-                     + (str_xy(I,J-1)-RoScl*bhstr_xy(I,J-1)) *                        &
-                       ((u(I,j,k)-u(I,j-1,k))*G%IdyBu(I,J-1)                          &
-                      + (v(i+1,J-1,k)-v(i,J-1,k))*G%IdxBu(I,J-1)) ) ) )
-          MEKE%mom_src_bh(i,j) = MEKE%mom_src_bh(i,j) + GV%H_to_RZ * ( &
-                ((bhstr_xx(i,j)-RoScl*bhstr_xx(i,j))*(u(I,j,k)-u(I-1,j,k))*G%IdxT(i,j)  &
-                -(bhstr_xx(i,j)-RoScl*bhstr_xx(i,j))*(v(i,J,k)-v(i,J-1,k))*G%IdyT(i,j)) &
-              + 0.25*(((bhstr_xy(I,J)-RoScl*bhstr_xy(I,J)) *                            &
-                       ((u(I,j+1,k)-u(I,j,k))*G%IdyBu(I,J)                              &
-                      + (v(i+1,J,k)-v(i,J,k))*G%IdxBu(I,J) )                            &
-                     + (bhstr_xy(I-1,J-1)-RoScl*bhstr_xy(I-1,J-1)) *                    &
-                       ((u(I-1,j,k)-u(I-1,j-1,k))*G%IdyBu(I-1,J-1)                      &
-                      + (v(i,J-1,k)-v(i-1,J-1,k))*G%IdxBu(I-1,J-1)) )                   &
-                    + ((bhstr_xy(I-1,J)-RoScl*bhstr_xy(I-1,J)) *                        &
-                       ((u(I-1,j+1,k)-u(I-1,j,k))*G%IdyBu(I-1,J)                        &
-                      + (v(i,J,k)-v(i-1,J,k))*G%IdxBu(I-1,J))                           &
-                     + (bhstr_xy(I,J-1)-RoScl*bhstr_xy(I,J-1)) *                        &
-                       ((u(I,j,k)-u(I,j-1,k))*G%IdyBu(I,J-1)                            &
-                      + (v(i+1,J-1,k)-v(i,J-1,k))*G%IdxBu(I,J-1)) ) ) )
+          MEKE%mom_src(i,j) = MEKE%mom_src(i,j) + (FrictWork(i,j,k) - RoScl*FrictWork_bh(i,j,k))
+          MEKE%mom_src_bh(i,j) = MEKE%mom_src_bh(i,j) + &
+                                 (FrictWork_bh(i,j,k) - RoScl*FrictWork_bh(i,j,k))
+
         enddo ; enddo
       else
 
