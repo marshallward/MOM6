@@ -681,6 +681,30 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
   !$OMP )
 
   !$acc kernels present(G)
+
+  ! TODO: Why aren't these implicitly private?
+
+  !$acc loop gang private( &
+  !$acc     dudx, dudy, dvdx, dvdy, &
+  !$acc     dudx_smooth, dudy_smooth, dvdx_smooth, dvdy_smooth, &
+  !$acc     str_xx, str_xy, &
+  !$acc     str_xx_gme, str_xy_gme, &
+  !$acc     bhstr_xx, bhstr_xy, &
+  !$acc     shear_mag, sh_xx, sh_xy, &
+  !$acc     sh_xx_smooth, sh_xy_smooth, &
+  !$acc     div_xx, div_xx_dx, div_xx_dy, &
+  !$acc     grad_div_mag_h, grad_div_mag_q, &
+  !$acc     del2u, del2v, del2vort_q, &
+  !$acc     ddel2vdx, ddel2udy, &
+  !$acc     grad_vort_mag_h, grad_vort_mag_h_2d, &
+  !$acc     grad_vort_mag_q, grad_vort_mag_q_2d, &
+  !$acc     vort_xy, vort_xy_dx, vort_xy_dy, &
+  !$acc     vort_xy_smooth, vort_xy_dx_smooth, vort_xy_dy_smooth, &
+  !$acc     vert_vort_mag, vert_vort_mag_smooth, &
+  !$acc     hrat_min, h_u, h_v, hq, &
+  !$acc     kh, ah, ah_sq, visc_bound_rem, &
+  !$acc     m_leithy &
+  !$acc )
   do k=1,nz
 
     ! The following are the forms of the horizontal tension and horizontal
@@ -854,6 +878,7 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
         endif
       endif
     enddo ; endif
+
     ! Now project thicknesses across corner points on OBCs.
     if (apply_OBC) then ; do n=1,OBC%number_of_segments
       J = OBC%segment(n)%HI%JsdB ; I = OBC%segment(n)%HI%IsdB
@@ -1556,6 +1581,8 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
 
       ! NOTE: The following do-block can be decomposed and vectorized after the
       !   stack size has been reduced.
+      ! NOTE: This loop is frequently identified as blocking GPU
+      !   parallelization.  Possibly because of the do-if pattern?
       do J=js-1,Jeq ; do I=is-1,Ieq
         if (rescale_Kh) &
           Kh(I,J) = VarMix%Res_fn_q(I,J) * Kh(I,J)
@@ -1926,75 +1953,77 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
       enddo ; enddo ; endif
     endif
 
+    ! ** These cumulant sums prevent parallelization ** !
+
     ! Make a similar calculation as for FrictWork above but accumulating into
     ! the vertically integrated MEKE source term, and adjusting for any
     ! energy loss seen as a reduction in the (biharmonic) frictional source term.
-    if (find_FrictWork .and. allocated(MEKE%mom_src)) then
-      if (k==1) then
-        do j=js,je ; do i=is,ie
-          MEKE%mom_src(i,j) = 0.
-        enddo ; enddo
-        if (allocated(MEKE%GME_snk)) then
-          do j=js,je ; do i=is,ie
-            MEKE%GME_snk(i,j) = 0.
-          enddo ; enddo
-        endif
-      endif
-      if (MEKE%backscatter_Ro_c /= 0.) then
-        do j=js,je ; do i=is,ie
-          FatH = 0.25*( (abs(G%CoriolisBu(I-1,J-1)) + abs(G%CoriolisBu(I,J))) + &
-                        (abs(G%CoriolisBu(I-1,J)) + abs(G%CoriolisBu(I,J-1))) )
-          Shear_mag_bc = sqrt(sh_xx(i,j) * sh_xx(i,j) + &
-            0.25*((sh_xy(I-1,J-1)*sh_xy(I-1,J-1) + sh_xy(I,J)*sh_xy(I,J)) + &
-                  (sh_xy(I-1,J)*sh_xy(I-1,J) + sh_xy(I,J-1)*sh_xy(I,J-1))))
-          if (CS%answer_date > 20190101) then
-            FatH = (US%s_to_T*FatH)**MEKE%backscatter_Ro_pow ! f^n
-            ! Note the hard-coded dimensional constant in the following line that can not
-            ! be rescaled for dimensional consistency.
-            Shear_mag_bc = (((US%s_to_T * Shear_mag_bc)**MEKE%backscatter_Ro_pow) + 1.e-30) &
-                        * MEKE%backscatter_Ro_c ! c * D^n
-            ! The Rossby number function is g(Ro) = 1/(1+c.Ro^n)
-            ! RoScl = 1 - g(Ro)
-            RoScl = Shear_mag_bc / (FatH + Shear_mag_bc) ! = 1 - f^n/(f^n+c*D^n)
-          else
-            if (FatH <= backscat_subround*Shear_mag_bc) then
-              RoScl = 1.0
-            else
-              Sh_F_pow = MEKE%backscatter_Ro_c * (Shear_mag_bc / FatH)**MEKE%backscatter_Ro_pow
-              RoScl = Sh_F_pow / (1.0 + Sh_F_pow) ! = 1 - f^n/(f^n+c*D^n)
-            endif
-          endif
+    !!!if (find_FrictWork .and. allocated(MEKE%mom_src)) then
+    !!!  if (k==1) then
+    !!!    do j=js,je ; do i=is,ie
+    !!!      MEKE%mom_src(i,j) = 0.
+    !!!    enddo ; enddo
+    !!!    if (allocated(MEKE%GME_snk)) then
+    !!!      do j=js,je ; do i=is,ie
+    !!!        MEKE%GME_snk(i,j) = 0.
+    !!!      enddo ; enddo
+    !!!    endif
+    !!!  endif
+    !!!  if (MEKE%backscatter_Ro_c /= 0.) then
+    !!!    do j=js,je ; do i=is,ie
+    !!!      FatH = 0.25*( (abs(G%CoriolisBu(I-1,J-1)) + abs(G%CoriolisBu(I,J))) + &
+    !!!                    (abs(G%CoriolisBu(I-1,J)) + abs(G%CoriolisBu(I,J-1))) )
+    !!!      Shear_mag_bc = sqrt(sh_xx(i,j) * sh_xx(i,j) + &
+    !!!        0.25*((sh_xy(I-1,J-1)*sh_xy(I-1,J-1) + sh_xy(I,J)*sh_xy(I,J)) + &
+    !!!              (sh_xy(I-1,J)*sh_xy(I-1,J) + sh_xy(I,J-1)*sh_xy(I,J-1))))
+    !!!      if (CS%answer_date > 20190101) then
+    !!!        FatH = (US%s_to_T*FatH)**MEKE%backscatter_Ro_pow ! f^n
+    !!!        ! Note the hard-coded dimensional constant in the following line that can not
+    !!!        ! be rescaled for dimensional consistency.
+    !!!        Shear_mag_bc = (((US%s_to_T * Shear_mag_bc)**MEKE%backscatter_Ro_pow) + 1.e-30) &
+    !!!                    * MEKE%backscatter_Ro_c ! c * D^n
+    !!!        ! The Rossby number function is g(Ro) = 1/(1+c.Ro^n)
+    !!!        ! RoScl = 1 - g(Ro)
+    !!!        RoScl = Shear_mag_bc / (FatH + Shear_mag_bc) ! = 1 - f^n/(f^n+c*D^n)
+    !!!      else
+    !!!        if (FatH <= backscat_subround*Shear_mag_bc) then
+    !!!          RoScl = 1.0
+    !!!        else
+    !!!          Sh_F_pow = MEKE%backscatter_Ro_c * (Shear_mag_bc / FatH)**MEKE%backscatter_Ro_pow
+    !!!          RoScl = Sh_F_pow / (1.0 + Sh_F_pow) ! = 1 - f^n/(f^n+c*D^n)
+    !!!        endif
+    !!!      endif
 
-          MEKE%mom_src(i,j) = MEKE%mom_src(i,j) + GV%H_to_RZ * ( &
-                ((str_xx(i,j)-RoScl*bhstr_xx(i,j))*(u(I,j,k)-u(I-1,j,k))*G%IdxT(i,j)  &
-                -(str_xx(i,j)-RoScl*bhstr_xx(i,j))*(v(i,J,k)-v(i,J-1,k))*G%IdyT(i,j)) &
-              + 0.25*(((str_xy(I,J)-RoScl*bhstr_xy(I,J)) *                            &
-                       ((u(I,j+1,k)-u(I,j,k))*G%IdyBu(I,J)                            &
-                      + (v(i+1,J,k)-v(i,J,k))*G%IdxBu(I,J) )                          &
-                     + (str_xy(I-1,J-1)-RoScl*bhstr_xy(I-1,J-1)) *                    &
-                       ((u(I-1,j,k)-u(I-1,j-1,k))*G%IdyBu(I-1,J-1)                    &
-                      + (v(i,J-1,k)-v(i-1,J-1,k))*G%IdxBu(I-1,J-1)) )                 &
-                    + ((str_xy(I-1,J)-RoScl*bhstr_xy(I-1,J)) *                        &
-                       ((u(I-1,j+1,k)-u(I-1,j,k))*G%IdyBu(I-1,J)                      &
-                      + (v(i,J,k)-v(i-1,J,k))*G%IdxBu(I-1,J))                         &
-                     + (str_xy(I,J-1)-RoScl*bhstr_xy(I,J-1)) *                        &
-                       ((u(I,j,k)-u(I,j-1,k))*G%IdyBu(I,J-1)                          &
-                      + (v(i+1,J-1,k)-v(i,J-1,k))*G%IdxBu(I,J-1)) ) ) )
-        enddo ; enddo
-      endif ! MEKE%backscatter_Ro_c
+    !!!      MEKE%mom_src(i,j) = MEKE%mom_src(i,j) + GV%H_to_RZ * ( &
+    !!!            ((str_xx(i,j)-RoScl*bhstr_xx(i,j))*(u(I,j,k)-u(I-1,j,k))*G%IdxT(i,j)  &
+    !!!            -(str_xx(i,j)-RoScl*bhstr_xx(i,j))*(v(i,J,k)-v(i,J-1,k))*G%IdyT(i,j)) &
+    !!!          + 0.25*(((str_xy(I,J)-RoScl*bhstr_xy(I,J)) *                            &
+    !!!                   ((u(I,j+1,k)-u(I,j,k))*G%IdyBu(I,J)                            &
+    !!!                  + (v(i+1,J,k)-v(i,J,k))*G%IdxBu(I,J) )                          &
+    !!!                 + (str_xy(I-1,J-1)-RoScl*bhstr_xy(I-1,J-1)) *                    &
+    !!!                   ((u(I-1,j,k)-u(I-1,j-1,k))*G%IdyBu(I-1,J-1)                    &
+    !!!                  + (v(i,J-1,k)-v(i-1,J-1,k))*G%IdxBu(I-1,J-1)) )                 &
+    !!!                + ((str_xy(I-1,J)-RoScl*bhstr_xy(I-1,J)) *                        &
+    !!!                   ((u(I-1,j+1,k)-u(I-1,j,k))*G%IdyBu(I-1,J)                      &
+    !!!                  + (v(i,J,k)-v(i-1,J,k))*G%IdxBu(I-1,J))                         &
+    !!!                 + (str_xy(I,J-1)-RoScl*bhstr_xy(I,J-1)) *                        &
+    !!!                   ((u(I,j,k)-u(I,j-1,k))*G%IdyBu(I,J-1)                          &
+    !!!                  + (v(i+1,J-1,k)-v(i,J-1,k))*G%IdxBu(I,J-1)) ) ) )
+    !!!    enddo ; enddo
+    !!!  endif ! MEKE%backscatter_Ro_c
 
-      do j=js,je ; do i=is,ie
-        MEKE%mom_src(i,j) = MEKE%mom_src(i,j) + FrictWork(i,j,k)
-      enddo ; enddo
+    !!!  do j=js,je ; do i=is,ie
+    !!!    MEKE%mom_src(i,j) = MEKE%mom_src(i,j) + FrictWork(i,j,k)
+    !!!  enddo ; enddo
 
-      if (CS%use_GME .and. allocated(MEKE%GME_snk)) then
-        do j=js,je ; do i=is,ie
-          MEKE%GME_snk(i,j) = MEKE%GME_snk(i,j) + FrictWork_GME(i,j,k)
-        enddo ; enddo
-      endif
+    !!!  if (CS%use_GME .and. allocated(MEKE%GME_snk)) then
+    !!!    do j=js,je ; do i=is,ie
+    !!!      MEKE%GME_snk(i,j) = MEKE%GME_snk(i,j) + FrictWork_GME(i,j,k)
+    !!!    enddo ; enddo
+    !!!  endif
+    !!!endif ! find_FrictWork and associated(mom_src)
 
-    endif ! find_FrictWork and associated(mom_src)
-
+    !** end cumulant sums **!
   enddo ! end of k loop
 
   !$acc end kernels
