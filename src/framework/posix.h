@@ -1,6 +1,10 @@
 #ifndef MOM6_POSIX_H_
 #define MOM6_POSIX_H_
 
+#ifdef HAVE_CONFIG_H
+#include "config.h"
+#endif
+
 ! STAT_BUF_SIZE should be set to sizeof(stat).
 ! The default value is based on glibc 2.28.
 #ifndef SIZEOF_STAT_BUF

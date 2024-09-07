@@ -38,6 +38,19 @@ AC_CONFIG_SRCDIR([../src/core/MOM.F90])
 AC_CONFIG_MACRO_DIR([m4])
 srcdir=$srcdir/..
 
+# NOTE: This produces a C-like header (with /* comments */), which are not
+#   standard Fortran.  However, neither are #include statements and we still
+#   use those.  Nonetheless, this is probably not an ideal method.
+# Any autoheader-based approach is going to have problems.  But we may be able
+#   introduce a Fortran-like "fconfig.h" and fill with autoconf @macros@.
+# XXX: This is all experimental!!  Unlikely this will ever be in production!
+AC_CONFIG_HEADERS([config.h])
+AH_TEMPLATE([LONGJMP_NAME], [name of longjmp])
+AH_TEMPLATE([SETJMP_NAME], [name of longjmp])
+AH_TEMPLATE([SIGLONGJMP_NAME], [name of longjmp])
+AH_TEMPLATE([SIGSETJMP_NAME], [name of longjmp])
+# TODO: Probably a better way to locate config.h
+FCFLAGS="${FCFLAGS} -I."
 
 # Configure the memory layout header
 
