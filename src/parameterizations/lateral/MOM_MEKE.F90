@@ -659,40 +659,38 @@ subroutine step_forward_MEKE(MEKE, h, SN_u, SN_v, visc, dt, G, GV, US, CS, hu, h
 
     ! Second stage of Strang splitting
     if (CS%MEKE_KH >= 0.0 .or. CS%MEKE_K4 >= 0.0) then
-      if (sdt>sdt_damp) then
-        ! Recalculate the drag rate, since MEKE has changed.
-        if (use_drag_rate) then
-          !$OMP parallel do default(shared)
-          do j=js,je ; do i=is,ie
-            drag_rate(i,j) = (GV%H_to_RZ * I_mass(i,j)) * sqrt( drag_rate_visc(i,j)**2 + &
-                   cdrag2 * ( max(0.0, 2.0*bottomFac2(i,j)*MEKE%MEKE(i,j)) + CS%MEKE_Uscale**2 ) )
-          enddo ; enddo
-        endif
+      ! Recalculate the drag rate, since MEKE has changed.
+      if (use_drag_rate) then
         !$OMP parallel do default(shared)
         do j=js,je ; do i=is,ie
-          damp_rate = CS%MEKE_damping + drag_rate(i,j) * bottomFac2(i,j)
-          if (MEKE%MEKE(i,j) < 0.) damp_rate = 0.
-          ! notice that the above line ensures a damping only if MEKE is positive,
-          ! while leaving MEKE unchanged if it is negative
-
-          damping = 1. / (1. + sdt_damp * damp_rate)
-
-          ! NOTE: As above, MEKE%MEKE should use `damping` but we must preserve
-          !   the existing expression for bit reproducibility.
-          MEKE%MEKE(i,j) =  MEKE%MEKE(i,j) / (1.0 + sdt_damp*damp_rate)
-          MEKE_decay(i,j) = damp_rate*G%mask2dT(i,j)
-
-          src_GM(i,j) = src_GM(i,j) * damping
-          src_mom_lp(i,j) = src_mom_lp(i,j) * damping
-          src_mom_bh(i,j) = src_mom_bh(i,j) * damping
-          src_adv(i,j) = src_adv(i,j) * damping
-          src_mom_K4(i,j) = src_mom_K4(i,j) * damping
-
-          src_btm_drag(i,j) = -MEKE_current(i,j) * ( &
-             damp_step * damping * (damp_rate + damp_rate_s1(i,j)) &
-          )
+          drag_rate(i,j) = (GV%H_to_RZ * I_mass(i,j)) * sqrt( drag_rate_visc(i,j)**2 + &
+                 cdrag2 * ( max(0.0, 2.0*bottomFac2(i,j)*MEKE%MEKE(i,j)) + CS%MEKE_Uscale**2 ) )
         enddo ; enddo
       endif
+      !$OMP parallel do default(shared)
+      do j=js,je ; do i=is,ie
+        damp_rate = CS%MEKE_damping + drag_rate(i,j) * bottomFac2(i,j)
+        if (MEKE%MEKE(i,j) < 0.) damp_rate = 0.
+        ! notice that the above line ensures a damping only if MEKE is positive,
+        ! while leaving MEKE unchanged if it is negative
+
+        damping = 1. / (1. + sdt_damp * damp_rate)
+
+        ! NOTE: As above, MEKE%MEKE should use `damping` but we must preserve
+        !   the existing expression for bit reproducibility.
+        MEKE%MEKE(i,j) =  MEKE%MEKE(i,j) / (1.0 + sdt_damp*damp_rate)
+        MEKE_decay(i,j) = damp_rate*G%mask2dT(i,j)
+
+        src_GM(i,j) = src_GM(i,j) * damping
+        src_mom_lp(i,j) = src_mom_lp(i,j) * damping
+        src_mom_bh(i,j) = src_mom_bh(i,j) * damping
+        src_adv(i,j) = src_adv(i,j) * damping
+        src_mom_K4(i,j) = src_mom_K4(i,j) * damping
+
+        src_btm_drag(i,j) = -MEKE_current(i,j) * ( &
+           damp_step * damping * (damp_rate + damp_rate_s1(i,j)) &
+        )
+      enddo ; enddo
     endif ! MEKE_KH>=0
 
     if (CS%debug) then
