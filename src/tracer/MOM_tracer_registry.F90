@@ -284,21 +284,31 @@ subroutine register_tracer_diagnostics(Reg, h, Time, diag, G, GV, US, use_ALE, u
   logical,                    intent(in) :: use_KPP !< If true active diagnostics that only
                                                  !! apply to CVMix KPP mixings
 
-  character(len=24)  :: name     ! A variable's name in a NetCDF file.
-  character(len=24)  :: shortnm  ! A shortened version of a variable's name for
-                                 ! creating additional diagnostics.
-  character(len=72)  :: longname ! The long name of that tracer variable.
-  character(len=72)  :: flux_longname ! The tracer name in the long names of fluxes.
-  character(len=48)  :: units    ! The dimensions of the tracer.
-  character(len=48)  :: flux_units ! The units for fluxes, either
-                                 ! [units] m3 s-1 or [units] kg s-1.
-  character(len=48)  :: conv_units ! The units for flux convergences, either
-                                 ! [units] m2 s-1 or [units] kg s-1.
-  character(len=48)  :: unit2    ! The dimensions of the tracer squared
-  character(len=72)  :: cmorname ! The CMOR name of this tracer.
-  character(len=120) :: cmor_longname ! The CMOR long name of that variable.
-  character(len=120) :: var_lname      ! A temporary longname for a diagnostic.
-  character(len=120) :: cmor_var_lname ! The temporary CMOR long name for a diagnostic
+  character(len=:), allocatable  :: name
+    ! A variable's name in a NetCDF file
+  character(len=:), allocatable :: shortnm
+    ! A shortened version of a variable's name for creating additional
+    ! diagnostics
+  character(len=:), allocatable :: longname
+    ! The long name of that tracer variable
+  character(len=:), allocatable :: flux_longname
+    ! The tracer name in the long names of fluxes
+  character(len=:), allocatable :: units
+    ! The dimensions of the tracer
+  character(len=:), allocatable :: flux_units
+    ! The units for fluxes, either [units] m3 s-1 or [units] kg s-1
+  character(len=:), allocatable :: conv_units
+    ! The units for flux convergences, either [units] m2 s-1 or [units] kg s-1
+  character(len=:), allocatable :: unit2
+    ! The dimensions of the tracer squared
+  character(len=:), allocatable  :: cmorname
+    ! The CMOR name of this tracer
+  character(len=:), allocatable :: cmor_longname
+    ! The CMOR long name of that variable.
+  character(len=:), allocatable :: var_lname
+    ! A temporary longname for a diagnostic.
+  character(len=:), allocatable :: cmor_var_lname
+    ! The temporary CMOR long name for a diagnostic
   real :: conversion ! Temporary term while we address a bug [conc m CU-1 H-1 ~> 1] or [conc kg m-2 CU-1 H-1 ~> 1]
   type(tracer_type), pointer :: Tr=>NULL()
   integer :: i, j, k, is, ie, js, je, nz, m, m2, nTr_in
