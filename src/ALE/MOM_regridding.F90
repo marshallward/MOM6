@@ -198,7 +198,8 @@ subroutine initialize_regridding(CS, GV, US, max_depth, param_file, mdl, coord_m
   ! Local variables
   integer :: ke ! Number of levels
   character(len=80)  :: string, string2, varName ! Temporary strings
-  character(len=40)  :: coord_units, coord_res_param ! Temporary strings
+  character(len=40)  :: coord_units ! Temporary strings
+  character(len=:), allocatable :: coord_res_param
   character(len=MAX_PARAM_LENGTH) :: param_name
   character(len=200) :: inputdir, fileName
   character(len=320) :: message ! Temporary strings
@@ -2343,7 +2344,7 @@ end function getCoordinateUnits
 !> Query the short name of the coordinate
 function getCoordinateShortName( CS )
   type(regridding_CS), intent(in) :: CS !< Regridding control structure
-  character(len=20)               :: getCoordinateShortName
+  character(len=25)               :: getCoordinateShortName
 
   select case ( CS%regridding_scheme )
     case ( REGRIDDING_ZSTAR )
