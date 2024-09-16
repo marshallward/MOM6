@@ -586,3 +586,4 @@ BULKML_CONV_MOMENTUM_BUG = True !   [Boolean] default = True
 PEN_SW_ABSORB_MINTHICK = 0.001  !   [m] default = 0.001
 GUST_CONST = 0.02               !   [Pa] default = 0.02
 FIX_USTAR_GUSTLESS_BUG = False  !   [Boolean] default = False
+MASS_WEIGHT_IN_PRESSURE_GRADIENT = True !   [Boolean] default = False
