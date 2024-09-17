@@ -10,7 +10,7 @@ jobs:
     env:
       CC: gcc
       FC: gfortran
-      FMS_COMMIT: 2019.01.03
+      #FMS_COMMIT: 2019.01.03
 
     defaults:
       run:
