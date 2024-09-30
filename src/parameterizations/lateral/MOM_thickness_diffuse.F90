@@ -19,7 +19,7 @@ use MOM_isopycnal_slopes,      only : vert_fill_TS
 use MOM_lateral_mixing_coeffs, only : VarMix_CS
 use MOM_MEKE_types,            only : MEKE_type
 use MOM_unit_scaling,          only : unit_scale_type
-use MOM_variables,             only : thermo_var_ptrs, cont_diag_ptrs
+use MOM_variables,             only : vertvisc_type, thermo_var_ptrs, cont_diag_ptrs
 use MOM_verticalGrid,          only : verticalGrid_type
 implicit none ; private
 
@@ -65,6 +65,9 @@ type, public :: thickness_diffuse_CS ; private
                                  !! longer than DT, or 0 (the default) to use DT.
   integer :: nkml                !< number of layers within mixed layer
   logical :: debug               !< write verbose checksums for debugging purposes
+  logical :: SYMMETRIC_INSTABILITY_DIFFUSE   !< If true, apply thickness diffusivity parameterizing symmetric instability
+                                 !!(Written by Elizabeth Yankovsky, 2020)
+  real    :: SymInst_frac_TKE_to_Kd !< Fraction of TKE used to calculate diffusivity (0-1).
   logical :: use_GME_thickness_diffuse !< If true, passes GM coefficients to MOM_hor_visc for use
                                  !! with GME closure.
   logical :: MEKE_GEOMETRIC      !< If true, uses the GM coefficient formulation from the GEOMETRIC
@@ -118,6 +121,11 @@ type, public :: thickness_diffuse_CS ; private
   integer :: id_KH_u1   = -1, id_KH_v1   = -1, id_KH_t1  = -1
   integer :: id_slope_x = -1, id_slope_y = -1
   integer :: id_sfn_unlim_x = -1, id_sfn_unlim_y = -1, id_sfn_x = -1, id_sfn_y = -1
+  integer :: id_sfn_unlim_SymInst_x = -1, id_sfn_unlim_SymInst_y = -1, id_sfn_SymInst_x = -1, id_sfn_SymInst_y = -1
+  integer :: id_Work3D_u_SymInst = -1, id_Work3D_v_SymInst = -1, id_Work3D_h_SymInst = -1
+  integer :: id_Work_h = -1, id_Work_h_SymInst = -1
+  integer :: id_Work_u = -1, id_Work_u_SymInst = -1
+  integer :: id_Work_v = -1, id_Work_v_SymInst = -1
   !>@}
 end type thickness_diffuse_CS
 
@@ -126,26 +134,31 @@ contains
 !> Calculates isopycnal height diffusion coefficients and applies isopycnal height diffusion
 !! by modifying to the layer thicknesses, h. Diffusivities are limited to ensure stability.
 !! Also returns along-layer mass fluxes used in the continuity equation.
-subroutine thickness_diffuse(h, uhtr, vhtr, tv, dt, G, GV, US, MEKE, VarMix, CDp, CS)
-  type(ocean_grid_type),                      intent(in)    :: G      !< Ocean grid structure
-  type(verticalGrid_type),                    intent(in)    :: GV     !< Vertical grid structure
-  type(unit_scale_type),                      intent(in)    :: US     !< A dimensional unit scaling type
-  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)),  intent(inout) :: h      !< Layer thickness [H ~> m or kg m-2]
-  real, dimension(SZIB_(G),SZJ_(G),SZK_(GV)), intent(inout) :: uhtr   !< Accumulated zonal mass flux
-                                                                      !! [L2 H ~> m3 or kg]
-  real, dimension(SZI_(G),SZJB_(G),SZK_(GV)), intent(inout) :: vhtr   !< Accumulated meridional mass flux
-                                                                      !! [L2 H ~> m3 or kg]
-  type(thermo_var_ptrs),                      intent(in)    :: tv     !< Thermodynamics structure
-  real,                                       intent(in)    :: dt     !< Time increment [T ~> s]
-  type(MEKE_type),                            intent(inout) :: MEKE   !< MEKE fields
-  type(VarMix_CS), target,                    intent(in)    :: VarMix !< Variable mixing coefficients
-  type(cont_diag_ptrs),                       intent(inout) :: CDp    !< Diagnostics for the continuity equation
-  type(thickness_diffuse_CS),                 intent(inout) :: CS     !< Control structure for thickness_diffuse
+subroutine thickness_diffuse(h, uhtr, vhtr, tv, dt, G, GV, US, visc, MEKE, VarMix, CDp, CS)
+  type(ocean_grid_type),                     intent(in)    :: G      !< Ocean grid structure
+  type(verticalGrid_type),                   intent(in)    :: GV     !< Vertical grid structure
+  type(unit_scale_type),                     intent(in)    :: US     !< A dimensional unit scaling type
+  type(vertvisc_type),                       intent(inout) :: visc   !< Structure containing vertical viscosities, bottom
+                                                                     !! boundary layer properies, and related fields.
+  real, dimension(SZI_(G),SZJ_(G),SZK_(G)),  intent(inout) :: h      !< Layer thickness [H ~> m or kg m-2]
+  real, dimension(SZIB_(G),SZJ_(G),SZK_(G)), intent(inout) :: uhtr   !< Accumulated zonal mass flux
+                                                                     !! [L2 H ~> m3 or kg]
+  real, dimension(SZI_(G),SZJB_(G),SZK_(G)), intent(inout) :: vhtr   !< Accumulated meridional mass flux
+                                                                     !! [L2 H ~> m3 or kg]
+  type(thermo_var_ptrs),                     intent(in)    :: tv     !< Thermodynamics structure
+  real,                                      intent(in)    :: dt     !< Time increment [T ~> s]
+  type(MEKE_type),                           intent(inout) :: MEKE   !< MEKE control structure
+  type(VarMix_CS), target,                   intent(in)    :: VarMix !< Variable mixing coefficients
+  type(cont_diag_ptrs),                      intent(inout) :: CDp    !< Diagnostics for the continuity equation
+  type(thickness_diffuse_CS),                intent(inout) :: CS     !< Control structure for thickness diffusion
+
   ! Local variables
   real :: e(SZI_(G),SZJ_(G),SZK_(GV)+1) ! heights of interfaces, relative to mean
                                          ! sea level [Z ~> m], positive up.
   real :: uhD(SZIB_(G),SZJ_(G),SZK_(GV)) ! Diffusive u*h fluxes [L2 H T-1 ~> m3 s-1 or kg s-1]
   real :: vhD(SZI_(G),SZJB_(G),SZK_(GV)) ! Diffusive v*h fluxes [L2 H T-1 ~> m3 s-1 or kg s-1]
+  real :: uhD_SymInst(SZIB_(G), SZJ_(G), SZK_(G)) ! Diffusive u*h fluxes [L2 H T-1 ~> m3 s-1 or kg s-1]
+  real :: vhD_SymInst(SZI_(G), SZJB_(G), SZK_(G)) ! Diffusive v*h fluxes [L2 H T-1 ~> m3 s-1 or kg s-1]
 
   real, dimension(SZIB_(G),SZJ_(G),SZK_(GV)+1) :: &
     KH_u, &       ! Isopycnal height diffusivities in u-columns [L2 T-1 ~> m2 s-1]
@@ -485,10 +498,10 @@ subroutine thickness_diffuse(h, uhtr, vhtr, tv, dt, G, GV, US, MEKE, VarMix, CDp
 
   ! Calculate uhD, vhD from h, e, KH_u, KH_v, tv%T/S
   if (use_stored_slopes) then
-    call thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV, US, MEKE, CS, &
+    call thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, uhD_SymInst, vhD_SymInst, cg1, dt, G, GV, US, visc, MEKE, CS, &
                                 int_slope_u, int_slope_v, VarMix%slope_x, VarMix%slope_y)
   else
-    call thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV, US, MEKE, CS, &
+    call thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, uhD_SymInst, vhD_SymInst, cg1, dt, G, GV, US, visc, MEKE, CS, &
                                 int_slope_u, int_slope_v)
   endif
 
@@ -567,16 +580,17 @@ subroutine thickness_diffuse(h, uhtr, vhtr, tv, dt, G, GV, US, MEKE, VarMix, CDp
   !$OMP parallel do default(shared)
   do k=1,nz
     do j=js,je ; do I=is-1,ie
-      uhtr(I,j,k) = uhtr(I,j,k) + uhD(I,j,k) * dt
+      uhtr(I,j,k) = uhtr(I,j,k) + uhD(I,j,k)*dt + uhD_SymInst(I,j,k)*dt
       if (associated(CDp%uhGM)) CDp%uhGM(I,j,k) = uhD(I,j,k)
     enddo ; enddo
     do J=js-1,je ; do i=is,ie
-      vhtr(i,J,k) = vhtr(i,J,k) + vhD(i,J,k) * dt
+      vhtr(i,J,k) = vhtr(i,J,k) + vhD(i,J,k)*dt + vhD_SymInst(I,j,k)*dt
       if (associated(CDp%vhGM)) CDp%vhGM(i,J,k) = vhD(i,J,k)
     enddo ; enddo
     do j=js,je ; do i=is,ie
       h(i,j,k) = h(i,j,k) - dt * G%IareaT(i,j) * &
-          ((uhD(I,j,k) - uhD(I-1,j,k)) + (vhD(i,J,k) - vhD(i,J-1,k)))
+          ((uhD(I,j,k) + uhD_SymInst(I,j,k) - uhD(I-1,j,k) - uhD_SymInst(I-1,j,k)) + &
+          (vhD(i,J,k) + vhD_SymInst(i,J,k) - vhD(i,J-1,k) - vhD_SymInst(i,J-1,k)))
       if (h(i,j,k) < GV%Angstrom_H) h(i,j,k) = GV%Angstrom_H
     enddo ; enddo
   enddo
@@ -599,11 +613,13 @@ end subroutine thickness_diffuse
 !> Calculates parameterized layer transports for use in the continuity equation.
 !! Fluxes are limited to give positive definite thicknesses.
 !! Called by thickness_diffuse().
-subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV, US, MEKE, &
+subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, uhD_SymInst, vhD_SymInst, cg1, dt, G, GV, US, visc, MEKE, &
                                   CS, int_slope_u, int_slope_v, slope_x, slope_y)
   type(ocean_grid_type),                        intent(in)  :: G     !< Ocean grid structure
   type(verticalGrid_type),                      intent(in)  :: GV    !< Vertical grid structure
   type(unit_scale_type),                        intent(in)  :: US    !< A dimensional unit scaling type
+  type(vertvisc_type),                          intent(inout) :: visc !< Structure containing vertical viscosities, bottom
+                                                                     !! boundary layer properies, and related fields.
   real, dimension(SZI_(G),SZJ_(G),SZK_(GV)),    intent(in)  :: h     !< Layer thickness [H ~> m or kg m-2]
   real, dimension(SZI_(G),SZJ_(G),SZK_(GV)+1),  intent(in)  :: e     !< Interface positions [Z ~> m]
   real, dimension(SZIB_(G),SZJ_(G),SZK_(GV)+1), intent(in)  :: Kh_u  !< Isopycnal height diffusivity
@@ -614,6 +630,10 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV
   real, dimension(SZIB_(G),SZJ_(G),SZK_(GV)),   intent(out) :: uhD   !< Zonal mass fluxes
                                                                      !! [H L2 T-1 ~> m3 s-1 or kg s-1]
   real, dimension(SZI_(G),SZJB_(G),SZK_(GV)),   intent(out) :: vhD   !< Meridional mass fluxes
+                                                                     !! [H L2 T-1 ~> m3 s-1 or kg s-1]
+  real, dimension(SZIB_(G),SZJ_(G),SZK_(G)),   intent(out) :: uhD_SymInst   !< Zonal mass fluxes
+                                                                     !! [H L2 T-1 ~> m3 s-1 or kg s-1]
+  real, dimension(SZI_(G),SZJB_(G),SZK_(G)),   intent(out) :: vhD_SymInst    !< Meridional mass fluxes
                                                                      !! [H L2 T-1 ~> m3 s-1 or kg s-1]
   real, dimension(:,:),                         pointer     :: cg1   !< Wave speed [L T-1 ~> m s-1]
   real,                                         intent(in)  :: dt    !< Time increment [T ~> s]
@@ -666,6 +686,8 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV
     drho_dT_dT_hr ! The second derivative of density with temperature at h (+1) points [R C-2 ~> kg m-3 degC-2]
   real :: uhtot(SZIB_(G),SZJ_(G))  ! The vertical sum of uhD [H L2 T-1 ~> m3 s-1 or kg s-1].
   real :: vhtot(SZI_(G),SZJB_(G))  ! The vertical sum of vhD [H L2 T-1 ~> m3 s-1 or kg s-1].
+  real :: uhtot_SymInst(SZIB_(G), SZJ_(G))  ! The vertical sum of uhD_SymInst [H L2 T-1 ~> m3 s-1 or kg s-1].
+  real :: vhtot_SymInst(SZI_(G), SZJB_(G))  ! The vertical sum of vhD_SymInst [H L2 T-1 ~> m3 s-1 or kg s-1].
   real, dimension(SZIB_(G)) :: &
     T_u, &        ! Temperature on the interface at the u-point [C ~> degC].
     S_u, &        ! Salinity on the interface at the u-point [S ~> ppt].
@@ -684,7 +706,10 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV
                                    ! integrated over u-point water columns [R Z L4 T-3 ~> W]
   real :: Work_v(SZI_(G),SZJB_(G)) ! The work done by the isopycnal height diffusion
                                    ! integrated over v-point water columns [R Z L4 T-3 ~> W]
-  real :: Work_h        ! The work averaged over an h-cell [R Z L2 T-3 ~> W m-2].
+  real :: Work_u_SymInst(SZIB_(G), SZJ_(G)) ! The work being done by the thickness
+  real :: Work_v_SymInst(SZI_(G), SZJB_(G)) ! diffusion integrated over a cell [R Z L4 T-3  ~> W ].
+  real :: Work_h(SZI_(G), SZJ_(G))          ! The work averaged over an h-cell [R Z L2 T-3 ~> W m-2].
+  real :: Work_h_SymInst(SZI_(G), SZJ_(G))        ! The work averaged over an h-cell [R Z L2 T-3 ~> W m-2].
   real :: PE_release_h  ! The amount of potential energy released by GM averaged over an h-cell
                         ! [R Z L2 T-3 ~> W m-2].  The calculation equals rho0 * h * S^2 * N^2 * kappa_GM.
   real :: I4dt          ! 1 / 4 dt [T-1 ~> s-1].
@@ -719,15 +744,23 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV
                         ! rescaling factors from vertical to horizontal distances [L2 Z-1 T-2 ~> m s-2]
   real :: Sfn_est       ! A preliminary estimate (before limiting) of the overturning
                         ! streamfunction [H L2 T-1 ~> m3 s-1 or kg s-1].
+  real :: Sfn_SymInst   ! A preliminary estimate (before limiting) of the overturning
+                        ! streamfunction [Z L2 T-1 ~> m3 s-1].
+  real :: Sfn_SymInst_u(SZIB_(G), SZK_(G)+1) ! Streamfunction for u-points [Z L2 T-1 ~> m3 s-1].
+  real :: Sfn_SymInst_v(SZI_(G), SZK_(G)+1)  ! Streamfunction for v-points [Z L2 T-1 ~> m3 s-1].
   real :: Sfn_unlim_u(SZIB_(G),SZK_(GV)+1) ! Volume streamfunction for u-points [Z L2 T-1 ~> m3 s-1]
   real :: Sfn_unlim_v(SZI_(G),SZK_(GV)+1)  ! Volume streamfunction for v-points [Z L2 T-1 ~> m3 s-1]
   real :: slope2_Ratio_u(SZIB_(G),SZK_(GV)+1) ! The ratio of the slope squared to slope_max squared [nondim]
   real :: slope2_Ratio_v(SZI_(G),SZK_(GV)+1)  ! The ratio of the slope squared to slope_max squared [nondim]
   real :: Sfn_in_h      ! The overturning streamfunction [H L2 T-1 ~> m3 s-1 or kg s-1] (note that
                         ! the units are different from other Sfn vars).
+  real :: Sfn_in_h_SymInst ! The overturning streamfunction [H L2 s-1 ~> m3 s-1 or kg s-1] (note that
+                        ! the units are different from other Sfn vars).
   real :: Sfn_safe      ! The streamfunction that goes linearly back to 0 at the surface
                         ! [H L2 T-1 ~> m3 s-1 or kg s-1].  This is a good value to use when the
                         ! slope is so large as to be meaningless, usually due to weak stratification.
+  real :: Sfn_safe_SymInst ! The streamfunction that goes linearly back to 0 at the surface.  This is a
+                        ! good thing to use when the slope is so large as to be meaningless [Z L2 T-1 ~> m3 s-1].
   real :: Slope         ! The slope of density surfaces, calculated in a way that is always
                         ! between -1 and 1 after undoing dimensional scaling, [Z L-1 ~> nondim]
   real :: mag_grad2     ! The squared magnitude of the 3-d density gradient [R2 L-2 ~> kg2 m-8].
@@ -741,7 +774,16 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV
   real :: dz_neglect2   ! dz_neglect^2 [Z2 ~> m2]
   real :: G_scale       ! The gravitational acceleration times a unit conversion
                         ! factor [L2 H-1 T-2 ~> m s-2 or m4 kg-1 s-2].
-  logical :: use_EOS    ! If true, density is calculated from T & S using an equation of state.
+  real :: Coriolis_u    ! Coriolis parameter at u points [T-1 ~> s-1].
+  real :: Coriolis_v    ! Coriolis parameter at v points [T-1 ~> s-1].
+  real :: factor_u      ! SYMMETRIC_INSTABILITY_DIFFUSE factor at u points.
+  real :: factor_v      ! SYMMETRIC_INSTABILITY_DIFFUSE factor at v points.
+  real :: SymInst_denom ! Value of the denominator, streamfunction goes to zero when it is zero [L Z-1 T-1 ~> s-1].
+  real :: frac          ! Fraction of transport being realized after limitation, [nondim].
+  real :: tmp_work_layer    ! Temporary work calculated in loop.
+  real :: max_Sfn       ! Maximum permitted streamfunction [Z L2 T-1 ~> m3 s-1].
+  logical :: use_EOS    ! If true, density is calculated from T & S using an
+                        ! equation of state.
   logical :: find_work  ! If true, find the change in energy due to the fluxes.
   integer :: nk_linear  ! The number of layers over which the streamfunction goes to 0.
   real :: G_rho0        ! g/Rho0 [L2 R-1 Z-1 T-2 ~> m4 kg-1 s-2].
@@ -766,6 +808,12 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV
                                                         ! [H L2 T-1 ~> m3 s-1 or kg s-1]
   real :: diag_sfn_unlim_y(SZI_(G),SZJB_(G),SZK_(GV)+1) ! Diagnostic of the y-face streamfunction before
                                                         ! applying limiters [Z L2 T-1 ~> m3 s-1]
+  real, dimension(SZIB_(G), SZJ_(G), SZK_(G)+1) :: diag_sfn_SymInst_x, diag_sfn_unlim_SymInst_x ! Diagnostics
+  real, dimension(SZI_(G), SZJB_(G), SZK_(G)+1) :: diag_sfn_SymInst_y, diag_sfn_unlim_SymInst_y ! Diagnostics
+                        ! times unit conversion factors [T-2 L2 Z-2 ~> s-2].
+  real, dimension(SZIB_(G), SZJ_(G), SZK_(G)+1) :: Work3D_u_SymInst ! 3D Work at u-points [R Z L4 T-3  ~> W ]
+  real, dimension(SZI_(G), SZJB_(G), SZK_(G)+1) :: Work3D_v_SymInst ! 3D Work at v-points [R Z L4 T-3  ~> W ]
+  real, dimension(SZI_(G), SZJ_(G), SZK_(G)+1) :: Work3D_h_SymInst ! Fraction of 3D Work at h-points [R Z L2 T-3 ~> W m-2]
   logical :: present_slope_x, present_slope_y, calc_derivatives
   integer, dimension(2) :: EOSdom_u  ! The shifted I-computational domain to use for equation of
                                      ! state calculations at u-points.
@@ -785,6 +833,7 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV
   dz_neglect = GV%dZ_subroundoff ; dz_neglect2 = dz_neglect**2
   if (GV%Boussinesq) G_rho0 = GV%g_Earth / GV%Rho0
   N2_floor = CS%N2_floor * US%Z_to_L**2
+  max_Sfn = 1.0e37*US%m_to_L**2*US%m_to_Z*US%T_to_s !Make sure diagnostics are representable as 32-bit reals
 
   use_EOS = associated(tv%eqn_of_state)
   present_slope_x = PRESENT(slope_x)
@@ -798,6 +847,7 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV
   Slope_y_PE(:,:,:) = 0.0
   hN2_x_PE(:,:,:) = 0.0
   hN2_y_PE(:,:,:) = 0.0
+  Work3D_h_SymInst(:,:,:) = 0.0
 
   find_work = allocated(MEKE%GM_src)
   find_work = (allocated(CS%GMwork) .or. find_work)
@@ -838,10 +888,22 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV
   !$OMP do
   do j=js,je ; do I=is-1,ie
     uhtot(I,j) = 0.0 ; Work_u(I,j) = 0.0
+    uhtot_SymInst(I,j) = 0.0 ; Work_u_SymInst(I,j) = 0.0
+    Work3D_u_SymInst(I,j,:) = 0.0
+    diag_sfn_x(I,j,1) = 0.0 ; diag_sfn_unlim_x(I,j,1) = 0.0
+    diag_sfn_x(I,j,nz+1) = 0.0 ; diag_sfn_unlim_x(I,j,nz+1) = 0.0
+    diag_sfn_SymInst_x(I,j,1) = 0.0 ; diag_sfn_unlim_SymInst_x(I,j,1) = 0.0
+    diag_sfn_SymInst_x(I,j,nz+1) = 0.0 ; diag_sfn_unlim_SymInst_x(I,j,nz+1) = 0.0
   enddo ; enddo
   !$OMP do
   do J=js-1,je ; do i=is,ie
     vhtot(i,J) = 0.0 ; Work_v(i,J) = 0.0
+    vhtot_SymInst(i,J) = 0.0 ; Work_v_SymInst(i,J) = 0.0
+    Work3D_v_SymInst(i,J,:) = 0.0
+    diag_sfn_y(i,J,1) = 0.0 ; diag_sfn_unlim_y(i,J,1) = 0.0
+    diag_sfn_y(i,J,nz+1) = 0.0 ; diag_sfn_unlim_y(i,J,nz+1) = 0.0
+    diag_sfn_SymInst_y(i,J,1) = 0.0 ; diag_sfn_unlim_SymInst_y(i,J,1) = 0.0
+    diag_sfn_SymInst_y(i,J,nz+1) = 0.0 ; diag_sfn_unlim_SymInst_y(i,J,nz+1) = 0.0
   enddo ; enddo
   !$OMP end parallel
 
@@ -868,6 +930,28 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV
   !$OMP                                  drdx,mag_grad2,Slope,slope2_Ratio_u,dzN2_u,  &
   !$OMP                                  Sfn_unlim_u,Rho_avg,drdi_u,drdkDe_u,c2_dz_u, &
   !$OMP                                  Sfn_safe,Sfn_est,Sfn_in_h,calc_derivatives)
+!!!$OMP parallel do default(none) shared(nz,is,ie,js,je,find_work,use_EOS,G,GV,US,pres,T,S, &
+!!!$OMP                                  uhtot_SymInst, uhD_SymInst, Work_u_SymInst, &
+!!!$OMP                                  Work3D_u_SymInst, &
+!!!$OMP                                  diag_sfn_SymInst_x, diag_sfn_unlim_SymInst_x, &
+!!!$OMP                                  nk_linear,IsdB,tv,h,h_neglect,e,dz_neglect,  &
+!!!$OMP                                  I_slope_max2,h_neglect2,present_int_slope_u, &
+!!!$OMP                                  int_slope_u,KH_u,uhtot,h_frac,h_avail_rsum,  &
+!!!$OMP                                  uhD,h_avail,G_scale,Work_u,CS,slope_x,cg1,   &
+!!!$OMP                                  diag_sfn_x, diag_sfn_unlim_x, max_Sfn, N2_floor,EOSdom_u, &
+!!!$OMP                                  use_stanley, Tsgs2,                          &
+!!!$OMP                                  present_slope_x,G_rho0,Slope_x_PE,hN2_x_PE)  &
+!!!$OMP                          private(drdiA,drdiB,drdkL,drdkR,pres_u,T_u,S_u,      &
+!!!$OMP                                  drho_dT_u,drho_dS_u,hg2A,hg2B,hg2L,hg2R,haA, &
+!!!$OMP                                  drho_dT_dT_u,scrap,                          &
+!!!$OMP                                  haB,haL,haR,dzaL,dzaR,wtA,wtB,wtL,wtR,drdz,  &
+!!!$OMP                                  drdx,mag_grad2,Slope,slope2_Ratio_u,hN2_u,   &
+!!!$OMP                                  Sfn_unlim_u,drdi_u,drdkDe_u,h_harm,c2_h_u,   &
+!!!$OMP                                  Sfn_SymInst_u, Sfn_in_h_SymInst, Sfn_SymInst, &
+!!!$OMP                                  Sfn_safe_SymInst, Coriolis_u, factor_u, frac, &
+!!!$OMP                                  tmp_work_layer, SymInst_denom, &
+!!!$OMP                                  Sfn_safe,Sfn_est,Sfn_in_h,calc_derivatives)
+
   do j=js,je
     do I=is-1,ie ; dzN2_u(I,1) = 0. ; dzN2_u(I,nz+1) = 0. ; enddo
     do K=nz,2,-1
@@ -1014,6 +1098,19 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV
             endif
             if (CS%id_slope_x > 0) CS%diagSlopeX(I,j,k) = Slope
 
+            if (CS%SYMMETRIC_INSTABILITY_DIFFUSE) then
+              Coriolis_u= 0.5*( G%CoriolisBu(I,J) + G%CoriolisBu(I,J-1) )
+              SymInst_denom = ((drdz*G_rho0) ** 2 + (US%Z_to_L*drdx*G_rho0) ** 2) ** 0.25
+              if (SymInst_denom > 0) then
+                factor_u = abs(Coriolis_u) - MAX(abs(Coriolis_u),abs(drdx*G_rho0/SymInst_denom))
+              else
+                factor_u = 0.0
+              endif
+              Sfn_SymInst_u(I,K)=(G%dxCu(I,j))**2*factor_u*(G%dy_Cu(I,j)*Slope)
+            else
+              Sfn_SymInst_u(I,K) = 0.
+            endif
+
             ! Estimate the streamfunction at each interface [H L2 T-1 ~> m3 s-1 or kg s-1].
             Sfn_unlim_u(I,K) = -(KH_u(I,j,K)*G%dy_Cu(I,j))*Slope
 
@@ -1037,21 +1134,47 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV
               endif
             endif
 
+            if (Sfn_SymInst_u(I,K) > 0.0) then ! The flow below this interface is positive.
+              if (e(i,j,K) < e(i+1,j,nz+1)) then
+                Sfn_SymInst_u(I,K) = 0.0 ! This is not uhtot, because it may compensate for
+                                ! deeper flow in very unusual cases.
+              elseif (e(i+1,j,nz+1) > e(i,j,K+1)) then
+                ! Scale the transport with the fraction of the donor layer above
+                ! the bottom on the receiving side.
+                Sfn_SymInst_u(I,K) = Sfn_SymInst_u(I,K) * ((e(i,j,K) - e(i+1,j,nz+1)) / &
+                                         ((e(i,j,K) - e(i,j,K+1)) + dz_neglect))
+              endif
+            else
+              if (e(i+1,j,K) < e(i,j,nz+1)) then ; Sfn_SymInst_u(I,K) = 0.0
+              elseif (e(i,j,nz+1) > e(i+1,j,K+1)) then
+                Sfn_SymInst_u(I,K) = Sfn_SymInst_u(I,K) * ((e(i+1,j,K) - e(i,j,nz+1)) / &
+                                       ((e(i+1,j,K) - e(i+1,j,K+1)) + dz_neglect))
+              endif
+            endif
+
           else ! .not. use_EOS
             if (present_slope_x) then
               Slope = slope_x(I,j,k)
             else
               Slope = ((e(i+1,j,K)-e(i,j,K))*G%IdxCu(I,j)) * G%OBCmaskCu(I,j)
             endif
+!This slope uses a different sign convention than the one above. It should be made consistent.
             if (CS%id_slope_x > 0) CS%diagSlopeX(I,j,k) = Slope
+            Sfn_SymInst_u(I,K)=-(G%dxCu(I,j))**2*factor_u*(G%dy_Cu(I,j)*Slope)
             Sfn_unlim_u(I,K) = -(KH_u(I,j,K)*G%dy_Cu(I,j))*Slope
             dzN2_u(I,K) = GV%g_prime(K)
           endif ! if (use_EOS)
         else ! if (k > nk_linear)
           dzN2_u(I,K) = N2_floor * dz_neglect
           Sfn_unlim_u(I,K) = 0.
+          Sfn_SymInst_u(I,K) = 0.
         endif ! if (k > nk_linear)
-        if (CS%id_sfn_unlim_x>0) diag_sfn_unlim_x(I,j,K) = Sfn_unlim_u(I,K)
+        if (CS%id_sfn_unlim_x>0) then
+            diag_sfn_unlim_x(I,j,K) = max(min(Sfn_unlim_u(I,K),max_Sfn),-max_Sfn)
+        endif
+        if (CS%id_sfn_unlim_SymInst_x>0) then
+            diag_sfn_unlim_SymInst_x(I,j,K) = max(min(Sfn_SymInst_u(I,K),max_Sfn),-max_Sfn)
+        endif
       enddo ! i-loop
     enddo ! k-loop
 
@@ -1067,11 +1190,14 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV
         if (G%OBCmaskCu(I,j)>0.) then
           do K=2,nz
             Sfn_unlim_u(I,K) = (1. + CS%FGNV_scale) * Sfn_unlim_u(I,K)
+            Sfn_SymInst_u(I,K) = (1. + CS%FGNV_scale) * Sfn_SymInst_u(I,K)
           enddo
           call streamfn_solver(nz, c2_dz_u(I,:), dzN2_u(I,:), Sfn_unlim_u(I,:))
+          call streamfn_solver(nz, c2_dz_u(I,:), dzN2_u(I,:), Sfn_SymInst_u(I,:))
         else
           do K=2,nz
             Sfn_unlim_u(I,K) = 0.
+            Sfn_SymInst_u(I,K) = 0.
           enddo
         endif
       enddo
@@ -1100,22 +1226,61 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV
               Sfn_safe = uhtot(I,j) * (1.0 - h_frac(i+1,j,k))
             endif
 
-            ! Determine the actual streamfunction at each interface.
+            if (uhtot_SymInst(I,j) <= 0.0) then
+              ! The transport that must balance the transport below is positive.
+              Sfn_safe_SymInst = uhtot_SymInst(I,j) * (1.0 - h_frac(i,j,k)) * GV%H_to_Z
+            else !  (uhtot(I,j) > 0.0)
+              Sfn_safe_SymInst = uhtot_SymInst(I,j) * (1.0 - h_frac(i+1,j,k)) * GV%H_to_Z
+            endif
+
+            ! Find the actual streamfunction at each interface.
             Sfn_est = (Z_to_H*Sfn_unlim_u(I,K) + slope2_Ratio_u(I,K)*Sfn_safe) / (1.0 + slope2_Ratio_u(I,K))
+            Sfn_SymInst = (Sfn_SymInst_u(I,K) + slope2_Ratio_u(I,K)*Sfn_safe_SymInst) / (1.0 + slope2_Ratio_u(I,K))
           else  ! When use_EOS is false, the layers are constant density.
             Sfn_est = Z_to_H*Sfn_unlim_u(I,K)
+            Sfn_SymInst = Sfn_SymInst_u(I,K)
           endif
 
+! FROM HERE COMBINE THEM
           ! Make sure that there is enough mass above to allow the streamfunction
           ! to satisfy the boundary condition of 0 at the surface.
-          Sfn_in_H = min(max(Sfn_est, -h_avail_rsum(i,j,K)), h_avail_rsum(i+1,j,K))
+!!!<<<<<<< HEAD
+!!!          Sfn_in_H = min(max(Sfn_est, -h_avail_rsum(i,j,K)), h_avail_rsum(i+1,j,K))
+!!!=======
+! Equivalent if Sfn_SymInst=0    Sfn_in_h = min(max(Sfn_est * GV%Z_to_H, -h_avail_rsum(i,j,K)), h_avail_rsum(i+1,j,K))
+          if ((Sfn_est + Sfn_SymInst)* GV%Z_to_H < -h_avail_rsum(i,j,K)) then
+            frac = -h_avail_rsum(i,j,K) / ((Sfn_est + Sfn_SymInst)*GV%Z_to_H)
+            Sfn_in_h = frac * Sfn_est * GV%Z_to_H
+            Sfn_in_h_SymInst = frac * Sfn_SymInst * GV%Z_to_H
+          elseif ((Sfn_est + Sfn_SymInst) * GV%Z_to_H > h_avail_rsum(i+1,j,K)) then
+            frac = h_avail_rsum(i+1,j,K) / ((Sfn_est + Sfn_SymInst)*GV%Z_to_H)
+            Sfn_in_h = frac * Sfn_est * GV%Z_to_H
+            Sfn_in_h_SymInst = frac * Sfn_SymInst * GV%Z_to_H
+          else
+            Sfn_in_h = Sfn_est * GV%Z_to_H
+            Sfn_in_h_SymInst = Sfn_SymInst * GV%Z_to_H
+          endif
+!!!>>>>>>> syminst
 
           ! The actual transport is limited by the mass available in the two
           ! neighboring grid cells.
-          uhD(I,j,k) = max(min((Sfn_in_H - uhtot(I,j)), h_avail(i,j,k)), &
-                           -h_avail(i+1,j,k))
+          ! uhD(I,j,k) + uhD_SymInst(I,j,k)  = max(min((Sfn_in_h - uhtot(I,j) + Sfn_in_h_SymInst -uhtot_SymInst(I,j)), h_avail(i,j,k)), &
+          !                 -h_avail(i+1,j,k))
+          if (((Sfn_in_h - uhtot(I,j)) + (Sfn_in_h_SymInst -uhtot_SymInst(I,j))) > h_avail(i,j,k)) then
+            frac = h_avail(i,j,k) / ((Sfn_in_h - uhtot(I,j)) + (Sfn_in_h_SymInst - uhtot_SymInst(I,j)))
+            uhD(I,j,k) = frac * (Sfn_in_h - uhtot(I,j))
+            uhD_SymInst(I,j,k) = frac * (Sfn_in_h_SymInst - uhtot_SymInst(I,j))
+          elseif (((Sfn_in_h - uhtot(I,j)) + (Sfn_in_h_SymInst - uhtot_SymInst(I,j))) < -h_avail(i+1,j,k)) then
+            frac = -h_avail(i+1,j,k) / ((Sfn_in_h - uhtot(I,j)) + (Sfn_in_h_SymInst - uhtot_SymInst(I,j)))
+            uhD(I,j,k) = frac * (Sfn_in_h - uhtot(I,j))
+            uhD_SymInst(I,j,k)  = frac * (Sfn_in_h_SymInst - uhtot_SymInst(I,j))
+          else
+            uhD(I,j,k) = Sfn_in_h - uhtot(I,j)
+            uhD_SymInst(I,j,k)  = Sfn_in_h_SymInst - uhtot_SymInst(I,j)
+          endif
 
           if (CS%id_sfn_x>0) diag_sfn_x(I,j,K) = diag_sfn_x(I,j,K+1) + uhD(I,j,k)
+          if (CS%id_sfn_SymInst_x>0) diag_sfn_SymInst_x(I,j,K) = diag_sfn_SymInst_x(I,j,K+1) + uhD_SymInst(I,j,k)
 !         sfn_x(I,j,K) = max(min(Sfn_in_h, uhtot(I,j)+h_avail(i,j,k)), &
 !                            uhtot(I,j)-h_avail(i+1,j,K))
 !         sfn_slope_x(I,j,K) = max(uhtot(I,j)-h_avail(i+1,j,k), &
@@ -1133,7 +1298,14 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV
             uhD(I,j,k) = -uhtot(I,j) * h_frac(i+1,j,k)
           endif
 
+          if (uhtot_SymInst(I,j) <= 0.0) then
+            uhD_SymInst(I,j,k) = -uhtot_SymInst(I,j) * h_frac(i,j,k)
+          else !  (uhtot(I,j) > 0.0)
+            uhD_SymInst(I,j,k) = -uhtot_SymInst(I,j) * h_frac(i+1,j,k)
+          endif
+
           if (CS%id_sfn_x>0) diag_sfn_x(I,j,K) = diag_sfn_x(I,j,K+1) + uhD(I,j,k)
+          if (CS%id_sfn_SymInst_x>0) diag_sfn_SymInst_x(I,j,K) = diag_sfn_SymInst_x(I,j,K+1) + uhD_SymInst(I,j,k)
 !         if (sfn_slope_x(I,j,K+1) <= 0.0) then
 !           sfn_slope_x(I,j,K) = sfn_slope_x(I,j,K+1) * (1.0 - h_frac(i,j,k))
 !         else
@@ -1143,6 +1315,7 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV
         endif
 
         uhtot(I,j) = uhtot(I,j) + uhD(I,j,k)
+        uhtot_SymInst(I,j) = uhtot_SymInst(I,j) + uhD_SymInst(I,j,k)
 
         if (find_work) then
           !   This is the energy tendency based on the original profiles, and does
@@ -1161,8 +1334,21 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV
             ( uhtot(I,j) * drdkDe_u(I,K) - &
               (uhD(I,j,k) * drdi_u(I,k)) * 0.25 * &
               ((e(i,j,K) + e(i,j,K+1)) + (e(i+1,j,K) + e(i+1,j,K+1))) )
-        endif
 
+          Work_u_SymInst(I,j) = Work_u_SymInst(I,j) + G_scale * &
+            ( uhtot_SymInst(I,j) * drdkDe_u(I,K) - &
+              (uhD_SymInst(I,j,k) * drdi_u(I,k)) * 0.25 * &
+              ((e(i,j,K) + e(i,j,K+1)) + (e(i+1,j,K) + e(i+1,j,K+1))) )
+
+          !same but 3D structure:
+          tmp_work_layer =  ((uhD_SymInst(I,j,k) * drdi_u(I,k)) * &
+               0.25 * ((e(i,j,K) + e(i,j,K+1)) + (e(i+1,j,K) + e(i+1,j,K+1))))
+
+          Work3D_u_SymInst(I,j,K) = G_scale * &
+            ( uhtot_SymInst(I,j) * drdkDe_u(I,K)  - 0.5 * tmp_work_layer )
+
+          Work3D_u_SymInst(I,j,K+1) = Work3D_u_SymInst(I,j,K+1) - 0.5 * G_scale * tmp_work_layer
+        endif
       enddo
     enddo ! end of k-loop
   enddo ! end of j-loop
@@ -1183,6 +1369,27 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV
   !$OMP                                  drdy,mag_grad2,Slope,slope2_Ratio_v,dzN2_v,N2_unlim, &
   !$OMP                                  Sfn_unlim_v,Rho_avg,drdj_v,drdkDe_v,c2_dz_v, &
   !$OMP                                  Sfn_safe,Sfn_est,Sfn_in_h,calc_derivatives)
+!!!$OMP parallel do default(none) shared(nz,is,ie,js,je,find_work,use_EOS,G,GV,US,pres,T,S, &
+!!!$OMP                                  vhtot_SymInst, vhD_SymInst, Work_v_SymInst, &
+!!!$OMP                                  Work3D_v_SymInst, &
+!!!$OMP                                  diag_sfn_SymInst_y, diag_sfn_unlim_SymInst_y, &
+!!!$OMP                                  nk_linear,IsdB,tv,h,h_neglect,e,dz_neglect,  &
+!!!$OMP                                  I_slope_max2,h_neglect2,present_int_slope_v, &
+!!!$OMP                                  int_slope_v,KH_v,vhtot,h_frac,h_avail_rsum,  &
+!!!$OMP                                  vhD,h_avail,G_scale,Work_v,CS,slope_y,cg1,   &
+!!!$OMP                                  diag_sfn_y,diag_sfn_unlim_y, max_Sfn, N2_floor,EOSdom_v,&
+!!!$OMP                                  use_stanley, Tsgs2,                          &
+!!!$OMP                                  present_slope_y,G_rho0,Slope_y_PE,hN2_y_PE)  &
+!!!$OMP                          private(drdjA,drdjB,drdkL,drdkR,pres_v,T_v,S_v,      &
+!!!$OMP                                  drho_dT_v,drho_dS_v,hg2A,hg2B,hg2L,hg2R,haA, &
+!!!$OMP                                  drho_dT_dT_v,scrap,                          &
+!!!$OMP                                  haB,haL,haR,dzaL,dzaR,wtA,wtB,wtL,wtR,drdz,  &
+!!!$OMP                                  drdy,mag_grad2,Slope,slope2_Ratio_v,hN2_v,   &
+!!!$OMP                                  Sfn_unlim_v,drdj_v,drdkDe_v,h_harm,c2_h_v,   &
+!!!$OMP                                  Sfn_SymInst_v, Sfn_in_h_SymInst, Sfn_SymInst, &
+!!!$OMP                                  Sfn_safe_SymInst, Coriolis_v, factor_v, frac, &
+!!!$OMP                                  tmp_work_layer, SymInst_denom, &
+!!!$OMP                                  Sfn_safe,Sfn_est,Sfn_in_h,calc_derivatives)
   do J=js-1,je
     do K=nz,2,-1
       if (find_work .and. .not.(use_EOS)) then
@@ -1335,6 +1542,20 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV
             endif
             if (CS%id_slope_y > 0) CS%diagSlopeY(I,j,k) = Slope
 
+            if (CS%SYMMETRIC_INSTABILITY_DIFFUSE) then
+              Coriolis_v= 0.5*( G%CoriolisBu(I,J) + G%CoriolisBu(I-1,J) )
+              SymInst_denom = ((drdz*G_rho0) ** 2 + (US%Z_to_L*drdy*G_rho0) ** 2) ** 0.25
+              if (SymInst_denom > 0) then
+                factor_v = abs(Coriolis_v) - MAX(abs(Coriolis_v),abs(drdy*G_rho0/SymInst_denom))
+              else
+                factor_v = 0.0
+              endif
+              Sfn_SymInst_v(i,K)=(G%dyCv(i,J))**2*factor_v*(G%dx_Cv(i,J)*Slope)
+            else
+              Sfn_SymInst_v(i,K) = 0.
+            endif
+
+            ! Estimate the streamfunction at each interface [H L2 T-1 ~> m3 s-1 or kg s-1].
             Sfn_unlim_v(i,K) = -((KH_v(i,J,K)*G%dx_Cv(i,J))*Slope)
 
             ! Avoid moving dense water upslope from below the level of
@@ -1357,6 +1578,24 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV
               endif
             endif
 
+            if (Sfn_SymInst_v(i,K) > 0.0) then ! The flow below this interface is positive.
+              if (e(i,j,K) < e(i,j+1,nz+1)) then
+                Sfn_SymInst_v(i,K) = 0.0 ! This is not vhtot, because it may compensate for
+                                ! deeper flow in very unusual cases.
+              elseif (e(i,j+1,nz+1) > e(i,j,K+1)) then
+                ! Scale the transport with the fraction of the donor layer above
+                ! the bottom on the receiving side.
+                Sfn_SymInst_v(i,K) = Sfn_SymInst_v(i,K) * ((e(i,j,K) - e(i,j+1,nz+1)) / &
+                                         ((e(i,j,K) - e(i,j,K+1)) + dz_neglect))
+              endif
+            else
+              if (e(i,j+1,K) < e(i,j,nz+1)) then ; Sfn_SymInst_v(i,K) = 0.0
+              elseif (e(i,j,nz+1) > e(i,j+1,K+1)) then
+                Sfn_SymInst_v(i,K) = Sfn_SymInst_v(i,K) * ((e(i,j+1,K) - e(i,j,nz+1)) / &
+                                       ((e(i,j+1,K) - e(i,j+1,K+1)) + dz_neglect))
+              endif
+            endif
+!This slope uses a different sign convention than the one above. It should be made consistent.
           else ! .not. use_EOS
             if (present_slope_y) then
               Slope = slope_y(i,J,k)
@@ -1364,14 +1603,21 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV
               Slope = ((e(i,j+1,K)-e(i,j,K))*G%IdyCv(i,J)) * G%OBCmaskCv(i,J)
             endif
             if (CS%id_slope_y > 0) CS%diagSlopeY(I,j,k) = Slope
-            Sfn_unlim_v(i,K) = -((KH_v(i,J,K)*G%dx_Cv(i,J))*Slope)
+            Sfn_SymInst_v(i,K) = -(G%dyCv(i,J))**2*factor_v*(G%dx_Cv(i,J)*Slope)
+            Sfn_unlim_v(i,K) = (KH_v(i,J,K)*G%dx_Cv(i,J))*Slope
             dzN2_v(i,K) = GV%g_prime(K)
           endif ! if (use_EOS)
         else ! if (k > nk_linear)
           dzN2_v(i,K) = N2_floor * dz_neglect
           Sfn_unlim_v(i,K) = 0.
+          Sfn_SymInst_v(i,K) = 0.
         endif ! if (k > nk_linear)
-        if (CS%id_sfn_unlim_y>0) diag_sfn_unlim_y(i,J,K) = Sfn_unlim_v(i,K)
+        if (CS%id_sfn_unlim_y>0) then
+          diag_sfn_unlim_y(i,J,K) = max(min(Sfn_unlim_v(i,K),max_Sfn),-max_Sfn)
+        endif
+        if (CS%id_sfn_unlim_SymInst_y>0) then
+          diag_sfn_unlim_SymInst_y(i,J,K) = max(min(Sfn_SymInst_v(i,K),max_Sfn),-max_Sfn)
+        endif
       enddo ! i-loop
     enddo ! k-loop
 
@@ -1387,11 +1633,14 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV
         if (G%OBCmaskCv(i,J)>0.) then
           do K=2,nz
             Sfn_unlim_v(i,K) = (1. + CS%FGNV_scale) * Sfn_unlim_v(i,K)
+            Sfn_SymInst_v(i,K) = (1. + CS%FGNV_scale) * Sfn_SymInst_v(i,K)
           enddo
           call streamfn_solver(nz, c2_dz_v(i,:), dzN2_v(i,:), Sfn_unlim_v(i,:))
+          call streamfn_solver(nz, c2_dz_v(i,:), dzN2_v(i,:), Sfn_SymInst_v(i,:))
         else
           do K=2,nz
             Sfn_unlim_v(i,K) = 0.
+            Sfn_SymInst_v(i,:) = 0.
           enddo
         endif
       enddo
@@ -1419,21 +1668,60 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV
               Sfn_safe = vhtot(i,J) * (1.0 - h_frac(i,j+1,k))
             endif
 
+            if (vhtot_SymInst(i,J) <= 0.0) then
+              ! The transport that must balance the transport below is positive.
+              Sfn_safe_SymInst = vhtot_SymInst(i,J) * (1.0 - h_frac(i,j,k)) * GV%H_to_Z
+            else !  (vhtot(I,j) > 0.0)
+              Sfn_safe_SymInst = vhtot_SymInst(i,J) * (1.0 - h_frac(i,j+1,k)) * GV%H_to_Z
+            endif
+
             ! Find the actual streamfunction at each interface.
             Sfn_est = (Z_to_H*Sfn_unlim_v(i,K) + slope2_Ratio_v(i,K)*Sfn_safe) / (1.0 + slope2_Ratio_v(i,K))
+            Sfn_SymInst = (Z_to_H*Sfn_SymInst_v(i,K) + slope2_Ratio_v(i,K)*Sfn_safe_SymInst) / (1.0 + slope2_Ratio_v(i,K))
           else  ! When use_EOS is false, the layers are constant density.
             Sfn_est = Z_to_H*Sfn_unlim_v(i,K)
+            Sfn_SymInst = Z_to_H*Sfn_SymInst_v(i,K)
           endif
-
+!COMBINING
           ! Make sure that there is enough mass above to allow the streamfunction
           ! to satisfy the boundary condition of 0 at the surface.
-          Sfn_in_H = min(max(Sfn_est, -h_avail_rsum(i,j,K)), h_avail_rsum(i,j+1,K))
-
+!!!<<<<<<< HEAD
+!!!          Sfn_in_H = min(max(Sfn_est, -h_avail_rsum(i,j,K)), h_avail_rsum(i,j+1,K))
+!!!
+!!!=======
+!Equivalent if Sfn_SymInst=0  Sfn_in_h = min(max(Sfn_est * GV%Z_to_H, -h_avail_rsum(i,j,K)), h_avail_rsum(i,j+1,K))
+          if ((Sfn_est + Sfn_SymInst)* GV%Z_to_H < -h_avail_rsum(i,j,K)) then
+            frac = -h_avail_rsum(i,j,K) / ((Sfn_est + Sfn_SymInst)*GV%Z_to_H)
+            Sfn_in_h = frac * Sfn_est * GV%Z_to_H
+            Sfn_in_h_SymInst = frac * Sfn_SymInst * GV%Z_to_H
+          elseif ((Sfn_est + Sfn_SymInst) * GV%Z_to_H > h_avail_rsum(i,j+1,K)) then
+            frac = h_avail_rsum(i,j+1,K) / ((Sfn_est + Sfn_SymInst)*GV%Z_to_H)
+            Sfn_in_h = frac * Sfn_est * GV%Z_to_H
+            Sfn_in_h_SymInst = frac * Sfn_SymInst * GV%Z_to_H
+          else
+            Sfn_in_h = Sfn_est * GV%Z_to_H
+            Sfn_in_h_SymInst = Sfn_SymInst * GV%Z_to_H
+          endif
+!!!>>>>>>> syminst
           ! The actual transport is limited by the mass available in the two
           ! neighboring grid cells.
-          vhD(i,J,k) = max(min((Sfn_in_H - vhtot(i,J)), h_avail(i,j,k)), -h_avail(i,j+1,k))
+          ! vhD(i,J,k)+vhD_SymInst(i,J,k) = max(min((Sfn_in_h - vhtot(i,J) + Sfn_in_h_SymInst - uhtot_SymInst(i,J)), h_avail(i,j,k)), &
+          !                 -h_avail(i,j+1,k))
+          if (((Sfn_in_h - vhtot(i,J)) + (Sfn_in_h_SymInst -vhtot_SymInst(i,J))) > h_avail(i,j,k)) then
+            frac = h_avail(i,j,k) / ((Sfn_in_h - vhtot(i,J)) + (Sfn_in_h_SymInst - vhtot_SymInst(i,J)))
+            vhD(i,J,k) = frac * (Sfn_in_h - vhtot(i,J))
+            vhD_SymInst(i,J,k) = frac * (Sfn_in_h_SymInst -vhtot_SymInst(i,J))
+          elseif (((Sfn_in_h - vhtot(i,J)) + (Sfn_in_h_SymInst -vhtot_SymInst(i,J))) < -h_avail(i,j+1,k)) then
+            frac = -h_avail(i,j+1,k) / ((Sfn_in_h - vhtot(i,J)) + (Sfn_in_h_SymInst - vhtot_SymInst(i,J)))
+            vhD(i,J,k) = frac * (Sfn_in_h - vhtot(i,J))
+            vhD_SymInst(i,J,k)  = frac * (Sfn_in_h_SymInst -vhtot_SymInst(i,J))
+          else
+            vhD(i,J,k) = Sfn_in_h - vhtot(i,J)
+            vhD_SymInst(i,J,k)  = Sfn_in_h_SymInst - vhtot_SymInst(i,J)
+          endif
 
           if (CS%id_sfn_y>0) diag_sfn_y(i,J,K) = diag_sfn_y(i,J,K+1) + vhD(i,J,k)
+          if (CS%id_sfn_SymInst_y>0) diag_sfn_SymInst_y(i,J,K) = diag_sfn_SymInst_y(i,J,K+1) + vhD_SymInst(i,J,k)
 !         sfn_y(i,J,K) = max(min(Sfn_in_h, vhtot(i,J)+h_avail(i,j,k)), &
 !                            vhtot(i,J)-h_avail(i,j+1,k))
 !         sfn_slope_y(i,J,K) = max(vhtot(i,J)-h_avail(i,j+1,k), &
@@ -1451,7 +1739,14 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV
             vhD(i,J,k) = -vhtot(i,J) * h_frac(i,j+1,k)
           endif
 
+          if (vhtot_SymInst(i,J) <= 0.0) then
+            vhD_SymInst(i,J,k) = -vhtot_SymInst(i,J) * h_frac(i,j,k)
+          else !  (vhtot(i,J) > 0.0)
+            vhD_SymInst(i,J,k) = -vhtot_SymInst(i,J) * h_frac(i,j+1,k)
+          endif
+
           if (CS%id_sfn_y>0) diag_sfn_y(i,J,K) = diag_sfn_y(i,J,K+1) + vhD(i,J,k)
+          if (CS%id_sfn_SymInst_y>0) diag_sfn_SymInst_y(i,J,K) = diag_sfn_SymInst_y(i,J,K+1) + vhD_SymInst(i,J,k)
 !         if (sfn_slope_y(i,J,K+1) <= 0.0) then
 !           sfn_slope_y(i,J,K) = sfn_slope_y(i,J,K+1) * (1.0 - h_frac(i,j,k))
 !         else
@@ -1460,7 +1755,7 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV
         endif
 
         vhtot(i,J) = vhtot(i,J)  + vhD(i,J,k)
-
+        vhtot_SymInst(i,J) = vhtot_SymInst(i,J)  + vhD_SymInst(i,J,k)
         if (find_work) then
           !   This is the energy tendency based on the original profiles, and does
           ! not include any nonlinear terms due to a finite time step (which would
@@ -1478,8 +1773,20 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV
             ( vhtot(i,J) * drdkDe_v(i,K) - &
              (vhD(i,J,k) * drdj_v(i,k)) * 0.25 * &
              ((e(i,j,K) + e(i,j,K+1)) + (e(i,j+1,K) + e(i,j+1,K+1))) )
-        endif
 
+          Work_v_SymInst(i,J) = Work_v_SymInst(i,J) + G_scale * &
+            ( vhtot_SymInst(i,J) * drdkDe_v(i,K) - &
+             (vhD_SymInst(i,J,k) * drdj_v(i,k)) * 0.25 * &
+             ((e(i,j,K) + e(i,j,K+1)) + (e(i,j+1,K) + e(i,j+1,K+1))) )
+
+          tmp_work_layer =  ((vhD_SymInst(i,J,k) * drdj_v(i,k)) * &
+               0.25 * ((e(i,j,K) + e(i,j,K+1)) + (e(i,j+1,K) + e(i,j+1,K+1))))
+
+          Work3D_v_SymInst(i,J,K) = G_scale * &
+            ( vhtot_SymInst(i,J) * drdkDe_v(i,K)  - 0.5 * tmp_work_layer )
+
+          Work3D_v_SymInst(i,J,K+1) = Work3D_v_SymInst(i,J,K+1) - 0.5 * G_scale * tmp_work_layer
+        endif
       enddo
     enddo ! end of k-loop
   enddo ! end of j-loop
@@ -1488,9 +1795,11 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV
   if (.not.find_work .or. .not.(use_EOS)) then
     do j=js,je ; do I=is-1,ie ; uhD(I,j,1) = -uhtot(I,j) ; enddo ; enddo
     do J=js-1,je ; do i=is,ie ; vhD(i,J,1) = -vhtot(i,J) ; enddo ; enddo
+    do j=js,je ; do I=is-1,ie ; uhD_SymInst(I,j,1) = -uhtot_SymInst(I,j) ; enddo ; enddo
+    do J=js-1,je ; do i=is,ie ; vhD_SymInst(i,J,1) = -vhtot_SymInst(i,J) ; enddo ; enddo
   else
     EOSdom_u(1) = (is-1) - (G%IsdB-1) ; EOSdom_u(2) = ie - (G%IsdB-1)
-    !$OMP parallel do default(shared) private(pres_u,T_u,S_u,drho_dT_u,drho_dS_u,drdiB,G_scale)
+    !$OMP parallel do default(shared) private(pres_u,tmp_work_layer,T_u,S_u,drho_dT_u,drho_dS_u,drdiB,G_scale)
     do j=js,je
       if (use_EOS) then
         do I=is-1,ie
@@ -1505,6 +1814,7 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV
         uhD(I,j,1) = -uhtot(I,j)
 
         G_scale = GV%g_Earth * GV%H_to_Z
+        uhD_SymInst(I,j,1) = -uhtot_SymInst(I,j)
         if (use_EOS) then
           drdiB = drho_dT_u(I) * (T(i+1,j,1)-T(i,j,1)) + &
                   drho_dS_u(I) * (S(i+1,j,1)-S(i,j,1))
@@ -1523,11 +1833,21 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV
               ( (uhD(I,j,1) * drdiB) * 0.25 * &
                 ((e(i,j,1) + e(i,j,2)) + (e(i+1,j,1) + e(i+1,j,2))) )
         endif
+        Work_u_SymInst(I,j) = Work_u_SymInst(I,j) - G_scale * &
+            ( (uhD_SymInst(I,j,1) * drdiB) * 0.25 * &
+              ((e(i,j,1) + e(i,j,2)) + (e(i+1,j,1) + e(i+1,j,2))) )
+
+        tmp_work_layer =  ((uhD_SymInst(I,j,1) * drdiB) * &
+             0.25 * ((e(i,j,1) + e(i,j,2)) + (e(i+1,j,1) + e(i+1,j,2))))
+        Work3D_u_SymInst(I,j,1) = G_scale * &
+          ( - 0.5 * tmp_work_layer )
+        Work3D_u_SymInst(I,j,2) = Work3D_u_SymInst(I,j,2) - 0.5 * G_scale * tmp_work_layer
+
       enddo
     enddo
 
     EOSdom_v(:) = EOS_domain(G%HI)
-    !$OMP parallel do default(shared) private(pres_v,T_v,S_v,drho_dT_v,drho_dS_v,drdjB,G_scale)
+    !$OMP parallel do default(shared) private(pres_v,tmp_work_layer,T_v,S_v,drho_dT_v,drho_dS_v,drdjB,G_scale)
     do J=js-1,je
       if (use_EOS) then
         do i=is,ie
@@ -1540,6 +1860,7 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV
       endif
       do i=is,ie
         vhD(i,J,1) = -vhtot(i,J)
+        vhD_SymInst(i,J,1) = -vhtot_SymInst(i,J)
 
         G_scale = GV%g_Earth * GV%H_to_Z
         if (use_EOS) then
@@ -1554,19 +1875,62 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV
         Work_v(i,J) = Work_v(i,J) - G_scale * &
             ( (vhD(i,J,1) * drdjB) * 0.25 * &
               ((e(i,j,1) + e(i,j,2)) + (e(i,j+1,1) + e(i,j+1,2))) )
+
+        Work_v_SymInst(i,J) = Work_v_SymInst(i,J) - G_scale * &
+            ( (vhD_SymInst(i,J,1) * drdjB) * 0.25 * &
+              ((e(i,j,1) + e(i,j,2)) + (e(i,j+1,1) + e(i,j+1,2))) )
+
+        tmp_work_layer =  ((vhD_SymInst(i,J,1) * drdjB) * &
+             0.25 * ((e(i,j,1) + e(i,j,2)) + (e(i,j+1,1) + e(i,j+1,2))))
+        Work3D_v_SymInst(i,J,1) = G_scale * &
+          ( - 0.5 * tmp_work_layer )
+        Work3D_v_SymInst(i,J,2) = Work3D_v_SymInst(i,J,2) - 0.5 * G_scale * tmp_work_layer
       enddo
     enddo
   endif
 
-  if (find_work) then ; do j=js,je ; do i=is,ie
-    ! Note that the units of Work_v and Work_u are [R Z L4 T-3 ~> W], while Work_h is in [R Z L2 T-3 ~> W m-2].
-    Work_h = 0.5 * G%IareaT(i,j) * &
-      ((Work_u(I-1,j) + Work_u(I,j)) + (Work_v(i,J-1) + Work_v(i,J)))
-    if (allocated(CS%GMwork)) CS%GMwork(i,j) = Work_h
-    if (.not. CS%GM_src_alt) then ; if (allocated(MEKE%GM_src)) then
-      MEKE%GM_src(i,j) = MEKE%GM_src(i,j) + Work_h
-    endif ; endif
-  enddo ; enddo ; endif
+  if (find_work) then
+    do j=js,je ; do i=is,ie
+      ! Note that the units of Work_v and Work_u are W, while Work_h is W m-2.
+      Work_h(i,j) = 0.5 * G%IareaT(i,j) * &
+        ((Work_u(I-1,j) + Work_u(I,j)) + (Work_v(i,J-1) + Work_v(i,J)))
+      Work_h_SymInst(i,j) = 0.5 * G%IareaT(i,j) * &
+        ((Work_u_SymInst(I-1,j) + Work_u_SymInst(I,j)) + (Work_v_SymInst(i,J-1) + Work_v_SymInst(i,J)))
+    enddo; enddo
+    do k=nz,1,-1; do j=js,je ; do i=is,ie
+!Computing 3D work at h-points that will be passed to calculating a diffusivity in MOM_set_diffusivity.F90:
+      Work3D_h_SymInst(i,j,K) = -0.5 * CS%SymInst_frac_TKE_to_Kd * G%IareaT(i,j) * & !switch sign to make release of work positive
+      ((Work3D_u_SymInst(I-1,j,K) + Work3D_u_SymInst(I,j,K)) + (Work3D_v_SymInst(i,J-1,K) + Work3D_v_SymInst(i,J,K)))
+      if (Work_h_SymInst(i,j)>0) Work3D_h_SymInst(i,j,K)=0.0
+
+      PE_release_h = -0.25*(Kh_u(I,j,k)*(Slope_x_PE(I,j,k)**2) * hN2_x_PE(I,j,k) + &
+      Kh_u(I-1,j,k)*(Slope_x_PE(I-1,j,k)**2) * hN2_x_PE(I-1,j,k) + &
+      Kh_v(i,J,k)*(Slope_y_PE(i,J,k)**2) * hN2_y_PE(i,J,k) + &
+      Kh_v(i,J-1,k)*(Slope_y_PE(i,J-1,k)**2) * hN2_y_PE(i,J-1,k))
+    enddo; enddo; enddo
+
+    if (allocated(CS%GMwork)) then
+      do j=js,je; do i=is,ie
+        CS%GMwork(i,j) = Work_h(i,j)
+      enddo; enddo
+    endif
+
+    if (allocated(MEKE%GM_src)) then
+      if (CS%GM_src_alt) then
+        do j=js,je ; do i=is,ie
+          MEKE%GM_src(i,j) = MEKE%GM_src(i,j) + PE_release_h
+        enddo; enddo
+      else
+        do j=js,je ; do i=is,ie
+          MEKE%GM_src(i,j) = MEKE%GM_src(i,j) + Work_h(i,j)
+        enddo; enddo
+      endif
+    endif
+  endif
+
+  if (associated(visc%Work3D_h_SymInst)) then
+    visc%Work3D_h_SymInst(:,:,:) = Work3D_h_SymInst(:,:,:)
+  endif
 
   if (find_work .and. CS%GM_src_alt) then ; if (allocated(MEKE%GM_src)) then
     if (CS%MEKE_src_answer_date >= 20240601) then
@@ -1603,9 +1967,21 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV
   if (CS%id_slope_y > 0) call post_data(CS%id_slope_y, CS%diagSlopeY, CS%diag)
   if (CS%id_sfn_x > 0) call post_data(CS%id_sfn_x, diag_sfn_x, CS%diag)
   if (CS%id_sfn_y > 0) call post_data(CS%id_sfn_y, diag_sfn_y, CS%diag)
+  if (CS%id_sfn_SymInst_x > 0) call post_data(CS%id_sfn_SymInst_x, diag_sfn_SymInst_x, CS%diag)
+  if (CS%id_sfn_SymInst_y > 0) call post_data(CS%id_sfn_SymInst_y, diag_sfn_SymInst_y, CS%diag)
   if (CS%id_sfn_unlim_x > 0) call post_data(CS%id_sfn_unlim_x, diag_sfn_unlim_x, CS%diag)
   if (CS%id_sfn_unlim_y > 0) call post_data(CS%id_sfn_unlim_y, diag_sfn_unlim_y, CS%diag)
-
+  if (CS%id_sfn_unlim_SymInst_x > 0) call post_data(CS%id_sfn_unlim_SymInst_x, diag_sfn_unlim_SymInst_x, CS%diag)
+  if (CS%id_sfn_unlim_SymInst_y > 0) call post_data(CS%id_sfn_unlim_SymInst_y, diag_sfn_unlim_SymInst_y, CS%diag)
+  if (CS%id_Work3D_u_SymInst > 0) call post_data(CS%id_Work3D_u_SymInst, Work3D_u_SymInst, CS%diag)
+  if (CS%id_Work3D_v_SymInst > 0) call post_data(CS%id_Work3D_v_SymInst, Work3D_v_SymInst, CS%diag)
+  if (CS%id_Work3D_h_SymInst > 0) call post_data(CS%id_Work3D_h_SymInst, Work3D_h_SymInst, CS%diag)
+  if (CS%id_Work_u > 0) call post_data(CS%id_Work_u, Work_u, CS%diag)
+  if (CS%id_Work_u_SymInst > 0) call post_data(CS%id_Work_u_SymInst, Work_u_SymInst, CS%diag)
+  if (CS%id_Work_v > 0) call post_data(CS%id_Work_v, Work_v, CS%diag)
+  if (CS%id_Work_v_SymInst > 0) call post_data(CS%id_Work_v_SymInst, Work_v_SymInst, CS%diag)
+  if (CS%id_Work_h > 0) call post_data(CS%id_Work_h, Work_h, CS%diag)
+  if (CS%id_Work_h_SymInst > 0) call post_data(CS%id_Work_h_SymInst, Work_h_SymInst, CS%diag)
 end subroutine thickness_diffuse_full
 
 !> Tridiagonal solver for streamfunction at interfaces
@@ -2267,6 +2643,15 @@ subroutine thickness_diffuse_init(Time, G, GV, US, param_file, diag, CDp, CS)
                  "This sets the default value for the various _ANSWER_DATE parameters.", &
                  default=99991231, do_not_log=.true.)
 
+  call get_param(param_file, mdl, "SYMMETRIC_INSTABILITY_DIFFUSE", CS%SYMMETRIC_INSTABILITY_DIFFUSE, &
+                 "If true, uses the symmetric instability parameterization \n"//&
+                 "(Yankovsky et al., 2020).", default=.false.)
+  CS%SymInst_frac_TKE_to_Kd  = 0.0
+  if (CS%SYMMETRIC_INSTABILITY_DIFFUSE) &
+    call get_param(param_file, mdl, "SymInst_frac_TKE_to_Kd",CS%SymInst_frac_TKE_to_Kd, &
+                   "Fraction of TKE used to calculate diffusivity (0-1).", units="nondim", &
+                   default=0.167)
+
   call get_param(param_file, mdl, "MEKE_GM_SRC_ALT", CS%GM_src_alt, &
                  "If true, use the GM energy conversion form S^2*N^2*kappa rather "//&
                  "than the streamfunction for the GM source term.", default=.false.)
@@ -2381,13 +2766,48 @@ subroutine thickness_diffuse_init(Time, G, GV, US, param_file, diag, CDp, CS)
   CS%id_sfn_y =  register_diag_field('ocean_model', 'GM_sfn_y', diag%axesCvi, Time, &
            'Parameterized Meridional Overturning Streamfunction', &
            'm3 s-1', conversion=GV%H_to_m*US%L_to_m**2*US%s_to_T)
+  CS%id_sfn_SymInst_x =  register_diag_field('ocean_model', 'SymInst_sfn_x', diag%axesCui, Time, &
+           'Parameterized Zonal Overturning Streamfunction', &
+           'm3 s-1', conversion=GV%H_to_m*US%L_to_m**2*US%s_to_T)
+  CS%id_sfn_SymInst_y =  register_diag_field('ocean_model', 'SymInst_sfn_y', diag%axesCvi, Time, &
+           'Parameterized Meridional Overturning Streamfunction', &
+           'm3 s-1', conversion=GV%H_to_m*US%L_to_m**2*US%s_to_T)
   CS%id_sfn_unlim_x =  register_diag_field('ocean_model', 'GM_sfn_unlim_x', diag%axesCui, Time, &
            'Parameterized Zonal Overturning Streamfunction before limiting/smoothing', &
            'm3 s-1', conversion=US%Z_to_m*US%L_to_m**2*US%s_to_T)
   CS%id_sfn_unlim_y =  register_diag_field('ocean_model', 'GM_sfn_unlim_y', diag%axesCvi, Time, &
            'Parameterized Meridional Overturning Streamfunction before limiting/smoothing', &
            'm3 s-1', conversion=US%Z_to_m*US%L_to_m**2*US%s_to_T)
-
+  CS%id_sfn_unlim_SymInst_x =  register_diag_field('ocean_model', 'SymInst_sfn_unlim_x', diag%axesCui, Time, &
+           'Parameterized Zonal Overturning Streamfunction before limiting/smoothing', &
+           'm3 s-1', conversion=US%Z_to_m*US%L_to_m**2*US%s_to_T)
+  CS%id_sfn_unlim_SymInst_y =  register_diag_field('ocean_model', 'SymInst_sfn_unlim_y', diag%axesCvi, Time, &
+           'Parameterized Meridional Overturning Streamfunction before limiting/smoothing', &
+           'm3 s-1', conversion=US%Z_to_m*US%L_to_m**2*US%s_to_T)
+  CS%id_Work3D_u_SymInst = register_diag_field('ocean_model', 'Work3D_u_SymInst', diag%axesCui, Time, &
+           'Work done at  U-point (Symmetric instability parameterization)', &
+           'W', conversion=US%RZ_to_kg_m2*US%L_to_m**4*US%s_to_T**3)
+  CS%id_Work3D_v_SymInst = register_diag_field('ocean_model', 'Work3D_v_SymInst', diag%axesCvi, Time, &
+           'Work done at  V-point (Symmetric instability parameterization)', &
+           'W', conversion=US%RZ_to_kg_m2*US%L_to_m**4*US%s_to_T**3)
+  CS%id_Work3D_h_SymInst = register_diag_field('ocean_model', 'Work3D_h_SymInst', diag%axesTi, Time, &
+           'Fraction of work done at  h-point used to calculate Kd (Symmetric instability parameterization)', &
+           'W m-2', conversion=US%RZ3_T3_to_W_m2*US%L_to_Z**2)
+  CS%id_Work_u = register_diag_field('ocean_model', 'Work_u', diag%axesCu1, Time, &
+           'Work done at  U-point', 'W', conversion=US%RZ_to_kg_m2*US%L_to_m**4*US%s_to_T**3)
+  CS%id_Work_v = register_diag_field('ocean_model', 'Work_v', diag%axesCv1, Time, &
+           'Work done at  V-point', 'W', conversion=US%RZ_to_kg_m2*US%L_to_m**4*US%s_to_T**3)
+  CS%id_Work_h = register_diag_field('ocean_model', 'Work_h', diag%axesT1, Time, &
+           'Work done at  h-point', 'W m-2', conversion=US%RZ3_T3_to_W_m2*US%L_to_Z**2)
+  CS%id_Work_u_SymInst = register_diag_field('ocean_model', 'Work_u_SymInst', diag%axesCu1, Time, &
+           'Work done at  U-point (Symmetric instability parameterization)', &
+           'W', conversion=US%RZ_to_kg_m2*US%L_to_m**4*US%s_to_T**3)
+  CS%id_Work_v_SymInst = register_diag_field('ocean_model', 'Work_v_SymInst', diag%axesCv1, Time, &
+           'Work done at  V-point (Symmetric instability parameterization)', &
+           'W', conversion=US%RZ_to_kg_m2*US%L_to_m**4*US%s_to_T**3)
+  CS%id_Work_h_SymInst = register_diag_field('ocean_model', 'Work_h_SymInst', diag%axesT1, Time, &
+           'Work done at  h-point (Symmetric instability parameterization)', &
+           'W m-2', conversion=US%RZ3_T3_to_W_m2*US%L_to_Z**2)
 end subroutine thickness_diffuse_init
 
 !> Copies KH_u_GME and KH_v_GME from private type into arrays provided as arguments

@@ -2699,11 +2699,12 @@ subroutine set_visc_register_restarts(HI, G, GV, US, param_file, visc, restart_C
   logical,                 intent(in) :: use_ice_shelf !< if true, register tau_shelf restarts
   ! Local variables
   logical :: use_kappa_shear, KS_at_vertex
-  logical :: adiabatic, useKPP, useEPBL, use_ideal_age
+  logical :: adiabatic, useKPP, useEPBL, use_ideal_age, local_syminst
   logical :: do_brine_plume, use_hor_bnd_diff, use_neutral_diffusion, use_fpmix
   logical :: use_CVMix_shear, MLE_use_PBL_MLD, MLE_use_Bodner, use_CVMix_conv
   integer :: isd, ied, jsd, jed, nz
-  real :: hfreeze !< If hfreeze > 0 [Z ~> m], melt potential will be computed.
+  real :: hfreeze !  If hfreeze > 0 [Z ~> m], melt potential will be computed.
+  real :: Prandtl_SymInst ! Prandtl number associated with symmetric instability parameterization [nondim].
   character(len=16)  :: Kv_units, Kd_units
   character(len=40)  :: mdl = "MOM_set_visc"  ! This module's name.
   type(vardesc) :: u_desc, v_desc
@@ -2713,7 +2714,7 @@ subroutine set_visc_register_restarts(HI, G, GV, US, param_file, visc, restart_C
                  do_not_log=.true.)
 
   use_kappa_shear = .false. ; KS_at_vertex = .false. ; use_CVMix_shear = .false.
-  useKPP = .false. ; useEPBL = .false. ; use_CVMix_conv = .false.
+  useKPP = .false.  ; local_syminst = .false. ; useEPBL = .false. ; use_CVMix_conv = .false.
 
   if (.not.adiabatic) then
     use_kappa_shear = kappa_shear_is_used(param_file)
@@ -2735,6 +2736,16 @@ subroutine set_visc_register_restarts(HI, G, GV, US, param_file, visc, restart_C
   else
     Kv_units = "Pa s" ; Kd_units = "kg m-1 s-1"
   endif
+
+  call get_param(param_file, mdl, "SYMMETRIC_INSTABILITY_DIFFUSE", local_syminst, &
+                 "If true, uses the symmetric instability parameterization \n"//&
+                 "(Yankovsky et al., 2020).", default=.false., do_not_log=.true.)
+  if (local_syminst) then
+    call safe_alloc_ptr(visc%Work3D_h_SymInst, isd, ied, jsd, jed, nz+1)
+  endif
+  call get_param(param_file, mdl, "PRANDTL_SYMINST", Prandtl_SymInst, &
+                 "Prandtl Number for Symmetric Instability Parameterization", &
+                 default=1.0, units="nondim", do_not_log=.true.)
 
   if (use_kappa_shear .or. useKPP .or. useEPBL .or. use_CVMix_shear .or. use_CVMix_conv) then
     call safe_alloc_ptr(visc%Kd_shear, isd, ied, jsd, jed, nz+1)
@@ -2759,7 +2770,7 @@ subroutine set_visc_register_restarts(HI, G, GV, US, param_file, visc, restart_C
     call safe_alloc_ptr(visc%TKE_turb, isd, ied, jsd, jed, nz+1)
   endif
 
-  if (useKPP) then
+  if (useKPP .or. (local_syminst .and. (prandtl_syminst > 0.))) then
     ! MOM_bkgnd_mixing uses Kv_slow when KPP is defined.
     call safe_alloc_ptr(visc%Kv_slow, isd, ied, jsd, jed, nz+1)
   endif
@@ -3221,6 +3232,7 @@ subroutine set_visc_end(visc, CS)
   if (allocated(visc%tbl_thick_shelf_v)) deallocate(visc%tbl_thick_shelf_v)
   if (allocated(visc%kv_tbl_shelf_u)) deallocate(visc%kv_tbl_shelf_u)
   if (allocated(visc%kv_tbl_shelf_v)) deallocate(visc%kv_tbl_shelf_v)
+  if (associated(visc%Work3D_h_SymInst)) deallocate(visc%Work3D_h_SymInst)
 end subroutine set_visc_end
 
 !> \namespace mom_set_visc

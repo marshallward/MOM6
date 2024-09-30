@@ -164,7 +164,7 @@ type, public :: set_diffusivity_CS ; private
                               !! in the LOTW_BBL calculations.  Values below 20240630 recover the
                               !! original answers, while higher values use more accurate expressions.
                               !! This only applies when USE_LOTW_BBL_DIFFUSIVITY is true.
-
+  real    :: Prandtl_SymInst  !< Prandtl number for symmetric instability parameterization. Default 1.
   character(len=200) :: inputdir !< The directory in which input files are found
   type(user_change_diff_CS), pointer :: user_change_diff_CSp => NULL() !< Control structure for a child module
   type(Kappa_shear_CS),      pointer :: kappaShear_CSp       => NULL() !< Control structure for a child module
@@ -182,6 +182,7 @@ type, public :: set_diffusivity_CS ; private
   integer :: id_Kd_quad    = -1, id_Kd_itidal   = -1, id_Kd_Froude  = -1, id_Kd_slope = -1
   integer :: id_prof_leak  = -1, id_prof_quad   = -1, id_prof_itidal= -1
   integer :: id_prof_Froude= -1, id_prof_slope  = -1, id_bbl_thick = -1, id_kbbl = -1
+  integer :: id_diag_TKE_SymInst = -1, id_diag_Kd_SymInst = -1
   !>@}
 
 end type set_diffusivity_CS
@@ -271,6 +272,8 @@ subroutine set_diffusivity(u, v, h, u_h, v_h, tv, fluxes, optics, visc, dt, Kd_i
   real :: rho_bot(SZI_(G)) ! In situ near-bottom density [T-2 ~> s-2]
   real :: h_bot(SZI_(G))   ! Bottom boundary layer thickness [H ~> m or kg m-2]
   integer :: k_bot(SZI_(G))   ! Bottom boundary layer thickness top layer index
+  real, dimension(SZI_(G),SZJ_(G),SZK_(G)) :: &
+    diag_TKE_SymInst, diag_Kd_SymInst ! Diagnostics for symmetric instability parameterization.
 
   type(diffusivity_diags)  :: dd ! structure with arrays of available diags
 
@@ -305,9 +308,11 @@ subroutine set_diffusivity(u, v, h, u_h, v_h, tv, fluxes, optics, visc, dt, Kd_i
     KT_extra, &   !< Double diffusion diffusivity of temperature [H Z T-1 ~> m2 s-1 or kg m-1 s-1]
     KS_extra      !< Double diffusion diffusivity of salinity [H Z T-1 ~> m2 s-1 or kg m-1 s-1]
 
+  real :: I_Rho0      ! inverse of Boussinesq reference density [R-1 ~> m3 kg-1]
   real :: dissip        ! local variable for dissipation calculations [Z2 R T-3 ~> W m-3]
   real :: Omega2        ! squared absolute rotation rate [T-2 ~> s-2]
-
+  real :: Kd_SymInst        ! Diffusivity from the symmetric instability parameterization [Z2 T-1 ~> m2 s-1]
+  real :: TKE_SymInst       ! TKE used to compute diffusivity in the symmetric instability parameterization [Z3 T-3 ~> m3 s-3]
   logical   :: use_EOS      ! If true, compute density from T/S using equation of state.
   logical   :: TKE_to_Kd_used ! If true, TKE_to_Kd and maxTKE need to be calculated.
   integer   :: kb(SZI_(G))  ! The index of the lightest layer denser than the
@@ -329,6 +334,7 @@ subroutine set_diffusivity(u, v, h, u_h, v_h, tv, fluxes, optics, visc, dt, Kd_i
   if (.not.CS%initialized) call MOM_error(FATAL,"set_diffusivity: "//&
          "Module must be initialized before it is used.")
 
+  I_Rho0     = 1.0 / GV%Rho0
   if (CS%answer_date < 20190101) then
     ! These hard-coded dimensional parameters are being replaced.
     kappa_dt_fill = 1.e-3*GV%m2_s_to_HZ_T * 7200.*US%s_to_T
@@ -348,6 +354,8 @@ subroutine set_diffusivity(u, v, h, u_h, v_h, tv, fluxes, optics, visc, dt, Kd_i
                     CS%use_int_tides .or. &
                    (CS%bottomdraglaw .and. .not.CS%use_LOTW_BBL_diffusivity))
 
+  diag_TKE_SymInst(:,:,:) = 0.0
+  diag_Kd_SymInst(:,:,:) = 0.0
   ! Set Kd_lay, Kd_int and Kv_slow to constant values, mostly to fill the halos.
   if (present(Kd_lay)) Kd_lay(:,:,:) = CS%Kd
   Kd_int(:,:,:) = CS%Kd
@@ -611,6 +619,29 @@ subroutine set_diffusivity(u, v, h, u_h, v_h, tv, fluxes, optics, visc, dt, Kd_i
       enddo ; enddo ; endif
     endif
 
+    !Work3D_h_SymInst has units  W/m2, needs to be divided  by rho_o (Boussinesq limit)
+    if (associated(visc%Work3D_h_SymInst)) then
+        do k=nz,1,-1 ; do i=is,ie
+          TKE_SymInst  = I_Rho0 * 0.5 * (visc%Work3D_h_SymInst(i,j,K)+visc%Work3D_h_SymInst(i,j,K+1))
+          diag_TKE_SymInst(i,j,k) = TKE_SymInst
+          if (TKE_SymInst<0) TKE_SymInst = 0.0
+          Kd_SymInst  = TKE_to_Kd(i,k) * TKE_SymInst
+          diag_Kd_SymInst(i,j,k) = Kd_SymInst
+
+          if (CS%Kd_max >= 0.0) Kd_SymInst = min(Kd_SymInst, CS%Kd_max)
+          Kd_lay(i,j,k) = Kd_lay(i,j,k) + Kd_SymInst
+
+          Kd_int(i,j,K)   = Kd_int(i,j,K)   + 0.5 * Kd_SymInst
+          Kd_int(i,j,K+1) = Kd_int(i,j,K+1) + 0.5 * Kd_SymInst
+
+          ! Adding viscosity and Prandtl number component:
+          if (CS%Prandtl_SymInst > 0.0) then
+            visc%Kv_slow(i,j,K)   = visc%Kv_slow(i,j,K)   + 0.5 * Kd_SymInst * CS%Prandtl_SymInst
+            visc%Kv_slow(i,j,K+1) = visc%Kv_slow(i,j,K+1) + 0.5 * Kd_SymInst * CS%Prandtl_SymInst
+          endif
+        enddo ; enddo
+    endif
+
     ! This adds the diffusion sustained by the energy extracted from the flow by the bottom drag.
     if (CS%bottomdraglaw .and. (CS%BBL_effic > 0.0)) then
       if (CS%use_LOTW_BBL_diffusivity) then
@@ -654,7 +685,7 @@ subroutine set_diffusivity(u, v, h, u_h, v_h, tv, fluxes, optics, visc, dt, Kd_i
       !   2) a dissipation proportional to N (aka Gargett) and
       !   3) dissipation corresponding to a (nearly) constant diffusivity.
       do k=2,nz-1 ; do i=is,ie
-        dissip = max( CS%dissip_min, &   ! Const. floor on dissip.
+        dissip = max( CS%dissip_min,  &   ! Const. floor on dissip.
                       CS%dissip_N0 + CS%dissip_N1 * sqrt(N2_lay(i,k)), & ! Floor aka Gargett
                       CS%dissip_N2 * N2_lay(i,k)) ! Floor of Kd_min*rho0/F_Ri
         Kd_lay_2d(i,k) = max(Kd_lay_2d(i,k) , &  ! Apply floor to Kd
@@ -749,6 +780,9 @@ subroutine set_diffusivity(u, v, h, u_h, v_h, tv, fluxes, optics, visc, dt, Kd_i
   if (CS%id_prof_Froude > 0) call post_data(CS%id_prof_Froude, dd%prof_Froude, CS%diag)
   if (CS%id_prof_quad > 0) call post_data(CS%id_prof_quad, dd%prof_quad, CS%diag)
   if (CS%id_prof_itidal > 0) call post_data(CS%id_prof_itidal, dd%prof_itidal, CS%diag)
+
+  if (CS%id_diag_TKE_SymInst > 0) call post_data(CS%id_diag_TKE_SymInst, diag_TKE_SymInst, CS%diag)
+  if (CS%id_diag_Kd_SymInst > 0) call post_data(CS%id_diag_Kd_SymInst, diag_Kd_SymInst, CS%diag)
 
   ! tidal mixing
   if (CS%use_tidal_mixing) &
@@ -2218,6 +2252,8 @@ subroutine set_diffusivity_init(Time, G, GV, US, param_file, diag, CS, int_tide_
   real :: decay_length     ! The maximum decay scale for the BBL diffusion [H ~> m or kg m-2]
   logical :: ML_use_omega
   integer :: default_answer_date  ! The default setting for the various ANSWER_DATE flags.
+  logical :: local_syminst
+
   ! This include declares and sets the variable "version".
 # include "version_variable.h"
   character(len=40)  :: mdl = "MOM_set_diffusivity"  ! This module's name.
@@ -2516,6 +2552,11 @@ subroutine set_diffusivity_init(Time, G, GV, US, param_file, diag, CS, int_tide_
   CS%id_Kd_layer = register_diag_field('ocean_model', 'Kd_layer', diag%axesTL, Time, &
       'Diapycnal diffusivity of layers (as set)', 'm2 s-1', conversion=GV%HZ_T_to_m2_s)
 
+  CS%id_diag_TKE_SymInst = register_diag_field('ocean_model', 'diag_TKE_SymInst', diag%axesTL, Time, &
+      'TKE from symmetric instability parameterization used to compute Kd', 'm3 s-3', conversion=US%Z_to_m**3*US%s_to_T**3)
+  CS%id_diag_Kd_SymInst = register_diag_field('ocean_model', 'diag_Kd_SymInst', diag%axesTL, Time, &
+      'Diapycnal diffusivity of layers from symmetric instability parameterization', 'm2 s-1', &
+      conversion=US%Z2_T_to_m2_s)
   if (CS%use_tidal_mixing) then
     CS%id_Kd_Work = register_diag_field('ocean_model', 'Kd_Work', diag%axesTL, Time, &
          'Work done by Diapycnal Mixing', 'W m-2', conversion=US%RZ3_T3_to_W_m2)
@@ -2598,6 +2639,13 @@ subroutine set_diffusivity_init(Time, G, GV, US, param_file, diag, CS, int_tide_
   if (CS%Vertex_Shear) halo_TS = 1
 
   double_diffuse = (CS%double_diffusion .or. CS%use_CVMix_ddiff)
+
+  call get_param(param_file, mdl, "SYMMETRIC_INSTABILITY_DIFFUSE", local_syminst, &
+                 "If true, uses the symmetric instability parameterization \n"//&
+                 "(Yankovsky et al., 2020).", default=.false., do_not_log=.true.)
+  call get_param(param_file, mdl, "PRANDTL_SYMINST", CS%Prandtl_SymInst, &
+                 "Prandtl Number for Symmetric Instability Parameterization", &
+                 default=1.0, units="nondim", do_not_log =.not.local_syminst)
 
 end subroutine set_diffusivity_init
 
