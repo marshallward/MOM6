@@ -124,7 +124,7 @@ type, public :: MEKE_CS ; private
   logical :: debug      !< If true, write out checksums of data for debugging
   integer :: eke_src !< Enum specifying whether EKE is stepped forward prognostically (default),
                      !! read in from a file, or inferred via a neural network
-  logical :: sqg_use_MEKE !< If True, use MEKE%Le for the SQG vertical structure. 
+  logical :: sqg_use_MEKE !< If True, use MEKE%Le for the SQG vertical structure.
   type(diag_ctrl), pointer :: diag => NULL() !< A type that regulates diagnostics output
   !>@{ Diagnostic handles
   integer :: id_MEKE = -1, id_Ue = -1, id_Kh = -1, id_src = -1
@@ -1912,7 +1912,7 @@ subroutine MEKE_alloc_register_restart(HI, US, param_file, MEKE, restart_CS)
     call register_restart_field(MEKE%Le, "MEKE_Le", .false., restart_CS, &
              longname="Eddy length scale from Mesoscale Eddy Kinetic Energy", &
              units="m", conversion=US%L_to_m)
-  endif    
+  endif
   if (Use_Kh_in_MEKE) then
     allocate(MEKE%Kh_diff(isd:ied,jsd:jed), source=0.0)
     call register_restart_field(MEKE%Kh_diff, "MEKE_Kh_diff", .false., restart_CS, &
