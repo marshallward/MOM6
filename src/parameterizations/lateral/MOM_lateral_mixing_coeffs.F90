@@ -614,9 +614,9 @@ subroutine calc_sqg_struct(h, tv, G, GV, US, CS, dt, MEKE)
     CS%sqg_struct(i,j,k) = CS%sqg_struct(i,j,k-1)*exp(-CS%sqg_expo*(dzc/Le(i,j)))
   enddo ; enddo ; enddo
 
-  if (CS%debug) then
-    call hchksum(CS%sqg_struct, 'sqg_struct', G%HI)
-  endif
+!  if (CS%debug) then
+!    call hchksum(CS%sqg_struct, 'sqg_struct', G%HI)
+!  endif
 
 
   if (query_averaging_enabled(CS%diag)) then
