@@ -609,9 +609,8 @@ subroutine calc_sqg_struct(h, tv, G, GV, US, CS, dt, MEKE)
   do k=2,nz ; do j=js,je ; do i=is,ie
     N2 = max(0.25*(N2_u(I-1,j,k) + N2_u(I,j,k) + N2_v(i,J-1,k) + N2_v(i,J,k)),0.0)
     dzc = 0.25*(dzu(I-1,j,k) + dzu(I,j,k) + dzv(i,J-1,k) + dzv(i,J,k)) * &
-            !N2**0.5/f(i,j)
-            sqrt(N2)/f(i,j)
-!    dzs = -N2**0.5/f(i,j)*dzc
+            N2**0.5/f(i,j)
+            !sqrt(N2)/f(i,j)
     CS%sqg_struct(i,j,k) = CS%sqg_struct(i,j,k-1)*exp(-CS%sqg_expo*(dzc/Le(i,j)))
   enddo ; enddo ; enddo
 
