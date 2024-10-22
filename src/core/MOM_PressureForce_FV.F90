@@ -1588,8 +1588,10 @@ subroutine PressureForce_FV_Bouss(h, tv, PFu, PFv, G, GV, US, CS, ALE_CSp, p_atm
 
   ! Compute pressure gradient in x direction
   !$acc data &
-  !$acc   present(G, GV, e, PFu, PFv) &
-  !$acc   copyin(pa, h, intx_pa, inty_pa, intx_dpa, inty_dpa, intz_dpa)
+  !$acc   present(CS, G, GV, e, PFu, PFv) &
+  !$acc   copyin(pa, h, intx_pa, inty_pa, intx_dpa, inty_dpa, intz_dpa) &
+  !$acc   create(dM)
+
   !$acc kernels
   !$OMP parallel do default(shared)
   do k=1,nz ; do j=js,je ; do I=Isq,Ieq
@@ -1612,11 +1614,10 @@ subroutine PressureForce_FV_Bouss(h, tv, PFu, PFv, G, GV, US, CS, ALE_CSp, p_atm
                   ((h(i,j,k) + h(i,j+1,k)) + h_neglect))
   enddo ; enddo ; enddo
   !$acc end kernels
-  !$acc end data
 
   if (CS%GFS_scale < 1.0) then
     ! Adjust the Montgomery potential to make this a reduced gravity model.
-    !$acc enter data create(dM)
+
     if (use_EOS) then
       !$OMP parallel do default(shared)
       do j=Jsq,Jeq+1
@@ -1635,17 +1636,14 @@ subroutine PressureForce_FV_Bouss(h, tv, PFu, PFv, G, GV, US, CS, ALE_CSp, p_atm
     else
       !$OMP parallel do default(shared)
 
-      !$acc data present(CS, G, GV, e, dM)
       !$acc kernels
       do j=Jsq,Jeq+1 ; do i=Isq,Ieq+1
         dM(i,j) = (CS%GFS_scale - 1.0) * (G_Rho0 * GV%Rlay(1)) * (e(i,j,1) - G%Z_ref)
       enddo ; enddo
       !$acc end kernels
-      !$acc end data
     endif
 
     !$OMP parallel do default(shared)
-    !$acc data present(G, dM, PFu, PFv)
     !$acc kernels
     do k=1,nz
       do j=js,je ; do I=Isq,Ieq
@@ -1656,10 +1654,8 @@ subroutine PressureForce_FV_Bouss(h, tv, PFu, PFv, G, GV, US, CS, ALE_CSp, p_atm
       enddo ; enddo
     enddo
     !$acc end kernels
-    !$acc end data
-
-    !$acc exit data copyout(dM)
   endif
+  !$acc end data
 
   !$acc exit data copyout(PFu, PFv, e)
 
