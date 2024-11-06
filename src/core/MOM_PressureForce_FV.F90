@@ -1768,15 +1768,18 @@ subroutine PressureForce_FV_Bouss(h, tv, PFu, PFv, G, GV, US, CS, ALE_CSp, p_atm
     enddo ; enddo ; enddo
   endif ! intx_pa and inty_pa have now been reset to reflect the properties of an unimpeded interface.
 
+  ! NOTE: None of these `enter data` statements should be here.  They are only
+  !   temporarily being used to set up the data regions below.
+  ! Eventually, they should be set up *outside* of the function.
+
   !$acc enter data create(PFu, PFv)
   !$acc enter data copyin(e)
 
-  ! NOTE: This should probably already be present, and we should be updating
-  !   the fields, rather than copying them.  Need more info.
   !$acc enter data if (use_EOS) &
   !$acc   copyin(tv_tmp, tv_tmp%T, tv_tmp%S, tv, tv%eqn_of_state, EOSdom2d)
-  !$acc enter data if(use_p_atm) copyin(p_atm)
-  !$acc enter data if(.not. use_p_atm) copyin(p0)
+  !$acc enter data if (use_p_atm) copyin(p_atm)
+  !$acc enter data if (.not. use_p_atm) copyin(p0)
+  !$acc enter data if (present(pbce)) copyin(pbce)
 
   ! Compute pressure gradient in x direction
   !$acc data &
@@ -1785,7 +1788,6 @@ subroutine PressureForce_FV_Bouss(h, tv, PFu, PFv, G, GV, US, CS, ALE_CSp, p_atm
   !$acc   create(rho_in_situ, dM)
 
   !$acc kernels
-  !$OMP parallel do default(shared)
   do k=1,nz ; do j=js,je ; do I=Isq,Ieq
     PFu(I,j,k) = (((pa(i,j,K)*h(i,j,k) + intz_dpa(i,j,k)) - &
                    (pa(i+1,j,K)*h(i+1,j,k) + intz_dpa(i+1,j,k))) + &
@@ -1796,7 +1798,6 @@ subroutine PressureForce_FV_Bouss(h, tv, PFu, PFv, G, GV, US, CS, ALE_CSp, p_atm
   enddo ; enddo ; enddo
 
   ! Compute pressure gradient in y direction
-  !$OMP parallel do default(shared)
   do k=1,nz ; do J=Jsq,Jeq ; do i=is,ie
     PFv(i,J,k) = (((pa(i,j,K)*h(i,j,k) + intz_dpa(i,j,k)) - &
                    (pa(i,j+1,K)*h(i,j+1,k) + intz_dpa(i,j+1,k))) + &
@@ -1849,15 +1850,12 @@ subroutine PressureForce_FV_Bouss(h, tv, PFu, PFv, G, GV, US, CS, ALE_CSp, p_atm
                                tv%eqn_of_state, EOSdom2d)
       endif
 
-      !$OMP parallel do default(shared)
       !$acc kernels
       do j=Jsq,Jeq+1 ; do i=Isq,Ieq+1
         dM(i,j) = (CS%GFS_scale - 1.0) * (G_Rho0 * rho_in_situ(i,j)) * (e(i,j,1) - G%Z_ref)
       enddo ; enddo
       !$acc end kernels
     else
-      !$OMP parallel do default(shared)
-
       !$acc kernels
       do j=Jsq,Jeq+1 ; do i=Isq,Ieq+1
         dM(i,j) = (CS%GFS_scale - 1.0) * (G_Rho0 * GV%Rlay(1)) * (e(i,j,1) - G%Z_ref)
@@ -1865,7 +1863,6 @@ subroutine PressureForce_FV_Bouss(h, tv, PFu, PFv, G, GV, US, CS, ALE_CSp, p_atm
       !$acc end kernels
     endif
 
-    !$OMP parallel do default(shared)
     !$acc kernels
     do k=1,nz
       do j=js,je ; do I=Isq,Ieq
@@ -1877,17 +1874,21 @@ subroutine PressureForce_FV_Bouss(h, tv, PFu, PFv, G, GV, US, CS, ALE_CSp, p_atm
     enddo
     !$acc end kernels
   endif
-  !$acc end data
-
-  !$acc exit data if(use_p_atm) delete(p_atm)
-  !$acc exit data if(.not. use_p_atm) delete(p0)
-  !$acc exit data if (use_EOS) &
-  !$acc   delete(tv_tmp, tv_tmp%T, tv_tmp%S, tv, tv%eqn_of_state, EOSdom2d)
-  !$acc exit data copyout(PFu, PFv, e)
 
   if (present(pbce)) then
     call set_pbce_Bouss(e, tv_tmp, G, GV, US, rho0_set_pbce, CS%GFS_scale, pbce)
   endif
+  !$acc end data
+
+  ! NOTE: As above, these are here until data is set up outside of the function.
+
+  !$acc exit data if (present(pbce)) copyout(pbce)
+  !$acc exit data if (use_EOS) &
+  !$acc   delete(tv_tmp, tv_tmp%T, tv_tmp%S, tv, tv%eqn_of_state, EOSdom2d)
+  !$acc exit data if (use_p_atm) delete(p_atm)
+  !$acc exit data if (.not. use_p_atm) delete(p0)
+  !$acc exit data delete(e)
+  !$acc exit data copyout(PFu, PFv)
 
   if (present(eta)) then
     ! eta is the sea surface height relative to a time-invariant geoid, for comparison with
