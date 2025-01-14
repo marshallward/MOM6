@@ -1819,9 +1819,6 @@ subroutine PressureForce_FV_Bouss(h, tv, PFu, PFv, G, GV, US, CS, ALE_CSp, p_atm
   !$omp target enter data if(.not. use_p_atm) &
   !$omp   map(to: p0)
 
-  !$omp target enter data if(present(pbce)) &
-  !$omp   map(to: pbce)
-
   ! NOTE: e_sal condition could be sharpened, but this is close enough.
   !$omp target enter data map(to: e_tidal_eq, e_tidal_sal, e_sal_and_tide) if (CS%tides)
   !$omp target enter data map(to: e_sal) if (CS%calculate_SAL)
@@ -1942,9 +1939,6 @@ subroutine PressureForce_FV_Bouss(h, tv, PFu, PFv, G, GV, US, CS, ALE_CSp, p_atm
   !$omp target exit data if (.not. use_p_atm) &
   !$omp   map(delete: p0)
 
-  !$omp target exit data if (present(pbce)) &
-  !$omp   map(from: pbce)
-
   !$omp target exit data &
   !$omp   map(delete: pa, dpa) &
   !$omp   map(delete: intx_pa, inty_pa, intx_dpa, inty_dpa, intz_dpa)
@@ -1952,8 +1946,6 @@ subroutine PressureForce_FV_Bouss(h, tv, PFu, PFv, G, GV, US, CS, ALE_CSp, p_atm
   ! NOTE: As above, these are here until data is set up outside of the function.
 
   if (present(eta)) then
-    !$omp target enter data map(alloc: eta)
-
     ! eta is the sea surface height relative to a time-invariant geoid, for comparison with
     ! what is used for eta in btstep.  See how e was calculated about 200 lines above.
     !$omp target
@@ -1983,8 +1975,6 @@ subroutine PressureForce_FV_Bouss(h, tv, PFu, PFv, G, GV, US, CS, ALE_CSp, p_atm
       enddo ; enddo
     endif
     !$omp end target
-
-    !$omp target exit data map(from: eta)
   endif
 
   !$omp target exit data map(delete: e)
