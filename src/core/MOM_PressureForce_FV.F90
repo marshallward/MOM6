@@ -1120,9 +1120,14 @@ subroutine PressureForce_FV_Bouss(h, tv, PFu, PFv, G, GV, US, CS, ALE_CSp, p_atm
     MassWt_u(:,:,:) = 0.0 ; MassWt_v(:,:,:) = 0.0
   endif
 
+  !$omp target enter data map(alloc: e)
+
+  !$omp target
+  !$omp parallel loop collapse(2)
   do j=Jsq,Jeq+1 ; do i=Isq,Ieq+1
     e(i,j,nz+1) = -G%bathyT(i,j)
   enddo ; enddo
+  !$omp end target
 
   ! The following two if-blocks are used to recover old answers for self-attraction and loading
   ! (SAL) and tides only. The old algorithm moves interface heights before density calculations,
@@ -1131,6 +1136,8 @@ subroutine PressureForce_FV_Bouss(h, tv, PFu, PFv, G, GV, US, CS, ALE_CSp, p_atm
 
   ! Calculate and add SAL geopotential anomaly to interface height (old answers)
   if (CS%calculate_SAL .and. CS%tides_answer_date<=20250131) then
+    !$omp target update from(e(:,:,nz+1))
+
     !$OMP parallel do default(shared)
     do j=Jsq,Jeq+1
       do i=Isq,Ieq+1
@@ -1148,10 +1155,14 @@ subroutine PressureForce_FV_Bouss(h, tv, PFu, PFv, G, GV, US, CS, ALE_CSp, p_atm
         e(i,j,nz+1) = e(i,j,nz+1) - e_sal(i,j)
       enddo ; enddo
     endif
+
+    !$omp target update to(e(:,:,nz+1))
   endif
 
   ! Calculate and add tidal geopotential anomaly to interface height (old answers)
   if (CS%tides .and. CS%tides_answer_date<=20250131) then
+    !$omp target update from(e(:,:,nz+1))
+
     if (CS%tides_answer_date>20230630) then ! answers_date between [20230701, 20250131]
       call calc_tidal_forcing(CS%Time, e_tidal_eq, e_tidal_sal, G, US, CS%tides_CSp)
      !$OMP parallel do default(shared)
@@ -1167,12 +1178,18 @@ subroutine PressureForce_FV_Bouss(h, tv, PFu, PFv, G, GV, US, CS, ALE_CSp, p_atm
         e(i,j,nz+1) = e(i,j,nz+1) - e_sal_and_tide(i,j)
       enddo ; enddo
     endif
+
+    !$omp target update to(e(:,:,nz+1))
   endif
 
-  !$OMP parallel do default(shared)
-  do j=Jsq,Jeq+1 ; do k=nz,1,-1 ; do i=Isq,Ieq+1
-    e(i,j,K) = e(i,j,K+1) + h(i,j,k)*GV%H_to_Z
-  enddo ; enddo ; enddo
+  !$omp target
+  do k=nz,1,-1
+    !$omp parallel loop collapse(2)
+    do j=Jsq,Jeq+1 ; do i=Isq,Ieq+1
+      e(i,j,K) = e(i,j,K+1) + h(i,j,k)*GV%H_to_Z
+    enddo ; enddo
+  enddo
+  !$omp end target
 
   if (use_EOS) then
     if (nkmb>0) then
@@ -1268,6 +1285,8 @@ subroutine PressureForce_FV_Bouss(h, tv, PFu, PFv, G, GV, US, CS, ALE_CSp, p_atm
   !$omp target enter data map(alloc: dpa, intx_dpa, inty_dpa, intz_dpa)
 
   if (use_EOS) then
+    !$omp target update from(e)
+
     ! The following routine computes the integrals that are needed to
     ! calculate the pressure gradient force. Linear profiles for T and S are
     ! assumed when regridding is activated. Otherwise, the previous version
