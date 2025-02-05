@@ -2150,13 +2150,22 @@ subroutine meridional_flux_adjust(v, h_in, h_S, h_N, vhbt, vh_tot_0, dvhdv_tot_0
     enddo ; endif
 
     if (itt < max_itts) then
+      !$omp target loop &
+      !$omp   map(to: vhbt(ish:ieh)) &
+      !$omp   map(from: vh_err(ish:ieh), dvhdv_tot(ish:ieh))
       do i=ish,ieh
         vh_err(i) = -vhbt(i) ; dvhdv_tot(i) = 0.0
       enddo
-      do k=1,nz ; do i=ish,ieh
+      !$omp target loop &
+      !$omp   map(to: vh_aux(ish:ieh, 1:nz), dvhdv(ish:ieh, 1:nz)) &
+      !$omp   map(tofrom: vh_err(ish:ieh), dvhdv_tot(ish:ieh))
+      do i=ish,ieh; do k=1,nz
         vh_err(i) = vh_err(i) + vh_aux(i,k)
         dvhdv_tot(i) = dvhdv_tot(i) + dvhdv(i,k)
       enddo ; enddo
+      !$omp target loop &
+      !$omp   map(to: vh_err(ish:ieh)) &
+      !$omp   map(tofrom: vh_err_best(ish:ieh))
       do i=ish,ieh
         vh_err_best(i) = min(vh_err_best(i), abs(vh_err(i)))
       enddo
