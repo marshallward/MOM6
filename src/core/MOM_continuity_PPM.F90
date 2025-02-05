@@ -2049,16 +2049,25 @@ subroutine meridional_flux_adjust(v, h_in, h_S, h_N, vhbt, vh_tot_0, dvhdv_tot_0
   real :: ddv     ! The change in dv from the previous iteration [L T-1 ~> m s-1].
   real :: tol_eta ! The tolerance for the current iteration [H ~> m or kg m-2].
   real :: tol_vel ! The tolerance for velocity in the current iteration [L T-1 ~> m s-1].
-  integer :: i, k, nz, itt, max_itts = 20
+  integer :: i, k, nz, istart, iend, itt, max_itts = 20
   logical :: domore, do_I(SZI_(G))
 
   nz = GV%ke
+  istart = G%isd
+  iend = G%ied
 
-  vh_aux(:,:) = 0.0 ; dvhdv(:,:) = 0.0
+  !$omp target loop collapse(2) map(from: vh_aux, dvhdv)
+  do i = istart, iend; do k = 1, nz
+    vh_aux(i, k) = 0.0
+    dvhdv(i, k) = 0.0
+  enddo; enddo
 
-  if (present(vh_3d)) then ; do k=1,nz ; do i=ish,ieh
-    vh_aux(i,k) = vh_3d(i,J,k)
-  enddo ; enddo ; endif
+  if (present(vh_3d)) then
+    !$omp target loop collapse(2) map(to:vh_3d(ish:ieh, J, 1:nz)) map(from: vh_aux(ish:ieh, 1:nz))
+    do k=1,nz ; do i=ish,ieh
+      vh_aux(i,k) = vh_3d(i,J,k)
+    enddo ; enddo
+  endif
 
   do i=ish,ieh
     dv(i) = 0.0 ; do_I(i) = do_I_in(i)
