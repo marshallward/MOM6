@@ -2088,6 +2088,9 @@ subroutine meridional_flux_adjust(v, h_in, h_S, h_N, vhbt, vh_tot_0, dvhdv_tot_0
     end select
     tol_vel = CS%tol_vel
 
+    !$omp target loop &
+    !$omp   map(to: vh_err(ish:ieh), dv(ish:ieh)) &
+    !$omp   map(tofrom: dv_max(ish:ieh), dv_min(ish:ieh), do_I(ish:ieh))
     do i=ish,ieh
       if (vh_err(i) > 0.0) then ; dv_max(i) = dv(i)
       elseif (vh_err(i) < 0.0) then ; dv_min(i) = dv(i)
