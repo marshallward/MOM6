@@ -1828,6 +1828,11 @@ subroutine merid_flux_layer(v, h, h_S, h_N, vh, dvhdv, visc_rem, dt, G, US, J, &
     local_open_BC = OBC%open_v_BCs_exist_globally
   endif ; endif
 
+  !$omp target loop &
+  !$omp   private(CFL, curv_3, h_marg) &
+  !$omp   map(to: vol_CFL, dt, do_I(ish:ieh), v(ish:ieh), G, G%dx_Cv(ish:ieh, J), G%IareaT(ish:ieh, J:J+1), G%IdyT(ish:ieh, J:J+1), h_S(ish:ieh, J:J+1), h_N(ish:ieh, j:J+1), h(ish:ieh, j:J+1), por_face_areaV(ish:ieh, J), visc_rem(ish:ieh)) &
+  !$omp   map(from: dvhdv(ish:ieh)) &
+  !$omp   map(tofrom: vh(ish:ieh)) ! I'm not sure why this needs to be tofrom, but simulation fails if not
   do i=ish,ieh ; if (do_I(i)) then
     if (v(i) > 0.0) then
       if (vol_CFL) then ; CFL = (v(i) * dt) * (G%dx_Cv(i,J) * G%IareaT(i,j))
@@ -2056,6 +2061,10 @@ subroutine meridional_flux_adjust(v, h_in, h_S, h_N, vhbt, vh_tot_0, dvhdv_tot_0
   istart = G%isd
   iend = G%ied
 
+  !!$omp target enter data &
+  !!$omp   map(to:vh_3d(ish:ieh, J, 1:nz), do_I_in(ish:ieh), dv_max_CFL(ish:ieh), dv_min_CFL(ish:ieh), vh_tot_0(ish:ieh), dvhdv_tot_0(ish:ieh), vhbt(ish:ieh)) &
+  !!$omp   map(alloc: vh_aux, dvhdv, dv(ish:ieh), do_I(ish:ieh), dv_max(ish:ieh), dv_min(ish:ieh), vh_err(ish:ieh), dvhdv_tot(ish:ieh), vh_err_best(ish:ieh))
+
   !$omp target loop collapse(2) map(from: vh_aux, dvhdv)
   do i = istart, iend; do k = 1, nz
     vh_aux(i, k) = 0.0
@@ -2080,6 +2089,10 @@ subroutine meridional_flux_adjust(v, h_in, h_S, h_N, vhbt, vh_tot_0, dvhdv_tot_0
     vh_err(i) = vh_tot_0(i) - vhbt(i) ; dvhdv_tot(i) = dvhdv_tot_0(i)
     vh_err_best(i) = abs(vh_err(i))
   enddo
+
+  !!$omp target exit data &
+  !!$omp   map(from: vh_aux, dvhdv, vh_aux(ish:ieh, 1:nz), dv(ish:ieh), do_I(ish:ieh), dv_max(ish:ieh), dv_min(ish:ieh), vh_err(ish:ieh), dvhdv_tot(ish:ieh), vh_err_best(ish:ieh)) &
+  !!$omp   map(release: vh_3d(ish:ieh, J, 1:nz), do_I_in(ish:ieh), dv_max_CFL(ish:ieh), dv_min_CFL(ish:ieh), vh_tot_0(ish:ieh), dvhdv_tot_0(ish:ieh), vhbt(ish:ieh))
 
   do itt=1,max_itts
     select case (itt)
