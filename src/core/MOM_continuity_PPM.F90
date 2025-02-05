@@ -2097,6 +2097,12 @@ subroutine meridional_flux_adjust(v, h_in, h_S, h_N, vhbt, vh_tot_0, dvhdv_tot_0
       else ; do_I(i) = .false. ; endif
     enddo
     domore = .false.
+    ! G and CS classses sent to GPU 
+    !$omp target loop &
+    !$omp   reduction(.or.: domore) &
+    !$omp   private(ddv, dv_prev) &
+    !$omp   map(tofrom: do_I(ish:ieh), dv(ish:ieh)) &
+    !$omp   map(to: G, CS, G%IareaT(ish:ieh, J:J+1), vh_err(ish:ieh), CS%better_iter, dvhdv_tot(ish:ieh), vh_err_best(ish:ieh), dv_max(ish:ieh), dv_min(ish:ieh))
     do i=ish,ieh ; if (do_I(i)) then
       if ((dt * min(G%IareaT(i,j),G%IareaT(i,j+1))*abs(vh_err(i)) > tol_eta) .or. &
           (CS%better_iter .and. ((abs(vh_err(i)) > tol_vel * dvhdv_tot(i)) .or. &
