@@ -1858,7 +1858,6 @@ subroutine merid_flux_layer(v, h, h_S, h_N, vh, dvhdv, visc_rem, dt, G, US, J, &
   endif ; enddo
 
   if (local_open_BC) then
-    write(*, *) "doing the thing"
     !$omp target loop &
     !$omp   private(l_seg) &
     !$omp   map(to: do_I(ish:ieh), h(ish:ieh, J), v(ish:ieh), visc_rem(ish:ieh), OBC, OBC%segnum_v(ish:ieh, J), OBC%segment, G, G%dx_Cv(ish:ieh, J), por_face_areaV(ish:ieh, J)) &
