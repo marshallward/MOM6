@@ -2175,9 +2175,14 @@ subroutine meridional_flux_adjust(v, h_in, h_S, h_N, vhbt, vh_tot_0, dvhdv_tot_0
   ! so-be-it, or else use a final upwind correction?
   ! This never seems to happen with 20 iterations as max_itt.
 
-  if (present(vh_3d)) then ; do k=1,nz ; do i=ish,ieh
-    vh_3d(i,J,k) = vh_aux(i,k)
-  enddo ; enddo ; endif
+  if (present(vh_3d)) then
+    !$omp target loop collapse(2) &
+    !$omp   map(to:vh_aux(ish:ieh, 1:nz)) &
+    !$omp   map(from: vh_3d(ish:ieh, J, 1:nz))
+    do k=1,nz ; do i=ish,ieh
+      vh_3d(i,J,k) = vh_aux(i,k)
+    enddo ; enddo
+  endif
 
 end subroutine meridional_flux_adjust
 
