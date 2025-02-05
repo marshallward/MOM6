@@ -2063,7 +2063,9 @@ subroutine meridional_flux_adjust(v, h_in, h_S, h_N, vhbt, vh_tot_0, dvhdv_tot_0
   enddo; enddo
 
   if (present(vh_3d)) then
-    !$omp target loop collapse(2) map(to:vh_3d(ish:ieh, J, 1:nz)) map(from: vh_aux(ish:ieh, 1:nz))
+    !$omp target loop collapse(2) &
+    !$omp   map(to:vh_3d(ish:ieh, J, 1:nz)) &
+    !$omp   map(from: vh_aux(ish:ieh, 1:nz))
     do k=1,nz ; do i=ish,ieh
       vh_aux(i,k) = vh_3d(i,J,k)
     enddo ; enddo
@@ -2132,8 +2134,16 @@ subroutine meridional_flux_adjust(v, h_in, h_S, h_N, vhbt, vh_tot_0, dvhdv_tot_0
     endif ; enddo
     if (.not.domore) exit
 
-    if ((itt < max_itts) .or. present(vh_3d)) then ; do k=1,nz
-      do i=ish,ieh ; v_new(i) = v(i,J,k) + dv(i) * visc_rem(i,k) ; enddo
+    if ((itt < max_itts) .or. present(vh_3d)) then ; 
+    do k=1,nz; 
+      !$omp target loop &
+      !$omp    map(to: v(ish:ieh, J, k), dv(ish:ieh), visc_rem(ish:ieh,k)) &
+      !$omp    map(from: v_new(ish:ieh))
+      do i=ish,ieh
+        v_new(i) = v(i,J,k) + dv(i) * visc_rem(i,k)
+      enddo
+      ! this subroutine also has loops in it
+      ! might get better performance if this k loop is fused with the i/j loops inside.
       call merid_flux_layer(v_new, h_in(:,:,k), h_S(:,:,k), h_N(:,:,k), &
                             vh_aux(:,k), dvhdv(:,k), visc_rem(:,k), &
                             dt, G, US, J, ish, ieh, do_I, CS%vol_CFL, por_face_areaV(:,:,k), OBC)
