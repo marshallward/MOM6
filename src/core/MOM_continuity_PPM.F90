@@ -1830,7 +1830,10 @@ subroutine merid_flux_layer(v, h, h_S, h_N, vh, dvhdv, visc_rem, dt, G, US, J, &
 
   !$omp target loop &
   !$omp   private(CFL, curv_3, h_marg) &
-  !$omp   map(to: vol_CFL, dt, do_I(ish:ieh), v(ish:ieh), G, G%dx_Cv(ish:ieh, J), G%IareaT(ish:ieh, J:J+1), G%IdyT(ish:ieh, J:J+1), h_S(ish:ieh, J:J+1), h_N(ish:ieh, j:J+1), h(ish:ieh, j:J+1), por_face_areaV(ish:ieh, J), visc_rem(ish:ieh)) &
+  !$omp   map(to: vol_CFL, dt, do_I(ish:ieh), v(ish:ieh), G, &
+  !$omp     G%dx_Cv(ish:ieh, J), G%IareaT(ish:ieh, J:J+1), &
+  !$omp     G%IdyT(ish:ieh, J:J+1), h_S(ish:ieh, J:J+1), h_N(ish:ieh, j:J+1), &
+  !$omp     h(ish:ieh, j:J+1), por_face_areaV(ish:ieh, J), visc_rem(ish:ieh)) &
   !$omp   map(from: dvhdv(ish:ieh)) &
   !$omp   map(tofrom: vh(ish:ieh)) ! I'm not sure why this needs to be tofrom, but simulation fails if not
   do i=ish,ieh ; if (do_I(i)) then
@@ -1860,7 +1863,9 @@ subroutine merid_flux_layer(v, h, h_S, h_N, vh, dvhdv, visc_rem, dt, G, US, J, &
   if (local_open_BC) then
     !$omp target loop &
     !$omp   private(l_seg) &
-    !$omp   map(to: do_I(ish:ieh), h(ish:ieh, J), v(ish:ieh), visc_rem(ish:ieh), OBC, OBC%segnum_v(ish:ieh, J), OBC%segment, G, G%dx_Cv(ish:ieh, J), por_face_areaV(ish:ieh, J)) &
+    !$omp   map(to: do_I(ish:ieh), h(ish:ieh, J), v(ish:ieh), &
+    !$omp     visc_rem(ish:ieh), OBC, OBC%segnum_v(ish:ieh, J), OBC%segment, &
+    !$omp     G, G%dx_Cv(ish:ieh, J), por_face_areaV(ish:ieh, J)) &
     !$omp   map(tofrom: vh(ish:ieh), dvhdv(ish:ieh))
     do i=ish,ieh ; if (do_I(i)) then
       l_seg = OBC%segnum_v(i,J)
@@ -2072,7 +2077,7 @@ subroutine meridional_flux_adjust(v, h_in, h_S, h_N, vhbt, vh_tot_0, dvhdv_tot_0
   !$omp     G%IdyT(ish:ieh, J:J+1), CS, CS%better_iter, CS%vol_CFL, &
   !$omp     v(ish:ieh, J, 1:nz), visc_rem(ish:ieh, 1:nz), &
   !$omp     h_in(ish:ieh, J:J+1, 1:nz), h_S(ish:ieh, J:J+1, 1:nz), &
-  !$omp     h_N(ish:ieh, J:J+1, 1:nz), dt, por_face_areaV(ish:ieh, J)) &
+  !$omp     h_N(ish:ieh, J:J+1, 1:nz), dt, por_face_areaV(ish:ieh, J, 1:nz)) &
   !$omp   map(alloc: vh_aux, dvhdv, dv(ish:ieh), do_I(ish:ieh), &
   !$omp     dv_max(ish:ieh), dv_min(ish:ieh), vh_err(ish:ieh), &
   !$omp     dvhdv_tot(ish:ieh), vh_err_best(ish:ieh), v_new(ish:ieh))
@@ -2219,7 +2224,7 @@ subroutine meridional_flux_adjust(v, h_in, h_S, h_N, vhbt, vh_tot_0, dvhdv_tot_0
   !$omp     G%IdyT(ish:ieh, J:J+1), CS, CS%better_iter, CS%vol_CFL, &
   !$omp     v(ish:ieh, J, 1:nz), visc_rem(ish:ieh, 1:nz), v_new(ish:ieh), &
   !$omp     h_in(ish:ieh, J:J+1, 1:nz), h_S(ish:ieh, J:J+1, 1:nz), &
-  !$omp     h_N(ish:ieh, J:J+1, 1:nz), dt, por_face_areaV(ish:ieh, J))
+  !$omp     h_N(ish:ieh, J:J+1, 1:nz), dt, por_face_areaV(ish:ieh, J, 1:nz))
 
 end subroutine meridional_flux_adjust
 
