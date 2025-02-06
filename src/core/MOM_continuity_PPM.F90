@@ -2070,10 +2070,12 @@ subroutine meridional_flux_adjust(v, h_in, h_S, h_N, vhbt, vh_tot_0, dvhdv_tot_0
   !$omp     vh_tot_0(ish:ieh), dvhdv_tot_0(ish:ieh), vhbt(ish:ieh), G, &
   !$omp     G%IareaT(ish:ieh, J:J+1), G%dx_Cv(ish:ieh, J), &
   !$omp     G%IdyT(ish:ieh, J:J+1), CS, CS%better_iter, CS%vol_CFL, &
-  !$omp     v(ish:ieh, J, 1:nz)) &
+  !$omp     v(ish:ieh, J, 1:nz), visc_rem(ish:ieh, 1:nz), &
+  !$omp     h_in(ish:ieh, J:J+1, 1:nz), h_S(ish:ieh, J:J+1, 1:nz), &
+  !$omp     h_N(ish:ieh, J:J+1, 1:nz), dt, por_face_areaV(ish:ieh, J)) &
   !$omp   map(alloc: vh_aux, dvhdv, dv(ish:ieh), do_I(ish:ieh), &
   !$omp     dv_max(ish:ieh), dv_min(ish:ieh), vh_err(ish:ieh), &
-  !$omp     dvhdv_tot(ish:ieh), vh_err_best(ish:ieh))
+  !$omp     dvhdv_tot(ish:ieh), vh_err_best(ish:ieh), v_new(ish:ieh))
 
   !$omp target loop collapse(2) map(from: vh_aux, dvhdv)
   do i = istart, iend; do k = 1, nz
@@ -2215,7 +2217,9 @@ subroutine meridional_flux_adjust(v, h_in, h_S, h_N, vhbt, vh_tot_0, dvhdv_tot_0
   !$omp     vh_err(ish:ieh), dvhdv_tot(ish:ieh), vh_err_best(ish:ieh), G, &
   !$omp     G%IareaT(ish:ieh, J:J+1), G%dx_Cv(ish:ieh, J), &
   !$omp     G%IdyT(ish:ieh, J:J+1), CS, CS%better_iter, CS%vol_CFL, &
-  !$omp     v(ish:ieh, J, 1:nz))
+  !$omp     v(ish:ieh, J, 1:nz), visc_rem(ish:ieh, 1:nz), v_new(ish:ieh), &
+  !$omp     h_in(ish:ieh, J:J+1, 1:nz), h_S(ish:ieh, J:J+1, 1:nz), &
+  !$omp     h_N(ish:ieh, J:J+1, 1:nz), dt, por_face_areaV(ish:ieh, J))
 
 end subroutine meridional_flux_adjust
 
