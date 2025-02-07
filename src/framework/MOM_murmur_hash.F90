@@ -38,7 +38,7 @@ end interface murmur_hash
 
 contains
 
-!> Return the murmur3 hash for a 32-bit integer array.
+!> Return the murmurhash3 hash for a 32-bit integer array.
 function murmurhash3_i32(key, seed) result(hash)
   integer(int32), intent(in) :: key(:)
     !< Input array
