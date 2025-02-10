@@ -2120,8 +2120,12 @@ subroutine meridional_flux_adjust(v, h_in, h_S, h_N, vhbt, vh_tot_0, dvhdv_tot_0
       case default ; tol_eta = CS%tol_eta
     end select
     tol_vel = CS%tol_vel
+    domore = .false.
 
-    !$omp target loop &
+    !$omp target &
+    !$omp   map(to: vh_err(ish:ieh), G, CS, G%IareaT(ish:ieh, J:J+1), CS%better_iter, dvhdv_tot(ish:ieh), vh_err_best(ish:ieh)) &
+    !$omp   map(tofrom: dv(ish:ieh), dv_max(ish:ieh), dv_min(ish:ieh), do_I(ish:ieh))
+    !$omp loop &
     !$omp   map(to: vh_err(ish:ieh), dv(ish:ieh)) &
     !$omp   map(tofrom: dv_max(ish:ieh), dv_min(ish:ieh), do_I(ish:ieh))
     do i=ish,ieh
@@ -2129,9 +2133,8 @@ subroutine meridional_flux_adjust(v, h_in, h_S, h_N, vhbt, vh_tot_0, dvhdv_tot_0
       elseif (vh_err(i) < 0.0) then ; dv_min(i) = dv(i)
       else ; do_I(i) = .false. ; endif
     enddo
-    domore = .false.
     ! G and CS classses sent to GPU 
-    !$omp target loop &
+    !$omp loop &
     !$omp   reduction(.or.: domore) &
     !$omp   private(ddv, dv_prev) &
     !$omp   map(tofrom: do_I(ish:ieh), dv(ish:ieh)) &
@@ -2163,6 +2166,7 @@ subroutine meridional_flux_adjust(v, h_in, h_S, h_N, vhbt, vh_tot_0, dvhdv_tot_0
         do_I(i) = .false.
       endif
     endif ; enddo
+    !$omp end target
     if (.not.domore) exit
 
     if ((itt < max_itts) .or. present(vh_3d)) then ; 
