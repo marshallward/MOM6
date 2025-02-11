@@ -932,6 +932,11 @@ subroutine zonal_flux_layer(u, h, h_W, h_E, uh, duhdu, visc_rem, dt, G, US, j, &
     local_open_BC = OBC%open_u_BCs_exist_globally
   endif ; endif
 
+  !$omp target loop &
+  !$omp   private(CFL, curv_3, h_marg) &
+  !$omp   map(to: do_I(ish-1:ieh), u(ish-1:ieh), vol_CFL, dt, G, G%dy_Cu(ish-1:ieh, j), G%IareaT(ish-1:ieh, j), G%IdxT(ish-1:ieh, j), h_W(ish-1:ieh), h_E(ish-1:ieh), h(ish-1:ieh), por_face_areaU(ish-1:ieh), visc_rem(ish-1:ieh)) &
+  !$omp   map(from: duhdu(ish-1:ieh)) &
+  !$omp   map(tofrom: uh(ish-1:ieh))
   do I=ish-1,ieh ; if (do_I(I)) then
     ! Set new values of uh and duhdu.
     if (u(I) > 0.0) then
@@ -1835,7 +1840,7 @@ subroutine merid_flux_layer(v, h, h_S, h_N, vh, dvhdv, visc_rem, dt, G, US, J, &
   !$omp     G%IdyT(ish:ieh, J:J+1), h_S(ish:ieh, J:J+1), h_N(ish:ieh, j:J+1), &
   !$omp     h(ish:ieh, j:J+1), por_face_areaV(ish:ieh, J), visc_rem(ish:ieh)) &
   !$omp   map(from: dvhdv(ish:ieh)) &
-  !$omp   map(tofrom: vh(ish:ieh)) ! I'm not sure why this needs to be tofrom, but simulation fails if not
+  !$omp   map(tofrom: vh(ish:ieh))
   do i=ish,ieh ; if (do_I(i)) then
     if (v(i) > 0.0) then
       if (vol_CFL) then ; CFL = (v(i) * dt) * (G%dx_Cv(i,J) * G%IareaT(i,j))
