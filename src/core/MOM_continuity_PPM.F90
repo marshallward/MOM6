@@ -2409,6 +2409,7 @@ subroutine set_merid_BT_cont(v, h_in, h_S, h_N, BT_cont, vh_tot_0, dvhdv_tot_0, 
   min_visc_rem = 0.1 ; CFL_min = 1e-6
 
  ! Diagnose the zero-transport correction, dv0.
+  !$omp target loop map(from: zeros(ish:ieh))
   do i=ish,ieh ; zeros(i) = 0.0 ; enddo
   call meridional_flux_adjust(v, h_in, h_S, h_N, zeros, vh_tot_0, dvhdv_tot_0, dv0, &
                          dv_max_CFL, dv_min_CFL, dt, G, GV, US, CS, visc_rem, &
@@ -2418,6 +2419,13 @@ subroutine set_merid_BT_cont(v, h_in, h_S, h_N, BT_cont, vh_tot_0, dvhdv_tot_0, 
   ! negative velocity correction for the northerly-flux, and a sufficiently
   ! positive correction for the southerly-flux.
   domore = .false.
+  !$omp target loop &
+  !$omp   reduction(.or.:domore) &
+  !$omp   map(to: do_I(ish:ieh), G, G%dyCv(ish:ieh, J), dv0(ish:ieh), &
+  !$omp     dv_CFL(ish:ieh)) &
+  !$omp   map(tofrom: dv_CFL(ish:ieh), dvR(ish:ieh), dvL(ish:ieh), &
+  !$omp     FAmt_L(ish:ieh), FAmt_R(ish:ieh), FAmt_0(ish:ieh), &
+  !$omp     vhTot_L(ish:ieh), vhtot_R(ish:ieh))
   do i=ish,ieh ; if (do_I(i)) then
     domore = .true.
     dv_CFL(i) = (CFL_min * Idt) * G%dyCv(i,J)
