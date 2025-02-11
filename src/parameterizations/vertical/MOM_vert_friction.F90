@@ -822,13 +822,13 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
     enddo ; enddo ; endif
 
     if (associated(ADp%du_dt_visc)) then ; do k=1,nz ; do I=Isq,Ieq
-      ADp%du_dt_visc(I,j,k) = u(I,j,k)
+      if (do_i(I)) ADp%du_dt_visc(I,j,k) = u(I,j,k)
     enddo ; enddo ; endif
     if (associated(ADp%du_dt_visc_gl90)) then ; do k=1,nz ; do I=Isq,Ieq
-      ADp%du_dt_visc_gl90(I,j,k) = u(I,j,k)
+      if (do_i(I)) ADp%du_dt_visc_gl90(I,j,k) = u(I,j,k)
     enddo ; enddo ; endif
     if (associated(ADp%du_dt_str)) then ; do k=1,nz ; do I=Isq,Ieq
-      ADp%du_dt_str(I,j,k) = 0.0
+      if (do_i(I)) ADp%du_dt_str(I,j,k) = 0.0
     enddo ; enddo ; endif
 
     !   One option is to have the wind stress applied as a body force
@@ -994,13 +994,13 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
     enddo ; enddo ; endif
 
     if (associated(ADp%dv_dt_visc)) then ; do k=1,nz ; do i=is,ie
-      ADp%dv_dt_visc(i,J,k) = v(i,J,k)
+      if (do_i(i)) ADp%dv_dt_visc(i,J,k) = v(i,J,k)
     enddo ; enddo ; endif
     if (associated(ADp%dv_dt_visc_gl90)) then ; do k=1,nz ; do i=is,ie
-      ADp%dv_dt_visc_gl90(i,J,k) = v(i,J,k)
+      if (do_i(i)) ADp%dv_dt_visc_gl90(i,J,k) = v(i,J,k)
     enddo ; enddo ; endif
     if (associated(ADp%dv_dt_str)) then ; do k=1,nz ; do i=is,ie
-      ADp%dv_dt_str(i,J,k) = 0.0
+      if (do_i(i)) ADp%dv_dt_str(i,J,k) = 0.0
     enddo ; enddo ; endif
 
     !   One option is to have the wind stress applied as a body force
