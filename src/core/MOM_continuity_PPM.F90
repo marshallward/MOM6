@@ -2436,12 +2436,18 @@ subroutine set_merid_BT_cont(v, h_in, h_S, h_N, BT_cont, vh_tot_0, dvhdv_tot_0, 
   endif ; enddo
 
   if (.not.domore) then
-    do k=1,nz ; do i=ish,ieh
+    ! needs to be tested!
+    !$omp target loop &
+    !$omp   map(tofrom: BT_cont, BT_cont%FA_v_S0(ish:ieh, J), &
+    !$omp     BT_cont%FA_v_SS(ish:ieh, J), BT_cont%vBT_SS(ish:ieh, J), &
+    !$omp     BT_cont%FA_v_N0(ish:ieh, J), BT_cont%FA_v_NN(ish:ieh, J), &
+    !$omp     BT_cont%vBT_NN(ish:ieh, J))
+    do i=ish,ieh
       BT_cont%FA_v_S0(i,J) = 0.0 ; BT_cont%FA_v_SS(i,J) = 0.0
       BT_cont%vBT_SS(i,J) = 0.0
       BT_cont%FA_v_N0(i,J) = 0.0 ; BT_cont%FA_v_NN(i,J) = 0.0
       BT_cont%vBT_NN(i,J) = 0.0
-    enddo ; enddo
+    enddo
     return
   endif
 
