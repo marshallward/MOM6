@@ -1291,9 +1291,14 @@ subroutine zonal_flux_adjust(u, h_in, h_W, h_E, uhbt, uh_tot_0, duhdu_tot_0, &
   ! so-be-it, or else use a final upwind correction?
   ! This never seems to happen with 20 iterations as max_itt.
 
-  if (present(uh_3d)) then ; do k=1,nz ; do I=ish-1,ieh
-    uh_3d(I,j,k) = uh_aux(I,k)
-  enddo ; enddo ; endif
+  if (present(uh_3d)) then 
+    !$omp target loop collapse(2) &
+    !$omp   map(to: uh_aux(ish-1:ieh, 1:nz)) &
+    !$omp   map(from: uh_3d(ish-1:ieh, j, 1:nz))  
+    do k=1,nz ; do I=ish-1,ieh
+      uh_3d(I,j,k) = uh_aux(I,k)
+    enddo ; enddo
+  endif
 
 end subroutine zonal_flux_adjust
 
