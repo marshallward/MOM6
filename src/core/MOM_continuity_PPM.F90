@@ -2451,7 +2451,12 @@ subroutine set_merid_BT_cont(v, h_in, h_S, h_N, BT_cont, vh_tot_0, dvhdv_tot_0, 
     return
   endif
 
-  do k=1,nz ; do i=ish,ieh ; if (do_I(i)) then
+  !$omp target loop &
+  !$omp   private(visc_rem_lim) &
+  !$omp   map(to: do_I(ish:ieh), visc_rem(ish:ieh, 1:nz), &
+  !$omp     visc_rem_max(ish:ieh), v(ish:ieh, J, 1:nz), dv_CFL(ish:ieh)), &
+  !$omp   map(tofrom: dvR(ish:ieh), dvL(ish:ieh))
+  do i=ish,ieh ; if (do_I(i)) then ; do k=1,nz
     visc_rem_lim = max(visc_rem(i,k), min_visc_rem*visc_rem_max(i))
     if (visc_rem_lim > 0.0) then ! This is almost always true for ocean points.
       if (v(i,J,k) + dvR(i)*visc_rem_lim > -dv_CFL(i)*visc_rem(i,k)) &
@@ -2459,7 +2464,7 @@ subroutine set_merid_BT_cont(v, h_in, h_S, h_N, BT_cont, vh_tot_0, dvhdv_tot_0, 
       if (v(i,J,k) + dvL(i)*visc_rem_lim < dv_CFL(i)*visc_rem(i,k)) &
         dvL(i) = -(v(i,J,k) - dv_CFL(i)*visc_rem(i,k)) / visc_rem_lim
     endif
-  endif ; enddo ; enddo
+  enddo ; endif ; enddo
   do k=1,nz
     do i=ish,ieh ; if (do_I(i)) then
       v_L(i) = v(I,j,k) + dvL(i) * visc_rem(i,k)
