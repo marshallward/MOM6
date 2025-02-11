@@ -940,11 +940,17 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
   !$OMP parallel do default(shared)
   do k=1,nz
     do j=js,je ; do I=Isq,Ieq
-      u_inst(I,j,k) = G%mask2dCu(I,j) * (u_inst(I,j,k) + dt * &
+      !!if (G%mask2dCu(I,j) > 0.) &
+      !!u_inst(I,j,k) = G%mask2dCu(I,j) * (u_inst(I,j,k) + dt * &
+      !!                (u_bc_accel(I,j,k) + CS%u_accel_bt(I,j,k)))
+      u_inst(I,j,k) = u_inst(I,j,k) + G%mask2dCu(I,j) * (dt * &
                       (u_bc_accel(I,j,k) + CS%u_accel_bt(I,j,k)))
     enddo ; enddo
     do J=Jsq,Jeq ; do i=is,ie
-      v_inst(i,J,k) = G%mask2dCv(i,J) * (v_inst(i,J,k) + dt * &
+      !!if (G%mask2dCv(I,j) > 0.) &
+      !!v_inst(i,J,k) = G%mask2dCv(i,J) * (v_inst(i,J,k) + dt * &
+      !!                (v_bc_accel(i,J,k) + CS%v_accel_bt(i,J,k)))
+      v_inst(i,J,k) = v_inst(i,J,k) + G%mask2dCv(i,J) * (dt * &
                       (v_bc_accel(i,J,k) + CS%v_accel_bt(i,J,k)))
     enddo ; enddo
   enddo

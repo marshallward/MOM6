@@ -330,10 +330,12 @@ subroutine step_MOM_dyn_unsplit(u, v, h, tv, visc, Time_local, dt, forces, &
 ! up = u + dt_pred * (PFu + CAu)
   call cpu_clock_begin(id_clock_mom_update)
   do k=1,nz ; do j=js,je ; do I=Isq,Ieq
-    up(I,j,k) = G%mask2dCu(I,j) * (u(I,j,k) + dt_pred * (CS%PFu(I,j,k) + CS%CAu(I,j,k)))
+    !!up(I,j,k) = G%mask2dCu(I,j) * (u(I,j,k) + dt_pred * (CS%PFu(I,j,k) + CS%CAu(I,j,k)))
+    up(I,j,k) = u(I,j,k) + G%mask2dCu(I,j) * (dt_pred * (CS%PFu(I,j,k) + CS%CAu(I,j,k)))
   enddo ; enddo ; enddo
   do k=1,nz ; do J=Jsq,Jeq ; do i=is,ie
-    vp(i,J,k) = G%mask2dCv(i,J) * (v(i,J,k) + dt_pred * (CS%PFv(i,J,k) + CS%CAv(i,J,k)))
+    !!vp(i,J,k) = G%mask2dCv(i,J) * (v(i,J,k) + dt_pred * (CS%PFv(i,J,k) + CS%CAv(i,J,k)))
+    vp(i,J,k) = v(i,J,k) + G%mask2dCv(i,J) * (dt_pred * (CS%PFv(i,J,k) + CS%CAv(i,J,k)))
   enddo ; enddo ; enddo
   call cpu_clock_end(id_clock_mom_update)
 
@@ -397,10 +399,12 @@ subroutine step_MOM_dyn_unsplit(u, v, h, tv, visc, Time_local, dt, forces, &
 ! upp = u + dt/2 * ( PFu + CAu )
   call cpu_clock_begin(id_clock_mom_update)
   do k=1,nz ; do j=js,je ; do I=Isq,Ieq
-    upp(I,j,k) = G%mask2dCu(I,j) * (u(I,j,k) + dt * 0.5 * (CS%PFu(I,j,k) + CS%CAu(I,j,k)))
+    !!upp(I,j,k) = G%mask2dCu(I,j) * (u(I,j,k) + dt * 0.5 * (CS%PFu(I,j,k) + CS%CAu(I,j,k)))
+    upp(I,j,k) = u(I,j,k) + G%mask2dCu(I,j) * (dt * 0.5 * (CS%PFu(I,j,k) + CS%CAu(I,j,k)))
   enddo ; enddo ; enddo
   do k=1,nz ; do J=Jsq,Jeq ; do i=is,ie
-    vpp(i,J,k) = G%mask2dCv(i,J) * (v(i,J,k) + dt * 0.5 * (CS%PFv(i,J,k) + CS%CAv(i,J,k)))
+    !!vpp(i,J,k) = G%mask2dCv(i,J) * (v(i,J,k) + dt * 0.5 * (CS%PFv(i,J,k) + CS%CAv(i,J,k)))
+    vpp(i,J,k) = v(i,J,k) + G%mask2dCv(i,J) * (dt * 0.5 * (CS%PFv(i,J,k) + CS%CAv(i,J,k)))
   enddo ; enddo ; enddo
   call cpu_clock_end(id_clock_mom_update)
 
@@ -489,10 +493,12 @@ subroutine step_MOM_dyn_unsplit(u, v, h, tv, visc, Time_local, dt, forces, &
     call open_boundary_zero_normal_flow(CS%OBC, G, GV, CS%CAu, CS%CAv)
   endif
   do k=1,nz ; do j=js,je ; do I=Isq,Ieq
-    u(I,j,k) = G%mask2dCu(I,j) * (u(I,j,k) + dt * (CS%PFu(I,j,k) + CS%CAu(I,j,k)))
+    !!u(I,j,k) = G%mask2dCu(I,j) * (u(I,j,k) + dt * (CS%PFu(I,j,k) + CS%CAu(I,j,k)))
+    u(I,j,k) = u(I,j,k) + G%mask2dCu(I,j) * (dt * (CS%PFu(I,j,k) + CS%CAu(I,j,k)))
   enddo ; enddo ; enddo
   do k=1,nz ; do J=Jsq,Jeq ; do i=is,ie
-    v(i,J,k) = G%mask2dCv(i,J) * (v(i,J,k) + dt * (CS%PFv(i,J,k) + CS%CAv(i,J,k)))
+    !!v(i,J,k) = G%mask2dCv(i,J) * (v(i,J,k) + dt * (CS%PFv(i,J,k) + CS%CAv(i,J,k)))
+    v(i,J,k) = v(i,J,k) + G%mask2dCv(i,J) * (dt * (CS%PFv(i,J,k) + CS%CAv(i,J,k)))
   enddo ; enddo ; enddo
 
 ! u <- u + dt d/dz visc d/dz u
