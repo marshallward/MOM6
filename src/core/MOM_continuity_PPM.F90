@@ -961,6 +961,12 @@ subroutine zonal_flux_layer(u, h, h_W, h_E, uh, duhdu, visc_rem, dt, G, US, j, &
   endif ; enddo
 
   if (local_open_BC) then
+    !$omp target loop &
+    !$omp  private(l_seg) &
+    !$omp  map(to: do_I(ish-1:ieh), OBC, OBC%segnum_u(ish-1:ieh, J), &
+    !$omp    OBC%segment, G%dy_Cu(ish-1:ieh, j), por_face_areaU(ish-1:ieh), &
+    !$omp    u(ish-1:ieh), h(ish-1:ieh+1), visc_rem(ish-1:ieh)) &
+    !$omp  map(tofrom: uh(ish-1:ieh), duhdu(ish-1:ieh))
     do I=ish-1,ieh ; if (do_I(I)) then ; if (OBC%segnum_u(I,j) /= OBC_NONE) then
       l_seg = OBC%segnum_u(I,j)
       if (OBC%segment(l_seg)%open) then
