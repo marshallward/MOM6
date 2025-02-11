@@ -1251,6 +1251,9 @@ subroutine zonal_flux_adjust(u, h_in, h_W, h_E, uhbt, uh_tot_0, duhdu_tot_0, &
     if (.not.domore) exit
 
     if ((itt < max_itts) .or. present(uh_3d)) then ; do k=1,nz
+      !$omp target loop &
+      !$omp   map(to: u(ish-1:ieh, j, k), du(ish-1:ieh), visc_rem(ish-1:ieh, k)) &
+      !$omp   map(from: u_new(ish-1:ieh))
       do I=ish-1,ieh ; u_new(I) = u(I,j,k) + du(I) * visc_rem(I,k) ; enddo
       call zonal_flux_layer(u_new, h_in(:,j,k), h_W(:,j,k), h_E(:,j,k), &
                             uh_aux(:,k), duhdu(:,k), visc_rem(:,k), &
@@ -1258,16 +1261,30 @@ subroutine zonal_flux_adjust(u, h_in, h_W, h_E, uhbt, uh_tot_0, duhdu_tot_0, &
     enddo ; endif
 
     if (itt < max_itts) then
+      !$omp target &
+      !$omp   map(to: uhbt(ish-1:ieh), uh_aux(ish-1:ieh, 1:nz), duhdu(ish-1:ieh, 1:nz)) &
+      !$omp   map(from: uh_err(ish-1:ieh), duhdu_tot(ish-1:ieh)) &
+      !$omp   map(tofrom: uh_err_best(ish-1:ieh))
+      !$omp loop &
+      !$omp   map(to: uhbt(ish-1:ieh)) &
+      !$omp   map(from: uh_err(ish-1:ieh), duhdu_tot(ish-1:ieh))
       do I=ish-1,ieh
         uh_err(I) = -uhbt(I) ; duhdu_tot(I) = 0.0
       enddo
+      !$omp loop &
+      !$omp   map(to: uh_aux(ish-1:ieh, 1:nz), duhdu(ish-1:ieh, 1:nz)) &
+      !$omp   map(tofrom: uh_err(ish-1:ieh), duhdu_tot(ish-1:ieh))
       do k=1,nz ; do I=ish-1,ieh
         uh_err(I) = uh_err(I) + uh_aux(I,k)
         duhdu_tot(I) = duhdu_tot(I) + duhdu(I,k)
       enddo ; enddo
+      !$omp loop &
+      !$omp   map(to: uh_err(ish-1:ieh)) &
+      !$omp   map(tofrom: uh_err_best(ish-1:ieh))
       do I=ish-1,ieh
         uh_err_best(I) = min(uh_err_best(I), abs(uh_err(I)))
       enddo
+      !$omp end target
     endif
   enddo ! itt-loop
   ! If there are any faces which have not converged to within the tolerance,
