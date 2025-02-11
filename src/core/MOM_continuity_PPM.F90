@@ -1160,6 +1160,17 @@ subroutine zonal_flux_adjust(u, h_in, h_W, h_E, uhbt, uh_tot_0, duhdu_tot_0, &
 
   nz = GV%ke
 
+  !$omp target enter data &
+  !$omp   map(to: uh_3d(ish-1:ieh, j, 1:nz), do_I_in(ish-1:ieh), &
+  !$omp     du_max_CFL(ish-1:ieh), du_min_CFL(ish-1:ieh), &
+  !$omp     uh_tot_0(ish-1:ieh), uhbt(ish-1:ieh), duhdu_tot_0(ish-1:ieh), dt, &
+  !$omp     G, G%IareaT(ish-1:ieh+1, J), CS, CS%better_iter, &
+  !$omp     u(ish-1:ieh, j, 1:nz), visc_rem(ish-1:ieh, 1:nz), &
+  !$omp     h_in(ish-1:ieh, j, 1:nz), h_W(ish-1:ieh, j, 1:nz), &
+  !$omp     h_E(ish-1:ieh, j, 1:nz), por_face_areaU(ish-1:ieh, j, 1:nz), &
+  !$omp     G%dy_Cu(ish-1:ieh, j), G%IdxT(ish-1:ieh, j)) &
+  !$omp   map(alloc: uh_aux(ish-1:ieh, 1:nz), duhdu(ish-1:ieh, 1:nz), du(ish-1:ieh), do_I(ish-1:ieh), du_max(ish-1:ieh), du_min(ish-1:ieh), uh_err(ish-1:ieh), duhdu_tot(ish-1:ieh), uh_err_best(ish-1:ieh), u_new(ish-1:ieh))
+
   !$omp target &
   !$omp   map(to: uh_3d(ish-1:ieh, j, 1:nz), do_I_in(ish-1:ieh), du_max_CFL(ish-1:ieh), du_min_CFL(ish-1:ieh), uh_tot_0(ish-1:ieh), uhbt(ish-1:ieh), duhdu_tot_0(ish-1:ieh)) &
   !$omp   map(from: uh_aux(ish-1:ieh, 1:nz), duhdu(ish-1:ieh, 1:nz), du(ish-1:ieh), do_I(ish-1:ieh), du_max(ish-1:ieh), du_min(ish-1:ieh), uh_err(ish-1:ieh), duhdu_tot(ish-1:ieh), uh_err_best(ish-1:ieh))
@@ -1299,6 +1310,19 @@ subroutine zonal_flux_adjust(u, h_in, h_W, h_E, uhbt, uh_tot_0, duhdu_tot_0, &
       uh_3d(I,j,k) = uh_aux(I,k)
     enddo ; enddo
   endif
+
+  !$omp target exit data &
+  !$omp   map(from: du(ish-1:ieh), uh_3d(ish-1:ieh, j, 1:nz)) &
+  !$omp   map(release: do_I_in(ish-1:ieh), du_max_CFL(ish-1:ieh), &
+  !$omp     du_min_CFL(ish-1:ieh), uh_tot_0(ish-1:ieh), uhbt(ish-1:ieh), &
+  !$omp     duhdu_tot_0(ish-1:ieh), dt, G, G%IareaT(ish-1:ieh+1, J), CS, &
+  !$omp     CS%better_iter, u(ish-1:ieh, j, 1:nz), visc_rem(ish-1:ieh, 1:nz), &
+  !$omp     uh_aux(ish-1:ieh, 1:nz), duhdu(ish-1:ieh, 1:nz), do_I(ish-1:ieh), &
+  !$omp     du_max(ish-1:ieh), du_min(ish-1:ieh), uh_err(ish-1:ieh), &
+  !$omp     duhdu_tot(ish-1:ieh), uh_err_best(ish-1:ieh), u_new(ish-1:ieh), &
+  !$omp     h_in(ish-1:ieh, j, 1:nz), h_W(ish-1:ieh, j, 1:nz), &
+  !$omp     h_E(ish-1:ieh, j, 1:nz), por_face_areaU(ish-1:ieh, j, 1:nz), &
+  !$omp     G%dy_Cu(ish-1:ieh, j), G%IdxT(ish-1:ieh, j))
 
 end subroutine zonal_flux_adjust
 
