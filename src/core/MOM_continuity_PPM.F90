@@ -2466,6 +2466,9 @@ subroutine set_merid_BT_cont(v, h_in, h_S, h_N, BT_cont, vh_tot_0, dvhdv_tot_0, 
     endif
   enddo ; endif ; enddo
   do k=1,nz
+    !$omp target loop &
+    !$omp   map(to: do_I(ish:ieh), v(ish:ieh, j, k), dvL(ish:ieh), visc_rem(ish:ieh, k)) &
+    !$omp   map(tofrom: v_L(ish:ieh), v_R(ish:ieh), v_0(ish:ieh))
     do i=ish,ieh ; if (do_I(i)) then
       v_L(i) = v(I,j,k) + dvL(i) * visc_rem(i,k)
       v_R(i) = v(I,j,k) + dvR(i) * visc_rem(i,k)
@@ -2477,6 +2480,12 @@ subroutine set_merid_BT_cont(v, h_in, h_S, h_N, BT_cont, vh_tot_0, dvhdv_tot_0, 
                           visc_rem(:,k), dt, G, US, J, ish, ieh, do_I, CS%vol_CFL, por_face_areaV(:,:,k))
     call merid_flux_layer(v_R, h_in(:,:,k), h_S(:,:,k), h_N(:,:,k), vh_R, dvhdv_R, &
                           visc_rem(:,k), dt, G, US, J, ish, ieh, do_I, CS%vol_CFL, por_face_areaV(:,:,k))
+
+    !$omp target loop &
+    !$omp   map(to: do_I(ish:ieh), dvhdv_0(ish:ieh), dvhdv_L(ish:ieh), &
+    !$omp     dvhdv_R(ish:ieh), vh_L(ish:ieh), vh_R(ish:ieh)) &
+    !$omp   map(tofrom: FAmt_0(ish:ieh), FAmt_L(ish:ieh), FAmt_R(ish:ieh), &
+    !$omp     vhtot_L(ish:ieh), vhtot_R(ish:ieh))
     do i=ish,ieh ; if (do_I(i)) then
       FAmt_0(i) = FAmt_0(i) + dvhdv_0(i)
       FAmt_L(i) = FAmt_L(i) + dvhdv_L(i)
@@ -2485,6 +2494,15 @@ subroutine set_merid_BT_cont(v, h_in, h_S, h_N, BT_cont, vh_tot_0, dvhdv_tot_0, 
       vhtot_R(i) = vhtot_R(i) + vh_R(i)
     endif ; enddo
   enddo
+  !$omp target loop &
+  !$omp   private(FA_0, FA_avg) &
+  !$omp   map(to: do_I(ish:ieh), FAmt_0(ish:ieh), dvL(ish:ieh), dv0(ish:ieh), &
+  !$omp     vhtot_L(ish:ieh), FAmt_L(ish:ieh), dvR(ish:ieh), vhtot_R(ish:ieh), &
+  !$omp     FAmt_R(ish:ieh)) &
+  !$omp   map(tofrom: BT_cont, BT_cont%FA_v_S0(ish:ieh, J), &
+  !$omp     BT_cont%FA_v_SS(ish:ieh, J), BT_cont%vBT_SS(ish:ieh, J), &
+  !$omp     BT_cont%FA_v_N0(ish:ieh, J), BT_cont%FA_v_NN(ish:ieh, J), &
+  !$omp     BT_cont%vBT_NN(ish:ieh, J))
   do i=ish,ieh ; if (do_I(i)) then
     FA_0 = FAmt_0(i) ; FA_avg = FAmt_0(i)
     if ((dvL(i) - dv0(i)) /= 0.0) &
