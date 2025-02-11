@@ -1160,18 +1160,37 @@ subroutine zonal_flux_adjust(u, h_in, h_W, h_E, uhbt, uh_tot_0, duhdu_tot_0, &
 
   nz = GV%ke
 
-  uh_aux(:,:) = 0.0 ; duhdu(:,:) = 0.0
+  !$omp target &
+  !$omp   map(to: uh_3d(ish-1:ieh, j, 1:nz), do_I_in(ish-1:ieh), du_max_CFL(ish-1:ieh), du_min_CFL(ish-1:ieh), uh_tot_0(ish-1:ieh), uhbt(ish-1:ieh), duhdu_tot_0(ish-1:ieh)) &
+  !$omp   map(from: uh_aux(ish-1:ieh, 1:nz), duhdu(ish-1:ieh, 1:nz), du(ish-1:ieh), do_I(ish-1:ieh), du_max(ish-1:ieh), du_min(ish-1:ieh), uh_err(ish-1:ieh), duhdu_tot(ish-1:ieh), uh_err_best(ish-1:ieh))
 
-  if (present(uh_3d)) then ; do k=1,nz ; do I=ish-1,ieh
-    uh_aux(i,k) = uh_3d(I,j,k)
-  enddo ; enddo ; endif
+  !$omp loop collapse(2) &
+  !$omp   map(from: uh_aux(ish-1:ieh, 1:nz), duhdu(ish-1:ieh, 1:nz))
+  do k = 1, nz; do i = ish-1, ieh
+    uh_aux(i, k) = 0.0
+    duhdu(i, k) = 0.0
+  enddo; enddo
 
+  if (present(uh_3d)) then
+    !$omp loop collapse(2) &
+    !$omp   map(to: uh_3d(ish-1:ieh, j, 1:nz)) &
+    !$omp   map(from: uh_aux(ish-1:ieh, 1:nz))
+    do k=1,nz ; do I=ish-1,ieh
+      uh_aux(i,k) = uh_3d(I,j,k)
+    enddo ; enddo
+  endif
+
+  !$omp loop &
+  !$omp   map(to: do_I_in(ish-1:ieh), du_max_CFL(ish-1:ieh), du_min_CFL(ish-1:ieh), uh_tot_0(ish-1:ieh), uhbt(ish-1:ieh), duhdu_tot_0(ish-1:ieh)) &
+  !$omp   map(from: du(ish-1:ieh), do_I(ish-1:ieh), du_max(ish-1:ieh), du_min(ish-1:ieh), uh_err(ish-1:ieh), duhdu_tot(ish-1:ieh), uh_err_best(ish-1:ieh))
   do I=ish-1,ieh
     du(I) = 0.0 ; do_I(I) = do_I_in(I)
     du_max(I) = du_max_CFL(I) ; du_min(I) = du_min_CFL(I)
     uh_err(I) = uh_tot_0(I) - uhbt(I) ; duhdu_tot(I) = duhdu_tot_0(I)
     uh_err_best(I) = abs(uh_err(I))
   enddo
+
+  !$omp end target
 
   do itt=1,max_itts
     select case (itt)
