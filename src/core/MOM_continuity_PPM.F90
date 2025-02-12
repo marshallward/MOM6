@@ -2161,13 +2161,8 @@ subroutine meridional_flux_adjust(v, h_in, h_S, h_N, vhbt, vh_tot_0, dvhdv_tot_0
   iend = G%ied
 
   !$omp target enter data &
-  !$omp   map(to: do_I_in(ish:ieh), dv_max_CFL(ish:ieh), dv_min_CFL(ish:ieh), &
-  !$omp     vh_tot_0(ish:ieh), dvhdv_tot_0(ish:ieh), vhbt(ish:ieh), G, &
-  !$omp     G%IareaT(ish:ieh, J:J+1), G%dx_Cv(ish:ieh, J), &
-  !$omp     G%IdyT(ish:ieh, J:J+1), CS, CS%better_iter, CS%vol_CFL, &
-  !$omp     v(ish:ieh, J, 1:nz), visc_rem(ish:ieh, 1:nz), &
-  !$omp     h_in(ish:ieh, J:J+1, 1:nz), h_S(ish:ieh, J:J+1, 1:nz), &
-  !$omp     h_N(ish:ieh, J:J+1, 1:nz), dt, por_face_areaV(ish:ieh, J, 1:nz)) &
+  !$omp   map(to: G, G%IareaT(ish:ieh, J:J+1), G%dx_Cv(ish:ieh, J), &
+  !$omp     G%IdyT(ish:ieh, J:J+1), CS, CS%better_iter, CS%vol_CFL) &
   !$omp   map(alloc: vh_aux, dvhdv, dv(ish:ieh), do_I(ish:ieh), &
   !$omp     dv_max(ish:ieh), dv_min(ish:ieh), vh_err(ish:ieh), &
   !$omp     dvhdv_tot(ish:ieh), vh_err_best(ish:ieh), v_new(ish:ieh))
@@ -2319,15 +2314,12 @@ subroutine meridional_flux_adjust(v, h_in, h_S, h_N, vhbt, vh_tot_0, dvhdv_tot_0
 
   !$omp target exit data &
   !$omp   map(from: dv(ish:ieh)) &
-  !$omp   map(release: vh_aux, dvhdv, do_I_in(ish:ieh), dv_max_CFL(ish:ieh), &
-  !$omp     dv_min_CFL(ish:ieh), vh_tot_0(ish:ieh), dvhdv_tot_0(ish:ieh), &
-  !$omp     vhbt(ish:ieh), do_I(ish:ieh), dv_max(ish:ieh), dv_min(ish:ieh), &
+  !$omp   map(release: vh_aux, dvhdv, &
+  !$omp     do_I(ish:ieh), dv_max(ish:ieh), dv_min(ish:ieh), &
   !$omp     vh_err(ish:ieh), dvhdv_tot(ish:ieh), vh_err_best(ish:ieh), G, &
   !$omp     G%IareaT(ish:ieh, J:J+1), G%dx_Cv(ish:ieh, J), &
   !$omp     G%IdyT(ish:ieh, J:J+1), CS, CS%better_iter, CS%vol_CFL, &
-  !$omp     v(ish:ieh, J, 1:nz), visc_rem(ish:ieh, 1:nz), v_new(ish:ieh), &
-  !$omp     h_in(ish:ieh, J:J+1, 1:nz), h_S(ish:ieh, J:J+1, 1:nz), &
-  !$omp     h_N(ish:ieh, J:J+1, 1:nz), dt, por_face_areaV(ish:ieh, J, 1:nz))
+  !$omp     v_new(ish:ieh))
 
 end subroutine meridional_flux_adjust
 
@@ -2413,7 +2405,9 @@ subroutine set_merid_BT_cont(v, h_in, h_S, h_N, BT_cont, vh_tot_0, dvhdv_tot_0, 
   !$omp     h_N(ish:ieh, J:J+1, 1:nz), vh_tot_0(ish:ieh), do_I(ish:ieh), &
   !$omp     dvhdv_tot_0(ish:ieh), dv_max_CFL(ish:ieh), dv_min_CFL(ish:ieh), &
   !$omp     por_face_areaV(ish:ieh, J, 1:nz), visc_rem(ish:ieh, 1:nz), dt, G, &
-  !$omp     US, CS, v(ish:ieh, J, 1:nz), BT_cont, visc_rem_max(ish:ieh)) &
+  !$omp     G%IareaT(ish:ieh, J:J+1), G%dx_Cv(ish:ieh, J), &
+  !$omp     G%IdyT(ish:ieh, J:J+1), US, CS, &
+  !$omp     v(ish:ieh, J, 1:nz), BT_cont, visc_rem_max(ish:ieh)) &
   !$omp   map(alloc: zeros(ish:ieh), dv0, FAmt_0(ish:ieh), FAmt_L(ish:ieh), &
   !$omp     FAmt_R(ish:ieh), vhtot_L(ish:ieh), vhtot_R(ish:ieh), &
   !$omp     dv_CFL(ish:ieh), dvR(ish:ieh), dvL(ish:ieh), v_L(ish:ieh), &
@@ -2549,7 +2543,7 @@ subroutine set_merid_BT_cont(v, h_in, h_S, h_N, BT_cont, vh_tot_0, dvhdv_tot_0, 
   !$omp target exit data &
   !$omp   map(from: BT_cont) &
   !$omp   map(release: do_I(ish:ieh), v(ish:ieh, J, 1:nz), dvL(ish:ieh), &
-  !$omp     dvR(ish:ieh), dv0, visc_rem(ish:ieh, 1:nz), dt, G, US, CS, &
+  !$omp     dvR(ish:ieh), dv0, visc_rem(ish:ieh, 1:nz), dt, G, G%IareaT(ish:ieh, J:J+1), G%dx_Cv(ish:ieh, J), G%IdyT(ish:ieh, J:J+1), US, CS, &
   !$omp     por_face_areaV(ish:ieh, J, 1:nz), v_L(ish:ieh), v_R(ish:ieh), &
   !$omp     v_0(ish:ieh), vh_0(ish:ieh), vh_L(ish:ieh), vh_R(ish:ieh), &
   !$omp     dvhdv_0(ish:ieh), dvhdv_L(ish:ieh), dvhdv_R(ish:ieh), &
