@@ -2408,22 +2408,24 @@ subroutine set_merid_BT_cont(v, h_in, h_S, h_N, BT_cont, vh_tot_0, dvhdv_tot_0, 
   nz = GV%ke ; Idt = 1.0 / dt
   min_visc_rem = 0.1 ; CFL_min = 1e-6
 
+  !$omp target enter data &
+  !$omp   map(to: h_in(ish:ieh, J:J+1, 1:nz), h_S(ish:ieh, J:J+1, 1:nz), &
+  !$omp     h_N(ish:ieh, J:J+1, 1:nz), vh_tot_0(ish:ieh), do_I(ish:ieh), &
+  !$omp     dvhdv_tot_0(ish:ieh), dv_max_CFL(ish:ieh), dv_min_CFL(ish:ieh), &
+  !$omp     por_face_areaV(ish:ieh, J, 1:nz), visc_rem(ish:ieh, 1:nz), dt, G, &
+  !$omp     US, CS, v(ish:ieh, J, 1:nz), BT_cont, visc_rem_max(ish:ieh)) &
+  !$omp   map(alloc: zeros(ish:ieh), dv0, FAmt_0(ish:ieh), FAmt_L(ish:ieh), &
+  !$omp     FAmt_R(ish:ieh), vhtot_L(ish:ieh), vhtot_R(ish:ieh), &
+  !$omp     dv_CFL(ish:ieh), dvR(ish:ieh), dvL(ish:ieh), v_L(ish:ieh), &
+  !$omp     v_R(ish:ieh), v_0(ish:ieh), vh_0(ish:ieh), vh_L(ish:ieh), &
+  !$omp     vh_R(ish:ieh), dvhdv_0(ish:ieh), dvhdv_L(ish:ieh), dvhdv_R(ish:ieh))
+
  ! Diagnose the zero-transport correction, dv0.
   !$omp target loop map(from: zeros(ish:ieh))
   do i=ish,ieh ; zeros(i) = 0.0 ; enddo
   call meridional_flux_adjust(v, h_in, h_S, h_N, zeros, vh_tot_0, dvhdv_tot_0, dv0, &
                          dv_max_CFL, dv_min_CFL, dt, G, GV, US, CS, visc_rem, &
                          j, ish, ieh, do_I, por_face_areaV)
-
-  !$omp target enter data &
-  !$omp   map(to: dv0(ish:ieh), dt, G, US, &
-  !$omp     CS, por_face_areaV(ish:ieh, J, 1:nz), FAmt_0(ish:ieh), &
-  !$omp     FAmt_L(ish:ieh), FAmt_R(ish:ieh), vhtot_L(ish:ieh), &
-  !$omp     vhtot_R(ish:ieh), h_in(ish:ieh, J:J+1, 1:nz), &
-  !$omp     h_S(ish:ieh, J:J+1, 1:nz), h_N(ish:ieh, J:J+1, 1:nz), BT_cont, do_I(ish:ieh), visc_rem(ish:ieh, 1:nz), visc_rem_max(ish:ieh), v(ish:ieh, J, 1:nz), dv_CFL(ish:ieh), dvR(ish:ieh), dvL(ish:ieh)) &
-  !$omp   map(alloc: v_L(ish:ieh), v_R(ish:ieh), v_0(ish:ieh), vh_0(ish:ieh), &
-  !$omp     vh_L(ish:ieh), vh_R(ish:ieh), dvhdv_0(ish:ieh), dvhdv_L(ish:ieh), &
-  !$omp     dvhdv_R(ish:ieh))
 
   !   Determine the southerly- and northerly- fluxes.  Choose a sufficiently
   ! negative velocity correction for the northerly-flux, and a sufficiently
@@ -2547,13 +2549,14 @@ subroutine set_merid_BT_cont(v, h_in, h_S, h_N, BT_cont, vh_tot_0, dvhdv_tot_0, 
   !$omp target exit data &
   !$omp   map(from: BT_cont) &
   !$omp   map(release: do_I(ish:ieh), v(ish:ieh, J, 1:nz), dvL(ish:ieh), &
-  !$omp     dvR(ish:ieh), dv0(ish:ieh), visc_rem(ish:ieh, 1:nz), dt, G, US, CS, &
+  !$omp     dvR(ish:ieh), dv0, visc_rem(ish:ieh, 1:nz), dt, G, US, CS, &
   !$omp     por_face_areaV(ish:ieh, J, 1:nz), v_L(ish:ieh), v_R(ish:ieh), &
   !$omp     v_0(ish:ieh), vh_0(ish:ieh), vh_L(ish:ieh), vh_R(ish:ieh), &
   !$omp     dvhdv_0(ish:ieh), dvhdv_L(ish:ieh), dvhdv_R(ish:ieh), &
   !$omp     h_in(ish:ieh, J:J+1, 1:nz), h_S(ish:ieh, J:J+1, 1:nz), &
   !$omp     h_N(ish:ieh, J:J+1, 1:nz), FAmt_0(ish:ieh), FAmt_L(ish:ieh), FAmt_R(ish:ieh), &
-  !$omp     vhtot_L(ish:ieh), vhtot_R(ish:ieh), visc_rem_max(ish:ieh), dv_CFL(ish:ieh))
+  !$omp     vhtot_L(ish:ieh), vhtot_R(ish:ieh), visc_rem_max(ish:ieh), dv_CFL(ish:ieh), zeros(ish:ieh), &
+  !$omp     vh_tot_0(ish:ieh), dvhdv_tot_0(ish:ieh), dv_max_CFL(ish:ieh), dv_min_CFL(ish:ieh))
 
 end subroutine set_merid_BT_cont
 
