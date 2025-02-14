@@ -1410,6 +1410,7 @@ subroutine set_zonal_BT_cont(u, h_in, h_W, h_E, BT_cont, uh_tot_0, duhdu_tot_0, 
   min_visc_rem = 0.1 ; CFL_min = 1e-6
 
  ! Diagnose the zero-transport correction, du0.
+  !$omp target loop map(from: zeros(ish-1:ieh))
   do I=ish-1,ieh ; zeros(I) = 0.0 ; enddo
   call zonal_flux_adjust(u, h_in, h_W, h_E, zeros, uh_tot_0, duhdu_tot_0, du0, &
                          du_max_CFL, du_min_CFL, dt, G, GV, US, CS, visc_rem, &
@@ -1419,6 +1420,12 @@ subroutine set_zonal_BT_cont(u, h_in, h_W, h_E, BT_cont, uh_tot_0, duhdu_tot_0, 
   ! negative velocity correction for the easterly-flux, and a sufficiently
   ! positive correction for the westerly-flux.
   domore = .false.
+  !$omp target loop &
+  !$omp   reduction(.or.:domore) &
+  !$omp   map(to: do_I(ish-1:ieh), G, G%dxCu(ish-1:ieh, J), du0(ish-1:ieh)) &
+  !$omp   map(from: du_CFL(ish-1:ieh), duR(ish-1:ieh), duL(ish-1:ieh), &
+  !$omp     FAmt_L(ish-1:ieh), FAmt_R(ish-1:ieh), FAmt_0(ish-1:ieh), &
+  !$omp     uhtot_L(ish-1:ieh), uhtot_R(ish-1:ieh))
   do I=ish-1,ieh
     if (do_I(I)) domore = .true.
     du_CFL(I) = (CFL_min * Idt) * G%dxCu(I,j)
@@ -1429,15 +1436,26 @@ subroutine set_zonal_BT_cont(u, h_in, h_W, h_E, BT_cont, uh_tot_0, duhdu_tot_0, 
   enddo
 
   if (.not.domore) then
-    do k=1,nz ; do I=ish-1,ieh
+    !$omp target loop &
+    !$omp   map(tofrom: BT_cont, BT_cont%FA_u_W0(ish-1:ieh, j), &
+    !$omp     BT_cont%FA_u_WW(ish-1:ieh, j), BT_cont%FA_u_E0(ish-1:ieh, j), &
+    !$omp     BT_cont%FA_u_EE(ish-1:ieh, j), BT_cont%uBT_WW(ish-1:ieh, j), &
+    !$omp     BT_cont%uBT_EE(ish-1:ieh, j))
+    do I=ish-1,ieh
       BT_cont%FA_u_W0(I,j) = 0.0 ; BT_cont%FA_u_WW(I,j) = 0.0
       BT_cont%FA_u_E0(I,j) = 0.0 ; BT_cont%FA_u_EE(I,j) = 0.0
       BT_cont%uBT_WW(I,j) = 0.0 ; BT_cont%uBT_EE(I,j) = 0.0
-    enddo ; enddo
+    enddo
     return
   endif
 
-  do k=1,nz ; do I=ish-1,ieh ; if (do_I(I)) then
+  !$omp target loop &
+  !$omp  private(visc_rem_lim) &
+  !$omp  map(to: do_I(ish-1:ieh), visc_rem(ish-1:ieh, 1:nz), &
+  !$omp    visc_rem_max(ish-1:ieh), u(ish-1:ieh, j, 1:nz), duR(ish-1:ieh), &
+  !$omp    du_CFL(ish-1:ieh)) &
+  !$omp  map(tofrom: duR(ish-1:ieh), duL(ish-1:ieh))
+  do I=ish-1,ieh ; if (do_I(I)) then; do k=1,nz
     visc_rem_lim = max(visc_rem(I,k), min_visc_rem*visc_rem_max(I))
     if (visc_rem_lim > 0.0) then ! This is almost always true for ocean points.
       if (u(I,j,k) + duR(I)*visc_rem_lim > -du_CFL(I)*visc_rem(I,k)) &
@@ -1445,9 +1463,14 @@ subroutine set_zonal_BT_cont(u, h_in, h_W, h_E, BT_cont, uh_tot_0, duhdu_tot_0, 
       if (u(I,j,k) + duL(I)*visc_rem_lim < du_CFL(I)*visc_rem(I,k)) &
         duL(I) = -(u(I,j,k) - du_CFL(I)*visc_rem(I,k)) / visc_rem_lim
     endif
-  endif ; enddo ; enddo
+  enddo ; endif ; enddo
 
   do k=1,nz
+    !$omp target loop &
+    !$omp   map(to: do_I(ish-1:ieh), u(ish-1:ieh, j, k), &
+    !$omp     visc_rem(ish-1:ieh, k), duL(ish-1:ieh), duR(ish-1:ieh), &
+    !$omp     du0(ish-1:ieh)) &
+    !$omp   map(from: u_L(ish-1:ieh), u_R(ish-1:ieh), u_0(ish-1:ieh)) ! from since they aren't initialized
     do I=ish-1,ieh ; if (do_I(I)) then
       u_L(I) = u(I,j,k) + duL(I) * visc_rem(I,k)
       u_R(I) = u(I,j,k) + duR(I) * visc_rem(I,k)
@@ -1459,6 +1482,11 @@ subroutine set_zonal_BT_cont(u, h_in, h_W, h_E, BT_cont, uh_tot_0, duhdu_tot_0, 
                           visc_rem(:,k), dt, G, US, j, ish, ieh, do_I, CS%vol_CFL, por_face_areaU(:,j,k))
     call zonal_flux_layer(u_R, h_in(:,j,k), h_W(:,j,k), h_E(:,j,k), uh_R, duhdu_R, &
                           visc_rem(:,k), dt, G, US, j, ish, ieh, do_I, CS%vol_CFL, por_face_areaU(:,j,k))
+    !$omp target loop &
+    !$omp   map(to: do_I(ish-1:ieh), duhdu_0(ish-1:ieh), duhdu_L(ish-1:ieh), &
+    !$omp     duhdu_R(ish-1:ieh), uh_L(ish-1:ieh), uh_R(ish-1:ieh)) &
+    !$omp   map(tofrom: FAmt_0(ish-1:ieh), FAmt_L(ish-1:ieh), FAmt_R(ish-1:ieh), &
+    !$omp     uhtot_L(ish-1:ieh), uhtot_R(ish-1:ieh))
     do I=ish-1,ieh ; if (do_I(I)) then
       FAmt_0(I) = FAmt_0(I) + duhdu_0(I)
       FAmt_L(I) = FAmt_L(I) + duhdu_L(I)
@@ -1467,6 +1495,15 @@ subroutine set_zonal_BT_cont(u, h_in, h_W, h_E, BT_cont, uh_tot_0, duhdu_tot_0, 
       uhtot_R(I) = uhtot_R(I) + uh_R(I)
     endif ; enddo
   enddo
+  !$omp target loop &
+  !$omp   private(FA_0, FA_avg) &
+  !$omp   map(to: do_I(ish-1:ieh), FAmt_0(ish-1:ieh), duL(ish-1:ieh), &
+  !$omp     du0(ish-1:ieh), uhtot_L(ish-1:ieh), FAmt_L(ish-1:ieh), &
+  !$omp     duR(ish-1:ieh), uhtot_R(ish-1:ieh), FAmt_R(ish-1:ieh)) &
+  !$omp   map(tofrom: BT_cont, BT_cont%FA_u_W0(ish-1:ieh, j), &
+  !$omp     BT_cont%FA_u_WW(ish-1:ieh, j), BT_cont%uBT_WW(ish-1:ieh, j), &
+  !$omp     BT_cont%FA_u_E0(ish-1:ieh, j), BT_cont%FA_u_EE(ish-1:ieh, j), &
+  !$omp     BT_cont%uBT_EE(ish-1:ieh, j))
   do I=ish-1,ieh ; if (do_I(I)) then
     FA_0 = FAmt_0(I) ; FA_avg = FAmt_0(I)
     if ((duL(I) - du0(I)) /= 0.0) &
