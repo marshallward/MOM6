@@ -1465,6 +1465,18 @@ subroutine set_zonal_BT_cont(u, h_in, h_W, h_E, BT_cont, uh_tot_0, duhdu_tot_0, 
     endif
   enddo ; endif ; enddo
 
+  !$omp target enter data &
+  !$omp   map(to: u(ish-1:ieh, j, 1:nz), duL(ish-1:ieh), duR(ish-1:ieh), &
+  !$omp     du0(ish-1:ieh), visc_rem(ish-1:ieh, 1:nz), do_I(ish-1:ieh), &
+  !$omp     h_in(ish-1:ieh, j, 1:nz), h_W(ish-1:ieh, j, 1:nz), &
+  !$omp     h_E(ish-1:ieh, j, 1:nz), por_face_areaU(ish-1:ieh, j, 1:nz), &
+  !$omp     G, G%dy_Cu(ish-1:ieh, j), G%IareaT(ish-1:ieh, j), &
+  !$omp     G%IdxT(ish-1:ieh, j), FAmt_0(ish-1:ieh), FAmt_L(ish-1:ieh), &
+  !$omp     FAmt_R(ish-1:ieh), uhtot_L(ish-1:ieh), uhtot_R(ish-1:ieh)), &
+  !$omp   map(alloc: u_L(ish-1:ieh), u_R(ish-1:ieh), u_0(ish-1:ieh), &
+  !$omp     uh_0(ish-1:ieh), uh_L(ish-1:ieh), uh_R(ish-1:ieh), &
+  !$omp     duhdu_0(ish-1:ieh), duhdu_L(ish-1:ieh), duhdu_R(ish-1:ieh))
+
   do k=1,nz
     !$omp target loop &
     !$omp   map(to: do_I(ish-1:ieh), u(ish-1:ieh, j, k), &
@@ -1495,6 +1507,20 @@ subroutine set_zonal_BT_cont(u, h_in, h_W, h_E, BT_cont, uh_tot_0, duhdu_tot_0, 
       uhtot_R(I) = uhtot_R(I) + uh_R(I)
     endif ; enddo
   enddo
+
+  !$omp target exit data &
+  !$omp   map(release: u(ish-1:ieh, j, 1:nz), duL(ish-1:ieh), duR(ish-1:ieh), &
+  !$omp     du0(ish-1:ieh), visc_rem(ish-1:ieh, 1:nz), do_I(ish-1:ieh), &
+  !$omp     u_L(ish-1:ieh), u_R(ish-1:ieh), u_0(ish-1:ieh), &
+  !$omp     h_in(ish-1:ieh, j, 1:nz), h_W(ish-1:ieh, j, 1:nz), &
+  !$omp     h_E(ish-1:ieh, j, 1:nz), por_face_areaU(ish-1:ieh, j, 1:nz), G, &
+  !$omp     G%dy_Cu(ish-1:ieh, j), G%IareaT(ish-1:ieh, j), &
+  !$omp     G%IdxT(ish-1:ieh, j), uh_0(ish-1:ieh), uh_L(ish-1:ieh), &
+  !$omp     uh_R(ish-1:ieh), duhdu_0(ish-1:ieh), duhdu_L(ish-1:ieh), &
+  !$omp     duhdu_R(ish-1:ieh)) &
+  !$omp   map(from: FAmt_0(ish-1:ieh), FAmt_L(ish-1:ieh), &
+  !$omp     FAmt_R(ish-1:ieh), uhtot_L(ish-1:ieh), uhtot_R(ish-1:ieh))
+
   !$omp target loop &
   !$omp   private(FA_0, FA_avg) &
   !$omp   map(to: do_I(ish-1:ieh), FAmt_0(ish-1:ieh), duL(ish-1:ieh), &
