@@ -611,22 +611,42 @@ subroutine zonal_mass_flux(u, h_in, h_W, h_E, uh, dt, G, GV, US, CS, OBC, por_fa
   I_dt = 1.0 / dt
   if (CS%aggress_adjust) CFL_dt = I_dt
 
+
   if (.not.use_visc_rem) visc_rem(:,:) = 1.0
-  !$OMP parallel do default(shared) private(do_I,duhdu,du,du_max_CFL,du_min_CFL,uh_tot_0, &
-  !$OMP                                     duhdu_tot_0,FAuI,visc_rem_max,I_vrm,du_lim,dx_E,dx_W, &
-  !$OMP                                     simple_OBC_pt,any_simple_OBC,l_seg) &
-  !$OMP                        firstprivate(visc_rem)
+
+  !$omp target enter data &
+  !$omp   map(to: visc_rem_u(ish-1:ieh, :, :), uhbt(ish-1:ieh, jsh:jeh), dt, &
+  !$omp     h_in(ish-1:ieh, :, :), h_W(ish-1:ieh, :, :), &
+  !$omp     h_E(ish-1:Ieh, :, :), G, G%IareaT(ish-1:ieh+1, jsh:jeh), &
+  !$omp     G%Dy_Cu(ish-1:ieh+1, jsh:jeh), G%IdxT(ish-1:ieh, jsh:jeh), G%IsdB, &
+  !$omp     G%IedB, G%AreaT(ish-1:ieh+1, jsh:jeh), CS, CS%vol_CFL, CS%better_iter, &
+  !$omp     G%dxT(ish-1:ieh+1, jsh:jeh), G%mask2dCu(ish-1:ieh, jsh:jeh), &
+  !$omp     G%dxCu(ish-1:ieh, jsh:jeh), &
+  !$omp     u(ish-1:ieh, :, :), por_face_areaU(ish-1:ieh, :, :), &
+  !$omp     BT_cont%uBT_EE(ish-1:ieh, jsh:jeh), BT_cont%uBT_WW(ish-1:ieh, jsh:jeh), &
+  !$omp     BT_cont%FA_u_WW(ish-1:ieh, jsh:jeh), BT_cont%FA_u_W0(ish-1:ieh, jsh:jeh), &
+  !$omp     BT_cont%FA_u_EE(ish-1:ieh, jsh:jeh), BT_cont%FA_u_E0(ish-1:ieh, jsh:jeh)) &
+  !$omp   map(alloc: du, du_min_CFL(ish-1:ieh), &
+  !$omp     du_max_CFL(ish-1:ieh), duhdu_tot_0(ish-1:ieh), uh_tot_0(ish-1:ieh), &
+  !$omp     visc_rem_max, visc_rem, u_cor(ish-1:ieh, :, :), do_I(ish-1:ieh), &
+  !$omp     uh(ish-1:ieh, :, :), duhdu(ish-1:ieh, 1:nz))
+
   do j=jsh,jeh
+    !$omp target loop map(from: do_I(ish-1:ieh))
     do I=ish-1,ieh ; do_I(I) = .true. ; enddo
     ! Set uh and duhdu.
     do k=1,nz
-      if (use_visc_rem) then ; do I=ish-1,ieh
-        visc_rem(I,k) = visc_rem_u(I,j,k)
-      enddo ; endif
+      if (use_visc_rem) then ; 
+        !$omp target loop map(to: visc_rem_u(ish-1:ieh, j, k)) map(from: visc_rem(ish-1:ieh, k))
+        do I=ish-1,ieh
+          visc_rem(I,k) = visc_rem_u(I,j,k)
+        enddo
+      endif
       call zonal_flux_layer(u(:,j,k), h_in(:,j,k), h_W(:,j,k), h_E(:,j,k), &
                             uh(:,j,k), duhdu(:,k), visc_rem(:,k), &
                             dt, G, US, j, ish, ieh, do_I, CS%vol_CFL, por_face_areaU(:,j,k), OBC)
       if (local_specified_BC) then
+        ! not in double_gyre
         do I=ish-1,ieh ; if (OBC%segnum_u(I,j) /= OBC_NONE) then
           l_seg = OBC%segnum_u(I,j)
           if (OBC%segment(l_seg)%specified) uh(I,j,k) = OBC%segment(l_seg)%normal_trans(I,j,k)
@@ -636,15 +656,26 @@ subroutine zonal_mass_flux(u, h_in, h_W, h_E, uh, dt, G, GV, US, CS, OBC, por_fa
 
     if (present(uhbt) .or. set_BT_cont) then
       if (use_visc_rem .and. CS%use_visc_rem_max) then
-        visc_rem_max(:) = 0.0
-        do k=1,nz ; do I=ish-1,ieh
+        !$omp target loop map(to: G, G%IsdB, G%IedB) map(from: visc_rem_max)
+        do i = G%IsdB, G%IedB; visc_rem_max(i) = 0.0; enddo
+        !$omp target loop &
+        !$omp   map(to:visc_rem(ish-1:ieh, 1:nz)) &
+        !$omp   map(tofrom: visc_rem_max(ish-1:ieh))
+        do I=ish-1,ieh ; do k=1,nz
           visc_rem_max(I) = max(visc_rem_max(I), visc_rem(I,k))
         enddo ; enddo
       else
+        ! not in double_gyre
         visc_rem_max(:) = 1.0
       endif
       !   Set limits on du that will keep the CFL number between -1 and 1.
       ! This should be adequate to keep the root bracketed in all cases.
+      !$omp target loop &
+      !$omp   private(I_vrm, dx_W, dx_E) &
+      !$omp   map(to: G, G%areaT(ish-1:ieh+1, j), G%dy_Cu(ish-1:ieh+1, j), &
+      !$omp     G%dxT(ish-1:ieh+1, j), CS, CS%vol_CFL, visc_rem_max(ish-1:Ieh)) &
+      !$omp   map(from: du_max_CFL(ish-1:ieh), du_min_CFL(ish-1:ieh), &
+      !$omp     uh_tot_0(ish-1:ieh), duhdu_tot_0(ish-1:ieh))
       do I=ish-1,ieh
         I_vrm = 0.0
         if (visc_rem_max(I) > 0.0) I_vrm = 1.0 / visc_rem_max(I)
@@ -656,12 +687,16 @@ subroutine zonal_mass_flux(u, h_in, h_W, h_E, uh, dt, G, GV, US, CS, OBC, por_fa
         du_min_CFL(I) = -2.0 * (CFL_dt * dx_E) * I_vrm
         uh_tot_0(I) = 0.0 ; duhdu_tot_0(I) = 0.0
       enddo
-      do k=1,nz ; do I=ish-1,ieh
+      !$omp target loop &
+      !$omp   map(to: duhdu(ish-1:ieh, 1:nz), uh(ish-1:ieh, j, 1:nz)) &
+      !$omp   map(tofrom: duhdu_tot_0(ish-1:ieh), uh_tot_0(ish-1:ieh))
+      do I=ish-1,ieh ; do k=1,nz
         duhdu_tot_0(I) = duhdu_tot_0(I) + duhdu(I,k)
         uh_tot_0(I) = uh_tot_0(I) + uh(I,j,k)
       enddo ; enddo
       if (use_visc_rem) then
         if (CS%aggress_adjust) then
+          ! not in double_gyre
           do k=1,nz ; do I=ish-1,ieh
             if (CS%vol_CFL) then
               dx_W = ratio_max(G%areaT(i,j), G%dy_Cu(I,j), 1000.0*G%dxT(i,j))
@@ -677,6 +712,12 @@ subroutine zonal_mass_flux(u, h_in, h_W, h_E, uh, dt, G, GV, US, CS, OBC, por_fa
               du_min_CFL(I) = du_lim / visc_rem(I,k)
           enddo ; enddo
         else
+          !$omp target loop collapse(2) &
+          !$omp  private(dx_W, dx_E) &
+          !$omp  map(to: G, G%areaT(ish-1:ieh+1, j), G%dy_Cu(ish-1:ieh+1, j), &
+          !$omp    G%dxT(ish-1:ieh+1, j), G%mask2dCu(ish-1:ieh, j), &
+          !$omp    visc_rem(ish-1:ieh, 1:nz), u(ish-1:ieh, j, 1:nz), CS, CS%vol_CFL) &
+          !$omp  map(tofrom: du_max_CFL(ish-1:ieh), du_min_CFL(ish-1:ieh))
           do k=1,nz ; do I=ish-1,ieh
             if (CS%vol_CFL) then
               dx_W = ratio_max(G%areaT(i,j), G%dy_Cu(I,j), 1000.0*G%dxT(i,j))
@@ -691,6 +732,7 @@ subroutine zonal_mass_flux(u, h_in, h_W, h_E, uh, dt, G, GV, US, CS, OBC, por_fa
         endif
       else
         if (CS%aggress_adjust) then
+          ! not in double_gyre
           do k=1,nz ; do I=ish-1,ieh
             if (CS%vol_CFL) then
               dx_W = ratio_max(G%areaT(i,j), G%dy_Cu(I,j), 1000.0*G%dxT(i,j))
@@ -703,6 +745,7 @@ subroutine zonal_mass_flux(u, h_in, h_W, h_E, uh, dt, G, GV, US, CS, OBC, por_fa
                         ((-dx_E*I_dt - u(I,j,k)) + MAX(0.0,u(I+1,j,k))) )
           enddo ; enddo
         else
+          ! not in double_gyre
           do k=1,nz ; do I=ish-1,ieh
             if (CS%vol_CFL) then
               dx_W = ratio_max(G%areaT(i,j), G%dy_Cu(I,j), 1000.0*G%dxT(i,j))
@@ -714,6 +757,8 @@ subroutine zonal_mass_flux(u, h_in, h_W, h_E, uh, dt, G, GV, US, CS, OBC, por_fa
           enddo ; enddo
         endif
       endif
+      !$omp target loop &
+      !$omp   map(tofrom: du_max_CFL(ish-1:ieh), du_min_CFL(ish-1:ieh))
       do I=ish-1,ieh
         du_max_CFL(I) = max(du_max_CFL(I),0.0)
         du_min_CFL(I) = min(du_min_CFL(I),0.0)
@@ -729,9 +774,12 @@ subroutine zonal_mass_flux(u, h_in, h_W, h_E, uh, dt, G, GV, US, CS, OBC, por_fa
           if (l_seg /= OBC_NONE) simple_OBC_pt(I) = OBC%segment(l_seg)%specified
           do_I(I) = .not.simple_OBC_pt(I)
           any_simple_OBC = any_simple_OBC .or. simple_OBC_pt(I)
-        enddo ; else ; do I=ish-1,ieh
-          do_I(I) = .true.
-        enddo ; endif
+        enddo ; else 
+          !$omp target loop map(from: do_I(ish-1:ieh))
+          do I=ish-1,ieh
+            do_I(I) = .true.
+          enddo
+        endif
       endif
 
       if (present(uhbt)) then
@@ -740,14 +788,25 @@ subroutine zonal_mass_flux(u, h_in, h_W, h_E, uh, dt, G, GV, US, CS, OBC, por_fa
                                du_max_CFL, du_min_CFL, dt, G, GV, US, CS, visc_rem, &
                                j, ish, ieh, do_I, por_face_areaU, uh, OBC=OBC)
 
-        if (present(u_cor)) then ; do k=1,nz
-          do I=ish-1,ieh ; u_cor(I,j,k) = u(I,j,k) + du(I) * visc_rem(I,k) ; enddo
-          if (any_simple_OBC) then ; do I=ish-1,ieh ; if (simple_OBC_pt(I)) then
-            u_cor(I,j,k) = OBC%segment(OBC%segnum_u(I,j))%normal_vel(I,j,k)
-          endif ; enddo ; endif
-        enddo ; endif ! u-corrected
+        if (present(u_cor)) then ; 
+          do k=1,nz
+            !$omp target loop &
+            !$omp   map(to: u(ish-1:ieh, j, k), du(ish-1:ieh), visc_rem(ish-1:ieh, k)) &
+            !$omp   map(from: u_cor(ish-1:ieh, j, k))
+            do I=ish-1,ieh
+              u_cor(I,j,k) = u(I,j,k) + du(I) * visc_rem(I,k)
+            enddo
+            if (any_simple_OBC) then
+              ! not in double_gyre
+              do I=ish-1,ieh ; if (simple_OBC_pt(I)) then
+                u_cor(I,j,k) = OBC%segment(OBC%segnum_u(I,j))%normal_vel(I,j,k)
+              endif ; enddo
+            endif
+          enddo
+        endif ! u-corrected
 
         if (present(du_cor)) then
+          ! not in double_gyre
           do I=ish-1,ieh ; du_cor(I,j) = du(I) ; enddo
         endif
 
@@ -758,6 +817,7 @@ subroutine zonal_mass_flux(u, h_in, h_W, h_E, uh, dt, G, GV, US, CS, OBC, por_fa
                                du_max_CFL, du_min_CFL, dt, G, GV, US, CS, visc_rem, &
                                visc_rem_max, j, ish, ieh, do_I, por_face_areaU)
         if (any_simple_OBC) then
+          ! not in double_gyre
           do I=ish-1,ieh
             if (simple_OBC_pt(I)) FAuI(I) = GV%H_subroundoff*G%dy_Cu(I,j)
           enddo
@@ -780,7 +840,26 @@ subroutine zonal_mass_flux(u, h_in, h_W, h_E, uh, dt, G, GV, US, CS, OBC, por_fa
 
   enddo ! j-loop
 
+  !$omp target exit data &
+  !$omp   map(from: u_cor(ish-1:ieh, :, :), uh(ish-1:ieh, :, :), &
+  !$omp     BT_cont%uBT_EE(ish-1:ieh, jsh:jeh), BT_cont%uBT_WW(ish-1:ieh, jsh:jeh), &
+  !$omp     BT_cont%FA_u_WW(ish-1:ieh, jsh:jeh), BT_cont%FA_u_W0(ish-1:ieh, jsh:jeh), &
+  !$omp     BT_cont%FA_u_EE(ish-1:ieh, jsh:jeh), BT_cont%FA_u_E0(ish-1:ieh, jsh:jeh)) &
+  !$omp   map(release: du, du_min_CFL(ish-1:ieh), dt, &
+  !$omp     du_max_CFL(ish-1:ieh), duhdu_tot_0(ish-1:ieh), uh_tot_0(ish-1:ieh), &
+  !$omp     visc_rem_max, visc_rem, do_I(ish-1:ieh), &
+  !$omp     visc_rem_u(ish-1:ieh, :, :), uhbt(ish-1:ieh, jsh:jeh), &
+  !$omp     h_in(ish-1:ieh, :, :), h_W(ish-1:ieh, :, :), &
+  !$omp     h_E(ish-1:Ieh, :, :), G, G%IareaT(ish-1:ieh+1, jsh:jeh), &
+  !$omp     G%Dy_Cu(ish-1:ieh+1, jsh:jeh), G%IdxT(ish-1:ieh, jsh:jeh), G%IsdB, &
+  !$omp     G%IedB, G%AreaT(ish-1:ieh+1, jsh:jeh), &
+  !$omp     G%dxT(ish-1:ieh+1, jsh:jeh), G%mask2dCu(ish-1:ieh, jsh:jeh), &
+  !$omp     G%dxCu(ish-1:ieh, jsh:jeh), &
+  !$omp     u(ish-1:ieh, :, :), CS, CS%vol_CFL, duhdu(ish-1:ieh, 1:nz), &
+  !$omp     por_face_areaU(ish-1:ieh, :, :))
+
   if (local_open_BC .and. set_BT_cont) then
+    ! not in double_gyre
     do n = 1, OBC%number_of_segments
       if (OBC%segment(n)%open .and. OBC%segment(n)%is_E_or_W) then
         I = OBC%segment(n)%HI%IsdB
@@ -932,6 +1011,11 @@ subroutine zonal_flux_layer(u, h, h_W, h_E, uh, duhdu, visc_rem, dt, G, US, j, &
     local_open_BC = OBC%open_u_BCs_exist_globally
   endif ; endif
 
+  !$omp target loop &
+  !$omp   private(CFL, curv_3, h_marg) &
+  !$omp   map(to: do_I(ish-1:ieh), u(ish-1:ieh), vol_CFL, dt, G, G%dy_Cu(ish-1:ieh, j), G%IareaT(ish-1:ieh, j), G%IdxT(ish-1:ieh, j), h_W(ish-1:ieh), h_E(ish-1:ieh), h(ish-1:ieh), por_face_areaU(ish-1:ieh), visc_rem(ish-1:ieh)) &
+  !$omp   map(from: duhdu(ish-1:ieh)) &
+  !$omp   map(tofrom: uh(ish-1:ieh))
   do I=ish-1,ieh ; if (do_I(I)) then
     ! Set new values of uh and duhdu.
     if (u(I) > 0.0) then
@@ -956,6 +1040,12 @@ subroutine zonal_flux_layer(u, h, h_W, h_E, uh, duhdu, visc_rem, dt, G, US, j, &
   endif ; enddo
 
   if (local_open_BC) then
+    !$omp target loop &
+    !$omp  private(l_seg) &
+    !$omp  map(to: do_I(ish-1:ieh), OBC, OBC%segnum_u(ish-1:ieh, J), &
+    !$omp    OBC%segment, G%dy_Cu(ish-1:ieh, j), por_face_areaU(ish-1:ieh), &
+    !$omp    u(ish-1:ieh), h(ish-1:ieh+1), visc_rem(ish-1:ieh)) &
+    !$omp  map(tofrom: uh(ish-1:ieh), duhdu(ish-1:ieh))
     do I=ish-1,ieh ; if (do_I(I)) then ; if (OBC%segnum_u(I,j) /= OBC_NONE) then
       l_seg = OBC%segnum_u(I,j)
       if (OBC%segment(l_seg)%open) then
@@ -1155,18 +1245,47 @@ subroutine zonal_flux_adjust(u, h_in, h_W, h_E, uhbt, uh_tot_0, duhdu_tot_0, &
 
   nz = GV%ke
 
-  uh_aux(:,:) = 0.0 ; duhdu(:,:) = 0.0
+  !$omp target enter data &
+  !$omp   map(to: uh_3d(ish-1:ieh, j, 1:nz), do_I_in(ish-1:ieh), &
+  !$omp     du_max_CFL(ish-1:ieh), du_min_CFL(ish-1:ieh), &
+  !$omp     uh_tot_0(ish-1:ieh), duhdu_tot_0(ish-1:ieh), dt, &
+  !$omp     G, G%IareaT(ish-1:ieh+1, J), CS, CS%better_iter, &
+  !$omp     u(ish-1:ieh, j, 1:nz), visc_rem(ish-1:ieh, 1:nz), &
+  !$omp     por_face_areaU(ish-1:ieh, j, 1:nz), &
+  !$omp     G%dy_Cu(ish-1:ieh, j), G%IdxT(ish-1:ieh, j)) &
+  !$omp   map(alloc: uh_aux(ish-1:ieh, 1:nz), duhdu(ish-1:ieh, 1:nz), du(ish-1:ieh), do_I(ish-1:ieh), du_max(ish-1:ieh), du_min(ish-1:ieh), uh_err(ish-1:ieh), duhdu_tot(ish-1:ieh), uh_err_best(ish-1:ieh), u_new(ish-1:ieh))
 
-  if (present(uh_3d)) then ; do k=1,nz ; do I=ish-1,ieh
-    uh_aux(i,k) = uh_3d(I,j,k)
-  enddo ; enddo ; endif
+  !$omp target &
+  !$omp   map(to: uh_3d(ish-1:ieh, j, 1:nz), do_I_in(ish-1:ieh), du_max_CFL(ish-1:ieh), du_min_CFL(ish-1:ieh), uh_tot_0(ish-1:ieh), uhbt(ish-1:ieh), duhdu_tot_0(ish-1:ieh)) &
+  !$omp   map(from: uh_aux(ish-1:ieh, 1:nz), duhdu(ish-1:ieh, 1:nz), du(ish-1:ieh), do_I(ish-1:ieh), du_max(ish-1:ieh), du_min(ish-1:ieh), uh_err(ish-1:ieh), duhdu_tot(ish-1:ieh), uh_err_best(ish-1:ieh))
 
+  !$omp loop collapse(2) &
+  !$omp   map(from: uh_aux(ish-1:ieh, 1:nz), duhdu(ish-1:ieh, 1:nz))
+  do k = 1, nz; do i = ish-1, ieh
+    uh_aux(i, k) = 0.0
+    duhdu(i, k) = 0.0
+  enddo; enddo
+
+  if (present(uh_3d)) then
+    !$omp loop collapse(2) &
+    !$omp   map(to: uh_3d(ish-1:ieh, j, 1:nz)) &
+    !$omp   map(from: uh_aux(ish-1:ieh, 1:nz))
+    do k=1,nz ; do I=ish-1,ieh
+      uh_aux(i,k) = uh_3d(I,j,k)
+    enddo ; enddo
+  endif
+
+  !$omp loop &
+  !$omp   map(to: do_I_in(ish-1:ieh), du_max_CFL(ish-1:ieh), du_min_CFL(ish-1:ieh), uh_tot_0(ish-1:ieh), uhbt(ish-1:ieh), duhdu_tot_0(ish-1:ieh)) &
+  !$omp   map(from: du(ish-1:ieh), do_I(ish-1:ieh), du_max(ish-1:ieh), du_min(ish-1:ieh), uh_err(ish-1:ieh), duhdu_tot(ish-1:ieh), uh_err_best(ish-1:ieh))
   do I=ish-1,ieh
     du(I) = 0.0 ; do_I(I) = do_I_in(I)
     du_max(I) = du_max_CFL(I) ; du_min(I) = du_min_CFL(I)
     uh_err(I) = uh_tot_0(I) - uhbt(I) ; duhdu_tot(I) = duhdu_tot_0(I)
     uh_err_best(I) = abs(uh_err(I))
   enddo
+
+  !$omp end target
 
   do itt=1,max_itts
     select case (itt)
@@ -1176,13 +1295,26 @@ subroutine zonal_flux_adjust(u, h_in, h_W, h_E, uhbt, uh_tot_0, duhdu_tot_0, &
       case default ; tol_eta = CS%tol_eta
     end select
     tol_vel = CS%tol_vel
+    domore = .false.
 
+    !$omp target &
+    !$omp   map(to: uh_err(ish-1:ieh), dt, G, G%IareaT(ish-1:ieh+1, J), tol_eta, CS, CS%better_iter, tol_vel, duhdu_tot(ish-1:ieh), uh_err_best(ish-1:ieh)) &
+    !$omp   map(tofrom: du(ish-1:ieh), du_max(ish-1:ieh), du_min(ish-1:ieh), do_I(ish-1:ieh))
+
+    !$omp loop &
+    !$omp   map(to: uh_err(ish-1:ieh), du(ish-1:ieh)) &
+    !$omp   map(tofrom: du_max(ish-1:ieh), du_min(ish-1:ieh), do_I(ish-1:ieh))
     do I=ish-1,ieh
       if (uh_err(I) > 0.0) then ; du_max(I) = du(I)
       elseif (uh_err(I) < 0.0) then ; du_min(I) = du(I)
       else ; do_I(I) = .false. ; endif
     enddo
-    domore = .false.
+
+    !$omp loop &
+    !$omp   private(ddu, du_prev) &
+    !$omp   reduction(.or.:domore) &
+    !$omp   map(to: dt, G, G%IareaT(ish-1:ieh+1, J), uh_err(ish-1:ieh), tol_eta, CS, CS%better_iter, tol_vel, duhdu_tot(ish-1:ieh), uh_err_best(ish-1:ieh), du_max(ish-1:ieh), du_min(ish-1:ieh)) &
+    !$omp   map(tofrom: do_I(ish-1:ieh), du(ish-1:ieh))
     do I=ish-1,ieh ; if (do_I(I)) then
       if ((dt * min(G%IareaT(i,j),G%IareaT(i+1,j))*abs(uh_err(I)) > tol_eta) .or. &
           (CS%better_iter .and. ((abs(uh_err(I)) > tol_vel * duhdu_tot(I)) .or. &
@@ -1210,9 +1342,13 @@ subroutine zonal_flux_adjust(u, h_in, h_W, h_E, uhbt, uh_tot_0, duhdu_tot_0, &
         do_I(I) = .false.
       endif
     endif ; enddo
+    !$omp end target
     if (.not.domore) exit
 
     if ((itt < max_itts) .or. present(uh_3d)) then ; do k=1,nz
+      !$omp target loop &
+      !$omp   map(to: u(ish-1:ieh, j, k), du(ish-1:ieh), visc_rem(ish-1:ieh, k)) &
+      !$omp   map(from: u_new(ish-1:ieh))
       do I=ish-1,ieh ; u_new(I) = u(I,j,k) + du(I) * visc_rem(I,k) ; enddo
       call zonal_flux_layer(u_new, h_in(:,j,k), h_W(:,j,k), h_E(:,j,k), &
                             uh_aux(:,k), duhdu(:,k), visc_rem(:,k), &
@@ -1220,25 +1356,56 @@ subroutine zonal_flux_adjust(u, h_in, h_W, h_E, uhbt, uh_tot_0, duhdu_tot_0, &
     enddo ; endif
 
     if (itt < max_itts) then
+      !$omp target &
+      !$omp   map(to: uhbt(ish-1:ieh), uh_aux(ish-1:ieh, 1:nz), duhdu(ish-1:ieh, 1:nz)) &
+      !$omp   map(from: uh_err(ish-1:ieh), duhdu_tot(ish-1:ieh)) &
+      !$omp   map(tofrom: uh_err_best(ish-1:ieh))
+      !$omp loop &
+      !$omp   map(to: uhbt(ish-1:ieh)) &
+      !$omp   map(from: uh_err(ish-1:ieh), duhdu_tot(ish-1:ieh))
       do I=ish-1,ieh
         uh_err(I) = -uhbt(I) ; duhdu_tot(I) = 0.0
       enddo
+      !$omp loop &
+      !$omp   map(to: uh_aux(ish-1:ieh, 1:nz), duhdu(ish-1:ieh, 1:nz)) &
+      !$omp   map(tofrom: uh_err(ish-1:ieh), duhdu_tot(ish-1:ieh))
       do k=1,nz ; do I=ish-1,ieh
         uh_err(I) = uh_err(I) + uh_aux(I,k)
         duhdu_tot(I) = duhdu_tot(I) + duhdu(I,k)
       enddo ; enddo
+      !$omp loop &
+      !$omp   map(to: uh_err(ish-1:ieh)) &
+      !$omp   map(tofrom: uh_err_best(ish-1:ieh))
       do I=ish-1,ieh
         uh_err_best(I) = min(uh_err_best(I), abs(uh_err(I)))
       enddo
+      !$omp end target
     endif
   enddo ! itt-loop
   ! If there are any faces which have not converged to within the tolerance,
   ! so-be-it, or else use a final upwind correction?
   ! This never seems to happen with 20 iterations as max_itt.
 
-  if (present(uh_3d)) then ; do k=1,nz ; do I=ish-1,ieh
-    uh_3d(I,j,k) = uh_aux(I,k)
-  enddo ; enddo ; endif
+  if (present(uh_3d)) then 
+    !$omp target loop collapse(2) &
+    !$omp   map(to: uh_aux(ish-1:ieh, 1:nz)) &
+    !$omp   map(from: uh_3d(ish-1:ieh, j, 1:nz))  
+    do k=1,nz ; do I=ish-1,ieh
+      uh_3d(I,j,k) = uh_aux(I,k)
+    enddo ; enddo
+  endif
+
+  !$omp target exit data &
+  !$omp   map(from: du(ish-1:ieh), uh_3d(ish-1:ieh, j, 1:nz)) &
+  !$omp   map(release: do_I_in(ish-1:ieh), du_max_CFL(ish-1:ieh), &
+  !$omp     du_min_CFL(ish-1:ieh), uh_tot_0(ish-1:ieh), &
+  !$omp     duhdu_tot_0(ish-1:ieh), dt, G, G%IareaT(ish-1:ieh+1, J), CS, &
+  !$omp     CS%better_iter, u(ish-1:ieh, j, 1:nz), visc_rem(ish-1:ieh, 1:nz), &
+  !$omp     uh_aux(ish-1:ieh, 1:nz), duhdu(ish-1:ieh, 1:nz), do_I(ish-1:ieh), &
+  !$omp     du_max(ish-1:ieh), du_min(ish-1:ieh), uh_err(ish-1:ieh), &
+  !$omp     duhdu_tot(ish-1:ieh), uh_err_best(ish-1:ieh), u_new(ish-1:ieh), &
+  !$omp     por_face_areaU(ish-1:ieh, j, 1:nz), &
+  !$omp     G%dy_Cu(ish-1:ieh, j), G%IdxT(ish-1:ieh, j))
 
 end subroutine zonal_flux_adjust
 
@@ -1319,7 +1486,24 @@ subroutine set_zonal_BT_cont(u, h_in, h_W, h_E, BT_cont, uh_tot_0, duhdu_tot_0, 
   nz = GV%ke ; Idt = 1.0 / dt
   min_visc_rem = 0.1 ; CFL_min = 1e-6
 
+  !$omp target enter data &
+  !$omp   map(to: u(ish-1:ieh, j, 1:nz), h_in(ish-1:ieh, j, 1:nz), &
+  !$omp     h_W(ish-1:ieh, j, 1:nz), h_E(ish-1:ieh, j, 1:nz), &
+  !$omp     uh_tot_0(ish-1:ieh), duhdu_tot_0(ish-1:ieh), &
+  !$omp     du_max_CFL(ish-1:ieh), du_min_CFL(ish-1:ieh), G, G%IareaT(ish-1:ieh+1, j), &
+  !$omp     G%dy_Cu(ish-1:ieh, j), G%IdxT(ish-1:ieh, j), G%dxCu(ish-1:ieh, J), &
+  !$omp     visc_rem(ish-1:ieh, 1:nz), do_I(ish-1:ieh), &
+  !$omp     por_face_areaU(ish-1:ieh, j, 1:nz), visc_rem_max(ish-1:ieh)) &
+  !$omp   map(alloc: zeros(ish-1:ieh), du0, du_CFL(ish-1:ieh), &
+  !$omp     duR(ish-1:ieh), duL(ish-1:ieh), FAmt_L(ish-1:ieh), &
+  !$omp     FAmt_R(ish-1:ieh), FAmt_0(ish-1:ieh), uhtot_L(ish-1:ieh), &
+  !$omp     uhtot_R(ish-1:ieh), &
+  !$omp     duhdu_0(ish-1:ieh), duhdu_L(ish-1:ieh), duhdu_R(ish-1:ieh), &
+  !$omp     u_L(ish-1:ieh), u_R(ish-1:ieh), u_0(ish-1:ieh), &
+  !$omp     uh_0(ish-1:ieh), uh_L(ish-1:ieh), uh_R(ish-1:ieh))
+
  ! Diagnose the zero-transport correction, du0.
+  !$omp target loop map(from: zeros(ish-1:ieh))
   do I=ish-1,ieh ; zeros(I) = 0.0 ; enddo
   call zonal_flux_adjust(u, h_in, h_W, h_E, zeros, uh_tot_0, duhdu_tot_0, du0, &
                          du_max_CFL, du_min_CFL, dt, G, GV, US, CS, visc_rem, &
@@ -1329,6 +1513,12 @@ subroutine set_zonal_BT_cont(u, h_in, h_W, h_E, BT_cont, uh_tot_0, duhdu_tot_0, 
   ! negative velocity correction for the easterly-flux, and a sufficiently
   ! positive correction for the westerly-flux.
   domore = .false.
+  !$omp target loop &
+  !$omp   reduction(.or.:domore) &
+  !$omp   map(to: do_I(ish-1:ieh), G, G%dxCu(ish-1:ieh, J), du0(ish-1:ieh)) &
+  !$omp   map(from: du_CFL(ish-1:ieh), duR(ish-1:ieh), duL(ish-1:ieh), &
+  !$omp     FAmt_L(ish-1:ieh), FAmt_R(ish-1:ieh), FAmt_0(ish-1:ieh), &
+  !$omp     uhtot_L(ish-1:ieh), uhtot_R(ish-1:ieh))
   do I=ish-1,ieh
     if (do_I(I)) domore = .true.
     du_CFL(I) = (CFL_min * Idt) * G%dxCu(I,j)
@@ -1339,15 +1529,26 @@ subroutine set_zonal_BT_cont(u, h_in, h_W, h_E, BT_cont, uh_tot_0, duhdu_tot_0, 
   enddo
 
   if (.not.domore) then
-    do k=1,nz ; do I=ish-1,ieh
+    !$omp target loop &
+    !$omp   map(tofrom: BT_cont, BT_cont%FA_u_W0(ish-1:ieh, j), &
+    !$omp     BT_cont%FA_u_WW(ish-1:ieh, j), BT_cont%FA_u_E0(ish-1:ieh, j), &
+    !$omp     BT_cont%FA_u_EE(ish-1:ieh, j), BT_cont%uBT_WW(ish-1:ieh, j), &
+    !$omp     BT_cont%uBT_EE(ish-1:ieh, j))
+    do I=ish-1,ieh
       BT_cont%FA_u_W0(I,j) = 0.0 ; BT_cont%FA_u_WW(I,j) = 0.0
       BT_cont%FA_u_E0(I,j) = 0.0 ; BT_cont%FA_u_EE(I,j) = 0.0
       BT_cont%uBT_WW(I,j) = 0.0 ; BT_cont%uBT_EE(I,j) = 0.0
-    enddo ; enddo
+    enddo
     return
   endif
 
-  do k=1,nz ; do I=ish-1,ieh ; if (do_I(I)) then
+  !$omp target loop &
+  !$omp  private(visc_rem_lim) &
+  !$omp  map(to: do_I(ish-1:ieh), visc_rem(ish-1:ieh, 1:nz), &
+  !$omp    visc_rem_max(ish-1:ieh), u(ish-1:ieh, j, 1:nz), duR(ish-1:ieh), &
+  !$omp    du_CFL(ish-1:ieh)) &
+  !$omp  map(tofrom: duR(ish-1:ieh), duL(ish-1:ieh))
+  do I=ish-1,ieh ; if (do_I(I)) then; do k=1,nz
     visc_rem_lim = max(visc_rem(I,k), min_visc_rem*visc_rem_max(I))
     if (visc_rem_lim > 0.0) then ! This is almost always true for ocean points.
       if (u(I,j,k) + duR(I)*visc_rem_lim > -du_CFL(I)*visc_rem(I,k)) &
@@ -1355,9 +1556,14 @@ subroutine set_zonal_BT_cont(u, h_in, h_W, h_E, BT_cont, uh_tot_0, duhdu_tot_0, 
       if (u(I,j,k) + duL(I)*visc_rem_lim < du_CFL(I)*visc_rem(I,k)) &
         duL(I) = -(u(I,j,k) - du_CFL(I)*visc_rem(I,k)) / visc_rem_lim
     endif
-  endif ; enddo ; enddo
+  enddo ; endif ; enddo
 
   do k=1,nz
+    !$omp target loop &
+    !$omp   map(to: do_I(ish-1:ieh), u(ish-1:ieh, j, k), &
+    !$omp     visc_rem(ish-1:ieh, k), duL(ish-1:ieh), duR(ish-1:ieh), &
+    !$omp     du0(ish-1:ieh)) &
+    !$omp   map(from: u_L(ish-1:ieh), u_R(ish-1:ieh), u_0(ish-1:ieh)) ! from since they aren't initialized
     do I=ish-1,ieh ; if (do_I(I)) then
       u_L(I) = u(I,j,k) + duL(I) * visc_rem(I,k)
       u_R(I) = u(I,j,k) + duR(I) * visc_rem(I,k)
@@ -1369,6 +1575,11 @@ subroutine set_zonal_BT_cont(u, h_in, h_W, h_E, BT_cont, uh_tot_0, duhdu_tot_0, 
                           visc_rem(:,k), dt, G, US, j, ish, ieh, do_I, CS%vol_CFL, por_face_areaU(:,j,k))
     call zonal_flux_layer(u_R, h_in(:,j,k), h_W(:,j,k), h_E(:,j,k), uh_R, duhdu_R, &
                           visc_rem(:,k), dt, G, US, j, ish, ieh, do_I, CS%vol_CFL, por_face_areaU(:,j,k))
+    !$omp target loop &
+    !$omp   map(to: do_I(ish-1:ieh), duhdu_0(ish-1:ieh), duhdu_L(ish-1:ieh), &
+    !$omp     duhdu_R(ish-1:ieh), uh_L(ish-1:ieh), uh_R(ish-1:ieh)) &
+    !$omp   map(tofrom: FAmt_0(ish-1:ieh), FAmt_L(ish-1:ieh), FAmt_R(ish-1:ieh), &
+    !$omp     uhtot_L(ish-1:ieh), uhtot_R(ish-1:ieh))
     do I=ish-1,ieh ; if (do_I(I)) then
       FAmt_0(I) = FAmt_0(I) + duhdu_0(I)
       FAmt_L(I) = FAmt_L(I) + duhdu_L(I)
@@ -1377,6 +1588,19 @@ subroutine set_zonal_BT_cont(u, h_in, h_W, h_E, BT_cont, uh_tot_0, duhdu_tot_0, 
       uhtot_R(I) = uhtot_R(I) + uh_R(I)
     endif ; enddo
   enddo
+
+  !$omp target exit data &
+  !$omp   map(release: u(ish-1:ieh, j, 1:nz)) 
+
+  !$omp target loop &
+  !$omp   private(FA_0, FA_avg) &
+  !$omp   map(to: do_I(ish-1:ieh), FAmt_0(ish-1:ieh), duL(ish-1:ieh), &
+  !$omp     du0(ish-1:ieh), uhtot_L(ish-1:ieh), FAmt_L(ish-1:ieh), &
+  !$omp     duR(ish-1:ieh), uhtot_R(ish-1:ieh), FAmt_R(ish-1:ieh)) &
+  !$omp   map(tofrom: BT_cont%FA_u_W0(ish-1:ieh, j), &
+  !$omp     BT_cont%FA_u_WW(ish-1:ieh, j), BT_cont%uBT_WW(ish-1:ieh, j), &
+  !$omp     BT_cont%FA_u_E0(ish-1:ieh, j), BT_cont%FA_u_EE(ish-1:ieh, j), &
+  !$omp     BT_cont%uBT_EE(ish-1:ieh, j))
   do I=ish-1,ieh ; if (do_I(I)) then
     FA_0 = FAmt_0(I) ; FA_avg = FAmt_0(I)
     if ((duL(I) - du0(I)) /= 0.0) &
@@ -1406,6 +1630,20 @@ subroutine set_zonal_BT_cont(u, h_in, h_W, h_E, BT_cont, uh_tot_0, duhdu_tot_0, 
     BT_cont%FA_u_E0(I,j) = 0.0 ; BT_cont%FA_u_EE(I,j) = 0.0
     BT_cont%uBT_WW(I,j) = 0.0 ; BT_cont%uBT_EE(I,j) = 0.0
   endif ; enddo
+
+  !$omp target exit data &
+  !$omp   map(release: du0, FAmt_0(ish-1:ieh), FAmt_L(ish-1:ieh), &
+  !$omp     FAmt_R(ish-1:ieh), uhtot_L(ish-1:ieh), uhtot_R(ish-1:ieh), &
+  !$omp     duL(ish-1:ieh), duR(ish-1:ieh), do_I(ish-1:ieh), G, &
+  !$omp     G%dy_Cu(ish-1:ieh, j), G%IareaT(ish-1:ieh, j), &
+  !$omp     G%IdxT(ish-1:ieh, j), G%dxCu(ish-1:ieh, j), &
+  !$omp     u_L(ish-1:ieh), u_R(ish-1:ieh), u_0(ish-1:ieh), &
+  !$omp     h_in(ish-1:ieh, j, 1:nz), h_W(ish-1:ieh, j, 1:nz), &
+  !$omp     h_E(ish-1:ieh, j, 1:nz), uh_0(ish-1:ieh), uh_L(ish-1:ieh), &
+  !$omp     uh_R(ish-1:ieh), visc_rem(ish-1:ieh, 1:nz), &
+  !$omp     por_face_areaU(ish-1:ieh, j, 1:nz), duhdu_0(ish-1:ieh), duhdu_L(ish-1:ieh), &
+  !$omp     duhdu_R(ish-1:ieh), du_CFL(ish-1:ieh), du_max_CFL(ish-1:ieh), du_min_CFL(ish-1:ieh), &
+  !$omp     uh_tot_0(ish-1:ieh), duhdu_tot_0(ish-1:ieh), zeros(ish-1:ieh), visc_rem_max(ish-1:ieh))
 
 end subroutine set_zonal_BT_cont
 
@@ -1828,6 +2066,14 @@ subroutine merid_flux_layer(v, h, h_S, h_N, vh, dvhdv, visc_rem, dt, G, US, J, &
     local_open_BC = OBC%open_v_BCs_exist_globally
   endif ; endif
 
+  !$omp target loop &
+  !$omp   private(CFL, curv_3, h_marg) &
+  !$omp   map(to: vol_CFL, dt, do_I(ish:ieh), v(ish:ieh), G, &
+  !$omp     G%dx_Cv(ish:ieh, J), G%IareaT(ish:ieh, J:J+1), &
+  !$omp     G%IdyT(ish:ieh, J:J+1), h_S(ish:ieh, J:J+1), h_N(ish:ieh, j:J+1), &
+  !$omp     h(ish:ieh, j:J+1), por_face_areaV(ish:ieh, J), visc_rem(ish:ieh)) &
+  !$omp   map(from: dvhdv(ish:ieh)) &
+  !$omp   map(tofrom: vh(ish:ieh))
   do i=ish,ieh ; if (do_I(i)) then
     if (v(i) > 0.0) then
       if (vol_CFL) then ; CFL = (v(i) * dt) * (G%dx_Cv(i,J) * G%IareaT(i,j))
@@ -1853,6 +2099,12 @@ subroutine merid_flux_layer(v, h, h_S, h_N, vh, dvhdv, visc_rem, dt, G, US, J, &
   endif ; enddo
 
   if (local_open_BC) then
+    !$omp target loop &
+    !$omp   private(l_seg) &
+    !$omp   map(to: do_I(ish:ieh), h(ish:ieh, J), v(ish:ieh), &
+    !$omp     visc_rem(ish:ieh), OBC, OBC%segnum_v(ish:ieh, J), OBC%segment, &
+    !$omp     G, G%dx_Cv(ish:ieh, J), por_face_areaV(ish:ieh, J)) &
+    !$omp   map(tofrom: vh(ish:ieh), dvhdv(ish:ieh))
     do i=ish,ieh ; if (do_I(i)) then
       l_seg = OBC%segnum_v(i,J)
 
@@ -2049,23 +2301,49 @@ subroutine meridional_flux_adjust(v, h_in, h_S, h_N, vhbt, vh_tot_0, dvhdv_tot_0
   real :: ddv     ! The change in dv from the previous iteration [L T-1 ~> m s-1].
   real :: tol_eta ! The tolerance for the current iteration [H ~> m or kg m-2].
   real :: tol_vel ! The tolerance for velocity in the current iteration [L T-1 ~> m s-1].
-  integer :: i, k, nz, itt, max_itts = 20
+  integer :: i, k, nz, istart, iend, itt, max_itts = 20
   logical :: domore, do_I(SZI_(G))
 
   nz = GV%ke
+  istart = G%isd
+  iend = G%ied
 
-  vh_aux(:,:) = 0.0 ; dvhdv(:,:) = 0.0
+  !$omp target enter data &
+  !$omp   map(to: G, G%IareaT(ish:ieh, J:J+1), G%dx_Cv(ish:ieh, J), &
+  !$omp     G%IdyT(ish:ieh, J:J+1), CS, CS%better_iter, CS%vol_CFL) &
+  !$omp   map(alloc: vh_aux, dvhdv, dv(ish:ieh), do_I(ish:ieh), &
+  !$omp     dv_max(ish:ieh), dv_min(ish:ieh), vh_err(ish:ieh), &
+  !$omp     dvhdv_tot(ish:ieh), vh_err_best(ish:ieh), v_new(ish:ieh))
 
-  if (present(vh_3d)) then ; do k=1,nz ; do i=ish,ieh
-    vh_aux(i,k) = vh_3d(i,J,k)
-  enddo ; enddo ; endif
+  !$omp target &
+  !$omp   map(from: vh_aux, dvhdv, dv(ish:ieh), do_I(ish:ieh), dv_max(ish:ieh), dv_min(ish:ieh), vh_err(ish:ieh), dvhdv_tot(ish:ieh), vh_err_best(ish:ieh)) &
+  !$omp   map(to: vh_3d(ish:ieh, J, 1:nz), do_I_in(ish:ieh), dv_max_CFL(ish:ieh), dv_min_CFL(ish:ieh), vh_tot_0(ish:ieh), dvhdv_tot_0(ish:ieh), vhbt(ish:ieh))
+  !$omp loop collapse(2) map(from: vh_aux, dvhdv)
+  do i = istart, iend; do k = 1, nz
+    vh_aux(i, k) = 0.0
+    dvhdv(i, k) = 0.0
+  enddo; enddo
 
+  if (present(vh_3d)) then
+    !$omp loop collapse(2) &
+    !$omp   map(to:vh_3d(ish:ieh, J, 1:nz)) &
+    !$omp   map(from: vh_aux(ish:ieh, 1:nz))
+    do k=1,nz ; do i=ish,ieh
+      vh_aux(i,k) = vh_3d(i,J,k)
+    enddo ; enddo
+  endif
+
+  !$omp loop &
+  !$omp   map(to: do_I_in(ish:ieh), dv_max_CFL(ish:ieh), dv_min_CFL(ish:ieh), vh_tot_0(ish:ieh), dvhdv_tot_0(ish:ieh), vhbt(ish:ieh)) &
+  !$omp   map(from: dv(ish:ieh), do_I(ish:ieh), dv_max(ish:ieh), dv_min(ish:ieh), vh_err(ish:ieh), dvhdv_tot(ish:ieh), vh_err_best(ish:ieh))
   do i=ish,ieh
     dv(i) = 0.0 ; do_I(i) = do_I_in(i)
     dv_max(i) = dv_max_CFL(i) ; dv_min(i) = dv_min_CFL(i)
     vh_err(i) = vh_tot_0(i) - vhbt(i) ; dvhdv_tot(i) = dvhdv_tot_0(i)
     vh_err_best(i) = abs(vh_err(i))
   enddo
+
+  !$omp end target
 
   do itt=1,max_itts
     select case (itt)
@@ -2075,13 +2353,25 @@ subroutine meridional_flux_adjust(v, h_in, h_S, h_N, vhbt, vh_tot_0, dvhdv_tot_0
       case default ; tol_eta = CS%tol_eta
     end select
     tol_vel = CS%tol_vel
+    domore = .false.
 
+    !$omp target &
+    !$omp   map(to: vh_err(ish:ieh), G, CS, G%IareaT(ish:ieh, J:J+1), CS%better_iter, dvhdv_tot(ish:ieh), vh_err_best(ish:ieh)) &
+    !$omp   map(tofrom: dv(ish:ieh), dv_max(ish:ieh), dv_min(ish:ieh), do_I(ish:ieh))
+    !$omp loop &
+    !$omp   map(to: vh_err(ish:ieh), dv(ish:ieh)) &
+    !$omp   map(tofrom: dv_max(ish:ieh), dv_min(ish:ieh), do_I(ish:ieh))
     do i=ish,ieh
       if (vh_err(i) > 0.0) then ; dv_max(i) = dv(i)
       elseif (vh_err(i) < 0.0) then ; dv_min(i) = dv(i)
       else ; do_I(i) = .false. ; endif
     enddo
-    domore = .false.
+    ! G and CS classses sent to GPU 
+    !$omp loop &
+    !$omp   reduction(.or.: domore) &
+    !$omp   private(ddv, dv_prev) &
+    !$omp   map(tofrom: do_I(ish:ieh), dv(ish:ieh)) &
+    !$omp   map(to: G, CS, G%IareaT(ish:ieh, J:J+1), vh_err(ish:ieh), CS%better_iter, dvhdv_tot(ish:ieh), vh_err_best(ish:ieh), dv_max(ish:ieh), dv_min(ish:ieh))
     do i=ish,ieh ; if (do_I(i)) then
       if ((dt * min(G%IareaT(i,j),G%IareaT(i,j+1))*abs(vh_err(i)) > tol_eta) .or. &
           (CS%better_iter .and. ((abs(vh_err(i)) > tol_vel * dvhdv_tot(i)) .or. &
@@ -2109,35 +2399,75 @@ subroutine meridional_flux_adjust(v, h_in, h_S, h_N, vhbt, vh_tot_0, dvhdv_tot_0
         do_I(i) = .false.
       endif
     endif ; enddo
+    !$omp end target
     if (.not.domore) exit
 
-    if ((itt < max_itts) .or. present(vh_3d)) then ; do k=1,nz
-      do i=ish,ieh ; v_new(i) = v(i,J,k) + dv(i) * visc_rem(i,k) ; enddo
+    if ((itt < max_itts) .or. present(vh_3d)) then ; 
+    do k=1,nz; 
+      !$omp target loop &
+      !$omp    map(to: v(ish:ieh, J, k), dv(ish:ieh), visc_rem(ish:ieh,k)) &
+      !$omp    map(from: v_new(ish:ieh))
+      do i=ish,ieh
+        v_new(i) = v(i,J,k) + dv(i) * visc_rem(i,k)
+      enddo
+      ! this subroutine also has loops in it
+      ! might get better performance if this k loop is fused with the i/j loops inside.
       call merid_flux_layer(v_new, h_in(:,:,k), h_S(:,:,k), h_N(:,:,k), &
                             vh_aux(:,k), dvhdv(:,k), visc_rem(:,k), &
                             dt, G, US, J, ish, ieh, do_I, CS%vol_CFL, por_face_areaV(:,:,k), OBC)
     enddo ; endif
 
     if (itt < max_itts) then
+      !$omp target &
+      !$omp   map(to: vhbt(ish:ieh), vh_aux(ish:ieh, 1:nz), dvhdv(ish:ieh, 1:nz)) &
+      !$omp   map(from: vh_err(ish:ieh), dvhdv_tot(ish:ieh)) &
+      !$omp   map(tofrom: vh_err_best(ish:ieh))
+
+      !$omp loop &
+      !$omp   map(to: vhbt(ish:ieh)) &
+      !$omp   map(from: vh_err(ish:ieh), dvhdv_tot(ish:ieh))
       do i=ish,ieh
         vh_err(i) = -vhbt(i) ; dvhdv_tot(i) = 0.0
       enddo
-      do k=1,nz ; do i=ish,ieh
+      !$omp loop &
+      !$omp   map(to: vh_aux(ish:ieh, 1:nz), dvhdv(ish:ieh, 1:nz)) &
+      !$omp   map(tofrom: vh_err(ish:ieh), dvhdv_tot(ish:ieh))
+      do i=ish,ieh; do k=1,nz
         vh_err(i) = vh_err(i) + vh_aux(i,k)
         dvhdv_tot(i) = dvhdv_tot(i) + dvhdv(i,k)
       enddo ; enddo
+      !$omp loop &
+      !$omp   map(to: vh_err(ish:ieh)) &
+      !$omp   map(tofrom: vh_err_best(ish:ieh))
       do i=ish,ieh
         vh_err_best(i) = min(vh_err_best(i), abs(vh_err(i)))
       enddo
+      !$omp end target
     endif
   enddo ! itt-loop
   ! If there are any faces which have not converged to within the tolerance,
   ! so-be-it, or else use a final upwind correction?
   ! This never seems to happen with 20 iterations as max_itt.
 
-  if (present(vh_3d)) then ; do k=1,nz ; do i=ish,ieh
-    vh_3d(i,J,k) = vh_aux(i,k)
-  enddo ; enddo ; endif
+  if (present(vh_3d)) then
+    !$omp target loop collapse(2) &
+    !$omp   map(to:vh_aux(ish:ieh, 1:nz)) &
+    !$omp   map(from: vh_3d(ish:ieh, J, 1:nz))
+    do k=1,nz ; do i=ish,ieh
+      vh_3d(i,J,k) = vh_aux(i,k)
+    enddo ; enddo
+    !$omp target exit data &
+    !$omp   map(from: vh_3d(ish:ieh, J, 1:nz))
+  endif
+
+  !$omp target exit data &
+  !$omp   map(from: dv(ish:ieh)) &
+  !$omp   map(release: vh_aux, dvhdv, &
+  !$omp     do_I(ish:ieh), dv_max(ish:ieh), dv_min(ish:ieh), &
+  !$omp     vh_err(ish:ieh), dvhdv_tot(ish:ieh), vh_err_best(ish:ieh), G, &
+  !$omp     G%IareaT(ish:ieh, J:J+1), G%dx_Cv(ish:ieh, J), &
+  !$omp     G%IdyT(ish:ieh, J:J+1), CS, CS%better_iter, CS%vol_CFL, &
+  !$omp     v_new(ish:ieh))
 
 end subroutine meridional_flux_adjust
 
@@ -2218,7 +2548,22 @@ subroutine set_merid_BT_cont(v, h_in, h_S, h_N, BT_cont, vh_tot_0, dvhdv_tot_0, 
   nz = GV%ke ; Idt = 1.0 / dt
   min_visc_rem = 0.1 ; CFL_min = 1e-6
 
+  !$omp target enter data &
+  !$omp   map(to: h_in(ish:ieh, J:J+1, 1:nz), h_S(ish:ieh, J:J+1, 1:nz), &
+  !$omp     h_N(ish:ieh, J:J+1, 1:nz), vh_tot_0(ish:ieh), do_I(ish:ieh), &
+  !$omp     dvhdv_tot_0(ish:ieh), dv_max_CFL(ish:ieh), dv_min_CFL(ish:ieh), &
+  !$omp     por_face_areaV(ish:ieh, J, 1:nz), visc_rem(ish:ieh, 1:nz), dt, G, &
+  !$omp     G%IareaT(ish:ieh, J:J+1), G%dx_Cv(ish:ieh, J), &
+  !$omp     G%IdyT(ish:ieh, J:J+1), US, CS, &
+  !$omp     v(ish:ieh, J, 1:nz), BT_cont, visc_rem_max(ish:ieh)) &
+  !$omp   map(alloc: zeros(ish:ieh), dv0, FAmt_0(ish:ieh), FAmt_L(ish:ieh), &
+  !$omp     FAmt_R(ish:ieh), vhtot_L(ish:ieh), vhtot_R(ish:ieh), &
+  !$omp     dv_CFL(ish:ieh), dvR(ish:ieh), dvL(ish:ieh), v_L(ish:ieh), &
+  !$omp     v_R(ish:ieh), v_0(ish:ieh), vh_0(ish:ieh), vh_L(ish:ieh), &
+  !$omp     vh_R(ish:ieh), dvhdv_0(ish:ieh), dvhdv_L(ish:ieh), dvhdv_R(ish:ieh))
+
  ! Diagnose the zero-transport correction, dv0.
+  !$omp target loop map(from: zeros(ish:ieh))
   do i=ish,ieh ; zeros(i) = 0.0 ; enddo
   call meridional_flux_adjust(v, h_in, h_S, h_N, zeros, vh_tot_0, dvhdv_tot_0, dv0, &
                          dv_max_CFL, dv_min_CFL, dt, G, GV, US, CS, visc_rem, &
@@ -2228,6 +2573,13 @@ subroutine set_merid_BT_cont(v, h_in, h_S, h_N, BT_cont, vh_tot_0, dvhdv_tot_0, 
   ! negative velocity correction for the northerly-flux, and a sufficiently
   ! positive correction for the southerly-flux.
   domore = .false.
+  !$omp target loop &
+  !$omp   reduction(.or.:domore) &
+  !$omp   map(to: do_I(ish:ieh), G, G%dyCv(ish:ieh, J), dv0(ish:ieh), &
+  !$omp     dv_CFL(ish:ieh)) &
+  !$omp   map(tofrom: dv_CFL(ish:ieh), dvR(ish:ieh), dvL(ish:ieh), &
+  !$omp     FAmt_L(ish:ieh), FAmt_R(ish:ieh), FAmt_0(ish:ieh), &
+  !$omp     vhTot_L(ish:ieh), vhtot_R(ish:ieh))
   do i=ish,ieh ; if (do_I(i)) then
     domore = .true.
     dv_CFL(i) = (CFL_min * Idt) * G%dyCv(i,J)
@@ -2238,16 +2590,27 @@ subroutine set_merid_BT_cont(v, h_in, h_S, h_N, BT_cont, vh_tot_0, dvhdv_tot_0, 
   endif ; enddo
 
   if (.not.domore) then
-    do k=1,nz ; do i=ish,ieh
+    ! needs to be tested!
+    !$omp target loop &
+    !$omp   map(tofrom: BT_cont, BT_cont%FA_v_S0(ish:ieh, J), &
+    !$omp     BT_cont%FA_v_SS(ish:ieh, J), BT_cont%vBT_SS(ish:ieh, J), &
+    !$omp     BT_cont%FA_v_N0(ish:ieh, J), BT_cont%FA_v_NN(ish:ieh, J), &
+    !$omp     BT_cont%vBT_NN(ish:ieh, J))
+    do i=ish,ieh
       BT_cont%FA_v_S0(i,J) = 0.0 ; BT_cont%FA_v_SS(i,J) = 0.0
       BT_cont%vBT_SS(i,J) = 0.0
       BT_cont%FA_v_N0(i,J) = 0.0 ; BT_cont%FA_v_NN(i,J) = 0.0
       BT_cont%vBT_NN(i,J) = 0.0
-    enddo ; enddo
+    enddo
     return
   endif
 
-  do k=1,nz ; do i=ish,ieh ; if (do_I(i)) then
+  !$omp target loop &
+  !$omp   private(visc_rem_lim) &
+  !$omp   map(to: do_I(ish:ieh), visc_rem(ish:ieh, 1:nz), &
+  !$omp     visc_rem_max(ish:ieh), v(ish:ieh, J, 1:nz), dv_CFL(ish:ieh)), &
+  !$omp   map(tofrom: dvR(ish:ieh), dvL(ish:ieh))
+  do i=ish,ieh ; if (do_I(i)) then ; do k=1,nz
     visc_rem_lim = max(visc_rem(i,k), min_visc_rem*visc_rem_max(i))
     if (visc_rem_lim > 0.0) then ! This is almost always true for ocean points.
       if (v(i,J,k) + dvR(i)*visc_rem_lim > -dv_CFL(i)*visc_rem(i,k)) &
@@ -2255,8 +2618,13 @@ subroutine set_merid_BT_cont(v, h_in, h_S, h_N, BT_cont, vh_tot_0, dvhdv_tot_0, 
       if (v(i,J,k) + dvL(i)*visc_rem_lim < dv_CFL(i)*visc_rem(i,k)) &
         dvL(i) = -(v(i,J,k) - dv_CFL(i)*visc_rem(i,k)) / visc_rem_lim
     endif
-  endif ; enddo ; enddo
+  enddo ; endif ; enddo
+  ! I don't yet understand why this needs to be here
+  !$omp target update from(dvR(ish:ieh), dvL(ish:ieh))
   do k=1,nz
+    !$omp target loop &
+    !$omp   map(to: do_I(ish:ieh), v(ish:ieh, j, k), dvL(ish:ieh), visc_rem(ish:ieh, k)) &
+    !$omp   map(tofrom: v_L(ish:ieh), v_R(ish:ieh), v_0(ish:ieh))
     do i=ish,ieh ; if (do_I(i)) then
       v_L(i) = v(I,j,k) + dvL(i) * visc_rem(i,k)
       v_R(i) = v(I,j,k) + dvR(i) * visc_rem(i,k)
@@ -2268,6 +2636,12 @@ subroutine set_merid_BT_cont(v, h_in, h_S, h_N, BT_cont, vh_tot_0, dvhdv_tot_0, 
                           visc_rem(:,k), dt, G, US, J, ish, ieh, do_I, CS%vol_CFL, por_face_areaV(:,:,k))
     call merid_flux_layer(v_R, h_in(:,:,k), h_S(:,:,k), h_N(:,:,k), vh_R, dvhdv_R, &
                           visc_rem(:,k), dt, G, US, J, ish, ieh, do_I, CS%vol_CFL, por_face_areaV(:,:,k))
+
+    !$omp target loop &
+    !$omp   map(to: do_I(ish:ieh), dvhdv_0(ish:ieh), dvhdv_L(ish:ieh), &
+    !$omp     dvhdv_R(ish:ieh), vh_L(ish:ieh), vh_R(ish:ieh)) &
+    !$omp   map(tofrom: FAmt_0(ish:ieh), FAmt_L(ish:ieh), FAmt_R(ish:ieh), &
+    !$omp     vhtot_L(ish:ieh), vhtot_R(ish:ieh))
     do i=ish,ieh ; if (do_I(i)) then
       FAmt_0(i) = FAmt_0(i) + dvhdv_0(i)
       FAmt_L(i) = FAmt_L(i) + dvhdv_L(i)
@@ -2276,6 +2650,16 @@ subroutine set_merid_BT_cont(v, h_in, h_S, h_N, BT_cont, vh_tot_0, dvhdv_tot_0, 
       vhtot_R(i) = vhtot_R(i) + vh_R(i)
     endif ; enddo
   enddo
+
+  !$omp target loop &
+  !$omp   private(FA_0, FA_avg) &
+  !$omp   map(to: do_I(ish:ieh), FAmt_0(ish:ieh), dvL(ish:ieh), dv0(ish:ieh), &
+  !$omp     vhtot_L(ish:ieh), FAmt_L(ish:ieh), dvR(ish:ieh), vhtot_R(ish:ieh), &
+  !$omp     FAmt_R(ish:ieh)) &
+  !$omp   map(tofrom: BT_cont, BT_cont%FA_v_S0(ish:ieh, J), &
+  !$omp     BT_cont%FA_v_SS(ish:ieh, J), BT_cont%vBT_SS(ish:ieh, J), &
+  !$omp     BT_cont%FA_v_N0(ish:ieh, J), BT_cont%FA_v_NN(ish:ieh, J), &
+  !$omp     BT_cont%vBT_NN(ish:ieh, J))
   do i=ish,ieh ; if (do_I(i)) then
     FA_0 = FAmt_0(i) ; FA_avg = FAmt_0(i)
     if ((dvL(i) - dv0(i)) /= 0.0) &
@@ -2303,6 +2687,18 @@ subroutine set_merid_BT_cont(v, h_in, h_S, h_N, BT_cont, vh_tot_0, dvhdv_tot_0, 
     BT_cont%FA_v_N0(i,J) = 0.0 ; BT_cont%FA_v_NN(i,J) = 0.0
     BT_cont%vBT_SS(i,J) = 0.0 ; BT_cont%vBT_NN(i,J) = 0.0
   endif ; enddo
+
+  !$omp target exit data &
+  !$omp   map(from: BT_cont) &
+  !$omp   map(release: do_I(ish:ieh), v(ish:ieh, J, 1:nz), dvL(ish:ieh), &
+  !$omp     dvR(ish:ieh), dv0, visc_rem(ish:ieh, 1:nz), dt, G, G%IareaT(ish:ieh, J:J+1), G%dx_Cv(ish:ieh, J), G%IdyT(ish:ieh, J:J+1), US, CS, &
+  !$omp     por_face_areaV(ish:ieh, J, 1:nz), v_L(ish:ieh), v_R(ish:ieh), &
+  !$omp     v_0(ish:ieh), vh_0(ish:ieh), vh_L(ish:ieh), vh_R(ish:ieh), &
+  !$omp     dvhdv_0(ish:ieh), dvhdv_L(ish:ieh), dvhdv_R(ish:ieh), &
+  !$omp     h_in(ish:ieh, J:J+1, 1:nz), h_S(ish:ieh, J:J+1, 1:nz), &
+  !$omp     h_N(ish:ieh, J:J+1, 1:nz), FAmt_0(ish:ieh), FAmt_L(ish:ieh), FAmt_R(ish:ieh), &
+  !$omp     vhtot_L(ish:ieh), vhtot_R(ish:ieh), visc_rem_max(ish:ieh), dv_CFL(ish:ieh), zeros(ish:ieh), &
+  !$omp     vh_tot_0(ish:ieh), dvhdv_tot_0(ish:ieh), dv_max_CFL(ish:ieh), dv_min_CFL(ish:ieh))
 
 end subroutine set_merid_BT_cont
 
