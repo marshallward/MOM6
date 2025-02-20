@@ -1743,21 +1743,22 @@ subroutine meridional_mass_flux(v, h_in, h_S, h_N, vh, dt, G, GV, US, CS, OBC, p
   if (CS%aggress_adjust) CFL_dt = I_dt
 
   if (.not.use_visc_rem) visc_rem(:,:) = 1.0
-  !$OMP parallel do default(shared) private(do_I,dvhdv,dv,dv_max_CFL,dv_min_CFL,vh_tot_0, &
-  !$OMP                                     dvhdv_tot_0,FAvi,visc_rem_max,I_vrm,dv_lim,dy_N,dy_S, &
-  !$OMP                                     simple_OBC_pt,any_simple_OBC,l_seg) &
-  !$OMP                        firstprivate(visc_rem)
+
   do J=jsh-1,jeh
+    !$omp target loop map(from: do_I(ish:ieh))
     do i=ish,ieh ; do_I(i) = .true. ; enddo
     ! This sets vh and dvhdv.
     do k=1,nz
-      if (use_visc_rem) then ; do i=ish,ieh
-        visc_rem(i,k) = visc_rem_v(i,J,k)
-      enddo ; endif
+      if (use_visc_rem) then
+        !$omp target loop map(to: visc_rem_v(ish:ieh, j, k)) map(from: visc_rem(ish:ieh, k))
+        do i=ish,ieh
+          visc_rem(i,k) = visc_rem_v(i,J,k)
+        enddo
+      endif
       call merid_flux_layer(v(:,J,k), h_in(:,:,k), h_S(:,:,k), h_N(:,:,k), &
                             vh(:,J,k), dvhdv(:,k), visc_rem(:,k), &
                             dt, G, US, J, ish, ieh, do_I, CS%vol_CFL, por_face_areaV(:,:,k), OBC)
-      if (local_specified_BC) then
+      if (local_specified_BC) then ! not in double_gyre
         do i=ish,ieh ; if (OBC%segnum_v(i,J) /= OBC_NONE) then
           l_seg = OBC%segnum_v(i,J)
           if (OBC%segment(l_seg)%specified) vh(i,J,k) = OBC%segment(l_seg)%normal_trans(i,J,k)
@@ -1767,15 +1768,24 @@ subroutine meridional_mass_flux(v, h_in, h_S, h_N, vh, dt, G, GV, US, CS, OBC, p
 
     if (present(vhbt) .or. set_BT_cont) then
       if (use_visc_rem .and. CS%use_visc_rem_max) then
-        visc_rem_max(:) = 0.0
+        !$omp target loop map(to: G, G%isd, G%ied) map(from: visc_rem_max)
+        do i = G%isd, G%ied; visc_rem_max(i) = 0.0; enddo
+        !$omp target loop map(to: visc_rem(ish:ieh, 1:nz)) map(tofrom: visc_rem_max(ish:ieh))
         do k=1,nz ; do i=ish,ieh
           visc_rem_max(i) = max(visc_rem_max(i), visc_rem(i,k))
         enddo ; enddo
       else
+        ! not in double_gyre
         visc_rem_max(:) = 1.0
       endif
       !   Set limits on dv that will keep the CFL number between -1 and 1.
       ! This should be adequate to keep the root bracketed in all cases.
+      !$omp target loop &
+      !$omp   private(I_vrm, dy_S, dy_N) &
+      !$omp   map(to: visc_rem_max(ish:ieh), G, G%areaT(ish:ieh, j:j+1), &
+      !$omp     G%dx_Cv(ish:ieh, j), G%dyT(ish:ieh, j:j+1)) &
+      !$omp   map(from: dv_max_CFL(ish:ieh), dv_min_CFL(ish:ieh), &
+      !$omp     vh_tot_0(ish:ieh), dvhdv_tot_0(ish:ieh))
       do i=ish,ieh
         I_vrm = 0.0
         if (visc_rem_max(i) > 0.0) I_vrm = 1.0 / visc_rem_max(i)
@@ -1787,13 +1797,16 @@ subroutine meridional_mass_flux(v, h_in, h_S, h_N, vh, dt, G, GV, US, CS, OBC, p
         dv_min_CFL(i) = -2.0 * (CFL_dt * dy_N) * I_vrm
         vh_tot_0(i) = 0.0 ; dvhdv_tot_0(i) = 0.0
       enddo
-      do k=1,nz ; do i=ish,ieh
+      !$omp target loop &
+      !$omp   map(to: dvhdv(ish:ieh, 1:nz), vh(ish:ieh, j, 1:nz)) &
+      !$omp   map(tofrom: dvhdv_tot_0(ish:ieh), vh_tot_0(ish:ieh))
+      do i=ish,ieh ; do k=1,nz
         dvhdv_tot_0(i) = dvhdv_tot_0(i) + dvhdv(i,k)
         vh_tot_0(i) = vh_tot_0(i) + vh(i,J,k)
       enddo ; enddo
 
       if (use_visc_rem) then
-        if (CS%aggress_adjust) then
+        if (CS%aggress_adjust) then ! not in double_gyre
           do k=1,nz ; do i=ish,ieh
             if (CS%vol_CFL) then
               dy_S = ratio_max(G%areaT(i,j), G%dx_Cv(I,j), 1000.0*G%dyT(i,j))
@@ -1808,19 +1821,28 @@ subroutine meridional_mass_flux(v, h_in, h_S, h_N, vh, dt, G, GV, US, CS, OBC, p
               dv_min_CFL(i) = dv_lim / visc_rem(i,k)
           enddo ; enddo
         else
-          do k=1,nz ; do i=ish,ieh
+          !$omp target teams distribute parallel do &
+          !$omp   private(dy_S, dy_N, k) &
+          !$omp   map(to: G, G%areaT(ish:ieh, j:j+1), G%dx_Cv(ish:ieh, j:j+1), &
+          !$omp     G%dyT(ish:ieh, j:j+1), G%mask2dCv(ish:ieh, j), CS, &
+          !$omp     CS%vol_CFL, visc_rem(ish:ieh, 1:nz), CFL_dt, &
+          !$omp     v(ish:ieh, j, 1:nz)) &
+          !$omp   map(tofrom: dv_max_CFL(ish:ieh), dv_min_CFL(ish:ieh))
+          do i=ish,ieh
             if (CS%vol_CFL) then
               dy_S = ratio_max(G%areaT(i,j), G%dx_Cv(I,j), 1000.0*G%dyT(i,j))
               dy_N = ratio_max(G%areaT(i,j+1), G%dx_Cv(I,j), 1000.0*G%dyT(i,j+1))
             else ; dy_S = G%dyT(i,j) ; dy_N = G%dyT(i,j+1) ; endif
-            if (dv_max_CFL(i) * visc_rem(i,k) > dy_S*CFL_dt - v(i,J,k)*G%mask2dCv(i,J)) &
-              dv_max_CFL(i) = (dy_S*CFL_dt - v(i,J,k)) / visc_rem(i,k)
-            if (dv_min_CFL(i) * visc_rem(i,k) < -dy_N*CFL_dt - v(i,J,k)*G%mask2dCv(i,J)) &
-              dv_min_CFL(i) = -(dy_N*CFL_dt + v(i,J,k)) / visc_rem(i,k)
-          enddo ; enddo
+            do k=1,nz
+              if (dv_max_CFL(i) * visc_rem(i,k) > dy_S*CFL_dt - v(i,J,k)*G%mask2dCv(i,J)) &
+                dv_max_CFL(i) = (dy_S*CFL_dt - v(i,J,k)) / visc_rem(i,k)
+              if (dv_min_CFL(i) * visc_rem(i,k) < -dy_N*CFL_dt - v(i,J,k)*G%mask2dCv(i,J)) &
+                dv_min_CFL(i) = -(dy_N*CFL_dt + v(i,J,k)) / visc_rem(i,k)
+            enddo
+          enddo
         endif
       else
-        if (CS%aggress_adjust) then
+        if (CS%aggress_adjust) then ! not in double_gyre
           do k=1,nz ; do i=ish,ieh
             if (CS%vol_CFL) then
               dy_S = ratio_max(G%areaT(i,j), G%dx_Cv(I,j), 1000.0*G%dyT(i,j))
@@ -1831,7 +1853,7 @@ subroutine meridional_mass_flux(v, h_in, h_S, h_N, vh, dt, G, GV, US, CS, OBC, p
             dv_min_CFL(i) = max(dv_min_CFL(i), 0.499 * &
                         ((-dy_N*I_dt - v(i,J,k)) + MAX(0.0,v(i,J+1,k))) )
           enddo ; enddo
-        else
+        else ! not in double_gyre
           do k=1,nz ; do i=ish,ieh
             if (CS%vol_CFL) then
               dy_S = ratio_max(G%areaT(i,j), G%dx_Cv(I,j), 1000.0*G%dyT(i,j))
@@ -1842,6 +1864,9 @@ subroutine meridional_mass_flux(v, h_in, h_S, h_N, vh, dt, G, GV, US, CS, OBC, p
           enddo ; enddo
         endif
       endif
+      
+      !$omp target loop &
+      !$omp   map(tofrom: dv_max_CFL(ish:ieh), dv_min_CFL(ish:ieh))
       do i=ish,ieh
         dv_max_CFL(i) = max(dv_max_CFL(i),0.0)
         dv_min_CFL(i) = min(dv_min_CFL(i),0.0)
@@ -1849,7 +1874,7 @@ subroutine meridional_mass_flux(v, h_in, h_S, h_N, vh, dt, G, GV, US, CS, OBC, p
 
       any_simple_OBC = .false.
       if (present(vhbt) .or. set_BT_cont) then
-        if (local_specified_BC .or. local_Flather_OBC) then ; do i=ish,ieh
+        if (local_specified_BC .or. local_Flather_OBC) then ; do i=ish,ieh ! not in double_gyre
           l_seg = OBC%segnum_v(i,J)
 
           ! Avoid reconciling barotropic/baroclinic transports if transport is specified
@@ -1857,9 +1882,10 @@ subroutine meridional_mass_flux(v, h_in, h_S, h_N, vh, dt, G, GV, US, CS, OBC, p
           if (l_seg /= OBC_NONE) simple_OBC_pt(i) = OBC%segment(l_seg)%specified
           do_I(i) = .not.simple_OBC_pt(i)
           any_simple_OBC = any_simple_OBC .or. simple_OBC_pt(i)
-        enddo ; else ; do i=ish,ieh
-          do_I(i) = .true.
-        enddo ; endif
+        enddo ; else
+          !$omp target loop map(from: do_I(ish:ieh))
+          do i=ish,ieh ; do_I(i) = .true. ; enddo
+        endif
       endif
 
       if (present(vhbt)) then
@@ -1868,14 +1894,22 @@ subroutine meridional_mass_flux(v, h_in, h_S, h_N, vh, dt, G, GV, US, CS, OBC, p
                                dv_max_CFL, dv_min_CFL, dt, G, GV, US, CS, visc_rem, &
                                j, ish, ieh, do_I, por_face_areaV, vh, OBC=OBC)
 
-        if (present(v_cor)) then ; do k=1,nz
-          do i=ish,ieh ; v_cor(i,J,k) = v(i,J,k) + dv(i) * visc_rem(i,k) ; enddo
-          if (any_simple_OBC) then ; do i=ish,ieh ; if (simple_OBC_pt(i)) then
-            v_cor(i,J,k) = OBC%segment(OBC%segnum_v(i,J))%normal_vel(i,J,k)
-          endif ; enddo ; endif
-        enddo ; endif ! v-corrected
+        if (present(v_cor)) then
+          !$omp target loop collapse(2) &
+          !$omp   map(to: v(ish:ieh, j, 1:nz), dv(ish:ieh), visc_rem(ish:ieh, 1:nz)) &
+          !$omp   map(from: v_cor(ish:ieh, j, 1:nz))
+          do k=1,nz ; do i=ish,ieh 
+            v_cor(i,J,k) = v(i,J,k) + dv(i) * visc_rem(i,k)
+          enddo ; enddo
+          if (any_simple_OBC) then ! not in double_gyre
+            do k = 1, nz ; do i=ish,ieh ; if (simple_OBC_pt(i)) then
+              v_cor(i,J,k) = OBC%segment(OBC%segnum_v(i,J))%normal_vel(i,J,k)
+            endif ; enddo ; enddo 
+          endif
+        endif ! v-corrected
 
         if (present(dv_cor)) then
+          ! not in double_gyre
           do i=ish,ieh ; dv_cor(i,J) = dv(i) ; enddo
         endif
 
@@ -1886,6 +1920,7 @@ subroutine meridional_mass_flux(v, h_in, h_S, h_N, vh, dt, G, GV, US, CS, OBC, p
                                dv_max_CFL, dv_min_CFL, dt, G, GV, US, CS, visc_rem, &
                                visc_rem_max, J, ish, ieh, do_I, por_face_areaV)
         if (any_simple_OBC) then
+          ! not in double_gyre
           do i=ish,ieh
             if (simple_OBC_pt(i)) FAvi(i) = GV%H_subroundoff*G%dx_Cv(i,J)
           enddo
