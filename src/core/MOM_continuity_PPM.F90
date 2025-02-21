@@ -1770,7 +1770,8 @@ subroutine meridional_mass_flux(v, h_in, h_S, h_N, vh, dt, G, GV, US, CS, OBC, p
       if (use_visc_rem .and. CS%use_visc_rem_max) then
         !$omp target loop map(to: G, G%isd, G%ied) map(from: visc_rem_max)
         do i = G%isd, G%ied; visc_rem_max(i) = 0.0; enddo
-        !$omp target loop map(to: visc_rem(ish:ieh, 1:nz)) map(tofrom: visc_rem_max(ish:ieh))
+        !$omp target loop collapse(2) reduction(max:visc_rem_max(ish:ieh)) &
+        !$omp   map(to: visc_rem(ish:ieh, 1:nz)) map(tofrom: visc_rem_max(ish:ieh))
         do k=1,nz ; do i=ish,ieh
           visc_rem_max(i) = max(visc_rem_max(i), visc_rem(i,k))
         enddo ; enddo
