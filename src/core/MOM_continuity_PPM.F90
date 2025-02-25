@@ -451,6 +451,7 @@ subroutine zonal_edge_thickness(h_in, h_W, h_E, G, GV, US, CS, OBC, LB_in)
   ish = LB%ish ; ieh = LB%ieh ; jsh = LB%jsh ; jeh = LB%jeh ; nz = GV%ke
 
   if (CS%upwind_1st) then
+    ! not in double_gyre
     !$OMP parallel do default(shared)
     do k=1,nz ; do j=jsh,jeh ; do i=ish-1,ieh+1
       h_W(i,j,k) = h_in(i,j,k) ; h_E(i,j,k) = h_in(i,j,k)
@@ -2990,6 +2991,7 @@ subroutine PPM_reconstruction_y(h_in, h_S, h_N, G, LB, h_min, monotonic, simple_
   endif
 
   if (simple_2nd) then
+    ! not in double_gyre
     do j=jsl,jel ; do i=isl,iel
       h_jm1 = G%mask2dT(i,j-1) * h_in(i,j-1) + (1.0-G%mask2dT(i,j-1)) * h_in(i,j)
       h_jp1 = G%mask2dT(i,j+1) * h_in(i,j+1) + (1.0-G%mask2dT(i,j+1)) * h_in(i,j)
@@ -2997,6 +2999,10 @@ subroutine PPM_reconstruction_y(h_in, h_S, h_N, G, LB, h_min, monotonic, simple_
       h_N(i,j) = 0.5*( h_jp1 + h_in(i,j) )
     enddo ; enddo
   else
+    !$omp target loop collapse(2) &
+    !$omp   private(dMx, dMn) &
+    !$omp   map(to: G%mask2dT(isl:iel, jsl-2:jel+2), h_in(isl:iel, jsl-2:jel+2)) &
+    !$omp   map(from: slp(isl:iel, jsl:jel))
     do j=jsl-1,jel+1 ; do i=isl,iel
       if ((G%mask2dT(i,j-1) * G%mask2dT(i,j) * G%mask2dT(i,j+1)) == 0.0) then
         slp(i,j) = 0.0
@@ -3012,6 +3018,7 @@ subroutine PPM_reconstruction_y(h_in, h_S, h_N, G, LB, h_min, monotonic, simple_
     enddo ; enddo
 
     if (local_open_BC) then
+      ! not in double_gyre
       do n=1, OBC%number_of_segments
         segment => OBC%segment(n)
         if (.not. segment%on_pe) cycle
@@ -3026,6 +3033,11 @@ subroutine PPM_reconstruction_y(h_in, h_S, h_N, G, LB, h_min, monotonic, simple_
       enddo
     endif
 
+    !$omp target loop collapse(2) &
+    !$omp   private(h_jm1, h_jp1) &
+    !$omp   map(to: G, G%mask2dT(isl:iel, jsl-1:jel+1), h_in(isl:iel, jsl-1:jel+1), &
+    !$omp     slp(isl:iel, jsl-1:jel+1)) &
+    !$omp   map(from: h_S(isl:iel, jsl:jel), h_N(isl:iel, jsl:jel))
     do j=jsl,jel ; do i=isl,iel
       ! Neighboring values should take into account any boundaries.  The 3
       ! following sets of expressions are equivalent.
