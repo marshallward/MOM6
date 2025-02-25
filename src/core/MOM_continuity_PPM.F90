@@ -616,16 +616,17 @@ subroutine zonal_mass_flux(u, h_in, h_W, h_E, uh, dt, G, GV, US, CS, OBC, por_fa
 
   !$omp target enter data &
   !$omp   map(to: visc_rem_u(ish-1:ieh, :, :), uhbt(ish-1:ieh, jsh:jeh), dt, &
-  !$omp     h_in(ish-1:ieh, :, :), h_W(ish-1:ieh, :, :), &
-  !$omp     h_E(ish-1:Ieh, :, :), G, G%IareaT(ish-1:ieh+1, jsh:jeh), &
-  !$omp     G%Dy_Cu(ish-1:ieh+1, jsh:jeh), G%IdxT(ish-1:ieh, jsh:jeh), G%IsdB, &
+  !$omp     h_in(ish-1:ieh, :, :), h_W(ish-1:ieh+1, :, :), &
+  !$omp     h_E(ish-1:ieh+1, :, :), G, G%IareaT(ish-1:ieh+1, jsh:jeh), &
+  !$omp     G%Dy_Cu(ish-1:ieh+1, jsh:jeh), G%IdxT(ish-1:ieh+1, jsh:jeh), G%IsdB, &
   !$omp     G%IedB, G%AreaT(ish-1:ieh+1, jsh:jeh), CS, CS%vol_CFL, CS%better_iter, &
   !$omp     G%dxT(ish-1:ieh+1, jsh:jeh), G%mask2dCu(ish-1:ieh, jsh:jeh), &
   !$omp     G%dxCu(ish-1:ieh, jsh:jeh), &
   !$omp     u(ish-1:ieh, :, :), por_face_areaU(ish-1:ieh, :, :), &
   !$omp     BT_cont%uBT_EE(ish-1:ieh, jsh:jeh), BT_cont%uBT_WW(ish-1:ieh, jsh:jeh), &
   !$omp     BT_cont%FA_u_WW(ish-1:ieh, jsh:jeh), BT_cont%FA_u_W0(ish-1:ieh, jsh:jeh), &
-  !$omp     BT_cont%FA_u_EE(ish-1:ieh, jsh:jeh), BT_cont%FA_u_E0(ish-1:ieh, jsh:jeh)) &
+  !$omp     BT_cont%FA_u_EE(ish-1:ieh, jsh:jeh), BT_cont%FA_u_E0(ish-1:ieh, jsh:jeh), &
+  !$omp     BT_cont%h_u(ish-1:ieh, :, :)) &
   !$omp   map(alloc: du, du_min_CFL(ish-1:ieh), &
   !$omp     du_max_CFL(ish-1:ieh), duhdu_tot_0(ish-1:ieh), uh_tot_0(ish-1:ieh), &
   !$omp     visc_rem_max, visc_rem, u_cor(ish-1:ieh, :, :), do_I(ish-1:ieh), &
@@ -840,24 +841,6 @@ subroutine zonal_mass_flux(u, h_in, h_W, h_E, uh, dt, G, GV, US, CS, OBC, por_fa
 
   enddo ! j-loop
 
-  !$omp target exit data &
-  !$omp   map(from: u_cor(ish-1:ieh, :, :), uh(ish-1:ieh, :, :), &
-  !$omp     BT_cont%uBT_EE(ish-1:ieh, jsh:jeh), BT_cont%uBT_WW(ish-1:ieh, jsh:jeh), &
-  !$omp     BT_cont%FA_u_WW(ish-1:ieh, jsh:jeh), BT_cont%FA_u_W0(ish-1:ieh, jsh:jeh), &
-  !$omp     BT_cont%FA_u_EE(ish-1:ieh, jsh:jeh), BT_cont%FA_u_E0(ish-1:ieh, jsh:jeh)) &
-  !$omp   map(release: du, du_min_CFL(ish-1:ieh), dt, &
-  !$omp     du_max_CFL(ish-1:ieh), duhdu_tot_0(ish-1:ieh), uh_tot_0(ish-1:ieh), &
-  !$omp     visc_rem_max, visc_rem, do_I(ish-1:ieh), &
-  !$omp     visc_rem_u(ish-1:ieh, :, :), uhbt(ish-1:ieh, jsh:jeh), &
-  !$omp     h_in(ish-1:ieh, :, :), h_W(ish-1:ieh, :, :), &
-  !$omp     h_E(ish-1:Ieh, :, :), G, G%IareaT(ish-1:ieh+1, jsh:jeh), &
-  !$omp     G%Dy_Cu(ish-1:ieh+1, jsh:jeh), G%IdxT(ish-1:ieh, jsh:jeh), G%IsdB, &
-  !$omp     G%IedB, G%AreaT(ish-1:ieh+1, jsh:jeh), &
-  !$omp     G%dxT(ish-1:ieh+1, jsh:jeh), G%mask2dCu(ish-1:ieh, jsh:jeh), &
-  !$omp     G%dxCu(ish-1:ieh, jsh:jeh), &
-  !$omp     u(ish-1:ieh, :, :), CS, CS%vol_CFL, duhdu(ish-1:ieh, 1:nz), &
-  !$omp     por_face_areaU(ish-1:ieh, :, :))
-
   if (local_open_BC .and. set_BT_cont) then
     ! not in double_gyre
     do n = 1, OBC%number_of_segments
@@ -893,6 +876,25 @@ subroutine zonal_mass_flux(u, h_in, h_W, h_E, uh, dt, G, GV, US, CS, OBC, por_fa
                                 CS%vol_CFL, CS%marginal_faces, OBC, por_face_areaU, visc_rem_u)
     endif
   endif ; endif
+
+  !$omp target exit data &
+  !$omp   map(from: u_cor(ish-1:ieh, :, :), uh(ish-1:ieh, :, :), &
+  !$omp     BT_cont%uBT_EE(ish-1:ieh, jsh:jeh), BT_cont%uBT_WW(ish-1:ieh, jsh:jeh), &
+  !$omp     BT_cont%FA_u_WW(ish-1:ieh, jsh:jeh), BT_cont%FA_u_W0(ish-1:ieh, jsh:jeh), &
+  !$omp     BT_cont%FA_u_EE(ish-1:ieh, jsh:jeh), BT_cont%FA_u_E0(ish-1:ieh, jsh:jeh), &
+  !$omp     BT_cont%h_u(ish-1:ieh, :, :)) &
+  !$omp   map(release: du, du_min_CFL(ish-1:ieh), dt, &
+  !$omp     du_max_CFL(ish-1:ieh), duhdu_tot_0(ish-1:ieh), uh_tot_0(ish-1:ieh), &
+  !$omp     visc_rem_max, visc_rem, do_I(ish-1:ieh), &
+  !$omp     visc_rem_u(ish-1:ieh, :, :), uhbt(ish-1:ieh, jsh:jeh), &
+  !$omp     h_in(ish-1:ieh, :, :), h_W(ish-1:ieh+1, :, :), &
+  !$omp     h_E(ish-1:ieh+1, :, :), G, G%IareaT(ish-1:ieh+1, jsh:jeh), &
+  !$omp     G%dy_Cu(ish-1:ieh+1, jsh:jeh), G%IdxT(ish-1:ieh+1, jsh:jeh), G%IsdB, &
+  !$omp     G%IedB, G%AreaT(ish-1:ieh+1, jsh:jeh), &
+  !$omp     G%dxT(ish-1:ieh+1, jsh:jeh), G%mask2dCu(ish-1:ieh, jsh:jeh), &
+  !$omp     G%dxCu(ish-1:ieh, jsh:jeh), &
+  !$omp     u(ish-1:ieh, :, :), CS, CS%vol_CFL, duhdu(ish-1:ieh, 1:nz), &
+  !$omp     por_face_areaU(ish-1:ieh, :, :))
 
   call cpu_clock_end(id_clock_correct)
 
