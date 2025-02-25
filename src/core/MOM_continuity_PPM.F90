@@ -1104,7 +1104,12 @@ subroutine zonal_flux_thickness(u, h, h_W, h_E, h_u, dt, G, GV, US, LB, vol_CFL,
   integer :: i, j, k, ish, ieh, jsh, jeh, nz, n
   ish = LB%ish ; ieh = LB%ieh ; jsh = LB%jsh ; jeh = LB%jeh ; nz = GV%ke
 
-  !$OMP parallel do default(shared) private(CFL,curv_3,h_marg,h_avg)
+  !$omp target loop collapse(3) &
+  !$omp   private(CFL,curv_3,h_marg,h_avg) &
+  !$omp   map(to: u(ish-1:ieh, :, :), vol_CFL, dt, G%dy_Cu(ish-1:ieh, jsh:jeh), &
+  !$omp     G%IareaT(ish-1:ieh+1, jsh:jeh), G%IdxT(ish-1:ieh+1, jsh:jeh), h_W(ish-1:ieh+1, :, :), &
+  !$omp     h_E(ish-1:ieh+1, :, :)) &
+  !$omp   map(from: h_u(ish-1:ieh, :, :))
   do k=1,nz ; do j=jsh,jeh ; do I=ish-1,ieh
     if (u(I,j,k) > 0.0) then
       if (vol_CFL) then ; CFL = (u(I,j,k) * dt) * (G%dy_Cu(I,j) * G%IareaT(i,j))
@@ -1135,11 +1140,14 @@ subroutine zonal_flux_thickness(u, h, h_W, h_E, h_u, dt, G, GV, US, LB, vol_CFL,
     ! Scale back the thickness to account for the effects of viscosity and the fractional open
     ! thickness to give an appropriate non-normalized weight for each layer in determining the
     ! barotropic acceleration.
-    !$OMP parallel do default(shared)
+    !$omp target loop collapse(3) &
+    !$omp   map(to: visc_rem_u(ish-1:ieh, :, :), por_face_areaU(ish-1:ieh, :, :)) &
+    !$omp   map(tofrom: h_u(ish-1:ieh, :, :))
     do k=1,nz ; do j=jsh,jeh ; do I=ish-1,ieh
       h_u(I,j,k) = h_u(I,j,k) * (visc_rem_u(I,j,k) * por_face_areaU(I,j,k))
     enddo ; enddo ; enddo
   else
+    ! not in double_gyre
     !$OMP parallel do default(shared)
     do k=1,nz ; do j=jsh,jeh ; do I=ish-1,ieh
       h_u(I,j,k) = h_u(I,j,k) * por_face_areaU(I,j,k)
@@ -1149,6 +1157,7 @@ subroutine zonal_flux_thickness(u, h, h_W, h_E, h_u, dt, G, GV, US, LB, vol_CFL,
   local_open_BC = .false.
   if (associated(OBC)) local_open_BC = OBC%open_u_BCs_exist_globally
   if (local_open_BC) then
+    ! not in double_gyre
     do n = 1, OBC%number_of_segments
       if (OBC%segment(n)%open .and. OBC%segment(n)%is_E_or_W) then
         I = OBC%segment(n)%HI%IsdB
@@ -1589,9 +1598,6 @@ subroutine set_zonal_BT_cont(u, h_in, h_W, h_E, BT_cont, uh_tot_0, duhdu_tot_0, 
     endif ; enddo
   enddo
 
-  !$omp target exit data &
-  !$omp   map(release: u(ish-1:ieh, j, 1:nz)) 
-
   !$omp target loop &
   !$omp   private(FA_0, FA_avg) &
   !$omp   map(to: do_I(ish-1:ieh), FAmt_0(ish-1:ieh), duL(ish-1:ieh), &
@@ -1640,7 +1646,7 @@ subroutine set_zonal_BT_cont(u, h_in, h_W, h_E, BT_cont, uh_tot_0, duhdu_tot_0, 
   !$omp     u_L(ish-1:ieh), u_R(ish-1:ieh), u_0(ish-1:ieh), &
   !$omp     h_in(ish-1:ieh, j, 1:nz), h_W(ish-1:ieh, j, 1:nz), &
   !$omp     h_E(ish-1:ieh, j, 1:nz), uh_0(ish-1:ieh), uh_L(ish-1:ieh), &
-  !$omp     uh_R(ish-1:ieh), visc_rem(ish-1:ieh, 1:nz), &
+  !$omp     uh_R(ish-1:ieh), visc_rem(ish-1:ieh, 1:nz), u(ish-1:ieh, j, 1:nz), &
   !$omp     por_face_areaU(ish-1:ieh, j, 1:nz), duhdu_0(ish-1:ieh), duhdu_L(ish-1:ieh), &
   !$omp     duhdu_R(ish-1:ieh), du_CFL(ish-1:ieh), du_max_CFL(ish-1:ieh), du_min_CFL(ish-1:ieh), &
   !$omp     uh_tot_0(ish-1:ieh), duhdu_tot_0(ish-1:ieh), zeros(ish-1:ieh), visc_rem_max(ish-1:ieh))
