@@ -2842,6 +2842,7 @@ subroutine PPM_reconstruction_x(h_in, h_W, h_E, G, LB, h_min, monotonic, simple_
   endif
 
   if (simple_2nd) then
+    ! not in double_gyre
     do j=jsl,jel ; do i=isl,iel
       h_im1 = G%mask2dT(i-1,j) * h_in(i-1,j) + (1.0-G%mask2dT(i-1,j)) * h_in(i,j)
       h_ip1 = G%mask2dT(i+1,j) * h_in(i+1,j) + (1.0-G%mask2dT(i+1,j)) * h_in(i,j)
@@ -2849,6 +2850,10 @@ subroutine PPM_reconstruction_x(h_in, h_W, h_E, G, LB, h_min, monotonic, simple_
       h_E(i,j) = 0.5*( h_ip1 + h_in(i,j) )
     enddo ; enddo
   else
+    !$omp target loop collapse(2) &
+    !$omp   private(dMx, dMn) &
+    !$omp   map(to: G%mask2dT(isl-2:iel+2, jsl:jel), h_in(isl-2:iel+2, jsl:jel)) &
+    !$omp   map(from: slp(isl-1:iel+1, jsl:jel))
     do j=jsl,jel ; do i=isl-1,iel+1
       if ((G%mask2dT(i-1,j) * G%mask2dT(i,j) * G%mask2dT(i+1,j)) == 0.0) then
         slp(i,j) = 0.0
@@ -2864,6 +2869,7 @@ subroutine PPM_reconstruction_x(h_in, h_W, h_E, G, LB, h_min, monotonic, simple_
     enddo ; enddo
 
     if (local_open_BC) then
+      ! not in double_gyre
       do n=1, OBC%number_of_segments
         segment => OBC%segment(n)
         if (.not. segment%on_pe) cycle
@@ -2878,6 +2884,11 @@ subroutine PPM_reconstruction_x(h_in, h_W, h_E, G, LB, h_min, monotonic, simple_
       enddo
     endif
 
+    !$omp target loop collapse(2) &
+    !$omp   private(h_im1, h_ip1) &
+    !$omp   map(to: G, G%mask2dT(isl-1:iel+1, jsl:jel), h_in(isl-1:iel+1, jsl:jel), &
+    !$omp     slp(isl-1:iel+1, jsl:jel)) &
+    !$omp   map(from: h_W(isl:iel, jsl:jel), h_E(isl:iel, jsl:jel))
     do j=jsl,jel ; do i=isl,iel
       ! Neighboring values should take into account any boundaries.  The 3
       ! following sets of expressions are equivalent.
@@ -2892,6 +2903,7 @@ subroutine PPM_reconstruction_x(h_in, h_W, h_E, G, LB, h_min, monotonic, simple_
   endif
 
   if (local_open_BC) then
+    ! not in double_gyre
     do n=1, OBC%number_of_segments
       segment => OBC%segment(n)
       if (.not. segment%on_pe) cycle
