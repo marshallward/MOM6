@@ -630,7 +630,7 @@ subroutine zonal_mass_flux(u, h_in, h_W, h_E, uh, dt, G, GV, US, CS, OBC, por_fa
   !$omp   map(alloc: du, du_min_CFL(ish-1:ieh), &
   !$omp     du_max_CFL(ish-1:ieh), duhdu_tot_0(ish-1:ieh), uh_tot_0(ish-1:ieh), &
   !$omp     visc_rem_max, visc_rem, u_cor(ish-1:ieh, :, :), do_I(ish-1:ieh), &
-  !$omp     uh(ish-1:ieh, :, :), duhdu(ish-1:ieh, 1:nz))
+  !$omp     uh(ish-1:ieh, :, :), duhdu(ish-1:ieh, 1:nz), BT_cont)
 
   do j=jsh,jeh
     !$omp target loop map(from: do_I(ish-1:ieh))
@@ -894,7 +894,7 @@ subroutine zonal_mass_flux(u, h_in, h_W, h_E, uh, dt, G, GV, US, CS, OBC, por_fa
   !$omp     G%dxT(ish-1:ieh+1, jsh:jeh), G%mask2dCu(ish-1:ieh, jsh:jeh), &
   !$omp     G%dxCu(ish-1:ieh, jsh:jeh), &
   !$omp     u(ish-1:ieh, :, :), CS, CS%vol_CFL, duhdu(ish-1:ieh, 1:nz), &
-  !$omp     por_face_areaU(ish-1:ieh, :, :))
+  !$omp     por_face_areaU(ish-1:ieh, :, :), BT_cont)
 
   call cpu_clock_end(id_clock_correct)
 
