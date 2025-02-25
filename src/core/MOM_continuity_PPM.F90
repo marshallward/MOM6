@@ -3080,6 +3080,10 @@ subroutine PPM_limit_pos(h_in, h_L, h_R, h_min, G, iis, iie, jis, jie)
   real    :: scale ! A scaling factor to reduce the curvature of the fit               [nondim]
   integer :: i,j
 
+  !$omp target loop collapse(2) &
+  !$omp   private(curv, dh, scale) &
+  !$omp   map(to: h_in(iis:iie, jis:jie)) &
+  !$omp   map(tofrom: h_L(iis:iie, jis:jie), h_R(iis:iie, jis:jie))
   do j=jis,jie ; do i=iis,iie
     ! This limiter prevents undershooting minima within the domain with
     ! values less than h_min.
