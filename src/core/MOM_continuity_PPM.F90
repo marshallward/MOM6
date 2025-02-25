@@ -2613,9 +2613,10 @@ subroutine set_merid_BT_cont(v, h_in, h_S, h_N, BT_cont, vh_tot_0, dvhdv_tot_0, 
   !$omp   reduction(.or.:domore) &
   !$omp   map(to: do_I(ish:ieh), G, G%dyCv(ish:ieh, J), dv0(ish:ieh), &
   !$omp     dv_CFL(ish:ieh)) &
-  !$omp   map(tofrom: dv_CFL(ish:ieh), dvR(ish:ieh), dvL(ish:ieh), &
+  !$omp   map(tofrom: dv_CFL(ish:ieh), &
   !$omp     FAmt_L(ish:ieh), FAmt_R(ish:ieh), FAmt_0(ish:ieh), &
-  !$omp     vhTot_L(ish:ieh), vhtot_R(ish:ieh))
+  !$omp     vhTot_L(ish:ieh), vhtot_R(ish:ieh)) &
+  !$omp   map(from: dvR(ish:ieh), dvL(ish:ieh))
   do i=ish,ieh ; if (do_I(i)) then
     domore = .true.
     dv_CFL(i) = (CFL_min * Idt) * G%dyCv(i,J)
@@ -2655,12 +2656,10 @@ subroutine set_merid_BT_cont(v, h_in, h_S, h_N, BT_cont, vh_tot_0, dvhdv_tot_0, 
         dvL(i) = -(v(i,J,k) - dv_CFL(i)*visc_rem(i,k)) / visc_rem_lim
     endif
   enddo ; endif ; enddo
-  ! I don't yet understand why this needs to be here
-  !$omp target update from(dvR(ish:ieh), dvL(ish:ieh))
   do k=1,nz
     !$omp target loop &
-    !$omp   map(to: do_I(ish:ieh), v(ish:ieh, j, k), dvL(ish:ieh), visc_rem(ish:ieh, k)) &
-    !$omp   map(tofrom: v_L(ish:ieh), v_R(ish:ieh), v_0(ish:ieh))
+    !$omp   map(to: do_I(ish:ieh), v(ish:ieh, j, k), dvL(ish:ieh), dvR(ish:ieh), dv0(ish:ieh), visc_rem(ish:ieh, k)) &
+    !$omp   map(from: v_L(ish:ieh), v_R(ish:ieh), v_0(ish:ieh))
     do i=ish,ieh ; if (do_I(i)) then
       v_L(i) = v(I,j,k) + dvL(i) * visc_rem(i,k)
       v_R(i) = v(I,j,k) + dvR(i) * visc_rem(i,k)
