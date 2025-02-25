@@ -2590,7 +2590,10 @@ subroutine set_merid_BT_cont(v, h_in, h_S, h_N, BT_cont, vh_tot_0, dvhdv_tot_0, 
   !$omp     por_face_areaV(ish:ieh, J, 1:nz), visc_rem(ish:ieh, 1:nz), dt, G, &
   !$omp     G%IareaT(ish:ieh, J:J+1), G%dx_Cv(ish:ieh, J), &
   !$omp     G%IdyT(ish:ieh, J:J+1), US, CS, &
-  !$omp     v(ish:ieh, J, 1:nz), BT_cont, visc_rem_max(ish:ieh)) &
+  !$omp     v(ish:ieh, J, 1:nz), BT_cont%FA_v_S0(ish:ieh, j), &
+  !$omp     BT_cont%FA_v_SS(ish:ieh, j), BT_cont%vBT_SS(ish:ieh, j), &
+  !$omp     BT_cont%FA_v_N0(ish:ieh, j), BT_cont%FA_v_NN(ish:ieh, j), &
+  !$omp     BT_cont%vBT_NN(ish:ieh, j), visc_rem_max(ish:ieh)) &
   !$omp   map(alloc: zeros(ish:ieh), dv0, FAmt_0(ish:ieh), FAmt_L(ish:ieh), &
   !$omp     FAmt_R(ish:ieh), vhtot_L(ish:ieh), vhtot_R(ish:ieh), &
   !$omp     dv_CFL(ish:ieh), dvR(ish:ieh), dvL(ish:ieh), v_L(ish:ieh), &
@@ -2723,7 +2726,10 @@ subroutine set_merid_BT_cont(v, h_in, h_S, h_N, BT_cont, vh_tot_0, dvhdv_tot_0, 
   endif ; enddo
 
   !$omp target exit data &
-  !$omp   map(from: BT_cont) &
+  !$omp   map(from: BT_cont%FA_v_S0(ish:ieh, j), &
+  !$omp     BT_cont%FA_v_SS(ish:ieh, j), BT_cont%vBT_SS(ish:ieh, j), &
+  !$omp     BT_cont%FA_v_N0(ish:ieh, j), BT_cont%FA_v_NN(ish:ieh, j), &
+  !$omp     BT_cont%vBT_NN(ish:ieh, j)) &
   !$omp   map(release: do_I(ish:ieh), v(ish:ieh, J, 1:nz), dvL(ish:ieh), &
   !$omp     dvR(ish:ieh), dv0, visc_rem(ish:ieh, 1:nz), dt, G, G%IareaT(ish:ieh, J:J+1), G%dx_Cv(ish:ieh, J), G%IdyT(ish:ieh, J:J+1), US, CS, &
   !$omp     por_face_areaV(ish:ieh, J, 1:nz), v_L(ish:ieh), v_R(ish:ieh), &
