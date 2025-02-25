@@ -2229,7 +2229,12 @@ subroutine meridional_flux_thickness(v, h, h_S, h_N, h_v, dt, G, GV, US, LB, vol
   integer :: i, j, k, ish, ieh, jsh, jeh, n, nz
   ish = LB%ish ; ieh = LB%ieh ; jsh = LB%jsh ; jeh = LB%jeh ; nz = GV%ke
 
-  !$OMP parallel do default(shared) private(CFL,curv_3,h_marg,h_avg)
+  !$omp target loop collapse(3) &
+  !$omp   private(CFL,curv_3,h_marg,h_avg) &
+  !$omp   map(to: v(ish:ieh, :, :), vol_CFL, dt, G%dx_Cv(ish:ieh, jsh-1:jeh), &
+  !$omp     G%IareaT(ish:ieh, jsh-1:jeh+1), G%IdyT(ish:ieh, jsh-1:jeh+1), h_S(ish:ieh, :, :), &
+  !$omp     h_N(ish:ieh, :, :), h(ish:ieh, :, :), marginal) &
+  !$omp   map(from: h_v(ish:ieh, :, :))
   do k=1,nz ; do J=jsh-1,jeh ; do i=ish,ieh
     if (v(i,J,k) > 0.0) then
       if (vol_CFL) then ; CFL = (v(i,J,k) * dt) * (G%dx_Cv(i,J) * G%IareaT(i,j))
@@ -2262,11 +2267,14 @@ subroutine meridional_flux_thickness(v, h, h_S, h_N, h_v, dt, G, GV, US, LB, vol
     ! Scale back the thickness to account for the effects of viscosity and the fractional open
     ! thickness to give an appropriate non-normalized weight for each layer in determining the
     ! barotropic acceleration.
-    !$OMP parallel do default(shared)
+    !$omp target loop collapse(3) &
+    !$omp   map(to: visc_rem_v(ish:ieh, :, :), por_face_areaV(ish:ieh, :, :)) &
+    !$omp   map(tofrom: h_v(ish:ieh, :, :))
     do k=1,nz ; do J=jsh-1,jeh ; do i=ish,ieh
       h_v(i,J,k) = h_v(i,J,k) * (visc_rem_v(i,J,k) * por_face_areaV(i,J,k))
     enddo ; enddo ; enddo
   else
+    ! not in double_gyre
     !$OMP parallel do default(shared)
     do k=1,nz ; do J=jsh-1,jeh ; do i=ish,ieh
       h_v(i,J,k) = h_v(i,J,k) * por_face_areaV(i,J,k)
@@ -2276,6 +2284,7 @@ subroutine meridional_flux_thickness(v, h, h_S, h_N, h_v, dt, G, GV, US, LB, vol
   local_open_BC = .false.
   if (associated(OBC)) local_open_BC = OBC%open_v_BCs_exist_globally
   if (local_open_BC) then
+    ! not in double_gyre
     do n = 1, OBC%number_of_segments
       if (OBC%segment(n)%open .and. OBC%segment(n)%is_N_or_S) then
         J = OBC%segment(n)%HI%JsdB
