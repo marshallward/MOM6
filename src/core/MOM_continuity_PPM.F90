@@ -1754,7 +1754,7 @@ subroutine meridional_mass_flux(v, h_in, h_S, h_N, vh, dt, G, GV, US, CS, OBC, p
   !$omp     visc_rem(ish:ieh, 1:nz), BT_cont%FA_v_S0(ish:ieh, jsh-1:jeh), &
   !$omp     BT_cont%FA_v_SS(ish:ieh, jsh-1:jeh), BT_cont%vBT_SS(ish:ieh, jsh-1:jeh), &
   !$omp     BT_cont%FA_v_N0(ish:ieh, jsh-1:jeh), BT_cont%FA_v_NN(ish:ieh, jsh-1:jeh), &
-  !$omp     BT_cont%vBT_NN(ish:ieh, jsh-1:jeh)) &
+  !$omp     BT_cont%vBT_NN(ish:ieh, jsh-1:jeh), BT_cont%h_v(ish:ieh, :, :)) &
   !$omp   map(alloc: vh, v_cor, dvhdv(ish:ieh, 1:nz), dv, dv_min_CFL(ish:ieh), dv_max_CFL(ish:ieh), &
   !$omp     dvhdv_tot_0(ish:ieh), vh_tot_0(ish:ieh), visc_rem_max, do_i(ish:ieh), BT_cont) ! NB Alloc BT_cont (pointer) seems to be the way to go
 
@@ -1958,21 +1958,8 @@ subroutine meridional_mass_flux(v, h_in, h_S, h_N, vh, dt, G, GV, US, CS, OBC, p
 
   enddo ! j-loop
 
-  !$omp target exit data &
-  !$omp   map(from: vh, v_cor, BT_cont%FA_v_S0(ish:ieh, jsh-1:jeh), &
-  !$omp     BT_cont%FA_v_SS(ish:ieh, jsh-1:jeh), BT_cont%vBT_SS(ish:ieh, jsh-1:jeh), &
-  !$omp     BT_cont%FA_v_N0(ish:ieh, jsh-1:jeh), BT_cont%FA_v_NN(ish:ieh, jsh-1:jeh), &
-  !$omp     BT_cont%vBT_NN(ish:ieh, jsh-1:jeh)) &
-  !$omp   map(release: G, G%areaT(ish:ieh, jsh-1:jeh+1), G%dx_Cv(ish:ieh, jsh-1:jeh+1), &
-  !$omp     G%dyT(ish:ieh, jsh-1:jeh+1), G%mask2dCv(ish:ieh, jsh-1:jeh), &
-  !$omp     G%IAreaT(ish:ieh, jsh-1:jeh+1), G%IdyT(ish:ieh, jsh-1:jeh+1), G%dyCv(ish:ieh, jsh-1:jeh), v(ish:ieh, :, :), &
-  !$omp     h_in(ish:ieh, :, :), h_S(ish:ieh, :, :), h_N(ish:ieh, :, :), dt, &
-  !$omp     por_face_areaV(ish:ieh, :, :), vhbt(ish:ieh, jsh-1:jeh), visc_rem_v(ish:ieh, :, :), &
-  !$omp     dvhdv(ish:ieh, 1:nz), dv, dv_min_CFL(ish:ieh), dv_max_CFL(ish:ieh), &
-  !$omp     dvhdv_tot_0(ish:ieh), vh_tot_0(ish:ieh), visc_rem_max, do_i(ish:ieh), &
-  !$omp     visc_rem(ish:ieh, 1:nz), BT_cont)
-
   if (local_open_BC .and. set_BT_cont) then
+    ! not in double_gyre
     do n = 1, OBC%number_of_segments
       if (OBC%segment(n)%open .and. OBC%segment(n)%is_N_or_S) then
         J = OBC%segment(n)%HI%JsdB
@@ -2006,6 +1993,20 @@ subroutine meridional_mass_flux(v, h_in, h_S, h_N, vh, dt, G, GV, US, CS, OBC, p
                                     CS%vol_CFL, CS%marginal_faces, OBC, por_face_areaV, visc_rem_v)
     endif
   endif ; endif
+
+  !$omp target exit data &
+  !$omp   map(from: vh, v_cor, BT_cont%FA_v_S0(ish:ieh, jsh-1:jeh), &
+  !$omp     BT_cont%FA_v_SS(ish:ieh, jsh-1:jeh), BT_cont%vBT_SS(ish:ieh, jsh-1:jeh), &
+  !$omp     BT_cont%FA_v_N0(ish:ieh, jsh-1:jeh), BT_cont%FA_v_NN(ish:ieh, jsh-1:jeh), &
+  !$omp     BT_cont%vBT_NN(ish:ieh, jsh-1:jeh), BT_cont%h_v(ish:ieh, :, :)) &
+  !$omp   map(release: G, G%areaT(ish:ieh, jsh-1:jeh+1), G%dx_Cv(ish:ieh, jsh-1:jeh+1), &
+  !$omp     G%dyT(ish:ieh, jsh-1:jeh+1), G%mask2dCv(ish:ieh, jsh-1:jeh), &
+  !$omp     G%IAreaT(ish:ieh, jsh-1:jeh+1), G%IdyT(ish:ieh, jsh-1:jeh+1), G%dyCv(ish:ieh, jsh-1:jeh), v(ish:ieh, :, :), &
+  !$omp     h_in(ish:ieh, :, :), h_S(ish:ieh, :, :), h_N(ish:ieh, :, :), dt, &
+  !$omp     por_face_areaV(ish:ieh, :, :), vhbt(ish:ieh, jsh-1:jeh), visc_rem_v(ish:ieh, :, :), &
+  !$omp     dvhdv(ish:ieh, 1:nz), dv, dv_min_CFL(ish:ieh), dv_max_CFL(ish:ieh), &
+  !$omp     dvhdv_tot_0(ish:ieh), vh_tot_0(ish:ieh), visc_rem_max, do_i(ish:ieh), &
+  !$omp     visc_rem(ish:ieh, 1:nz), BT_cont)
 
   call cpu_clock_end(id_clock_correct)
 
@@ -2231,7 +2232,7 @@ subroutine meridional_flux_thickness(v, h, h_S, h_N, h_v, dt, G, GV, US, LB, vol
 
   !$omp target loop collapse(3) &
   !$omp   private(CFL,curv_3,h_marg,h_avg) &
-  !$omp   map(to: v(ish:ieh, :, :), vol_CFL, dt, G%dx_Cv(ish:ieh, jsh-1:jeh), &
+  !$omp   map(to: v(ish:ieh, :, :), vol_CFL, dt, G, G%dx_Cv(ish:ieh, jsh-1:jeh), &
   !$omp     G%IareaT(ish:ieh, jsh-1:jeh+1), G%IdyT(ish:ieh, jsh-1:jeh+1), h_S(ish:ieh, :, :), &
   !$omp     h_N(ish:ieh, :, :), h(ish:ieh, :, :), marginal) &
   !$omp   map(from: h_v(ish:ieh, :, :))
