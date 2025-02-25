@@ -2108,8 +2108,7 @@ subroutine merid_flux_layer(v, h, h_S, h_N, vh, dvhdv, visc_rem, dt, G, US, J, &
   !$omp     G%dx_Cv(ish:ieh, J), G%IareaT(ish:ieh, J:J+1), &
   !$omp     G%IdyT(ish:ieh, J:J+1), h_S(ish:ieh, J:J+1), h_N(ish:ieh, j:J+1), &
   !$omp     h(ish:ieh, j:J+1), por_face_areaV(ish:ieh, J), visc_rem(ish:ieh)) &
-  !$omp   map(from: dvhdv(ish:ieh)) &
-  !$omp   map(tofrom: vh(ish:ieh))
+  !$omp   map(from: dvhdv(ish:ieh), vh(ish:ieh))
   do i=ish,ieh ; if (do_I(i)) then
     if (v(i) > 0.0) then
       if (vol_CFL) then ; CFL = (v(i) * dt) * (G%dx_Cv(i,J) * G%IareaT(i,j))
