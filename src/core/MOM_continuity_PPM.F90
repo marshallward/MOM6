@@ -2857,6 +2857,10 @@ subroutine PPM_reconstruction_x(h_in, h_W, h_E, G, LB, h_min, monotonic, simple_
       h_E(i,j) = 0.5*( h_ip1 + h_in(i,j) )
     enddo ; enddo
   else
+
+    ! slp is only used in this block
+    !$omp enter data map(alloc: slp(isl-1:iel+1, jsl:jel))
+
     !$omp target loop collapse(2) &
     !$omp   private(dMx, dMn) &
     !$omp   map(to: G%mask2dT(isl-2:iel+2, jsl:jel), h_in(isl-2:iel+2, jsl:jel)) &
@@ -2907,6 +2911,8 @@ subroutine PPM_reconstruction_x(h_in, h_W, h_E, G, LB, h_min, monotonic, simple_
       h_W(i,j) = 0.5*( h_im1 + h_in(i,j) ) + oneSixth*( slp(i-1,j) - slp(i,j) )
       h_E(i,j) = 0.5*( h_ip1 + h_in(i,j) ) + oneSixth*( slp(i,j) - slp(i+1,j) )
     enddo ; enddo
+
+    !$omp target exit data map(release: slp(isl-1:iel+1, jsl:jel))
   endif
 
   if (local_open_BC) then
@@ -3005,10 +3011,14 @@ subroutine PPM_reconstruction_y(h_in, h_S, h_N, G, LB, h_min, monotonic, simple_
       h_N(i,j) = 0.5*( h_jp1 + h_in(i,j) )
     enddo ; enddo
   else
+
+    ! slp only used in this block
+    !$omp target enter data map(alloc: slp(isl:iel, jsl-1:jel+1))
+
     !$omp target loop collapse(2) &
     !$omp   private(dMx, dMn) &
     !$omp   map(to: G%mask2dT(isl:iel, jsl-2:jel+2), h_in(isl:iel, jsl-2:jel+2)) &
-    !$omp   map(from: slp(isl:iel, jsl:jel))
+    !$omp   map(from: slp(isl:iel, jsl-1:jel+1))
     do j=jsl-1,jel+1 ; do i=isl,iel
       if ((G%mask2dT(i,j-1) * G%mask2dT(i,j) * G%mask2dT(i,j+1)) == 0.0) then
         slp(i,j) = 0.0
@@ -3053,6 +3063,9 @@ subroutine PPM_reconstruction_y(h_in, h_S, h_N, G, LB, h_min, monotonic, simple_
       h_S(i,j) = 0.5*( h_jm1 + h_in(i,j) ) + oneSixth*( slp(i,j-1) - slp(i,j) )
       h_N(i,j) = 0.5*( h_jp1 + h_in(i,j) ) + oneSixth*( slp(i,j) - slp(i,j+1) )
     enddo ; enddo
+
+    !$omp target exit data map(release: slp(isl:iel, jsl-1:jel+1))
+    
   endif
 
   if (local_open_BC) then
