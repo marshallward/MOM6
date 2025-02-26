@@ -2857,7 +2857,7 @@ subroutine PPM_reconstruction_x(h_in, h_W, h_E, G, LB, h_min, monotonic, simple_
   else
 
     ! slp is only used in this block
-    !$omp enter data map(alloc: slp(isl-1:iel+1, jsl:jel))
+    !$omp target enter data map(alloc: slp(isl-1:iel+1, jsl:jel))
 
     !$omp target loop collapse(2) &
     !$omp   private(dMx, dMn) &
