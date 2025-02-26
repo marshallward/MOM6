@@ -367,11 +367,14 @@ subroutine continuity_zonal_convergence(h, uh, dt, G, GV, LB, hin, hmin)
   h_min = 0.0 ; if (present(hmin)) h_min = hmin
 
   if (present(hin)) then
-    !$OMP parallel do default(shared)
+    !$omp target loop collapse(3) &
+    !$omp   map(to: hin(LB%ish:LB%ieh, :, :), dt, LB, GV, G, G%IareaT(LB%ish:LB%ieh, LB%jsh:LB%jeh), uh(LB%ish-1:LB%ieh, :, :)) &
+    !$omp   map(tofrom: h(LB%ish:LB%ieh, :, :)) ! tofrom because j is being transferred entirely, but not necesarilly participating in the loop.
     do k=1,GV%ke ; do j=LB%jsh,LB%jeh ; do i=LB%ish,LB%ieh
       h(i,j,k) = max( hin(i,j,k) - dt * G%IareaT(i,j) * (uh(I,j,k) - uh(I-1,j,k)), h_min )
     enddo ; enddo ; enddo
   else
+    ! not in double_gyre
     !$OMP parallel do default(shared)
     do k=1,GV%ke ; do j=LB%jsh,LB%jeh ; do i=LB%ish,LB%ieh
       h(i,j,k) = max( h(i,j,k) - dt * G%IareaT(i,j) * (uh(I,j,k) - uh(I-1,j,k)), h_min )
@@ -405,12 +408,15 @@ subroutine continuity_merdional_convergence(h, vh, dt, G, GV, LB, hin, hmin)
   h_min = 0.0 ; if (present(hmin)) h_min = hmin
 
   if (present(hin)) then
+    ! not in double_gyre
     !$OMP parallel do default(shared)
     do k=1,GV%ke ; do j=LB%jsh,LB%jeh ; do i=LB%ish,LB%ieh
       h(i,j,k) = max( hin(i,j,k) - dt * G%IareaT(i,j) * (vh(i,J,k) - vh(i,J-1,k)), h_min )
     enddo ; enddo ; enddo
   else
-    !$OMP parallel do default(shared)
+    !$omp target loop collapse(3) &
+    !$omp   map(to: dt, G, GV, LB, G%IareaT(LB%ish:LB%ieh, LB%jsh:LB%jeh), vh(LB%ish:LB%ieh, :, :)) &
+    !$omp   map(tofrom: h(LB%ish:LB%ieh, :, :))
     do k=1,GV%ke ; do j=LB%jsh,LB%jeh ; do i=LB%ish,LB%ieh
       h(i,j,k) = max( h(i,j,k) - dt * G%IareaT(i,j) * (vh(i,J,k) - vh(i,J-1,k)), h_min )
     enddo ; enddo ; enddo
