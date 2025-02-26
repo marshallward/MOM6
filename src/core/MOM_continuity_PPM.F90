@@ -1316,7 +1316,7 @@ subroutine zonal_flux_adjust(u, h_in, h_W, h_E, uhbt, uh_tot_0, duhdu_tot_0, &
     domore = .false.
 
     !$omp target &
-    !$omp   map(to: uh_err(ish-1:ieh), dt, G, G%IareaT(ish-1:ieh+1, J), tol_eta, CS, CS%better_iter, tol_vel, duhdu_tot(ish-1:ieh), uh_err_best(ish-1:ieh)) &
+    !$omp   map(to: uh_err(ish-1:ieh), dt, G, G%IareaT(ish-1:ieh+1, J), CS, CS%better_iter, duhdu_tot(ish-1:ieh), uh_err_best(ish-1:ieh)) &
     !$omp   map(tofrom: du(ish-1:ieh), du_max(ish-1:ieh), du_min(ish-1:ieh), do_I(ish-1:ieh))
 
     !$omp loop &
@@ -1331,7 +1331,7 @@ subroutine zonal_flux_adjust(u, h_in, h_W, h_E, uhbt, uh_tot_0, duhdu_tot_0, &
     !$omp loop &
     !$omp   private(ddu, du_prev) &
     !$omp   reduction(.or.:domore) &
-    !$omp   map(to: dt, G, G%IareaT(ish-1:ieh+1, J), uh_err(ish-1:ieh), tol_eta, CS, CS%better_iter, tol_vel, duhdu_tot(ish-1:ieh), uh_err_best(ish-1:ieh), du_max(ish-1:ieh), du_min(ish-1:ieh)) &
+    !$omp   map(to: dt, G, G%IareaT(ish-1:ieh+1, J), uh_err(ish-1:ieh), CS, CS%better_iter, duhdu_tot(ish-1:ieh), uh_err_best(ish-1:ieh), du_max(ish-1:ieh), du_min(ish-1:ieh)) &
     !$omp   map(tofrom: do_I(ish-1:ieh), du(ish-1:ieh))
     do I=ish-1,ieh ; if (do_I(I)) then
       if ((dt * min(G%IareaT(i,j),G%IareaT(i+1,j))*abs(uh_err(I)) > tol_eta) .or. &
