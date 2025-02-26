@@ -2397,7 +2397,7 @@ subroutine meridional_flux_adjust(v, h_in, h_S, h_N, vhbt, vh_tot_0, dvhdv_tot_0
   iend = G%ied
 
   !$omp target enter data &
-  !$omp   map(to: G, G%IareaT(ish:ieh, J:J+1), G%dx_Cv(ish:ieh, J), &
+  !$omp   map(to: G, G%IareaT(ish:ieh, J:J+1), G%dx_Cv(ish:ieh, J), vh_3d(ish:ieh, j, 1:nz), &
   !$omp     G%IdyT(ish:ieh, J:J+1), CS, CS%better_iter, CS%vol_CFL) &
   !$omp   map(alloc: vh_aux, dvhdv, dv(ish:ieh), do_I(ish:ieh), &
   !$omp     dv_max(ish:ieh), dv_min(ish:ieh), vh_err(ish:ieh), &
@@ -2544,12 +2544,10 @@ subroutine meridional_flux_adjust(v, h_in, h_S, h_N, vhbt, vh_tot_0, dvhdv_tot_0
     do k=1,nz ; do i=ish,ieh
       vh_3d(i,J,k) = vh_aux(i,k)
     enddo ; enddo
-    !$omp target exit data &
-    !$omp   map(from: vh_3d(ish:ieh, J, 1:nz))
   endif
 
   !$omp target exit data &
-  !$omp   map(from: dv(ish:ieh)) &
+  !$omp   map(from: dv(ish:ieh), vh_3d(ish:ieh, j, 1:nz)) &
   !$omp   map(release: vh_aux, dvhdv, &
   !$omp     do_I(ish:ieh), dv_max(ish:ieh), dv_min(ish:ieh), &
   !$omp     vh_err(ish:ieh), dvhdv_tot(ish:ieh), vh_err_best(ish:ieh), G, &
