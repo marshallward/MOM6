@@ -1769,7 +1769,7 @@ subroutine meridional_mass_flux(v, h_in, h_S, h_N, vh, dt, G, GV, US, CS, OBC, p
   !$omp     visc_rem(ish:ieh, 1:nz), BT_cont%FA_v_S0(ish:ieh, jsh-1:jeh), &
   !$omp     BT_cont%FA_v_SS(ish:ieh, jsh-1:jeh), BT_cont%vBT_SS(ish:ieh, jsh-1:jeh), &
   !$omp     BT_cont%FA_v_N0(ish:ieh, jsh-1:jeh), BT_cont%FA_v_NN(ish:ieh, jsh-1:jeh), &
-  !$omp     BT_cont%vBT_NN(ish:ieh, jsh-1:jeh), BT_cont%h_v(ish:ieh, :, :)) &
+  !$omp     BT_cont%vBT_NN(ish:ieh, jsh-1:jeh), BT_cont%h_v(ish:ieh, :, :), US) &
   !$omp   map(alloc: vh, v_cor, dvhdv(ish:ieh, 1:nz), dv, dv_min_CFL(ish:ieh), dv_max_CFL(ish:ieh), &
   !$omp     dvhdv_tot_0(ish:ieh), vh_tot_0(ish:ieh), visc_rem_max, do_i(ish:ieh), BT_cont) ! NB Alloc BT_cont (pointer) seems to be the way to go
 
@@ -2021,7 +2021,7 @@ subroutine meridional_mass_flux(v, h_in, h_S, h_N, vh, dt, G, GV, US, CS, OBC, p
   !$omp     por_face_areaV(ish:ieh, :, :), vhbt(ish:ieh, jsh-1:jeh), visc_rem_v(ish:ieh, :, :), &
   !$omp     dvhdv(ish:ieh, 1:nz), dv, dv_min_CFL(ish:ieh), dv_max_CFL(ish:ieh), &
   !$omp     dvhdv_tot_0(ish:ieh), vh_tot_0(ish:ieh), visc_rem_max, do_i(ish:ieh), &
-  !$omp     visc_rem(ish:ieh, 1:nz), BT_cont)
+  !$omp     visc_rem(ish:ieh, 1:nz), BT_cont, US)
 
   call cpu_clock_end(id_clock_correct)
 
