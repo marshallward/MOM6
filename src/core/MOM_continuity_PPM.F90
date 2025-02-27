@@ -1757,8 +1757,6 @@ subroutine meridional_mass_flux(v, h_in, h_S, h_N, vh, dt, G, GV, US, CS, OBC, p
   I_dt = 1.0 / dt
   if (CS%aggress_adjust) CFL_dt = I_dt
 
-  if (.not.use_visc_rem) visc_rem(:,:) = 1.0
-
   !$omp target enter data &
   !$omp   map(to: G, G%areaT(ish:ieh, jsh-1:jeh+1), G%dx_Cv(ish:ieh, jsh-1:jeh+1), &
   !$omp     G%dyT(ish:ieh, jsh-1:jeh+1), G%mask2dCv(ish:ieh, jsh-1:jeh), &
@@ -1766,12 +1764,22 @@ subroutine meridional_mass_flux(v, h_in, h_S, h_N, vh, dt, G, GV, US, CS, OBC, p
   !$omp     G%dyCv(ish:ieh, jsh-1:jeh), v(ish:ieh, :, :), &
   !$omp     h_in(ish:ieh, :, :), h_S(ish:ieh, :, :), h_N(ish:ieh, :, :), dt, &
   !$omp     por_face_areaV(ish:ieh, :, :), vhbt(ish:ieh, jsh-1:jeh), visc_rem_v(ish:ieh, :, :), &
-  !$omp     visc_rem(ish:ieh, 1:nz), BT_cont%FA_v_S0(ish:ieh, jsh-1:jeh), &
+  !$omp     BT_cont%FA_v_S0(ish:ieh, jsh-1:jeh), &
   !$omp     BT_cont%FA_v_SS(ish:ieh, jsh-1:jeh), BT_cont%vBT_SS(ish:ieh, jsh-1:jeh), &
   !$omp     BT_cont%FA_v_N0(ish:ieh, jsh-1:jeh), BT_cont%FA_v_NN(ish:ieh, jsh-1:jeh), &
   !$omp     BT_cont%vBT_NN(ish:ieh, jsh-1:jeh), BT_cont%h_v(ish:ieh, :, :), US) &
   !$omp   map(alloc: vh, v_cor, dvhdv(ish:ieh, 1:nz), dv, dv_min_CFL(ish:ieh), dv_max_CFL(ish:ieh), &
-  !$omp     dvhdv_tot_0(ish:ieh), vh_tot_0(ish:ieh), visc_rem_max, do_i(ish:ieh), BT_cont) ! NB Alloc BT_cont (pointer) seems to be the way to go
+  !$omp     dvhdv_tot_0(ish:ieh), vh_tot_0(ish:ieh), visc_rem_max, do_i(ish:ieh), BT_cont, visc_rem) ! NB Alloc BT_cont (pointer) seems to be the way to go
+
+  if (.not.use_visc_rem) then
+    !$omp target loop collapse(2) &
+    !$omp   map(from: visc_rem)
+    do j = G%jsd, G%jed
+      do i = G%isd, G%ied
+        visc_rem(i, j) = 1.0
+      end do
+    end do
+  endif
 
   do J=jsh-1,jeh
     !$omp target loop map(from: do_I(ish:ieh))
@@ -2021,7 +2029,7 @@ subroutine meridional_mass_flux(v, h_in, h_S, h_N, vh, dt, G, GV, US, CS, OBC, p
   !$omp     por_face_areaV(ish:ieh, :, :), vhbt(ish:ieh, jsh-1:jeh), visc_rem_v(ish:ieh, :, :), &
   !$omp     dvhdv(ish:ieh, 1:nz), dv, dv_min_CFL(ish:ieh), dv_max_CFL(ish:ieh), &
   !$omp     dvhdv_tot_0(ish:ieh), vh_tot_0(ish:ieh), visc_rem_max, do_i(ish:ieh), &
-  !$omp     visc_rem(ish:ieh, 1:nz), BT_cont, US)
+  !$omp     visc_rem, BT_cont, US)
 
   call cpu_clock_end(id_clock_correct)
 
