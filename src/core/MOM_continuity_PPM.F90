@@ -638,8 +638,8 @@ subroutine zonal_mass_flux(u, h_in, h_W, h_E, uh, dt, G, GV, US, CS, OBC, por_fa
 
   if (.not.use_visc_rem) then
     !$omp target loop collapse(2) map(from: visc_rem)
-    do k = G%isd, G%ied
-      do i = 1, G%ke
+    do k = 1, nz
+      do i = G%isd, G%ied
         visc_rem(i, k) = 1.0
       end do
     end do
@@ -1780,9 +1780,9 @@ subroutine meridional_mass_flux(v, h_in, h_S, h_N, vh, dt, G, GV, US, CS, OBC, p
   if (.not.use_visc_rem) then
     !$omp target loop collapse(2) &
     !$omp   map(from: visc_rem)
-    do j = G%jsd, G%jed
+    do k = 1, nz
       do i = G%isd, G%ied
-        visc_rem(i, j) = 1.0
+        visc_rem(i, k) = 1.0
       end do
     end do
   endif
