@@ -1855,7 +1855,7 @@ subroutine meridional_mass_flux(v, h_in, h_S, h_N, vh, dt, G, GV, US, CS, OBC, p
           !$omp   private(dy_S, dy_N, k) &
           !$omp   map(to: G, G%areaT(ish:ieh, j:j+1), G%dx_Cv(ish:ieh, j:j+1), &
           !$omp     G%dyT(ish:ieh, j:j+1), G%mask2dCv(ish:ieh, j), CS, &
-          !$omp     CS%vol_CFL, visc_rem(ish:ieh, 1:nz), CFL_dt, &
+          !$omp     CS%vol_CFL, visc_rem(ish:ieh, 1:nz), &
           !$omp     v(ish:ieh, j, 1:nz)) &
           !$omp   map(tofrom: dv_max_CFL(ish:ieh), dv_min_CFL(ish:ieh))
           do i=ish,ieh
