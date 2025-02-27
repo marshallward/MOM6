@@ -618,9 +618,6 @@ subroutine zonal_mass_flux(u, h_in, h_W, h_E, uh, dt, G, GV, US, CS, OBC, por_fa
   I_dt = 1.0 / dt
   if (CS%aggress_adjust) CFL_dt = I_dt
 
-
-  if (.not.use_visc_rem) visc_rem(:,:) = 1.0
-
   !$omp target enter data &
   !$omp   map(to: visc_rem_u(ish-1:ieh, :, :), uhbt(ish-1:ieh, jsh:jeh), dt, &
   !$omp     h_in(ish-1:ieh, :, :), h_W(ish-1:ieh+1, :, :), &
@@ -638,6 +635,15 @@ subroutine zonal_mass_flux(u, h_in, h_W, h_E, uh, dt, G, GV, US, CS, OBC, por_fa
   !$omp     du_max_CFL(ish-1:ieh), duhdu_tot_0(ish-1:ieh), uh_tot_0(ish-1:ieh), &
   !$omp     visc_rem_max, visc_rem, u_cor(ish-1:ieh, :, :), do_I(ish-1:ieh), &
   !$omp     uh(ish-1:ieh, :, :), duhdu(ish-1:ieh, 1:nz), BT_cont)
+
+  if (.not.use_visc_rem) then
+    !$omp target loop collapse(2) map(from: visc_rem)
+    do k = G%isd, G%ied
+      do i = 1, G%ke
+        visc_rem(i, k) = 1.0
+      end do
+    end do
+  end if
 
   do j=jsh,jeh
     !$omp target loop map(from: do_I(ish-1:ieh))
