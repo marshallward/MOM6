@@ -1046,7 +1046,9 @@ subroutine zonal_flux_layer(u, h, h_W, h_E, uh, duhdu, visc_rem, dt, G, US, j, &
 
   !$omp target loop &
   !$omp   private(CFL, curv_3, h_marg) &
-  !$omp   map(to: do_I(ish-1:ieh), u(ish-1:ieh), vol_CFL, dt, G, G%dy_Cu(ish-1:ieh, j), G%IareaT(ish-1:ieh, j), G%IdxT(ish-1:ieh, j), h_W(ish-1:ieh), h_E(ish-1:ieh), h(ish-1:ieh), por_face_areaU(ish-1:ieh), visc_rem(ish-1:ieh)) &
+  !$omp   map(to: do_I(ish-1:ieh), u(ish-1:ieh), vol_CFL, dt, G, G%dy_Cu(ish-1:ieh, j), &
+  !$omp     G%IareaT(ish-1:ieh+1, j), G%IdxT(ish-1:ieh+1, j), h_W(ish-1:ieh+1), h_E(ish-1:ieh+1), &
+  !$omp     h(ish-1:ieh+1), por_face_areaU(ish-1:ieh), visc_rem(ish-1:ieh)) &
   !$omp   map(from: duhdu(ish-1:ieh)) &
   !$omp   map(tofrom: uh(ish-1:ieh))
   do I=ish-1,ieh ; if (do_I(I)) then
