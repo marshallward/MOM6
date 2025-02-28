@@ -161,7 +161,7 @@ subroutine continuity_PPM(u, v, hin, h, uh, vh, dt, G, GV, US, CS, OBC, pbv, uhb
       " one must be present in call to continuity_PPM.")
 
   !$omp target enter data &
-  !$omp   map(to: hin, h, G, G%mask2dt, G%mask2dCu, G%IdxT, G%IareaT, G%dy_Cu, G%dxT, G%AreaT, G%mask2dCv, &
+  !$omp   map(to: hin, G, G%mask2dt, G%mask2dCu, G%IdxT, G%IareaT, G%dy_Cu, G%dxT, G%AreaT, G%mask2dCv, &
   !$omp     G%IdyT, G%dyT, G%DyCv, G%dx_Cv, G%dxCu, GV, h_W, h_E, h_N, h_S, dt, pbv%por_face_areaU, &
   !$omp     pbv%por_face_areaV, BT_cont%FA_v_N0, BT_cont%FA_v_NN, BT_cont%FA_v_S0, BT_cont%FA_v_SS, &
   !$omp     BT_cont%h_v, BT_cont%vBT_NN, BT_cont%vBT_SS, BT_cont%FA_u_E0, BT_cont%FA_u_EE, &
@@ -203,7 +203,7 @@ subroutine continuity_PPM(u, v, hin, h, uh, vh, dt, G, GV, US, CS, OBC, pbv, uhb
   endif
 
   !$omp target exit data &
-  !$omp   map(from: h, uh, vh, BT_cont%FA_v_N0, BT_cont%FA_v_NN, BT_cont%FA_v_S0, BT_cont%FA_v_SS, &
+  !$omp   map(from: uh, vh, BT_cont%FA_v_N0, BT_cont%FA_v_NN, BT_cont%FA_v_S0, BT_cont%FA_v_SS, &
   !$omp     BT_cont%h_v, BT_cont%vBT_NN, BT_cont%vBT_SS, BT_cont%FA_u_E0, BT_cont%FA_u_EE, BT_cont%FA_u_W0, BT_cont%FA_u_WW, BT_cont%h_u, BT_cont%uBT_EE, BT_cont%uBT_WW, u_cor, v_cor) &
   !$omp   map(release: hin, G, G%mask2dt, G%mask2dCu, G%IdxT, G%IareaT, G%dy_Cu, G%dxT, G%AreaT, G%mask2dCv, &
   !$omp     G%IdyT, G%dyT, G%DyCv, G%dx_Cv, G%dxCu, GV, h_W, h_E, h_N, h_S, dt, pbv%por_face_areaU, &
