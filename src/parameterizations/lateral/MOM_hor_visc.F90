@@ -715,6 +715,7 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
   ! TODO: Do this outside the function
   !$omp target enter data map(to: u, v, h)
   !$omp target enter data map(to: hu_cont, hv_cont) if (use_cont_huv)
+  !$omp target enter data map(to: MEKE%Au) if (use_MEKE_Au)
 
   do k=1,nz
 
@@ -1204,8 +1205,6 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
     !$omp target update from(h_u, h_v)
     !$omp target update from(Del2u, Del2v) if (CS%biharmonic)
     !$omp target update from(Shear_mag) if (use_Smag)
-    !$omp target update from(hrat_min) &
-    !$omp     if (CS%better_bound_Kh .or. CS%better_bound_Ah)
 
     if (CS%Laplacian) then
       ! Determine the Laplacian viscosity at h points, using the
@@ -1343,9 +1342,6 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
       !$omp end target
 
       !$omp target update from(Kh)
-
-      !$omp target update from(visc_bound_rem) &
-      !$omp   if (CS%better_bound_Kh .or. CS%better_bound_Ah)
 
       ! In Leith+E parameterization Kh is computed after Ah in the biharmonic loop.
       ! The harmonic component of str_xx is added in the biharmonic loop.
@@ -1519,6 +1515,7 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
 
       !$omp target update from(Ah)
 
+      ! TODO: GPU
       if (use_MEKE_Au) then
         ! *Add* the MEKE contribution
         do j=js_Kh,je_Kh ; do i=is_Kh,ie_Kh
@@ -1526,6 +1523,7 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
         enddo ; enddo
       endif
 
+      ! TODO: GPU
       if (CS%Re_Ah > 0.0) then
         do j=js_Kh,je_Kh ; do i=is_Kh,ie_Kh
           KE = 0.125*(((u(I,j,k)+u(I-1,j,k))**2) + ((v(i,J,k)+v(i,J-1,k))**2))
@@ -1533,27 +1531,32 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
         enddo ; enddo
       endif
 
+      !$omp target
       if (CS%better_bound_Ah) then
         if (CS%better_bound_Kh) then
+          !$omp parallel loop collapse(2)
           do j=js_Kh,je_Kh ; do i=is_Kh,ie_Kh
             Ah(i,j) = min(Ah(i,j), visc_bound_rem(i,j) * hrat_min(i,j) * CS%Ah_Max_xx(i,j))
           enddo ; enddo
         else
+          !$omp parallel loop collapse(2)
           do j=js_Kh,je_Kh ; do i=is_Kh,ie_Kh
             Ah(i,j) = min(Ah(i,j), hrat_min(i,j) * CS%Ah_Max_xx(i,j))
           enddo ; enddo
         endif
       endif
+      !$omp end target
 
+      ! TODO: GPU
       if (CS%EY24_EBT_BS) then
-          do j=js_Kh,je_Kh ; do i=is_Kh,ie_Kh
-            tmp = CS%KS_coef * hrat_min(i,j) * CS%Ah_Max_xx_KS(i,j)
-            visc_limit_h(i,j,k) = tmp
-            visc_limit_h_frac(i,j,k) = Ah(i,j) / (CS%KS_coef * hrat_min(i,j) * CS%Ah_Max_xx_KS(i,j))
-            if (Ah(i,j) >= tmp) then
-              visc_limit_h_flag(i,j,k) = 1.
-            endif
-          enddo ; enddo
+        do j=js_Kh,je_Kh ; do i=is_Kh,ie_Kh
+          tmp = CS%KS_coef * hrat_min(i,j) * CS%Ah_Max_xx_KS(i,j)
+          visc_limit_h(i,j,k) = tmp
+          visc_limit_h_frac(i,j,k) = Ah(i,j) / (CS%KS_coef * hrat_min(i,j) * CS%Ah_Max_xx_KS(i,j))
+          if (Ah(i,j) >= tmp) then
+            visc_limit_h_flag(i,j,k) = 1.
+          endif
+        enddo ; enddo
       endif
 
       if ((CS%id_Ah_h>0) .or. CS%debug .or. CS%use_Leithy) then
@@ -1592,6 +1595,11 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
         bhstr_xx(i,j) = d_str * (h(i,j,k) * CS%reduction_xx(i,j))
       enddo ; enddo
     endif ! Get biharmonic coefficient at h points and biharmonic part of str_xx
+
+    !$omp target update from(hrat_min) &
+    !$omp     if (CS%better_bound_Kh .or. CS%better_bound_Ah)
+    !$omp target update from(visc_bound_rem) &
+    !$omp   if (CS%better_bound_Kh .or. CS%better_bound_Ah)
 
     ! Backscatter using MEKE
     if (CS%EY24_EBT_BS) then
