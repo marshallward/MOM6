@@ -698,8 +698,8 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
 
   !$omp target enter data map(to: CS%Kh_bg_xx, CS%Kh_bg_xy) if (CS%Laplacian)
   !$omp target enter data map(to: CS%Kh_max_xx) if (CS%Laplacian)
-  !!!$omp target enter data map(to: CS%Kh_max_xy) &
-  !!!$omp   if (CS%Laplacian .and. (CS%bound_Kh .or. CS%better_bound_Kh))
+  !$omp target enter data map(to: CS%Kh_max_xy) &
+  !$omp   if (CS%Laplacian .and. (CS%bound_Kh .or. CS%better_bound_Kh))
   !$omp target enter data map(to: CS%Laplac2_const_xx) if (CS%Laplacian)
   !$omp target enter data map(to: CS%Laplac3_const_xx) if (CS%Laplacian)
   !$omp target enter data map(to: CS%Laplac2_const_xy) if (CS%Smagorinsky_Kh)
@@ -1734,8 +1734,6 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
     !$omp target update from(Shear_mag) if (use_Smag)
     !$omp target update from(Del2u, Del2v) if (CS%biharmonic)
     !$omp target update from(dDel2vdx, dDel2udy) if (CS%biharmonic)
-    !$omp target update from(visc_bound_rem, hrat_min) &
-    !$omp   if (CS%better_bound_Kh .or. CS%better_bound_Ah)
 
     if (CS%Laplacian) then
       ! Determine the Laplacian viscosity at q points, using the
@@ -1862,6 +1860,8 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
         !$omp target update from(Kh)
       endif
 
+      !$omp target
+      !$omp parallel loop collapse(2)
       do J=js-1,Jeq ; do I=is-1,Ieq
         ! Newer method of bounding for stability
         if ((CS%better_bound_Kh) .and. (CS%better_bound_Ah)) then
@@ -1877,6 +1877,7 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
           Kh(I,J) = min(Kh(I,J), hrat_min(I,J) * CS%Kh_Max_xy(I,J))
         endif
       enddo ; enddo
+      !$omp end target
 
       if (CS%use_Leithy) then
         ! Leith+E doesn't recompute Kh at q points, it just interpolates it from h to q points
@@ -1919,6 +1920,8 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
     endif ! get harmonic coefficient Kh at q points and harmonic part of str_xy
 
     !$omp target update from(Kh)
+    !$omp target update from(visc_bound_rem, hrat_min) &
+    !$omp   if (CS%better_bound_Kh .or. CS%better_bound_Ah)
 
     if (CS%anisotropic) then
       do J=js-1,Jeq ; do I=is-1,Ieq
@@ -2435,8 +2438,8 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
 
   !$omp target exit data map(delete: CS%Kh_bg_xx, CS%Kh_bg_xy) if (CS%Laplacian)
   !$omp target exit data map(delete: CS%Kh_Max_xx) if (CS%Laplacian)
-  !!!$omp target exit data map(delete: CS%Kh_max_xy) &
-  !!!$omp   if (CS%Laplacian .and. (CS%bound_Kh .or. CS%better_bound_Kh))
+  !$omp target exit data map(delete: CS%Kh_max_xy) &
+  !$omp   if (CS%Laplacian .and. (CS%bound_Kh .or. CS%better_bound_Kh))
   !$omp target exit data map(delete: CS%Laplac2_const_xx) if (CS%Laplacian)
   !$omp target exit data map(delete: CS%Laplac3_const_xx) if (CS%Laplacian)
   !$omp target exit data map(delete: CS%Laplac2_const_xy) if (CS%Smagorinsky_Kh)
