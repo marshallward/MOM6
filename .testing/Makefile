@@ -453,7 +453,7 @@ $(1).$(2): $(foreach b,$(3),$(WORK)/$(1)/$(b)/ocean.stats)
 
 .PRECIOUS: $(foreach b,$(3),$(WORK)/$(1)/$(b)/chksum_diag)
 $(1).$(2).diag: $(foreach b,$(3),$(WORK)/$(1)/$(b)/chksum_diag)
-	@cmp $$^ || !( \
+	tools/cmp_diag.sh $$^ || !( \
 	  mkdir -p $(WORK)/results/$(1); \
 	  (diff $$^ | tee $(WORK)/results/$(1)/chksum_diag.$(2).diff | head -n 20) ; \
 	  echo -e "$(FAIL): Diagnostics $(1).$(2).diag have changed." \
