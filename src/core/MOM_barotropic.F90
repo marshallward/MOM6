@@ -854,6 +854,8 @@ subroutine btstep(U_in, V_in, eta_in, dt, bc_accel_u, bc_accel_v, forces, pbce, 
   if (id_clock_pass_pre > 0) call cpu_clock_end(id_clock_pass_pre)
 !--- end setup for group halo update
 
+  !$omp target enter data map(alloc: ubt_Cor, vbt_Cor)
+
 !   Calculate the constant coefficients for the Coriolis force terms in the
 ! barotropic momentum equations.  This has to be done quite early to start
 ! the halo update that needs to be completed before the next calculations.
@@ -1393,6 +1395,8 @@ subroutine btstep(U_in, V_in, eta_in, dt, bc_accel_u, bc_accel_v, forces, pbce, 
   if (nonblock_setup) then
     if (id_clock_calc_pre > 0) call cpu_clock_end(id_clock_calc_pre)
     if (id_clock_pass_pre > 0) call cpu_clock_begin(id_clock_pass_pre)
+    ! ensure correct data on host to be exchanged
+    !$omp target update from(ubt_Cor, vbt_Cor)
     call start_group_pass(CS%pass_gtot, CS%BT_Domain)
     call start_group_pass(CS%pass_ubt_Cor, G%Domain)
     if (id_clock_pass_pre > 0) call cpu_clock_end(id_clock_pass_pre)
@@ -1414,9 +1418,12 @@ subroutine btstep(U_in, V_in, eta_in, dt, bc_accel_u, bc_accel_v, forces, pbce, 
     call complete_group_pass(CS%pass_gtot, CS%BT_Domain)
     call complete_group_pass(CS%pass_ubt_Cor, G%Domain)
   else
+    !$omp target update from(ubt_Cor, vbt_Cor)
     call do_group_pass(CS%pass_gtot, CS%BT_Domain)
     call do_group_pass(CS%pass_ubt_Cor, G%Domain)
   endif
+  ! Update MPI-updated values are on GPU
+  !$omp target update to(Ubt_Cor, vbt_Cor)
   ! The various elements of gtot are positive definite but directional, so use
   ! the polarity arrays to sort out when the directions have shifted.
   do concurrent (j=jsvf-1:jevf+1, i=isvf-1:ievf+1)
@@ -2131,6 +2138,8 @@ subroutine btstep(U_in, V_in, eta_in, dt, bc_accel_u, bc_accel_v, forces, pbce, 
   endif
 
   deallocate(wt_vel, wt_eta, wt_trans, wt_accel, wt_accel2)
+
+  !$omp target exit data map(release: ubt_Cor, vbt_Cor)
 
 end subroutine btstep
 
