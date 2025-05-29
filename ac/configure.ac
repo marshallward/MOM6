@@ -158,11 +158,18 @@ AX_FC_CHECK_LIB([netcdff], [nf_create], [], [], [
 ])
 
 
+## Force 8-byte reals
+#AX_FC_REAL8
+#AS_IF(
+#  [test "$enable_real8" != no],
+#  [FCFLAGS="$FCFLAGS $REAL8_FCFLAGS"])
+
+
 # Force 8-byte reals
-AX_FC_REAL8
+MOM6_FC_REAL64
 AS_IF(
-  [test "$enable_real8" != no],
-  [FCFLAGS="$FCFLAGS $REAL8_FCFLAGS"])
+  [test "$enable_real64" != no],
+  [FCFLAGS="$FCFLAGS $REAL64_FCFLAGS"])
 
 
 # OpenMP configuration
