@@ -104,21 +104,22 @@ AC_SUBST(FC, $MPIFC)
 AC_SUBST(LD, $MPIFC)
 
 # Confirm that FC can see the Fortran 90 MPI module.
-AX_FC_CHECK_MODULE([mpi],
-  [], [AC_MSG_ERROR([Could not find MPI Fortran module.])])
+MOM6_FC_CHECK_MODULE([mpi],
+  [], [AC_MSG_ERROR([Could not find MPI Fortran module.])]
+)
 
 
 # netCDF configuration
 
 # Search for the Fortran netCDF module.
-AX_FC_CHECK_MODULE([netcdf], [], [
+MOM6_FC_CHECK_MODULE([netcdf], [], [
   AS_UNSET([ax_fc_cv_mod_netcdf])
   AC_PATH_PROG([NF_CONFIG], [nf-config])
   AS_IF([test -n "$NF_CONFIG"], [
     AC_SUBST([FCFLAGS], ["$FCFLAGS -I$($NF_CONFIG --includedir)"])
     ], [AC_MSG_ERROR([Could not find nf-config.])]
   )
-  AX_FC_CHECK_MODULE([netcdf], [], [
+  MOM6_FC_CHECK_MODULE([netcdf], [], [
     AC_MSG_ERROR([Could not find netcdf module.])
   ])
 ])
@@ -167,9 +168,9 @@ AX_FC_CHECK_LIB([netcdff], [nf_create], [], [], [
 
 # Force 8-byte reals
 MOM6_FC_REAL64
-AS_IF(
-  [test "$enable_real64" != no],
-  [FCFLAGS="$FCFLAGS $REAL64_FCFLAGS"])
+AS_IF([test "$enable_real64" != no],
+  [FCFLAGS="$FCFLAGS $REAL64_FCFLAGS"]
+)
 
 
 # OpenMP configuration
@@ -194,9 +195,9 @@ AS_IF(
 # FMS support
 
 # Test for fms_mod to verify FMS module access
-AX_FC_CHECK_MODULE([fms_mod], [], [
+MOM6_FC_CHECK_MODULE([fms_mod], [], [
   AS_UNSET([ax_fc_cv_mod_fms_mod])
-  AX_FC_CHECK_MODULE([fms_mod],
+  MOM6_FC_CHECK_MODULE([fms_mod],
     [AC_SUBST([FCFLAGS], ["-I${srcdir}/ac/deps/include $FCFLAGS"])],
     [AC_MSG_ERROR([Could not find fms_mod Fortran module.])],
     [-I${srcdir}/ac/deps/include])
@@ -231,7 +232,7 @@ AC_COMPILE_IFELSE(
 )
 
 # Determine the FMS IO implementation.
-AX_FC_CHECK_MODULE([fms2_io_mod], [
+MOM6_FC_CHECK_MODULE([fms2_io_mod], [
   MODEL_FRAMEWORK=${srcdir}/config_src/infra/FMS2
 ],[
   MODEL_FRAMEWORK=${srcdir}/config_src/infra/FMS1
