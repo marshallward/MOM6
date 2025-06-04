@@ -230,7 +230,7 @@ LDFLAGS_DEPS = -L$(abspath $(DEPS)/lib)
 PATH_DEPS = PATH="${PATH}:$(abspath $(DEPS)/bin)"
 
 
-# Define the build targets in terms of the traditional DEBUG/REPRO/etc labels
+# Compiler flags
 SYMMETRIC_FCFLAGS := FCFLAGS="$(FCFLAGS_DEBUG) $(FCFLAGS_INIT) $(FCFLAGS_DEPS)"
 ASYMMETRIC_FCFLAGS := FCFLAGS="$(FCFLAGS_DEBUG) $(FCFLAGS_INIT) $(FCFLAGS_DEPS)"
 REPRO_FCFLAGS := FCFLAGS="$(FCFLAGS_REPRO) $(FCFLAGS_DEPS)"
@@ -239,9 +239,9 @@ OPENMP_FCFLAGS := FCFLAGS="$(FCFLAGS_DEBUG) $(FCFLAGS_INIT) $(FCFLAGS_DEPS)"
 TARGET_FCFLAGS := FCFLAGS="$(FCFLAGS_DEBUG) $(FCFLAGS_INIT) $(FCFLAGS_DEPS)"
 COV_FCFLAGS := FCFLAGS="$(FCFLAGS_COVERAGE) $(FCFLAGS_DEPS)"
 
+# Linker flags
 MOM_LDFLAGS := LDFLAGS="$(LDFLAGS_DEPS) $(LDFLAGS_USER)"
 COV_LDFLAGS := LDFLAGS="$(LDFLAGS_COVERAGE) $(LDFLAGS_DEPS) $(LDFLAGS_USER)"
-
 
 # Environment variable configuration
 MOM_ENV := $(PATH_FMS)
@@ -271,16 +271,21 @@ $(BUILD)/timing/Makefile: MOM_ACFLAGS += --with-driver=timing_tests
 .NOTPARALLEL:$(foreach e,$(UNIT_EXECS),$(BUILD)/unit/$(e))
 $(BUILD)/unit/test_%: $(BUILD)/unit/Makefile FORCE
 	cd $(@D) && $(TIME) $(MAKE) $(@F)
-$(BUILD)/unit/Makefile: $(foreach e,$(UNIT_EXECS),../config_src/drivers/unit_tests/$(e).F90)
+
+$(BUILD)/unit/Makefile: \
+  $(foreach e,$(UNIT_EXECS),../config_src/drivers/unit_tests/$(e).F90)
 
 .NOTPARALLEL:$(foreach e,$(TIMING_EXECS),$(BUILD)/timing/$(e))
 $(BUILD)/timing/time_%: $(BUILD)/timing/Makefile FORCE
 	cd $(@D) && $(TIME) $(MAKE) $(@F)
-$(BUILD)/timing/Makefile: $(foreach e,$(TIMING_EXECS),../config_src/drivers/timing_tests/$(e).F90)
+
+$(BUILD)/timing/Makefile: \
+  $(foreach e,$(TIMING_EXECS),../config_src/drivers/timing_tests/$(e).F90)
 
 $(BUILD)/%/MOM6: $(BUILD)/%/Makefile FORCE
 	cd $(@D) && $(TIME) $(MAKE) $(@F)
 
+ifdef DO_REGRESSION_TESTS
 # Target codebase should use its own build system
 $(BUILD)/target/MOM6: $(BUILD)/target FORCE | $(TARGET_CODEBASE)
 	$(MAKE) -C $(TARGET_CODEBASE)/.testing BUILD=build build/symmetric/MOM6
@@ -293,6 +298,7 @@ $(BUILD)/opt_target/MOM6: $(BUILD)/opt_target FORCE | $(TARGET_CODEBASE)
 
 $(BUILD)/opt_target: | $(TARGET_CODEBASE)
 	ln -s $(abspath $(TARGET_CODEBASE))/.testing/build/opt $@
+endif
 
 FORCE:
 
@@ -330,10 +336,12 @@ ALL_EXECS = symmetric asymmetric repro openmp opt opt_target coupled nuopc \
 $(foreach b,$(ALL_EXECS),$(BUILD)/$(b)/):
 	mkdir -p $@
 
+ifdef DO_REGRESSION_TESTS
 # Fetch the regression target codebase
 $(TARGET_CODEBASE):
 	git clone --recursive $(MOM_TARGET_URL) $@
 	cd $@ && git checkout --recurse-submodules $(MOM_TARGET_BRANCH)
+endif
 
 
 ## FMS
@@ -361,6 +369,7 @@ $(DEPS)/m4: ../ac/deps/m4 | $(DEPS)
 
 $(DEPS):
 	mkdir -p $(DEPS)
+
 
 #---
 # Verify that the coupled model drivers can be compiled.  This does not verify
@@ -667,15 +676,22 @@ test.summary:
 run.cov.unit: $(foreach t,$(UNIT_EXECS),$(BUILD)/unit/$(t).F90.gcov)
 
 .PHONY: build.unit
+.NOTPARALLEL: build.unit
 build.unit: $(foreach f, $(UNIT_EXECS), $(BUILD)/unit/$(f))
+
 .PHONY: run.unit
 run.unit: $(foreach f, $(UNIT_EXECS), work/unit/$(f).out)
+
 .PHONY: build.timing
+.NOTPARALLEL: build.timing
 build.timing: $(foreach f, $(TIMING_EXECS), $(BUILD)/timing/$(f))
+
 .PHONY: run.timing
 run.timing: $(foreach f, $(TIMING_EXECS), work/timing/$(f).out)
+
 .PHONY: show.timing
 show.timing: $(foreach f, $(TIMING_EXECS), work/timing/$(f).show)
+
 $(WORK)/timing/%.show:
 	./tools/disp_timing.py $(@:.show=.out)
 
