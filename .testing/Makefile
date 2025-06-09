@@ -213,10 +213,8 @@ endif
 
 ## Rules
 
-.PHONY: all build.regressions build.prof
+.PHONY: all
 all: $(foreach b,$(EXECS),$(BUILD)/$(b))
-#build.regressions: $(foreach b,symmetric target,$(BUILD)/$(b)/MOM6)
-#build.prof: $(foreach b,opt opt_target,$(BUILD)/$(b)/MOM6)
 
 # Executable
 .PRECIOUS: $(foreach b,$(EXECS),$(BUILD)/$(b))
@@ -285,7 +283,6 @@ $(BUILD)/timing/Makefile: \
 $(BUILD)/%/MOM6: $(BUILD)/%/Makefile FORCE
 	cd $(@D) && $(TIME) $(MAKE) $(@F)
 
-ifdef DO_REGRESSION_TESTS
 # Target codebase should use its own build system
 $(BUILD)/target/MOM6: $(BUILD)/target FORCE | $(TARGET_CODEBASE)
 	$(MAKE) -C $(TARGET_CODEBASE)/.testing BUILD=build build/symmetric/MOM6
@@ -298,9 +295,8 @@ $(BUILD)/opt_target/MOM6: $(BUILD)/opt_target FORCE | $(TARGET_CODEBASE)
 
 $(BUILD)/opt_target: | $(TARGET_CODEBASE)
 	ln -s $(abspath $(TARGET_CODEBASE))/.testing/build/opt $@
-endif
 
-FORCE:
+.PHONY: FORCE
 
 
 ## Use autoconf to construct the Makefile for each target
@@ -419,10 +415,6 @@ run.asymmetric: $(foreach c,$(filter-out tc3,$(CONFIGS)),$(CONFIGS),$(WORK)/$(c)
 run.nan: $(foreach c,$(CONFIGS),$(WORK)/$(c)/nan/ocean.stats)
 run.openmp: $(foreach c,$(CONFIGS),$(WORK)/$(c)/openmp/ocean.stats)
 run.cov: $(foreach c,$(CONFIGS),$(WORK)/$(c)/cov/ocean.stats)
-
-# Flag overrides
-$(foreach c,$(CONFIGS),$(c).regression $(c).regression.diag): \
-  DO_REGRESSION_TESTS := 1
 
 # Configuration test rules
 # $(1): Configuration name (tc1, tc2, &c.)
@@ -711,17 +703,14 @@ TIMING_TARGET_EXECS ?= \
   $(basename $(notdir $(wildcard $(TARGET_CODEBASE)/config_src/drivers/timing_tests/*.F90)))
 
 .PHONY: build.timing_target
-build.timing_target: DO_REGRESSION_TESTS := 1
 build.timing_target: \
   $(foreach f, $(TIMING_TARGET_EXECS), $(TARGET_CODEBASE)/.testing/$(BUILD)/timing/$(f))
 
 .PHONY: run.timing_target
-run.timing_target: DO_REGRESSION_TESTS := 1
 run.timing_target: \
   $(foreach f, $(TIMING_TARGET_EXECS), $(TARGET_CODEBASE)/.testing/work/timing/$(f).out)
 
 .PHONY: compare.timing
-compare.timing: DO_REGRESSION_TESTS := 1
 compare.timing: \
   $(foreach f, $(filter $(TIMING_EXECS),$(TIMING_TARGET_EXECS)), work/timing/$(f).compare)
 $(WORK)/timing/%.compare: \
@@ -788,7 +777,6 @@ PCONFIGS = p0
 profile: $(foreach p,$(PCONFIGS), prof.$(p))
 
 .PHONY: prof.p0
-prof.p0: DO_REGRESSION_TESTS := 1
 prof.p0: $(WORK)/p0/opt/clocks.json $(WORK)/p0/opt_target/clocks.json
 	python tools/compare_clocks.py $^
 
@@ -817,7 +805,6 @@ PERF_EVENTS ?=
 perf: $(foreach p,$(PCONFIGS), perf.$(p))
 
 .PHONY: prof.p0
-perf.p0: DO_REGRESSION_TESTS := 1
 perf.p0: $(WORK)/p0/opt/profile.json $(WORK)/p0/opt_target/profile.json
 	python tools/compare_perf.py $^
 
