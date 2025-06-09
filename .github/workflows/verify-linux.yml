@@ -712,6 +712,7 @@ jobs:
 
       - name: Profile with perf
         run: |
+          sudo sysctl -w kernel.perf_event_paranoid=2
           make -C .testing -j \
           -o build/opt/MOM6 \
           -o build/opt_target/MOM6 \
