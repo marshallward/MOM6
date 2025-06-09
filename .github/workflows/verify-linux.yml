@@ -733,7 +733,10 @@ jobs:
           run.timing
 
       - name: Compare unit test timings
-        run: make -C .testing compare.timing
+        run: |
+          make -C .testing \
+          DO_REGRESSION_TESTS=1 \
+          compare.timing
 
   # Cleanup
 
