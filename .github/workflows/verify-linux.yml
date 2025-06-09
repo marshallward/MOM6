@@ -584,7 +584,7 @@ jobs:
 
       - name: Check for regressions
         run: |
-          make -C .testing -j DO_REGRESSION_TESTS=1 \
+          make -C .testing -j \
           -o build/symmetric/MOM6 \
           -o build/target/MOM6 \
           test.regression
@@ -656,9 +656,8 @@ jobs:
           $(for f in build/timing/time_*; do echo "-o $f"; done) \
           run.timing
 
-        # Why does this need DO_REGRESSION_TESTS?
       - name: Show timing results
-        run: make -C .testing DO_REGRESSION_TESTS=1 show.timing
+        run: make -C .testing show.timing
 
   # These are most likely nonsense on a GitHub node, but someday it could work.
   compare-timings:
@@ -675,6 +674,18 @@ jobs:
 
       - uses: ./.github/actions/ubuntu-setup
 
+        # NOTE: This needs to occur before the artifacts are unpacked, because
+        #   our rule for setting up `target_codebase` depends on its presence,
+        #   rather than its contents.
+        # If we can improve this rule, then this can be moved after unpacking.
+      - name: Re-clone target directory
+        run: |
+          make -C .testing \
+          MOM_TARGET_SLUG=$GITHUB_REPOSITORY \
+          MOM_TARGET_LOCAL_BRANCH=$GITHUB_BASE_REF \
+          DO_REGRESSION_TESTS=1 \
+          build/target_codebase
+
       - name: Download optimized MOM6
         uses: actions/download-artifact@v4
         with:
@@ -690,35 +701,40 @@ jobs:
             tar -xpvf mom6-opt.tar
             tar -xpvf mom6-opt-target.tar
 
-      - name: Install preprocessing dependencies
+      - name: Install preprocessor dependency
         run: pip install f90nml
 
       - name: Profile with FMS clocks
-        run: make -C .testing -j DO_REGRESSION_TESTS=1 profile
+        run: |
+          make -C .testing -j \
+          -o build/opt/MOM6 \
+          -o build/opt_target/MOM6 \
+          profile
 
       - name: Profile with perf
-        run: make -C .testing -j DO_REGRESSION_TESTS=1 perf
+        run: |
+          make -C .testing -j \
+          -o build/opt/MOM6 \
+          -o build/opt_target/MOM6 \
+          perf
 
-      - name: Run timing tests
-        run: make -C .testing -j run.timing
+      - name: Run unit test timings
+        run: |
+          cd .testing && make -j \
+          $(for f in build/timing/time_*; do echo "-o $f"; done) \
+          run.timing
 
       - name: Show timing results
         run: make -C .testing DO_REGRESSION_TESTS=1 show.timing
 
-      - name: Re-clone target directory
-        run: |
-          make -C .testing \
-          DO_REGRESSION_TESTS=1 \
-          build/target_codebase 
-
       - name: Run target timing tests
         run: |
-          make -C .testing -j \
-          -o "build/target_codebase/.testing/build/timing/time_*"
+          cd .testing/build/target_codebase/.testing && make -j \
+          $(for f in build/timing/time_*; do echo "-o $f"; done) \
           run.timing
 
       - name: Compare unit test timings
-        run: make -C .testing DO_REGRESSION_TESTS=1 compare.timing
+        run: make -C .testing compare.timing
 
   # Cleanup
 

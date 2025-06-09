@@ -215,8 +215,8 @@ endif
 
 .PHONY: all build.regressions build.prof
 all: $(foreach b,$(EXECS),$(BUILD)/$(b))
-build.regressions: $(foreach b,symmetric target,$(BUILD)/$(b)/MOM6)
-build.prof: $(foreach b,opt opt_target,$(BUILD)/$(b)/MOM6)
+#build.regressions: $(foreach b,symmetric target,$(BUILD)/$(b)/MOM6)
+#build.prof: $(foreach b,opt opt_target,$(BUILD)/$(b)/MOM6)
 
 # Executable
 .PRECIOUS: $(foreach b,$(EXECS),$(BUILD)/$(b))
@@ -420,6 +420,10 @@ run.nan: $(foreach c,$(CONFIGS),$(WORK)/$(c)/nan/ocean.stats)
 run.openmp: $(foreach c,$(CONFIGS),$(WORK)/$(c)/openmp/ocean.stats)
 run.cov: $(foreach c,$(CONFIGS),$(WORK)/$(c)/cov/ocean.stats)
 
+# Flag overrides
+$(foreach c,$(CONFIGS),$(c).regression $(c).regression.diag): \
+  DO_REGRESSION_TESTS := 1
+
 # Configuration test rules
 # $(1): Configuration name (tc1, tc2, &c.)
 # $(2): Excluded tests
@@ -617,7 +621,6 @@ $(eval $(call STAT_RULE,dim.h,symmetric,,H_RESCALE_POWER=11,,1))
 $(eval $(call STAT_RULE,dim.z,symmetric,,Z_RESCALE_POWER=11,,1))
 $(eval $(call STAT_RULE,dim.q,symmetric,,Q_RESCALE_POWER=11,,1))
 $(eval $(call STAT_RULE,dim.r,symmetric,,R_RESCALE_POWER=11,,1))
-
 $(eval $(call STAT_RULE,cov,cov,true,,,1))
 
 # Generate the half-period input namelist as follows:
@@ -696,20 +699,33 @@ $(WORK)/timing/%.show:
 	./tools/disp_timing.py $(@:.show=.out)
 
 
-# Invoke the above unit/timing rules for a "target" code
-# Invoke with appropriate macros defines, i.e.
-#   make build.timing_target MOM_TARGET_URL=... MOM_TARGET_BRANCH=... TARGET_CODEBASE=$(BUILD)/target_codebase
-#   make run.timing_target TARGET_CODEBASE=$(BUILD)/target_codebase
+# Invoke the above unit/timing rules for a "target" code, e.g.
+#   make \
+#     MOM_TARGET_URL=... \
+#     MOM_TARGET_BRANCH=... \
+#     TARGET_CODEBASE=$(BUILD)/target_codebase \
+#     build.timing_target
+#   make TARGET_CODEBASE=$(BUILD)/target_codebase run.timing_target
 
-TIMING_TARGET_EXECS ?= $(basename $(notdir $(wildcard $(TARGET_CODEBASE)/config_src/drivers/timing_tests/*.F90) ) )
+TIMING_TARGET_EXECS ?= \
+  $(basename $(notdir $(wildcard $(TARGET_CODEBASE)/config_src/drivers/timing_tests/*.F90)))
 
 .PHONY: build.timing_target
-build.timing_target: $(foreach f, $(TIMING_TARGET_EXECS), $(TARGET_CODEBASE)/.testing/$(BUILD)/timing/$(f))
+build.timing_target: DO_REGRESSION_TESTS := 1
+build.timing_target: \
+  $(foreach f, $(TIMING_TARGET_EXECS), $(TARGET_CODEBASE)/.testing/$(BUILD)/timing/$(f))
+
 .PHONY: run.timing_target
-run.timing_target: $(foreach f, $(TIMING_TARGET_EXECS), $(TARGET_CODEBASE)/.testing/work/timing/$(f).out)
+run.timing_target: DO_REGRESSION_TESTS := 1
+run.timing_target: \
+  $(foreach f, $(TIMING_TARGET_EXECS), $(TARGET_CODEBASE)/.testing/work/timing/$(f).out)
+
 .PHONY: compare.timing
-compare.timing: $(foreach f, $(filter $(TIMING_EXECS),$(TIMING_TARGET_EXECS)), work/timing/$(f).compare)
-$(WORK)/timing/%.compare: $(TARGET_CODEBASE)
+compare.timing: DO_REGRESSION_TESTS := 1
+compare.timing: \
+  $(foreach f, $(filter $(TIMING_EXECS),$(TIMING_TARGET_EXECS)), work/timing/$(f).compare)
+$(WORK)/timing/%.compare: \
+  $(TARGET_CODEBASE)
 	./tools/disp_timing.py -r $(TARGET_CODEBASE)/.testing/$(@:.compare=.out) $(@:.compare=.out)
 $(TARGET_CODEBASE)/.testing/%: | $(TARGET_CODEBASE)
 	cd $(TARGET_CODEBASE)/.testing && make $*
@@ -772,6 +788,7 @@ PCONFIGS = p0
 profile: $(foreach p,$(PCONFIGS), prof.$(p))
 
 .PHONY: prof.p0
+prof.p0: DO_REGRESSION_TESTS := 1
 prof.p0: $(WORK)/p0/opt/clocks.json $(WORK)/p0/opt_target/clocks.json
 	python tools/compare_clocks.py $^
 
@@ -800,6 +817,7 @@ PERF_EVENTS ?=
 perf: $(foreach p,$(PCONFIGS), perf.$(p))
 
 .PHONY: prof.p0
+perf.p0: DO_REGRESSION_TESTS := 1
 perf.p0: $(WORK)/p0/opt/profile.json $(WORK)/p0/opt_target/profile.json
 	python tools/compare_perf.py $^
 
