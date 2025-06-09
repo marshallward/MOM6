@@ -2,6 +2,10 @@ name: Linux verification
 
 on: [push, pull_request]
 
+env:
+    MOM_TARGET_SLUG: ${{ github.repository }}
+    MOM_TARGET_LOCAL_BRANCH: ${{ github.base_ref }}
+
 jobs:
   # Documentation
 
@@ -155,8 +159,6 @@ jobs:
       - name: Compile target FMS
         run: |
           make -C .testing \
-          MOM_TARGET_SLUG=$GITHUB_REPOSITORY \
-          MOM_TARGET_LOCAL_BRANCH=$GITHUB_BASE_REF \
           DO_REGRESSION_TESTS=1 \
           build/target_codebase
           make -C .testing/build/target_codebase/.testing -j \
@@ -165,8 +167,6 @@ jobs:
       - name: Compile target MOM6
         run: |
           make -C .testing -j \
-          MOM_TARGET_SLUG=$GITHUB_REPOSITORY \
-          MOM_TARGET_LOCAL_BRANCH=$GITHUB_BASE_REF \
           DO_REGRESSION_TESTS=1 \
           build/target/MOM6
 
@@ -225,8 +225,6 @@ jobs:
       - name: Compile target FMS
         run: |
           make -C .testing \
-          MOM_TARGET_SLUG=$GITHUB_REPOSITORY \
-          MOM_TARGET_LOCAL_BRANCH=$GITHUB_BASE_REF \
           DO_REGRESSION_TESTS=1 \
           build/target_codebase
           make -C .testing/build/target_codebase/.testing -j \
@@ -234,16 +232,13 @@ jobs:
 
       - name: Compile target MOM6
         run: |
-          make -C .testing -j build/opt_target/MOM6 \
-          MOM_TARGET_SLUG=$GITHUB_REPOSITORY \
-          MOM_TARGET_LOCAL_BRANCH=$GITHUB_BASE_REF \
-          DO_REGRESSION_TESTS=1
+          make -C .testing -j \
+          DO_REGRESSION_TESTS=1 \
+          build/opt_target/MOM6
 
       - name: Compile target timing tests
         run: |
           make -C .testing/build/target_codebase/.testing \
-          MOM_TARGET_SLUG=$GITHUB_REPOSITORY \
-          MOM_TARGET_LOCAL_BRANCH=$GITHUB_BASE_REF \
           DO_REGRESSION_TESTS=1 \
           build.timing
 
@@ -550,6 +545,7 @@ jobs:
       - name: Verify REPRO equivalence
         run: |
           make -C .testing -j \
+          -o build/symmetric/MOM6 \
           -o build/repro/MOM6 \
           test.repro
 
@@ -625,7 +621,11 @@ jobs:
           run.cov.unit
 
       - name: Report coverage to CI
-        run: make -C .testing report.cov report.cov.unit
+        run: |
+          cd .testing && make \
+          -o build/cov/MOM6 \
+          $(for f in build/unit/test_*; do echo "-o $f"; done) \
+          report.cov report.cov.unit
         env:
           CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 
@@ -682,8 +682,6 @@ jobs:
       - name: Re-clone target directory
         run: |
           make -C .testing \
-          MOM_TARGET_SLUG=$GITHUB_REPOSITORY \
-          MOM_TARGET_LOCAL_BRANCH=$GITHUB_BASE_REF \
           DO_REGRESSION_TESTS=1 \
           build/target_codebase
 
