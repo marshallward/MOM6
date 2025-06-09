@@ -587,6 +587,7 @@ jobs:
           make -C .testing -j \
           -o build/symmetric/MOM6 \
           -o build/target/MOM6 \
+          DO_REGRESSION_TESTS=1 \
           test.regression
 
   run-coverage:
