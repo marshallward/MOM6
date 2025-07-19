@@ -1655,9 +1655,12 @@ subroutine btstep(U_in, V_in, eta_in, dt, bc_accel_u, bc_accel_v, forces, pbce, 
   endif
 
   if (CS%debug) then
+    !$omp target update from(uhbt, vhbt)
     call uvchksum("BT [uv]hbt", uhbt, vhbt, CS%debug_BT_HI, haloshift=0, &
                   unscale=US%s_to_T*US%L_to_m**2*GV%H_to_m)
+    !$omp target update from(ubt, vbt)
     call uvchksum("BT Initial [uv]bt", ubt, vbt, CS%debug_BT_HI, haloshift=0, unscale=US%L_T_to_m_s)
+    !$omp target update from(eta)
     call hchksum(eta, "BT Initial eta", CS%debug_BT_HI, haloshift=0, unscale=GV%H_to_MKS)
     call uvchksum("BT BT_force_[uv]", BT_force_u, BT_force_v, &
                   CS%debug_BT_HI, haloshift=0, unscale=US%L_T2_to_m_s2)
@@ -1674,8 +1677,10 @@ subroutine btstep(U_in, V_in, eta_in, dt, bc_accel_u, bc_accel_v, forces, pbce, 
     if (.not. use_BT_cont) then
       call uvchksum("BT Dat[uv]", Datu, Datv, CS%debug_BT_HI, haloshift=1, unscale=US%L_to_m*GV%H_to_m)
     endif
+    !$omp target update from(wt_u, wt_v)
     call uvchksum("BT wt_[uv]", wt_u, wt_v, G%HI, haloshift=0, &
                   symmetric=.true., omit_corners=.true., scalar_pair=.true.)
+    !$omp target update from(CS%frhatu, CS%frhatv)
     call uvchksum("BT frhat[uv]", CS%frhatu, CS%frhatv, G%HI, haloshift=0, &
                   symmetric=.true., omit_corners=.true., scalar_pair=.true.)
     call uvchksum("BT visc_rem_[uv]", visc_rem_u, visc_rem_v, G%HI, haloshift=0, &
@@ -2650,23 +2655,32 @@ subroutine btstep_timeloop(eta, ubt, vbt, uhbt0, Datu, BTCL_u, vhbt0, Datv, BTCL
     ! This might need to be moved outside of the OMP do loop directives.
     if (CS%debug_bt) then
       write(mesg,'("BT vel update ",I4)') n
+      !$omp target update from(PFu, PFv)
       call uvchksum(trim(mesg)//" PF[uv]", PFu, PFv, CS%debug_BT_HI, haloshift=iev-ie, &
                     unscale=US%L_T_to_m_s*US%s_to_T)
+      !$omp target update from(Cor_u, Cor_v)
       call uvchksum(trim(mesg)//" Cor_[uv]", Cor_u, Cor_v, CS%debug_BT_HI, haloshift=iev-ie, &
                     unscale=US%L_T_to_m_s*US%s_to_T)
+      !$omp target update from(BT_force_u, BT_force_v)
       call uvchksum(trim(mesg)//" BT_force_[uv]", BT_force_u, BT_force_v, CS%debug_BT_HI, haloshift=iev-ie, &
                     unscale=US%L_T_to_m_s*US%s_to_T)
+      !$omp target update from(BT_rem_u, BT_rem_v)
       call uvchksum(trim(mesg)//" BT_rem_[uv]", BT_rem_u, BT_rem_v, CS%debug_BT_HI, &
                     haloshift=iev-ie, scalar_pair=.true.)
+      !$omp target update from(ubt, vbt)
       call uvchksum(trim(mesg)//" [uv]bt", ubt, vbt, CS%debug_BT_HI, haloshift=iev-ie, &
                     unscale=US%L_T_to_m_s)
+      !$omp target update from(ubt_trans, vbt_trans)
       call uvchksum(trim(mesg)//" [uv]bt_trans", ubt_trans, vbt_trans, CS%debug_BT_HI, haloshift=iev-ie, &
                     unscale=US%L_T_to_m_s)
+      !$omp target update from(uhbt, vhbt)
       call uvchksum(trim(mesg)//" [uv]hbt", uhbt, vhbt, CS%debug_BT_HI, haloshift=iev-ie, &
                     unscale=US%s_to_T*US%L_to_m**2*GV%H_to_m)
-      if (integral_BT_cont) &
+      if (integral_BT_cont) then
+        !$omp target update from(uhbt_int, vhbt_int)
         call uvchksum(trim(mesg)//" [uv]hbt_int", uhbt_int, vhbt_int, CS%debug_BT_HI, haloshift=iev-ie, &
                       unscale=US%L_to_m**2*GV%H_to_m)
+      endif
     endif
 
     ! Apply open boundary condition considerations to revise the updated velocities and transports.
@@ -2723,8 +2737,10 @@ subroutine btstep_timeloop(eta, ubt, vbt, uhbt0, Datu, BTCL_u, vhbt0, Datv, BTCL
 
     if (CS%debug_bt) then
       write(mesg,'("BT step ",I4)') n
+      !$omp target update from(ubt, vbt)
       call uvchksum(trim(mesg)//" [uv]bt", ubt, vbt, CS%debug_BT_HI, haloshift=iev-ie, &
                     unscale=US%L_T_to_m_s)
+      !$omp target update from(eta)
       call hchksum(eta, trim(mesg)//" eta", CS%debug_BT_HI, haloshift=iev-ie, unscale=GV%H_to_MKS)
     endif
 
