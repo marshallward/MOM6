@@ -695,17 +695,27 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
     enddo ; enddo ; enddo
   endif
 
+  ! This should be conditional, but the first do-concurrent always copies the
+  ! array, so for now it always happens.
+  !$omp target enter data map(to: ADp)
+  !$omp target enter data map(alloc: ADp%du_dt_str)
+
   if (associated(ADp%du_dt_str)) then
-    do k=1,nz ; do j=G%jsc,G%jec ; do I=Isq,Ieq
+    do concurrent (k=1:nz, j=G%jsc:G%jec, I=Isq:Ieq)
       ADp%du_dt_str(I,j,k) = 0.0
-    enddo ; enddo ; enddo
+    enddo
   endif
+
+  ! TODO: Move outside function
+  !$omp target update to(u, v, h)
+
+  !$omp target enter data map(alloc: surface_stress)
 
   !   One option is to have the wind stress applied as a body force
   ! over the topmost Hmix fluid.  If DIRECT_STRESS is not defined,
   ! the wind stress is applied as a stress boundary condition.
   if (CS%direct_stress) then
-    do j=G%jsc,G%jec ; do I=Isq,Ieq ; if (G%mask2dCu(I,j) > 0.) then
+    do concurrent (j=G%jsc:G%jec, I=Isq:Ieq, G%mask2dCu(I,j) > 0.)
       surface_stress(I,j) = 0.0
       zDS = 0.0
       stress = dt_Rho0 * forces%taux(I,j)
@@ -713,14 +723,15 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
         h_a = 0.5 * (h(i,j,k) + h(i+1,j,k)) + h_neglect
         hfr = 1.0 ; if ((zDS+h_a) > Hmix) hfr = (Hmix - zDS) / h_a
         u(I,j,k) = u(I,j,k) + I_Hmix * hfr * stress
+        ! TODO: This needs to be outside loop
         if (associated(ADp%du_dt_str)) ADp%du_dt_str(i,J,k) = (I_Hmix * hfr * stress) * Idt
         zDS = zDS + h_a ; if (zDS >= Hmix) exit
       enddo
-    endif ; enddo ; enddo
+    enddo
   else
-    do j=G%jsc,G%jec ; do I=Isq,Ieq
+    do concurrent (j=G%jsc:G%jec, I=Isq:Ieq)
       surface_stress(I,j) = dt_Rho0 * (G%mask2dCu(I,j)*forces%taux(I,j))
-    enddo ; enddo
+    enddo
   endif
 
   ! perform forward elimination on the tridiagonal system
@@ -749,52 +760,73 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
   ! c1(k) is -c'_(k - 1)
   ! and the right-hand-side is destructively updated to be d'_k
 
+  !$omp target enter data map(alloc: Ray)
+
   if (allocated(visc%Ray_u)) then
-    do j=G%jsc,G%jec ; do I=Isq,Ieq
+    ! TODO: Move outside
+    !$omp target enter data map(to: visc%Ray_u)
+
+    do concurrent (j=G%jsc:G%jec, I=Isq:Ieq)
       Ray(I,j) = visc%Ray_u(I,j,1)
-    enddo ; enddo
+    enddo
   else
-    do j=G%jsc,G%jec ; do I=Isq,Ieq
+    do concurrent (j=G%jsc:G%jec, I=Isq:Ieq)
       Ray(I,j) = 0.
-    enddo ; enddo
+    enddo
   endif
 
-  do j=G%isc,G%jec ; do I=Isq,Ieq ; if (G%mask2dCu(I,j) > 0.) then
+  ! TODO: Move outside
+  !$omp target enter data map(to: CS, CS%a_u, CS%h_u)
+
+  !$omp target enter data map(alloc: b1, c1, d1)
+
+  do concurrent (j=G%isc:G%jec, I=Isq:Ieq, G%mask2dCu(I,j) > 0.)
     b_denom_1 = CS%h_u(I,j,1) + dt * (Ray(I,j) + CS%a_u(I,j,1))
     b1(I,j) = 1.0 / (b_denom_1 + dt*CS%a_u(I,j,2))
     d1(I,j) = b_denom_1 * b1(I,j)
     u(I,j,1) = b1(I,j) * (CS%h_u(I,j,1) * u(I,j,1) + surface_stress(I,j))
-  endif ; enddo ; enddo
+  enddo
 
   if (associated(ADp%du_dt_str)) then
-    do j=G%isc,G%jec ; do I=Isq,Ieq ; if (G%mask2dCu(I,j) > 0.) then
+    do concurrent (j=G%isc:G%jec, I=Isq:Ieq, G%mask2dCu(I,j) > 0.)
       ADp%du_dt_str(I,j,1) = b1(I,j) * (CS%h_u(I,j,1) * ADp%du_dt_str(I,j,1) + surface_stress(I,j) * Idt)
-    endif ; enddo ; enddo
+    enddo
   endif
 
   do k=2,nz
     if (allocated(visc%Ray_u)) then
-      do j=G%jsc,G%jec ; do I=Isq,Ieq
+      do concurrent (j=G%jsc:G%jec, I=Isq:Ieq)
         Ray(I,j) = visc%Ray_u(I,j,k)
-      enddo ; enddo
+      enddo
     endif
 
-    do j=G%isc,G%jec ; do I=Isq,Ieq ; if (G%mask2dCu(I,j) > 0.) then
+    do concurrent (j=G%isc:G%jec, I=Isq:Ieq, G%mask2dCu(I,j) > 0.)
       c1(I,j,k) = dt * CS%a_u(I,j,K) * b1(I,j)
       b_denom_1 = CS%h_u(I,j,k) + dt * (Ray(I,j) + CS%a_u(I,j,K)*d1(I,j))
       b1(I,j) = 1.0 / (b_denom_1 + dt * CS%a_u(I,j,K+1))
       d1(I,j) = b_denom_1 * b1(I,j)
       u(I,j,k) = (CS%h_u(I,j,k) * u(I,j,k) + &
                   dt * CS%a_u(I,j,K) * u(I,j,k-1)) * b1(I,j)
-    endif ; enddo ; enddo
+    enddo
 
     if (associated(ADp%du_dt_str)) then
-      do j=G%isc,G%jec ; do I=Isq,Ieq ; if (G%mask2dCu(I,j) > 0.) then
+      do concurrent (j=G%isc:G%jec, I=Isq:Ieq, G%mask2dCu(I,j) > 0.)
         ADp%du_dt_str(I,j,k) = (CS%h_u(I,j,k) * ADp%du_dt_str(I,j,k) &
             + dt * CS%a_u(I,j,K) * ADp%du_dt_str(I,j,k-1)) * b1(I,j)
-      endif ; enddo ; enddo
+      enddo
     endif
   enddo
+
+  !$omp target exit data map(from: b1, c1, d1)
+  !$omp target update from(u)
+
+  ! Temporary
+  !$omp target exit data map(from: ADp%du_dt_str)
+  !$omp target exit data map(delete: ADp)
+  !$omp target exit data map(from: surface_stress)
+  !$omp target exit data map(delete: CS, CS%a_u, CS%h_u)
+  !$omp target exit data map(from: Ray)
+  !$omp target exit data map(delete: visc%Ray_u) if (allocated(visc%Ray_u))
 
   ! back substitute to solve for the new velocities
   ! u_k = d'_k - c'_k x_(k+1)

@@ -424,7 +424,7 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
 
   ! allocate internal variables on GPU
   !$omp target enter data map(alloc: u_bc_accel, v_bc_accel, eta_pred, uh_in, vh_in)
-  !$omp target enter data map(alloc: hp)
+  !$omp target enter data map(alloc: up, vp, hp)
   !$omp target update to(eta)
 
   !$OMP parallel do default(shared)
@@ -772,6 +772,7 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
   call vertvisc_coef(up, vp, h, dz, forces, visc, tv, dt_pred, G, GV, US, CS%vertvisc_CSp, &
                      CS%OBC, VarMix)
 
+  !$omp target update to (up, vp, h)
   if (CS%fpmix) then
     hbl(:,:) = 0.0
     if (ASSOCIATED(CS%KPP_CSp)) call KPP_get_BLD(CS%KPP_CSp, hbl, G, US, m_to_BLD_units=GV%m_to_H)
@@ -1206,6 +1207,8 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
     enddo ; enddo ; enddo
     call post_data(CS%id_veffA, veffA, CS%diag)
   endif
+
+  !$omp target exit data map(delete: up, vp)
 
   ! Diagnostics of the fractional thicknesses times momentum budget terms
   ! 3D diagnostics hf_PFu etc. are commented because there is no clarity on proper remapping grid option.
