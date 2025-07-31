@@ -1,7 +1,24 @@
+module mom_nvtx
+use nvtx
+implicit none
+
+contains 
+
+subroutine start_nvtx(label)
+   character(len=*), intent(in) :: label
+   call nvtxStartRange(label)
+end subroutine start_nvtx 
+
+subroutine end_nvtx()
+  call nvtxEndRange
+end subroutine end_nvtx
+
+end module mom_nvtx
 !> Implements vertical viscosity (vertvisc)
 module MOM_vert_friction
 
 ! This file is part of MOM6. See LICENSE.md for the license.
+use mom_nvtx
 use MOM_domains,       only : pass_var, To_All, Omit_corners
 use MOM_domains,       only : pass_vector, Scalar_Pair
 use MOM_diag_mediator, only : post_data, register_diag_field, safe_alloc_ptr
@@ -697,6 +714,8 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
 
   ! This should be conditional, but the first do-concurrent always copies the
   ! array, so for now it always happens.
+  call start_nvtx("ADp initialize to 0.0")
+  ! this could be a function 
   !$omp target enter data map(to: ADp)
   !$omp target enter data map(alloc: ADp%du_dt_str)
 
@@ -706,9 +725,11 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
     enddo
   endif
 
-  ! TODO: Move outside function
-  !$omp target update to(u, v, h)
+  call end_nvtx
 
+  ! TODO: Move outside function
+  call start_nvtx("second do concurrent")
+  !$omp target update to(u, v, h)
   !$omp target enter data map(alloc: surface_stress)
 
   !   One option is to have the wind stress applied as a body force
@@ -733,6 +754,7 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
       surface_stress(I,j) = dt_Rho0 * (G%mask2dCu(I,j)*forces%taux(I,j))
     enddo
   endif
+  call end_nvtx
 
   ! perform forward elimination on the tridiagonal system
   !
@@ -759,7 +781,7 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
   ! this is done so that d1 = b1 * b_denom_1 = 1 - c'_(k-1)
   ! c1(k) is -c'_(k - 1)
   ! and the right-hand-side is destructively updated to be d'_k
-
+  call start_nvtx("forward elimination on tridiagonal system")
   !$omp target enter data map(alloc: Ray)
 
   if (allocated(visc%Ray_u)) then
@@ -774,8 +796,10 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
       Ray(I,j) = 0.
     enddo
   endif
+  call end_nvtx
 
   ! TODO: Move outside
+  call start_nvtx("biggo loopo")
   !$omp target enter data map(to: CS, CS%a_u, CS%h_u)
 
   !$omp target enter data map(alloc: b1, c1, d1)
@@ -820,6 +844,9 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
   !$omp target exit data map(from: b1, c1, d1)
   !$omp target update from(u)
 
+
+
+
   ! Temporary
   !$omp target exit data map(from: ADp%du_dt_str)
   !$omp target exit data map(delete: ADp)
@@ -828,6 +855,9 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
   !$omp target exit data map(from: Ray)
   !$omp target exit data map(delete: visc%Ray_u) if (allocated(visc%Ray_u))
 
+  call end_nvtx
+
+  call start_nvtx("solve for te new velocities")
   ! back substitute to solve for the new velocities
   ! u_k = d'_k - c'_k x_(k+1)
   do k=nz-1,1,-1
@@ -852,6 +882,9 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
     enddo
   endif
 
+  call end_nvtx()
+
+  call start_nvtx("compute vertical velocity")
   ! compute vertical velocity tendency that arises from GL90 viscosity;
   ! follow tridiagonal solve method as above; to avoid corrupting u,
   ! use ADp%du_dt_visc_gl90 as a placeholder for updated u (due to GL90) until last do loop
@@ -951,6 +984,9 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
     endif ; enddo ; enddo ; enddo
   endif
 
+  call end_nvtx
+
+  call start_nvtx("meridional velocity")
   ! == Now work on the meridional velocity component.
 
   ! When mixing down Eulerian current + Stokes drift add before calling solver
@@ -1071,6 +1107,8 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
     enddo
   endif
 
+  call end_nvtx
+  call start_nvtx("Vertical velocity tendency")
   ! compute vertical velocity tendency that arises from GL90 viscosity;
   ! follow tridiagonal solve method as above; to avoid corrupting v,
   ! use ADp%dv_dt_visc_gl90 as a placeholder for updated u (due to GL90) until last do loop
@@ -1161,6 +1199,8 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
       v(i,J,k) = v(i,J,k) + Waves%Us_y(i,J,k)
     endif ; enddo ; enddo ; enddo
   endif
+  call end_nvtx
+  call start_nvtx("calculate KE source")
 
   ! Calculate the KE source from GL90 vertical viscosity [H L2 T-3 ~> m3 s-3].
   ! We do the KE-rate calculation here (rather than in MOM_diagnostics) to ensure
@@ -1199,6 +1239,7 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
       endif
     enddo
   endif
+  call end_nvtx
 
   ! Offer diagnostic fields for averaging.
   if (query_averaging_enabled(CS%diag)) then
