@@ -841,11 +841,27 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
     endif
   enddo
 
+
+  call end_nvtx
+
+
+  call start_nvtx("solve for te new velocities")
+  ! back substitute to solve for the new velocities
+  ! u_k = d'_k - c'_k x_(k+1)
+  do k=nz-1,1,-1
+  !$omp target teams loop collapse(2) private(j,i) 
+    do j=G%isc,G%jec
+      do I=Isq,Ieq 
+        if (G%mask2dCu(I,j) > 0.) then
+          u(I,j,k) = u(I,j,k) + c1(I,j,k+1) * u(I,j,k+1)
+        endif 
+      enddo
+    enddo
+  !$omp end target teams loop
+  enddo
+
   !$omp target exit data map(from: b1, c1, d1)
   !$omp target update from(u)
-
-
-
 
   ! Temporary
   !$omp target exit data map(from: ADp%du_dt_str)
@@ -854,17 +870,7 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
   !$omp target exit data map(delete: CS, CS%a_u, CS%h_u)
   !$omp target exit data map(from: Ray)
   !$omp target exit data map(delete: visc%Ray_u) if (allocated(visc%Ray_u))
-
-  call end_nvtx
-
-  call start_nvtx("solve for te new velocities")
-  ! back substitute to solve for the new velocities
-  ! u_k = d'_k - c'_k x_(k+1)
-  do k=nz-1,1,-1
-    do j=G%isc,G%jec ; do I=Isq,Ieq ; if (G%mask2dCu(I,j) > 0.) then
-      u(I,j,k) = u(I,j,k) + c1(I,j,k+1) * u(I,j,k+1)
-    endif ; enddo ; enddo
-  enddo
+  !! TODO jorge: this is the last GPU code
 
   if (associated(ADp%du_dt_str)) then
     do j=G%isc,G%jec ; do I=Isq,Ieq
