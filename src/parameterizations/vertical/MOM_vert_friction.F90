@@ -860,9 +860,37 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
   !$omp end target teams loop
   enddo
 
+
+  if (associated(ADp%du_dt_str)) then
+  !$omp target teams loop collapse(2) private(i,j)
+    do j=G%isc,G%jec
+      do I=Isq,Ieq
+        if (abs(ADp%du_dt_str(I,j,nz)) < accel_underflow) then 
+          ADp%du_dt_str(I,j,nz) = 0.0
+        end if
+      enddo
+    enddo
+    !$omp end target teams loop
+
+    do k=nz-1,1,-1
+      !$omp target teams loop collapse(2) private(i,j)
+      do j=G%isc,G%jec
+        do I=Isq,Ieq
+          if (G%mask2dCu(I,j) > 0.) then
+              ADp%du_dt_str(I,j,k) = &
+                ADp%du_dt_str(I,j,k) + c1(I,j,k+1) * ADp%du_dt_str(I,j,k+1)
+
+            if (abs(ADp%du_dt_str(I,j,k)) < accel_underflow) &
+              ADp%du_dt_str(I,j,k) = 0.0
+          end if
+        enddo
+      enddo
+    !$omp end target teams loop
+    enddo
+  endif
+
   !$omp target exit data map(from: b1, c1, d1)
   !$omp target update from(u)
-
   ! Temporary
   !$omp target exit data map(from: ADp%du_dt_str)
   !$omp target exit data map(delete: ADp)
@@ -872,21 +900,6 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
   !$omp target exit data map(delete: visc%Ray_u) if (allocated(visc%Ray_u))
   !! TODO jorge: this is the last GPU code
 
-  if (associated(ADp%du_dt_str)) then
-    do j=G%isc,G%jec ; do I=Isq,Ieq
-      if (abs(ADp%du_dt_str(I,j,nz)) < accel_underflow) &
-        ADp%du_dt_str(I,j,nz) = 0.0
-    enddo ; enddo
-
-    do k=nz-1,1,-1
-      do j=G%isc,G%jec ; do I=Isq,Ieq ; if (G%mask2dCu(I,j) > 0.) then
-        ADp%du_dt_str(I,j,k) = ADp%du_dt_str(I,j,k) + c1(I,j,k+1) * ADp%du_dt_str(I,j,k+1)
-
-        if (abs(ADp%du_dt_str(I,j,k)) < accel_underflow) &
-          ADp%du_dt_str(I,j,k) = 0.0
-      endif ; enddo ; enddo
-    enddo
-  endif
 
   call end_nvtx()
 
