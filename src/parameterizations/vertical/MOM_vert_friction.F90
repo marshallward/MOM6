@@ -706,31 +706,40 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
     enddo ; enddo; enddo
   endif
 
-  if (associated(ADp%du_dt_visc_gl90)) then
-    do k=1,nz ; do j=G%jsc,G%jec ; do I=Isq,Ieq
-      ADp%du_dt_visc_gl90(I,j,k) = u(I,j,k)
-    enddo ; enddo ; enddo
-  endif
 
   ! This should be conditional, but the first do-concurrent always copies the
   ! array, so for now it always happens.
   call start_nvtx("ADp initialize to 0.0")
   ! this could be a function 
   !$omp target enter data map(to: ADp)
+  !$omp target update to(u)
   !$omp target enter data map(alloc: ADp%du_dt_str)
+  !$omp target enter data map(alloc: ADp%du_dt_visc_gl90)
+
+  if (associated(ADp%du_dt_visc_gl90)) then
+    do k=1,nz
+    !$omp target teams loop private(i,j) collapse(2)
+      do j=G%jsc,G%jec
+        do I=Isq,Ieq
+          ADp%du_dt_visc_gl90(I,j,k) = u(I,j,k)
+        enddo
+      enddo
+      !$omp end target teams loop
+    enddo
+  endif
 
   if (associated(ADp%du_dt_str)) then
     do concurrent (k=1:nz, j=G%jsc:G%jec, I=Isq:Ieq)
       ADp%du_dt_str(I,j,k) = 0.0
     enddo
   endif
+  !$omp target update to(v, h)
+  !$omp target enter data map(alloc: surface_stress)
 
   call end_nvtx
 
   ! TODO: Move outside function
   call start_nvtx("second do concurrent")
-  !$omp target update to(u, v, h)
-  !$omp target enter data map(alloc: surface_stress)
 
   !   One option is to have the wind stress applied as a body force
   ! over the topmost Hmix fluid.  If DIRECT_STRESS is not defined,
@@ -889,16 +898,6 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
     enddo
   endif
 
-  !$omp target exit data map(from: b1, c1, d1)
-  !$omp target update from(u)
-  ! Temporary
-  !$omp target exit data map(from: ADp%du_dt_str)
-  !$omp target exit data map(delete: ADp)
-  !$omp target exit data map(from: surface_stress)
-  !$omp target exit data map(delete: CS, CS%a_u, CS%h_u)
-  !$omp target exit data map(from: Ray)
-  !$omp target exit data map(delete: visc%Ray_u) if (allocated(visc%Ray_u))
-  !! TODO jorge: this is the last GPU code
 
 
   call end_nvtx()
@@ -907,61 +906,110 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
   ! compute vertical velocity tendency that arises from GL90 viscosity;
   ! follow tridiagonal solve method as above; to avoid corrupting u,
   ! use ADp%du_dt_visc_gl90 as a placeholder for updated u (due to GL90) until last do loop
+  vert_vel_gl90: block
   if ((CS%id_du_dt_visc_gl90 > 0) .or. (CS%id_GLwork > 0)) then
     if (associated(ADp%du_dt_visc_gl90)) then
-      do j=G%isc,G%jec ; do I=Isq,Ieq ; if (G%mask2dCu(I,j) > 0.) then
-        b_denom_1 = CS%h_u(I,j,1)  ! CS%a_u_gl90(I,j,1) is zero
-        b1(I,j) = 1.0 / (b_denom_1 + dt*CS%a_u_gl90(I,j,2))
-        d1(I,j) = b_denom_1 * b1(I,j)
+     !$omp target teams loop private(i,j) collapse(2)
+      do j=G%isc,G%jec
+        do I=Isq,Ieq 
+          if (G%mask2dCu(I,j) > 0.) then
+            b_denom_1 = CS%h_u(I,j,1)  ! CS%a_u_gl90(I,j,1) is zero
+            b1(I,j) = 1.0 / (b_denom_1 + dt*CS%a_u_gl90(I,j,2))
+            d1(I,j) = b_denom_1 * b1(I,j)
 
-        ADp%du_dt_visc_gl90(I,j,1) = b1(I,j) * (CS%h_u(I,j,1) * ADp%du_dt_visc_gl90(I,j,1))
-      endif ; enddo ; enddo
+            ADp%du_dt_visc_gl90(I,j,1) = b1(I,j) * (CS%h_u(I,j,1) * ADp%du_dt_visc_gl90(I,j,1))
+          endif
+        enddo
+      enddo
+      !$omp end target teams loop
 
       do k=2,nz
-        do j=G%isc,G%jec ; do I=Isq,Ieq ; if (G%mask2dCu(I,j) > 0.) then
-          c1(I,j,k) = dt * CS%a_u_gl90(I,j,K) * b1(I,j)
-          b_denom_1 = CS%h_u(I,j,k) + dt * (CS%a_u_gl90(I,j,K)*d1(I,j))
-          b1(I,j) = 1.0 / (b_denom_1 + dt * CS%a_u_gl90(I,j,K+1))
-          d1(I,j) = b_denom_1 * b1(I,j)
+        !$omp target teams loop private(i,j) collapse(2)
+        do j=G%isc,G%jec
+          do I=Isq,Ieq
+            if (G%mask2dCu(I,j) > 0.) then
+              c1(I,j,k) = dt * CS%a_u_gl90(I,j,K) * b1(I,j)
+              b_denom_1 = CS%h_u(I,j,k) + dt * (CS%a_u_gl90(I,j,K)*d1(I,j))
+              b1(I,j) = 1.0 / (b_denom_1 + dt * CS%a_u_gl90(I,j,K+1))
+              d1(I,j) = b_denom_1 * b1(I,j)
 
-          ADp%du_dt_visc_gl90(I,j,k) = (CS%h_u(I,j,k) * ADp%du_dt_visc_gl90(I,j,k) &
-              + dt * CS%a_u_gl90(I,j,K) * ADp%du_dt_visc_gl90(I,j,k-1)) * b1(I,j)
-        endif ; enddo ; enddo
+              ADp%du_dt_visc_gl90(I,j,k) = (CS%h_u(I,j,k) * ADp%du_dt_visc_gl90(I,j,k) &
+                + dt * CS%a_u_gl90(I,j,K) * ADp%du_dt_visc_gl90(I,j,k-1)) * b1(I,j)
+            endif
+          enddo
+        enddo
+      !$omp end target teams loop
       enddo
 
-      ! back substitute to solve for new velocities, held by ADp%du_dt_visc_gl90
       do k=nz-1,1,-1
-        do j=G%isc,G%jec ; do I=Isq,Ieq ; if (G%mask2dCu(I,j) > 0.) then
-          ADp%du_dt_visc_gl90(I,j,k) = ADp%du_dt_visc_gl90(I,j,k) &
+        !$omp target teams loop private(i,j) collapse(2)
+        do j=G%isc,G%jec
+          do I=Isq,Ieq
+            if (G%mask2dCu(I,j) > 0.) then
+              ADp%du_dt_visc_gl90(I,j,k) = ADp%du_dt_visc_gl90(I,j,k) &
               + c1(I,j,k+1) * ADp%du_dt_visc_gl90(I,j,k+1)
-        endif ; enddo ; enddo
+            endif
+          enddo
+        enddo
+        !$omp end target teams loop
       enddo
 
       do k=1,nz
-        do j=G%isc,G%jec ; do I=Isq,Ieq ; if (G%mask2dCu(I,j) > 0.) then
-          ! now fill ADp%du_dt_visc_gl90(I,j,k) with actual velocity tendency due to GL90;
-          ! note that on RHS: ADp%du_dt_visc(I,j,k) holds the original velocity value u(I,j,k)
-          ! and ADp%du_dt_visc_gl90(I,j,k) the updated velocity due to GL90
-          ADp%du_dt_visc_gl90(I,j,k) = &
-              (ADp%du_dt_visc_gl90(I,j,k) - ADp%du_dt_visc(I,j,k)) * Idt
+        
+        !$omp target teams loop private(i,j) collapse(2)
+        do j=G%isc,G%jec
+          do I=Isq,Ieq
+            if (G%mask2dCu(I,j) > 0.) then
+              ! now fill ADp%du_dt_visc_gl90(I,j,k) with actual velocity tendency due to GL90;
+              ! note that on RHS: ADp%du_dt_visc(I,j,k) holds the original velocity value u(I,j,k)
+              ! and ADp%du_dt_visc_gl90(I,j,k) the updated velocity due to GL90
+              ADp%du_dt_visc_gl90(I,j,k) = &
+                  (ADp%du_dt_visc_gl90(I,j,k) - ADp%du_dt_visc(I,j,k)) * Idt
 
-          if (abs(ADp%du_dt_visc_gl90(I,j,k)) < accel_underflow) then
-            ADp%du_dt_visc_gl90(I,j,k) = 0.0
-          endif
-        endif ; enddo ; enddo
+              if (abs(ADp%du_dt_visc_gl90(I,j,k)) < accel_underflow) then
+                ADp%du_dt_visc_gl90(I,j,k) = 0.0
+              endif
+            endif
+          enddo
+        enddo
+        !$omp end target teams loop
       enddo
 
+
+
+      ! back substitute to solve for new velocities, held by ADp%du_dt_visc_gl90
       ! to compute energetics, we need to multiply by u*h, where u is original velocity before
       ! velocity update; note that ADp%du_dt_visc(I,j,k) holds the original velocity value u(I,j,k)
       if (CS%id_GLwork > 0) then
         do k=1,nz
-          do j=G%isc,G%jec ; do I=Isq,Ieq ; if (G%mask2dCu(I,j) > 0.) then
-            KE_u(I,j,k) = ADp%du_dt_visc(I,j,k) * CS%h_u(I,j,k) * G%areaCu(I,j) * ADp%du_dt_visc_gl90(I,j,k)
-          endif ; enddo ; enddo
+        !$omp target teams loop private(i,j) collapse(2)
+          do j=G%isc,G%jec
+            do I=Isq,Ieq
+              if (G%mask2dCu(I,j) > 0.) then
+                KE_u(I,j,k) = ADp%du_dt_visc(I,j,k) * CS%h_u(I,j,k) * G%areaCu(I,j) * ADp%du_dt_visc_gl90(I,j,k)
+              endif
+            enddo
+          enddo
+        !$omp end target teams loop
         enddo
       endif
     endif
   endif
+
+  end block vert_vel_gl90
+    ! this block is just for reference since this if is big and does not fit in my screen
+
+  !$omp target exit data map(from: b1, c1, d1)
+  !$omp target exit data map(from:u)
+  ! Temporary
+  !$omp target exit data map(from: ADp%du_dt_str)
+  !$omp target exit data map(from: ADp%du_dt_visc_gl90)
+  !$omp target exit data map(delete: ADp)
+  !$omp target exit data map(from: surface_stress)
+  !$omp target exit data map(delete: CS, CS%a_u, CS%h_u)
+  !$omp target exit data map(from: Ray)
+  !$omp target exit data map(delete: visc%Ray_u) if (allocated(visc%Ray_u))
+  !! TODO jorge: this is the last GPU code
 
   if (associated(ADp%du_dt_visc)) then
     do k=1,nz ; do j=G%jsc,G%jec ; do I=Isq,Ieq
