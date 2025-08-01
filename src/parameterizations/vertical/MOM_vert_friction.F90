@@ -999,6 +999,67 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
   end block vert_vel_gl90
     ! this block is just for reference since this if is big and does not fit in my screen
 
+
+  if (associated(ADp%du_dt_visc)) then
+    do k=1,nz
+      !$omp target teams loop private(i,j) collapse(2)
+      do j=G%jsc,G%jec ; do I=Isq,Ieq
+      ADp%du_dt_visc(I,j,k) = (u(I,j,k) - ADp%du_dt_visc(I,j,k)) * Idt
+
+      if (abs(ADp%du_dt_visc(I,j,k)) < accel_underflow) &
+        ADp%du_dt_visc(I,j,k) = 0.0
+      enddo ; enddo
+        !$omp end target teams loop
+    enddo
+  endif
+
+  if (allocated(visc%taux_shelf)) then
+      !$omp target teams loop private(i,j) collapse(2)
+    do j=G%jsc,G%jec ; do I=Isq,Ieq
+      visc%taux_shelf(I,j) = -GV%H_to_RZ * CS%a1_shelf_u(I,j) * u(I,j,1) ! - u_shelf?
+    enddo ; enddo
+        !$omp end target teams loop
+  endif
+
+  if (present(taux_bot)) then
+      !$omp target teams loop private(i,j) collapse(2)
+    do j=G%jsc,G%jec ; do I=Isq,Ieq
+      taux_bot(I,j) = GV%H_to_RZ * (u(I,j,nz) * CS%a_u(I,j,nz+1))
+    enddo ; enddo
+        !$omp end target teams loop
+
+    if (allocated(visc%Ray_u)) then
+      do k=1,nz
+      !$omp target teams loop private(i,j) collapse(2)
+        do j=G%jsc,G%jec ; do I=Isq,Ieq
+        taux_bot(I,j) = taux_bot(I,j) + GV%H_to_RZ * (visc%Ray_u(I,j,k) * u(I,j,k))
+        enddo ; enddo
+        !$omp end target teams loop
+      enddo
+    endif
+  endif
+
+  ! When mixing down Eulerian current + Stokes drift subtract after calling solver
+  if (DoStokesMixing) then
+    do k=1,nz
+      !$omp target teams loop private(i,j) collapse(2)
+      do j=G%jsc,G%jec ; do I=Isq,Ieq ; if (G%mask2dCu(I,j) > 0.) then
+        u(I,j,k) = u(I,j,k) - Waves%Us_x(I,j,k)
+      endif ; enddo ; enddo
+        !$omp end target teams loop
+    enddo
+  endif
+
+  if (lfpmix) then
+    do k=1,nz
+      !$omp target teams loop private(i,j) collapse(2)
+      do j=G%jsc,G%jec ; do I=Isq,Ieq ; if (G%mask2dCu(I,j) > 0.) then
+        u(I,j,k) = u(I,j,k) + Waves%Us_x(I,j,k)
+      endif ; enddo ; enddo
+        !$omp end target teams loop
+    enddo
+  endif
+
   !$omp target exit data map(from: b1, c1, d1)
   !$omp target exit data map(from:u)
   ! Temporary
@@ -1010,46 +1071,6 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
   !$omp target exit data map(from: Ray)
   !$omp target exit data map(delete: visc%Ray_u) if (allocated(visc%Ray_u))
   !! TODO jorge: this is the last GPU code
-
-  if (associated(ADp%du_dt_visc)) then
-    do k=1,nz ; do j=G%jsc,G%jec ; do I=Isq,Ieq
-      ADp%du_dt_visc(I,j,k) = (u(I,j,k) - ADp%du_dt_visc(I,j,k)) * Idt
-
-      if (abs(ADp%du_dt_visc(I,j,k)) < accel_underflow) &
-        ADp%du_dt_visc(I,j,k) = 0.0
-    enddo ; enddo ; enddo
-  endif
-
-  if (allocated(visc%taux_shelf)) then
-    do j=G%jsc,G%jec ; do I=Isq,Ieq
-      visc%taux_shelf(I,j) = -GV%H_to_RZ * CS%a1_shelf_u(I,j) * u(I,j,1) ! - u_shelf?
-    enddo ; enddo
-  endif
-
-  if (present(taux_bot)) then
-    do j=G%jsc,G%jec ; do I=Isq,Ieq
-      taux_bot(I,j) = GV%H_to_RZ * (u(I,j,nz) * CS%a_u(I,j,nz+1))
-    enddo ; enddo
-
-    if (allocated(visc%Ray_u)) then
-      do k=1,nz ; do j=G%jsc,G%jec ; do I=Isq,Ieq
-        taux_bot(I,j) = taux_bot(I,j) + GV%H_to_RZ * (visc%Ray_u(I,j,k) * u(I,j,k))
-      enddo ; enddo ; enddo
-    endif
-  endif
-
-  ! When mixing down Eulerian current + Stokes drift subtract after calling solver
-  if (DoStokesMixing) then
-    do k=1,nz ; do j=G%jsc,G%jec ; do I=Isq,Ieq ; if (G%mask2dCu(I,j) > 0.) then
-      u(I,j,k) = u(I,j,k) - Waves%Us_x(I,j,k)
-    endif ; enddo ; enddo ; enddo
-  endif
-
-  if (lfpmix) then
-    do k=1,nz ; do j=G%jsc,G%jec ; do I=Isq,Ieq ; if (G%mask2dCu(I,j) > 0.) then
-      u(I,j,k) = u(I,j,k) + Waves%Us_x(I,j,k)
-    endif ; enddo ; enddo ; enddo
-  endif
 
   call end_nvtx
 
