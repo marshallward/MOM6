@@ -3295,7 +3295,7 @@ subroutine vertvisc_limit_vel(u, v, h, ADp, CDp, forces, visc, dt, G, GV, US, CS
   H_report = 6.0 * GV%Angstrom_H
 
   if (len_trim(CS%u_trunc_file) > 0) then
-    !$OMP target teams loop default(shared) private(trunc_any,CFL)
+    !$OMP parallel do default(shared) private(trunc_any,CFL)
     do j=js,je
       trunc_any = .false.
       do I=Isq,Ieq ; dowrite(I,j) = .false. ; enddo
@@ -3345,11 +3345,11 @@ subroutine vertvisc_limit_vel(u, v, h, ADp, CDp, forces, visc, dt, G, GV, US, CS
         endif ; enddo ; enddo
       endif ; endif
     enddo ! j-loop
-    !$omp end target teams loop
+    !$omp end parallel do 
   else  ! Do not report accelerations leading to large velocities.
     if (CS%CFL_based_trunc) then
       do k=1,nz
-      !$OMP target teams loop default(shared)
+      !$OMP parallel do default(shared)
       do j=js,je ; do I=Isq,Ieq
         if (abs(u(I,j,k)) < CS%vel_underflow) then ; u(I,j,k) = 0.0
         elseif ((u(I,j,k) * (dt * G%dy_Cu(I,j))) * G%IareaT(i+1,j) < -CS%CFL_trunc) then
@@ -3360,7 +3360,7 @@ subroutine vertvisc_limit_vel(u, v, h, ADp, CDp, forces, visc, dt, G, GV, US, CS
           if (h(i,j,k) + h(i+1,j,k) > H_report) CS%ntrunc = CS%ntrunc + 1
         endif
       enddo ; enddo
-      !$omp end target teams loop
+      !$omp end parallel do
       enddo
     else
       !$OMP parallel do default(shared)
