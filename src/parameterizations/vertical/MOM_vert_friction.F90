@@ -653,6 +653,7 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
   if (.not.CS%initialized) call MOM_error(FATAL,"MOM_vert_friction(visc): "// &
          "Module must be initialized before it is used.")
 
+  !JORGE TODO: depending on the size, allocating this might be a bottleneck
   if (CS%id_GLwork > 0) then
     allocate(KE_u(G%IsdB:G%IedB,G%jsd:G%jed,GV%ke), source=0.0)
     allocate(KE_v(G%isd:G%ied,G%JsdB:G%JedB,GV%ke), source=0.0)
@@ -716,6 +717,7 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
   !$omp target update to(u)
   !$omp target enter data map(alloc: ADp%dv_dt_str)
   !$omp target enter data map(alloc: ADp%du_dt_str)
+  !$omp target enter data map(alloc: ADp%dv_dt_visc_gl90)
   !$omp target enter data map(alloc: ADp%du_dt_visc_gl90)
 
   if (associated(ADp%du_dt_visc_gl90)) then
@@ -1226,11 +1228,11 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
 
   do k=2,nz
     if (allocated(visc%Ray_v)) then
-  !$omp target teams loop private(i,j) collapse(2)
+      !$omp target teams loop private(i,j) collapse(2)
       do J=Jsq,Jeq ; do i=is,ie
         Ray(i,J) = visc%Ray_v(i,J,k)
       enddo ; enddo
-  !$omp end target teams loop
+      !$omp end target teams loop
     endif
 
     !$omp target teams loop private(i,j) collapse(2)
@@ -1241,7 +1243,7 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
       d1(i,J) = b_denom_1 * b1(i,J)
       v(i,J,k) = (CS%h_v(i,J,k) * v(i,J,k) + dt * CS%a_v(i,J,K) * v(i,J,k-1)) * b1(i,J)
     endif ; enddo ; enddo
-  !$omp end target teams loop
+    !$omp end target teams loop
 
     if (associated(ADp%dv_dt_str)) then
       !$omp target teams loop private(i,j) collapse(2)
@@ -1249,33 +1251,197 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
         ADp%dv_dt_str(i,J,k) = (CS%h_v(i,J,k) * ADp%dv_dt_str(i,J,k) &
             + dt * CS%a_v(i,J,K) * ADp%dv_dt_str(i,J,k-1)) * b1(i,J)
       endif ; enddo ; enddo
-  !$omp end target teams loop
+      !$omp end target teams loop
     endif
   enddo
 
   do k=nz-1,1,-1
-  !$omp target teams loop private(i,j) collapse(2)
+    !$omp target teams loop private(i,j) collapse(2)
     do J=Jsq,Jeq ; do i=is,ie ; if (G%mask2dCv(i,J) > 0.) then
       v(i,J,k) = v(i,J,k) + c1(i,J,k+1) * v(i,J,k+1)
     endif ; enddo ; enddo
-  !$omp end target teams loop
+    !$omp end target teams loop
   enddo
 
   if (associated(ADp%dv_dt_str)) then
-  !$omp target teams loop private(i,j) collapse(2)
+    !$omp target teams loop private(i,j) collapse(2)
     do J=Jsq,Jeq ; do i=is,ie
       if (abs(ADp%dv_dt_str(i,J,nz)) < accel_underflow) ADp%dv_dt_str(i,J,nz) = 0.0
     enddo ; enddo
-  !$omp end target teams loop
+    !$omp end target teams loop
 
     do k=nz-1,1,-1
-  !$omp target teams loop private(i,j) collapse(2)
+      !$omp target teams loop private(i,j) collapse(2)
       do J=Jsq,Jeq ; do i=is,ie ; if (G%mask2dCv(i,J) > 0.) then
         ADp%dv_dt_str(i,J,k) = ADp%dv_dt_str(i,J,k) + c1(i,J,k+1) * ADp%dv_dt_str(i,J,k+1)
         if (abs(ADp%dv_dt_str(i,J,k)) < accel_underflow) ADp%dv_dt_str(i,J,k) = 0.0
       endif ; enddo ; enddo
-  !$omp end target teams loop
+      !$omp end target teams loop
     enddo
+  endif
+
+
+
+  call end_nvtx
+  call start_nvtx("Vertical velocity tendency")
+  ! compute vertical velocity tendency that arises from GL90 viscosity;
+  ! follow tridiagonal solve method as above; to avoid corrupting v,
+  ! use ADp%dv_dt_visc_gl90 as a placeholder for updated u (due to GL90) until last do loop
+  if ((CS%id_dv_dt_visc_gl90 > 0) .or. (CS%id_GLwork > 0)) then
+    if (associated(ADp%dv_dt_visc_gl90)) then
+      !$omp target teams loop private(i,j) collapse(2)
+      do J=Jsq,Jeq
+        do i=is,ie
+          if (G%mask2dCv(i,J) > 0.) then
+            b_denom_1 = CS%h_v(i,J,1)  ! CS%a_v_gl90(i,J,1) is zero
+            b1(i,J) = 1.0 / (b_denom_1 + dt*CS%a_v_gl90(i,J,2))
+            d1(i,J) = b_denom_1 * b1(i,J)
+            ADp%dv_dt_visc_gl90(I,J,1) = b1(i,J) * (CS%h_v(i,J,1) * ADp%dv_dt_visc_gl90(i,J,1))
+          end if 
+        end do 
+      end do 
+      !$omp end target teams loop
+
+      do k=2,nz
+        !$omp target teams loop private(i,j) collapse(2)
+        do J=Jsq,Jeq
+          do i=is,ie
+            if (G%mask2dCv(i,J) > 0.) then
+              c1(i,J,k) = dt * CS%a_v_gl90(i,J,K) * b1(i,J)
+              b_denom_1 = CS%h_v(i,J,k) + dt * (CS%a_v_gl90(i,J,K)*d1(i,J))
+              b1(i,J) = 1.0 / (b_denom_1 + dt * CS%a_v_gl90(i,J,K+1))
+              d1(i,J) = b_denom_1 * b1(i,J)
+              ADp%dv_dt_visc_gl90(i,J,k) = (CS%h_v(i,J,k) * ADp%dv_dt_visc_gl90(i,J,k) + &
+                          dt * CS%a_v_gl90(i,J,K) * ADp%dv_dt_visc_gl90(i,J,k-1)) * b1(i,J)
+            end if
+          end do 
+        end do
+        !$omp end target teams loop
+      enddo
+
+      ! back substitute to solve for new velocities, held by ADp%dv_dt_visc_gl90
+      do k=nz-1,1,-1
+        !$omp target teams loop private(i,j) collapse(2)
+        do J=Jsq,Jeq
+          do i=is,ie
+            if (G%mask2dCv(i,J) > 0.) then
+              ADp%dv_dt_visc_gl90(i,J,k) = ADp%dv_dt_visc_gl90(i,J,k) + c1(i,J,k+1) * ADp%dv_dt_visc_gl90(i,J,k+1)
+            end if 
+          end do 
+        end do 
+        !$omp end target teams loop
+      enddo
+
+      do k=1,nz
+        !$omp target teams loop private(i,j) collapse(2)
+        do J=Jsq,Jeq
+          do i=is,ie
+            if (G%mask2dCv(i,J) > 0.) then
+          ! now fill ADp%dv_dt_visc_gl90(i,J,k) with actual velocity tendency due to GL90;
+          ! note that on RHS: ADp%dv_dt_visc(i,J,k) holds the original velocity value v(i,J,k)
+          ! and ADp%dv_dt_visc_gl90(i,J,k) the updated velocity due to GL90
+              ADp%dv_dt_visc_gl90(i,J,k) = (ADp%dv_dt_visc_gl90(i,J,k) - ADp%dv_dt_visc(i,J,k))*Idt
+              if (abs(ADp%dv_dt_visc_gl90(i,J,k)) < accel_underflow) ADp%dv_dt_visc_gl90(i,J,k) = 0.0
+            end if
+          end do 
+        end do 
+        !$omp end target teams loop
+      enddo
+
+      ! to compute energetics, we need to multiply by v*h, where u is original velocity before
+      ! velocity update; note that ADp%dv_dt_visc(I,j,k) holds the original velocity value v(i,J,k)
+      if (CS%id_GLwork > 0) then
+        do k=1,nz
+          !$omp target teams loop private(i,j) collapse(2)
+          do J=Jsq,Jeq
+            do i=is,ie
+              if (G%mask2dCv(i,J) > 0.) then
+                ! note that on RHS: ADp%dv_dt_visc(I,j,k) holds the original velocity value v(I,j,k)
+                KE_v(I,j,k) = ADp%dv_dt_visc(i,J,k) * CS%h_v(i,J,k) * G%areaCv(i,J) * ADp%dv_dt_visc_gl90(i,J,k)
+              end if
+            end do 
+          end do 
+          !$omp end target teams loop
+
+        enddo
+      endif
+
+    endif
+  endif
+
+
+  if (associated(ADp%dv_dt_visc)) then
+    do k=1,nz
+      !$omp target teams loop private(i,j) collapse(2)
+      do J=Jsq,Jeq
+        do i=is,ie
+          ADp%dv_dt_visc(i,J,k) = (v(i,J,k) - ADp%dv_dt_visc(i,J,k))*Idt
+          if (abs(ADp%dv_dt_visc(i,J,k)) < accel_underflow) ADp%dv_dt_visc(i,J,k) = 0.0
+        end do 
+      end do 
+      !$omp end target teams loop
+    end do 
+  endif
+
+  if (allocated(visc%tauy_shelf)) then
+    !$omp target teams loop private(i,j) collapse(2)
+    do J=Jsq,Jeq
+      do i=is,ie
+        visc%tauy_shelf(i,J) = -GV%H_to_RZ * CS%a1_shelf_v(i,J) * v(i,J,1) ! - v_shelf?
+      end do 
+    end do 
+    !$omp end target teams loop
+  endif
+
+  if (present(tauy_bot)) then
+    !$omp target teams loop private(i,j) collapse(2)
+    do J=Jsq,Jeq
+      do i=is,ie
+        tauy_bot(i,J) = GV%H_to_RZ * (v(i,J,nz) * CS%a_v(i,J,nz+1))
+      end do 
+    end do
+    !$omp end target teams loop
+
+    if (allocated(visc%Ray_v)) then
+      do k=1,nz
+        !$omp target teams loop private(i,j) collapse(2)
+        do J=Jsq,Jeq
+          do i=is,ie
+            tauy_bot(i,J) = tauy_bot(i,J) + GV%H_to_RZ * (visc%Ray_v(i,J,k)*v(i,J,k))
+          end do
+        end do
+        !$omp end target teams loop
+      end do 
+    endif
+  endif
+
+  ! When mixing down Eulerian current + Stokes drift subtract after calling solver
+  if (DoStokesMixing) then
+    do k=1,nz
+      !$omp target teams loop private(i,j) collapse(2)
+      do J=Jsq,Jeq
+        do i=is,ie
+          if (G%mask2dCv(i,J) > 0.) then
+            v(i,J,k) = v(i,J,k) - Waves%Us_y(i,J,k)
+          end if
+        end do
+      end do 
+      !$omp end target teams loop
+    end do 
+  endif
+
+  if (lfpmix) then
+    do k=1,nz
+      !$omp target teams loop private(i,j) collapse(2)
+      do J=Jsq,Jeq
+        do i=is,ie
+          if (G%mask2dCv(i,J) > 0.) then
+            v(i,J,k) = v(i,J,k) + Waves%Us_y(i,J,k)
+          end if
+        end do 
+      end do 
+      !$omp end target teams loop
+    end do 
   endif
 
   !$omp target exit data map(from: b1, c1, d1)
@@ -1290,99 +1456,6 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
   !$omp target exit data map(from: Ray)
   !$omp target exit data map(delete: visc%Ray_u) if (allocated(visc%Ray_u))
   !! TODO jorge: this is the last GPU code
-
-  call end_nvtx
-  call start_nvtx("Vertical velocity tendency")
-  ! compute vertical velocity tendency that arises from GL90 viscosity;
-  ! follow tridiagonal solve method as above; to avoid corrupting v,
-  ! use ADp%dv_dt_visc_gl90 as a placeholder for updated u (due to GL90) until last do loop
-  if ((CS%id_dv_dt_visc_gl90 > 0) .or. (CS%id_GLwork > 0)) then
-    if (associated(ADp%dv_dt_visc_gl90)) then
-      do J=Jsq,Jeq ; do i=is,ie ; if (G%mask2dCv(i,J) > 0.) then
-        b_denom_1 = CS%h_v(i,J,1)  ! CS%a_v_gl90(i,J,1) is zero
-        b1(i,J) = 1.0 / (b_denom_1 + dt*CS%a_v_gl90(i,J,2))
-        d1(i,J) = b_denom_1 * b1(i,J)
-        ADp%dv_dt_visc_gl90(I,J,1) = b1(i,J) * (CS%h_v(i,J,1) * ADp%dv_dt_visc_gl90(i,J,1))
-      endif ; enddo ; enddo
-
-      do k=2,nz
-        do J=Jsq,Jeq ; do i=is,ie ; if (G%mask2dCv(i,J) > 0.) then
-          c1(i,J,k) = dt * CS%a_v_gl90(i,J,K) * b1(i,J)
-          b_denom_1 = CS%h_v(i,J,k) + dt * (CS%a_v_gl90(i,J,K)*d1(i,J))
-          b1(i,J) = 1.0 / (b_denom_1 + dt * CS%a_v_gl90(i,J,K+1))
-          d1(i,J) = b_denom_1 * b1(i,J)
-          ADp%dv_dt_visc_gl90(i,J,k) = (CS%h_v(i,J,k) * ADp%dv_dt_visc_gl90(i,J,k) + &
-                      dt * CS%a_v_gl90(i,J,K) * ADp%dv_dt_visc_gl90(i,J,k-1)) * b1(i,J)
-        endif ; enddo ; enddo
-      enddo
-
-      ! back substitute to solve for new velocities, held by ADp%dv_dt_visc_gl90
-      do k=nz-1,1,-1
-        do J=Jsq,Jeq ; do i=is,ie ; if (G%mask2dCv(i,J) > 0.) then
-          ADp%dv_dt_visc_gl90(i,J,k) = ADp%dv_dt_visc_gl90(i,J,k) + c1(i,J,k+1) * ADp%dv_dt_visc_gl90(i,J,k+1)
-        endif ; enddo ; enddo
-      enddo
-
-      do k=1,nz
-        do J=Jsq,Jeq ; do i=is,ie ; if (G%mask2dCv(i,J) > 0.) then
-          ! now fill ADp%dv_dt_visc_gl90(i,J,k) with actual velocity tendency due to GL90;
-          ! note that on RHS: ADp%dv_dt_visc(i,J,k) holds the original velocity value v(i,J,k)
-          ! and ADp%dv_dt_visc_gl90(i,J,k) the updated velocity due to GL90
-          ADp%dv_dt_visc_gl90(i,J,k) = (ADp%dv_dt_visc_gl90(i,J,k) - ADp%dv_dt_visc(i,J,k))*Idt
-          if (abs(ADp%dv_dt_visc_gl90(i,J,k)) < accel_underflow) ADp%dv_dt_visc_gl90(i,J,k) = 0.0
-        endif ; enddo ; enddo
-      enddo
-
-      ! to compute energetics, we need to multiply by v*h, where u is original velocity before
-      ! velocity update; note that ADp%dv_dt_visc(I,j,k) holds the original velocity value v(i,J,k)
-      if (CS%id_GLwork > 0) then
-        do k=1,nz
-          do J=Jsq,Jeq ; do i=is,ie ; if (G%mask2dCv(i,J) > 0.) then
-            ! note that on RHS: ADp%dv_dt_visc(I,j,k) holds the original velocity value v(I,j,k)
-            KE_v(I,j,k) = ADp%dv_dt_visc(i,J,k) * CS%h_v(i,J,k) * G%areaCv(i,J) * ADp%dv_dt_visc_gl90(i,J,k)
-          endif ; enddo ; enddo
-        enddo
-      endif
-    endif
-  endif
-
-  if (associated(ADp%dv_dt_visc)) then
-    do k=1,nz ; do J=Jsq,Jeq ; do i=is,ie
-      ADp%dv_dt_visc(i,J,k) = (v(i,J,k) - ADp%dv_dt_visc(i,J,k))*Idt
-      if (abs(ADp%dv_dt_visc(i,J,k)) < accel_underflow) ADp%dv_dt_visc(i,J,k) = 0.0
-    enddo ; enddo ; enddo
-  endif
-
-  if (allocated(visc%tauy_shelf)) then
-    do J=Jsq,Jeq ; do i=is,ie
-      visc%tauy_shelf(i,J) = -GV%H_to_RZ * CS%a1_shelf_v(i,J) * v(i,J,1) ! - v_shelf?
-    enddo ; enddo
-  endif
-
-  if (present(tauy_bot)) then
-    do J=Jsq,Jeq ; do i=is,ie
-      tauy_bot(i,J) = GV%H_to_RZ * (v(i,J,nz) * CS%a_v(i,J,nz+1))
-    enddo; enddo
-
-    if (allocated(visc%Ray_v)) then
-      do k=1,nz ; do J=Jsq,Jeq ; do i=is,ie
-        tauy_bot(i,J) = tauy_bot(i,J) + GV%H_to_RZ * (visc%Ray_v(i,J,k)*v(i,J,k))
-      enddo ; enddo ; enddo
-    endif
-  endif
-
-  ! When mixing down Eulerian current + Stokes drift subtract after calling solver
-  if (DoStokesMixing) then
-    do k=1,nz ; do J=Jsq,Jeq ; do i=is,ie ; if (G%mask2dCv(i,J) > 0.) then
-      v(i,J,k) = v(i,J,k) - Waves%Us_y(i,J,k)
-    endif ; enddo ; enddo ; enddo
-  endif
-
-  if (lfpmix) then
-    do k=1,nz ; do J=Jsq,Jeq ; do i=is,ie ; if (G%mask2dCv(i,J) > 0.) then
-      v(i,J,k) = v(i,J,k) + Waves%Us_y(i,J,k)
-    endif ; enddo ; enddo ; enddo
-  endif
   call end_nvtx
   call start_nvtx("calculate KE source")
 
