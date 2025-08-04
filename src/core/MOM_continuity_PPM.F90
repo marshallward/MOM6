@@ -1764,9 +1764,9 @@ subroutine meridional_mass_flux(v, h_in, h_S, h_N, vh, dt, G, GV, US, CS, OBC, p
     if (present(vhbt) .or. set_BT_cont) then
       if (use_visc_rem .and. CS%use_visc_rem_max) then
         do concurrent (i=ish:ieh)
-          visc_rem_max(i,J) = visc_rem_v(i,J,1)
+          visc_rem_max(i,J) = 0.0
         enddo
-        do k=2,nz ; do concurrent (i=ish:ieh)
+        do k=1,nz ; do concurrent (i=ish:ieh)
           visc_rem_max(i,J) = max(visc_rem_max(i,J), visc_rem_v_tmp(i,J,k))
         enddo ; enddo
       else
@@ -1948,14 +1948,14 @@ subroutine present_vhbt_or_set_BT_cont(v, h_in, h_S, h_N, vh_tot_0, dvhdv_tot_0,
         l_seg = abs(OBC%segnum_v(i,J))
 
         ! Avoid reconciling barotropic/baroclinic transports if transport is specified
-        simple_OBC_pt(i,j) = .false.
-        if (l_seg /= 0) simple_OBC_pt(i,j) = OBC%segment(l_seg)%specified
-        do_I(i,j) = .not.simple_OBC_pt(i,j)
-        any_simple_OBC = any_simple_OBC .or. simple_OBC_pt(i,j)
+        simple_OBC_pt(i,J) = .false.
+        if (l_seg /= 0) simple_OBC_pt(i,J) = OBC%segment(l_seg)%specified
+        do_I(i,J) = .not.simple_OBC_pt(i,J)
+        any_simple_OBC = any_simple_OBC .or. simple_OBC_pt(i,J)
       enddo
     else
-      do concurrent (j=jsh-1:jeh, i=ish:ieh)
-        do_I(i,j) = .true.
+      do concurrent (J=jsh-1:jeh, i=ish:ieh)
+        do_I(i,J) = .true.
       enddo
     endif ! local_specified_BC .or. local_Flather_OBC
 
@@ -2226,21 +2226,21 @@ subroutine meridional_flux_thickness(v, h, h_S, h_N, h_v, dt, G, GV, US, LB, vol
         if (OBC%segment(n)%direction == OBC_DIRECTION_N) then
           if (present(visc_rem_v)) then
             do concurrent (k=1:nz, i = OBC%segment(n)%HI%isd:OBC%segment(n)%HI%ied)
-              h_v(i,J,k) = h(i,j,k) * (visc_rem_v(i,J,k) * por_face_areaV(i,J,k))
+              h_v(i,J,k) = h(i,J,k) * (visc_rem_v(i,J,k) * por_face_areaV(i,J,k))
             enddo
           else
             do concurrent (k=1:nz, i = OBC%segment(n)%HI%isd:OBC%segment(n)%HI%ied)
-              h_v(i,J,k) = h(i,j,k) * por_face_areaV(i,J,k)
+              h_v(i,J,k) = h(i,J,k) * por_face_areaV(i,J,k)
             enddo
           endif
         else
           if (present(visc_rem_v)) then
             do concurrent (k=1:nz, i = OBC%segment(n)%HI%isd:OBC%segment(n)%HI%ied)
-              h_v(i,J,k) = h(i,j+1,k) * (visc_rem_v(i,J,k) * por_face_areaV(i,J,k))
+              h_v(i,J,k) = h(i,J+1,k) * (visc_rem_v(i,J,k) * por_face_areaV(i,J,k))
             enddo
           else
             do concurrent (k=1:nz, i = OBC%segment(n)%HI%isd:OBC%segment(n)%HI%ied)
-              h_v(i,J,k) = h(i,j+1,k) * por_face_areaV(i,J,k)
+              h_v(i,J,k) = h(i,J+1,k) * por_face_areaV(i,J,k)
             enddo
           endif
         endif
