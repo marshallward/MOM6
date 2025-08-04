@@ -1464,6 +1464,7 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
   ! a sign-definite term. MOM_diagnostics does not have access to the velocities
   ! and thicknesses used in the vertical solver, but rather uses a time-mean
   ! barotropic transport [uv]h.
+  ! JORGE TODO: should be offloaded?
   if (CS%id_GLwork > 0) then
     if (.not.G%symmetric) &
       call do_group_pass(CS%pass_KE_uv, G%domain)
@@ -1479,6 +1480,7 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
   call vertvisc_limit_vel(u, v, h, ADp, CDp, forces, visc, dt, G, GV, US, CS)
 
   ! Here the velocities associated with open boundary conditions are applied.
+  ! JORGE TODO: should be offloaded?
   if (associated(OBC)) then
     do n=1,OBC%number_of_segments
       if (OBC%segment(n)%specified) then
@@ -3293,7 +3295,7 @@ subroutine vertvisc_limit_vel(u, v, h, ADp, CDp, forces, visc, dt, G, GV, US, CS
   H_report = 6.0 * GV%Angstrom_H
 
   if (len_trim(CS%u_trunc_file) > 0) then
-    !$OMP parallel do default(shared) private(trunc_any,CFL)
+    !$OMP target teams loop default(shared) private(trunc_any,CFL)
     do j=js,je
       trunc_any = .false.
       do I=Isq,Ieq ; dowrite(I,j) = .false. ; enddo
@@ -3343,10 +3345,12 @@ subroutine vertvisc_limit_vel(u, v, h, ADp, CDp, forces, visc, dt, G, GV, US, CS
         endif ; enddo ; enddo
       endif ; endif
     enddo ! j-loop
+    !$omp end target teams loop
   else  ! Do not report accelerations leading to large velocities.
     if (CS%CFL_based_trunc) then
-      !$OMP parallel do default(shared)
-      do k=1,nz ; do j=js,je ; do I=Isq,Ieq
+      do k=1,nz
+      !$OMP target teams loop default(shared)
+      do j=js,je ; do I=Isq,Ieq
         if (abs(u(I,j,k)) < CS%vel_underflow) then ; u(I,j,k) = 0.0
         elseif ((u(I,j,k) * (dt * G%dy_Cu(I,j))) * G%IareaT(i+1,j) < -CS%CFL_trunc) then
           u(I,j,k) = (-0.9*CS%CFL_trunc) * (G%areaT(i+1,j) / (dt * G%dy_Cu(I,j)))
@@ -3355,7 +3359,9 @@ subroutine vertvisc_limit_vel(u, v, h, ADp, CDp, forces, visc, dt, G, GV, US, CS
           u(I,j,k) = (0.9*CS%CFL_trunc) * (G%areaT(i,j) / (dt * G%dy_Cu(I,j)))
           if (h(i,j,k) + h(i+1,j,k) > H_report) CS%ntrunc = CS%ntrunc + 1
         endif
-      enddo ; enddo ; enddo
+      enddo ; enddo
+      !$omp end target teams loop
+      enddo
     else
       !$OMP parallel do default(shared)
       do k=1,nz ; do j=js,je ; do I=Isq,Ieq
