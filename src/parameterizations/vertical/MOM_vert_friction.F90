@@ -712,6 +712,7 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
   call start_nvtx("ADp initialize to 0.0")
   ! this could be a function 
   !$omp target enter data map(to: ADp)
+  !$omp target enter data map(to: G, G%mask2dCu)
   !$omp target update to(u)
   !$omp target enter data map(alloc: ADp%du_dt_str)
   !$omp target enter data map(alloc: ADp%du_dt_visc_gl90)
@@ -745,19 +746,40 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
   ! over the topmost Hmix fluid.  If DIRECT_STRESS is not defined,
   ! the wind stress is applied as a stress boundary condition.
   if (CS%direct_stress) then
-    do concurrent (j=G%jsc:G%jec, I=Isq:Ieq, G%mask2dCu(I,j) > 0.)
+  !$omp target teams loop private(i,j)
+  do j = G%jsc, G%jec
+  do I = Isq, Ieq
+    if (G%mask2dCu(I,j) > 0.0) then
       surface_stress(I,j) = 0.0
       zDS = 0.0
       stress = dt_Rho0 * forces%taux(I,j)
-      do k=1,nz
+      do k = 1, nz
         h_a = 0.5 * (h(i,j,k) + h(i+1,j,k)) + h_neglect
-        hfr = 1.0 ; if ((zDS+h_a) > Hmix) hfr = (Hmix - zDS) / h_a
+        hfr = 1.0
+        if ((zDS+h_a) > Hmix) hfr = (Hmix - zDS) / h_a
         u(I,j,k) = u(I,j,k) + I_Hmix * hfr * stress
-        ! TODO: This needs to be outside loop
-        if (associated(ADp%du_dt_str)) ADp%du_dt_str(i,J,k) = (I_Hmix * hfr * stress) * Idt
-        zDS = zDS + h_a ; if (zDS >= Hmix) exit
-      enddo
-    enddo
+        if (associated(ADp%du_dt_str)) ADp%du_dt_str(i,j,k) = (I_Hmix * hfr * stress) * Idt
+        zDS = zDS + h_a
+        if (zDS >= Hmix) exit
+      end do
+    end if
+  end do
+end do
+!$omp end target teams loop
+
+    !do concurrent (j=G%jsc:G%jec, I=Isq:Ieq, G%mask2dCu(I,j) > 0.)
+    !  surface_stress(I,j) = 0.0
+    !  zDS = 0.0
+    !  stress = dt_Rho0 * forces%taux(I,j)
+    !  do k=1,nz
+    !    h_a = 0.5 * (h(i,j,k) + h(i+1,j,k)) + h_neglect
+    !    hfr = 1.0 ; if ((zDS+h_a) > Hmix) hfr = (Hmix - zDS) / h_a
+    !    u(I,j,k) = u(I,j,k) + I_Hmix * hfr * stress
+    !    ! TODO: This needs to be outside loop
+    !    if (associated(ADp%du_dt_str)) ADp%du_dt_str(i,J,k) = (I_Hmix * hfr * stress) * Idt
+    !    zDS = zDS + h_a ; if (zDS >= Hmix) exit
+    !  enddo
+    !enddo
   else
     do concurrent (j=G%jsc:G%jec, I=Isq:Ieq)
       surface_stress(I,j) = dt_Rho0 * (G%mask2dCu(I,j)*forces%taux(I,j))
@@ -810,7 +832,6 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
   ! TODO: Move outside
   call start_nvtx("biggo loopo")
   !$omp target enter data map(to: CS, CS%a_u, CS%h_u)
-
   !$omp target enter data map(alloc: b1, c1, d1)
 
   do concurrent (j=G%isc:G%jec, I=Isq:Ieq, G%mask2dCu(I,j) > 0.)
@@ -1148,25 +1169,36 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
   ! over the topmost Hmix fluid.  If DIRECT_STRESS is not defined,
   ! the wind stress is applied as a stress boundary condition.
   if (CS%direct_stress) then
-    do J=Jsq,Jeq ; do i=is,ie ; if (G%mask2dCv(i,J) > 0.) then
-      surface_stress(i,J) = 0.0
-      zDS = 0.0
-      stress = dt_Rho0 * forces%tauy(i,J)
-      do k=1,nz
-        h_a = 0.5 * (h(i,J,k) + h(i,J+1,k)) + h_neglect
-        hfr = 1.0 ; if ((zDS+h_a) > Hmix) hfr = (Hmix - zDS) / h_a
-        v(i,J,k) = v(i,J,k) + I_Hmix * hfr * stress
-        if (associated(ADp%dv_dt_str)) ADp%dv_dt_str(i,J,k) = (I_Hmix * hfr * stress) * Idt
-        zDS = zDS + h_a ; if (zDS >= Hmix) exit
-      enddo
-    endif ; enddo ; enddo
+  ! TODO JORGE: refactor this one later
+    do J=Jsq,Jeq
+      do i=is,ie
+        if (G%mask2dCv(i,J) > 0.) then
+          surface_stress(i,J) = 0.0
+          zDS = 0.0
+          stress = dt_Rho0 * forces%tauy(i,J)
+          do k=1,nz
+            h_a = 0.5 * (h(i,J,k) + h(i,J+1,k)) + h_neglect
+            hfr = 1.0
+            if ((zDS+h_a) > Hmix) hfr = (Hmix - zDS) / h_a
+            v(i,J,k) = v(i,J,k) + I_Hmix * hfr * stress
+            if (associated(ADp%dv_dt_str)) ADp%dv_dt_str(i,J,k) = (I_Hmix * hfr * stress) * Idt
+            zDS = zDS + h_a
+            if (zDS >= Hmix) exit
+          enddo
+        endif 
+      end do 
+    end do
   else
-    do J=Jsq,Jeq ; do i=is,ie
-      surface_stress(i,J) = dt_Rho0 * (G%mask2dCv(i,J) * forces%tauy(i,J))
-    enddo ; enddo
+    do J=Jsq,Jeq
+      do i=is,ie
+        surface_stress(i,J) = dt_Rho0 * (G%mask2dCv(i,J) * forces%tauy(i,J))
+      end do
+    end do
   endif
 
   if (allocated(visc%Ray_v)) then
+  ! this seems to not be used in the double gyre example
+  ! pending porting
     do J=Jsq,Jeq ; do i=is,ie
       Ray(i,J) = visc%Ray_v(i,J,1)
     enddo ; enddo
@@ -1176,12 +1208,38 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
     enddo ; enddo
   endif
 
-  do J=Jsq,Jeq ; do i=is,ie ; if (G%mask2dCv(i,J) > 0.) then
-    b_denom_1 = CS%h_v(i,J,1) + dt * (Ray(i,J) + CS%a_v(i,J,1))
-    b1(i,J) = 1.0 / (b_denom_1 + dt*CS%a_v(i,J,2))
-    d1(i,J) = b_denom_1 * b1(i,J)
-    v(i,J,1) = b1(i,J) * (CS%h_v(i,J,1) * v(i,J,1) + surface_stress(i,J))
-  endif ; enddo ; enddo
+  !! these are temp, the above loop has not been ported to GPUs so I need to bring these back 
+  !!$omp target enter data map(to: b1, c1, d1)
+  !! v has been on the gpu and not sent back 
+  !!!$omp target enter data map(to:v)
+  !!$omp target enter data map(to: Ray)
+  !!$omp target enter data map(to: ADp%du_dt_str)
+  !!$omp target enter data map(to: ADp%du_dt_visc_gl90)
+  !!$omp target enter data map(to: surface_stress)
+
+  !!$omp target enter data map(to: CS, CS%a_v, CS%h_v)
+
+  !!$omp target teams loop private(i,j) collapse(2)
+  do J=Jsq,Jeq
+    do i=is,ie
+      if (G%mask2dCv(i,J) > 0.) then
+        b_denom_1 = CS%h_v(i,J,1) + dt * (Ray(i,J) + CS%a_v(i,J,1))
+        b1(i,J) = 1.0 / (b_denom_1 + dt*CS%a_v(i,J,2))
+        d1(i,J) = b_denom_1 * b1(i,J)
+        v(i,J,1) = b1(i,J) * (CS%h_v(i,J,1) * v(i,J,1) + surface_stress(i,J))
+      end if
+    end do 
+  end do
+  !!$omp end target teams loop
+
+  !!$omp target exit data map(from: b1, c1, d1)
+  !!$omp target exit data map(from:u)
+  !!$omp target exit data map(from: Ray)
+  !!$omp target exit data map(from: ADp%du_dt_str)
+  !!$omp target exit data map(from: ADp%du_dt_visc_gl90)
+  !!$omp target exit data map(from: surface_stress)
+
+  !!$omp target exit data map(from: CS, CS%a_v, CS%h_v)
 
   if (associated(ADp%dv_dt_str)) then
     do J=Jsq,Jeq ; do i=is,ie ; if (G%mask2dCv(i,J) > 0.) then
