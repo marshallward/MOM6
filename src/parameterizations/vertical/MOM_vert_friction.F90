@@ -1060,6 +1060,78 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
     enddo
   endif
 
+
+  call end_nvtx
+
+  call start_nvtx("meridional velocity")
+  ! == Now work on the meridional velocity component.
+
+  ! When mixing down Eulerian current + Stokes drift add before calling solver
+  if (DoStokesMixing) then
+    do k=1,nz
+      !$omp target teams loop private(i,j) collapse(2)
+      do J=Jsq,Jeq
+        do i=is,ie
+          if (G%mask2dCv(i,J) > 0.) then
+            v(i,j,k) = v(i,j,k) + Waves%Us_y(i,j,k)
+          end if 
+        end do 
+      end do
+      !$omp end target teams loop
+    end do
+  endif
+
+
+  if (lfpmix) then
+    do k=1,nz
+      !$omp target teams loop private(i,j) collapse(2)
+      do J=Jsq,Jeq
+        do i=is,ie
+          if (G%mask2dCv(i,J) > 0.) then
+            v(i,j,k) = v(i,j,k) - Waves%Us_y(i,j,k)
+          end if
+        end do 
+      end do 
+      !$omp end target teams loop
+    end do 
+  endif
+
+
+  if (associated(ADp%dv_dt_visc)) then
+    do k=1,nz
+      !$omp target teams loop private(i,j) collapse(2)
+      do J=Jsq,Jeq
+        do i=is,ie
+          ADp%dv_dt_visc(i,J,k) = v(i,J,k)
+        end do 
+      end do 
+    end do 
+  endif
+
+  if (associated(ADp%dv_dt_visc_gl90)) then
+    do k=1,nz
+      !$omp target teams loop private(i,j) collapse(2)
+      do J=Jsq,Jeq
+        do i=is,ie
+          ADp%dv_dt_visc_gl90(i,J,k) = v(i,J,k)
+        end do 
+      end do 
+      !$omp end target teams loop
+    end do 
+  endif
+
+  if (associated(ADp%dv_dt_str)) then
+    do k=1,nz
+      !$omp target teams loop private(i,j) collapse(2)
+      do J=Jsq,Jeq
+        do i=is,ie
+          ADp%dv_dt_str(i,J,k) = 0.0
+        end do 
+      end do 
+      !$omp end target teams loop
+    end do 
+  endif
+
   !$omp target exit data map(from: b1, c1, d1)
   !$omp target exit data map(from:u)
   ! Temporary
@@ -1071,42 +1143,6 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
   !$omp target exit data map(from: Ray)
   !$omp target exit data map(delete: visc%Ray_u) if (allocated(visc%Ray_u))
   !! TODO jorge: this is the last GPU code
-
-  call end_nvtx
-
-  call start_nvtx("meridional velocity")
-  ! == Now work on the meridional velocity component.
-
-  ! When mixing down Eulerian current + Stokes drift add before calling solver
-  if (DoStokesMixing) then
-    do k=1,nz ; do J=Jsq,Jeq ; do i=is,ie ; if (G%mask2dCv(i,J) > 0.) then
-      v(i,j,k) = v(i,j,k) + Waves%Us_y(i,j,k)
-    endif ; enddo ; enddo ; enddo
-  endif
-
-  if (lfpmix) then
-    do k=1,nz ; do J=Jsq,Jeq ; do i=is,ie ; if (G%mask2dCv(i,J) > 0.) then
-      v(i,j,k) = v(i,j,k) - Waves%Us_y(i,j,k)
-    endif ; enddo ; enddo ; enddo
-  endif
-
-  if (associated(ADp%dv_dt_visc)) then
-    do k=1,nz ; do J=Jsq,Jeq ; do i=is,ie
-      ADp%dv_dt_visc(i,J,k) = v(i,J,k)
-    enddo ; enddo ; enddo
-  endif
-
-  if (associated(ADp%dv_dt_visc_gl90)) then
-    do k=1,nz ; do J=Jsq,Jeq ; do i=is,ie
-      ADp%dv_dt_visc_gl90(i,J,k) = v(i,J,k)
-    enddo ; enddo ; enddo
-  endif
-
-  if (associated(ADp%dv_dt_str)) then
-    do k=1,nz ; do J=Jsq,Jeq ; do i=is,ie
-      ADp%dv_dt_str(i,J,k) = 0.0
-    enddo ; enddo ; enddo
-  endif
 
   !   One option is to have the wind stress applied as a body force
   ! over the topmost Hmix fluid.  If DIRECT_STRESS is not defined,
@@ -1327,6 +1363,7 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
       endif
     enddo
   endif
+
   call end_nvtx
 
   ! Offer diagnostic fields for averaging.
