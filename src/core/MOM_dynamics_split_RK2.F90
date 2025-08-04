@@ -425,7 +425,7 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
 
   ! allocate internal variables on GPU
   !$omp target enter data map(alloc: u_bc_accel, v_bc_accel, eta_pred, uh_in, vh_in)
-  !$omp target enter data map(alloc: hp, dz)
+  !$omp target enter data map(alloc: up, vp, hp, dz, h_tmp)
   !$omp target update to(eta, pbv, pbv%por_face_areaU, pbv%por_face_areaV)
 
   !$OMP parallel do default(shared)
@@ -805,7 +805,7 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
   ! uh = u_av * h
   ! hp = h + dt * div . uh
   call cpu_clock_begin(id_clock_continuity)
-  !$omp target update to(CS%visc_rem_u, CS%visc_rem_v)
+  !$omp target update to(CS%visc_rem_u, CS%visc_rem_v, up, vp)
   call continuity(up, vp, h, hp, uh, vh, dt, G, GV, US, CS%continuity_CSp, CS%OBC, pbv, &
                   uhbt=CS%uhbt, vhbt=CS%vhbt, visc_rem_u=CS%visc_rem_u, visc_rem_v=CS%visc_rem_v, &
                   u_cor=u_av, v_cor=v_av, BT_cont=CS%BT_cont)
@@ -1087,7 +1087,9 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
   ! h  = h + dt * div . uh
   ! u_av and v_av adjusted so their mass transports match uhbt and vhbt.
   call cpu_clock_begin(id_clock_continuity)
-  h_tmp(:, :, :) = h(:, :, :)
+  do concurrent (k=1:nz, j=G%jsd:G%jed, i=G%isd:G%ied)
+    h_tmp(i,j,k) = h(i,j,k)
+  enddo
   !$omp target update to(CS%visc_rem_u, CS%visc_rem_v, u_inst, v_inst)
   call continuity(u_inst, v_inst, h_tmp, h, uh, vh, dt, G, GV, US, CS%continuity_CSp, CS%OBC, pbv, &
                   uhbt=CS%uhbt, vhbt=CS%vhbt, visc_rem_u=CS%visc_rem_u, visc_rem_v=CS%visc_rem_v, &
@@ -1133,7 +1135,7 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
 
   ! release internal variables
   !$omp target exit data map(release: u_bc_accel, v_bc_accel, eta_pred, uh_in, vh_in)
-  !$omp target exit data map(delete: hp, dz)
+  !$omp target exit data map(delete: hp, up, vp, dz, h_tmp)
 
   if (CS%store_CAu) then
     ! Calculate a predictor-step estimate of the Coriolis and momentum advection terms
