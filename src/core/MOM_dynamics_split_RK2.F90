@@ -514,9 +514,10 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
   !$omp target update to(h)
   call PressureForce(h, tv, CS%PFu, CS%PFv, G, GV, US, CS%PressureForce_CSp, &
                      CS%ALE_CSp, CS%ADp, p_surf, CS%pbce, CS%eta_PF)
-  !$omp target update from(CS%PFu, CS%PFv, CS%pbce, CS%eta_PF)
+  !$omp target update from(CS%PFu, CS%PFv, CS%pbce)
 
   if (dyn_p_surf) then
+    !$omp target update from(CS%eta_PF)
     pres_to_eta = 1.0 / (GV%g_Earth * GV%H_to_RZ)
     !$OMP parallel do default(shared)
     do j=Jsq,Jeq+1 ; do i=Isq,Ieq+1
@@ -644,7 +645,6 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
 
   call cpu_clock_begin(id_clock_btcalc)
   ! Calculate the relative layer weights for determining barotropic quantities.
-  !$omp target update to(h)
   if (.not.BT_cont_BT_thick) then
     call btcalc(h, G, GV, CS%barotropic_CSp, OBC=CS%OBC)
   endif
