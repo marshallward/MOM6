@@ -749,7 +749,7 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
   ! over the topmost Hmix fluid.  If DIRECT_STRESS is not defined,
   ! the wind stress is applied as a stress boundary condition.
   if (CS%direct_stress) then
-    !$omp target teams loop private(i,j)
+    !$omp target teams loop private(i,j) collapse(2)
     do j = G%jsc, G%jec
       do I = Isq, Ieq
         if (G%mask2dCu(I,j) > 0.0) then
@@ -1149,7 +1149,7 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
   ! the wind stress is applied as a stress boundary condition.
   if (CS%direct_stress) then
   ! TODO JORGE: refactor this one later
-    !$omp target teams loop private(i,j) 
+    !$omp target teams loop private(i,j) collapse(2) 
     do J=Jsq,Jeq
       do i=is,ie
         if (G%mask2dCv(i,J) > 0.) then
