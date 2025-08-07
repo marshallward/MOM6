@@ -2313,12 +2313,8 @@ subroutine meridional_flux_adjust(v, h_in, h_S, h_N, vh_tot_0, dvhdv_tot_0, &
 
   tol_vel = CS%tol_vel
 
-  !$omp target loop private(i, k, itt, vh_err, vh_err_best, dvhdv_tot, dv_min, dv_max, do_I) &
-  !$omp   map(to: G, G%IareaT, G%IdyT, G%dx_Cv, G%IdyT, v, h_in, h_S, h_N, visc_rem, vhbt, &
-  !$omp     dv_max_CFL, dv_min_CFL, vh_tot_0, dvhdv_tot_0, CS, do_I_in, por_face_areaV) &
-  !$omp   map(alloc: vh_aux, dvhdv, v_new, vh_err, vh_err_best, dvhdv_tot, dv_min, dv_max, do_I) &
-  !$omp   map(tofrom: vh_3d) &
-  !$omp   map(from: dv)
+  !$omp target loop private(vh_err, vh_err_best, dvhdv_tot, dv_min, dv_max, do_I) &
+  !$omp   map(alloc: vh_aux, dvhdv, v_new, vh_err, vh_err_best, dvhdv_tot, dv_min, dv_max, do_I)
   do J=jsh-1,jeh
 
     if (present(vh_3d)) then
