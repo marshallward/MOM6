@@ -612,8 +612,8 @@ subroutine zonal_mass_flux(u, h_in, h_W, h_E, uh, dt, G, GV, US, CS, OBC, por_fa
   if (CS%aggress_adjust) CFL_dt = I_dt
 
   !$omp target enter data &
-  !$omp   map(alloc: visc_rem_u_tmp, &
-  !$omp       duhdu, du, du_min_CFL, du_max_CFL, duhdu_tot_0, uh_tot_0, visc_rem_max)
+  !$omp   map(alloc: visc_rem_u_tmp, duhdu, du, du_min_CFL, du_max_CFL, duhdu_tot_0, uh_tot_0, &
+  !$omp     visc_rem_max)
 
   do concurrent (j=jsh:jeh)
 
@@ -758,8 +758,8 @@ subroutine zonal_mass_flux(u, h_in, h_W, h_E, uh, dt, G, GV, US, CS, OBC, por_fa
                                    uh, u_cor, du_cor, BT_cont, dt, G, GV, US, CS, OBC, LB)
 
   !$omp target exit data &
-  !$omp   map(release: visc_rem_u_tmp, duhdu, du, &
-  !$omp       du_min_CFL, du_max_CFL, duhdu_tot_0, uh_tot_0, visc_rem_max)
+  !$omp   map(release: visc_rem_u_tmp, duhdu, du, du_min_CFL, du_max_CFL, duhdu_tot_0, uh_tot_0, &
+  !$omp     visc_rem_max)
 
   call cpu_clock_end(id_clock_correct)
 
@@ -1334,11 +1334,8 @@ subroutine zonal_flux_adjust(u, h_in, h_W, h_E, uh_tot_0, duhdu_tot_0, &
   tol_vel = CS%tol_vel
 
   ! NVIDIA do concurrent doesn't work with private arrays (private scalars OK)
-  !$omp target loop private(i, k, itt, uh_err, uh_err_best, duhdu_tot, du_min, du_max, do_I) &
-  !$omp   map(to: do_I_in, du_max_CFL, du_min_CFL, uh_tot_0, uhbt, duhdu_tot_0, G, G%IareaT, &
-  !$omp     CS, u, visc_rem, h_W, h_E, h_in, G%dy_Cu, G%IdxT, por_face_areaU) &
-  !$omp   map(alloc: uh_aux, duhdu, do_I, du_max, du_min, duhdu_tot, uh_err, uh_err_best, u_new) &
-  !$omp   map(tofrom: uh_3d, du)
+  !$omp target loop private(uh_err, uh_err_best, duhdu_tot, du_min, du_max, do_I) &
+  !$omp   map(alloc: uh_aux, duhdu, do_I, du_max, du_min, duhdu_tot, uh_err, uh_err_best, u_new)
   do j=jsh,jeh
 
     if (present(uh_3d)) then
