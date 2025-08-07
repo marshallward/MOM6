@@ -2499,12 +2499,8 @@ subroutine set_merid_BT_cont(v, h_in, h_S, h_N, BT_cont, dv0, vh_tot_0, dvhdv_to
   nz = GV%ke ; Idt = 1.0 / dt
   min_visc_rem = 0.1 ; CFL_min = 1e-6
 
-  !$omp target loop private(i, k, dvL, dvR, dv_CFL, FAmt_L, FAmt_R, FAmt_0, vhtot_L, vhtot_R) &
-  !$omp   map(to: G, G%dx_Cv, G%dyCv, G%IdyT, v, h_in, h_S, h_N, BT_cont, vh_tot_0, dvhdv_tot_0, &
-  !$omp     dv_max_CFL, dv_min_CFL, CS, visc_rem, visc_rem_max, do_I, por_face_areaV, dv0) &
-  !$omp   map(alloc: dvL, dvR, dv_CFL, FAmt_L, FAmt_R, FAmt_0, vhtot_L, vhtot_R) &
-  !$omp   map(from: BT_cont%FA_v_S0, BT_cont%FA_v_SS, BT_cont%vBT_SS, BT_cont%FA_v_N0, &
-  !$omp     BT_cont%FA_v_NN, BT_cont%vBT_NN)
+  !$omp target loop private(dvL, dvR, dv_CFL, FAmt_L, FAmt_R, FAmt_0, vhtot_L, vhtot_R) &
+  !$omp   map(alloc: dvL, dvR, dv_CFL, FAmt_L, FAmt_R, FAmt_0, vhtot_L, vhtot_R)
   do J=jsh-1,jeh
     ! Determine the southerly- and northerly- fluxes. Choose a sufficiently
     ! negative velocity correction for the northerly-flux, and a sufficiently
