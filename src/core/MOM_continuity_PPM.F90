@@ -1303,9 +1303,10 @@ subroutine zonal_flux_adjust(u, h_in, h_W, h_E, uh_tot_0, duhdu_tot_0, &
   type(ocean_OBC_type),             optional, pointer       :: OBC !< Open boundaries control structure.
   ! Local variables
   real, dimension(SZIB_(G),SZJ_(G),SZK_(GV)) :: &
-    uh_aux, &      ! An auxiliary zonal volume flux [H L2 T-1 ~> m3 s-1 or kg s-1].
-    duhdu          ! Partial derivative of uh with u [H L ~> m2 or kg m-1].
-  real :: u_new          ! The velocity with the correction added [L T-1 ~> m s-1].
+    uh_aux         ! An auxiliary zonal volume flux [H L2 T-1 ~> m3 s-1 or kg s-1].
+  real :: &
+    duhdu, &       ! Partial derivative of uh with u [H L ~> m2 or kg m-1].
+    u_new          ! The velocity with the correction added [L T-1 ~> m s-1].
   real, dimension(SZIB_(G)) :: &
     uh_err, &      ! Difference between uhbt and the summed uh [H L2 T-1 ~> m3 s-1 or kg s-1].
     uh_err_best, & ! The smallest value of uh_err found so far [H L2 T-1 ~> m3 s-1 or kg s-1].
@@ -1335,7 +1336,7 @@ subroutine zonal_flux_adjust(u, h_in, h_W, h_E, uh_tot_0, duhdu_tot_0, &
 
   ! NVIDIA do concurrent doesn't work with private arrays (private scalars OK)
   !$omp target loop private(uh_err, uh_err_best, duhdu_tot, du_min, du_max, do_I) &
-  !$omp   map(alloc: uh_aux, duhdu, do_I, du_max, du_min, duhdu_tot, uh_err, uh_err_best, u_new)
+  !$omp   map(alloc: uh_aux, do_I, du_max, du_min, duhdu_tot, uh_err, uh_err_best, u_new)
   do j=jsh,jeh
 
     if (present(uh_3d)) then
@@ -1409,17 +1410,17 @@ subroutine zonal_flux_adjust(u, h_in, h_W, h_E, uh_tot_0, duhdu_tot_0, &
         do k=1,nz ; do concurrent (I=ish-1:ieh, do_I(I))
           u_new = u(I,j,k) + du(I,j) * visc_rem(I,j,k)
           call flux_elem(u_new, h_in(I,j,k), h_in(I+1,j,k), h_W(I,j,k), h_W(I+1,j,k), h_E(I,j,k), &
-                         h_E(I+1,j,k), uh_aux(I,j,k), duhdu(I,j,k), visc_rem(I,j,k), G%dy_Cu(I,j), &
+                         h_E(I+1,j,k), uh_aux(I,j,k), duhdu, visc_rem(I,j,k), G%dy_Cu(I,j), &
                          G%IareaT(I,j), G%IareaT(I+1,j), G%IdxT(I,j), G%IdxT(i+1,j), dt, G, GV, US, &
                          CS%vol_CFL, por_face_areaU(I,j,k))
           ! Below if statement looks expensive in profiling results, but I believe it's
           ! masking the expensive update of uh_err beneath
           if (local_OBC) &
-            call flux_elem_OBC(u_new, h_in(I,j,k), h_in(I+1,j,k), uh_aux(I,j,k), duhdu(I,j,k), &
+            call flux_elem_OBC(u_new, h_in(I,j,k), h_in(I+1,j,k), uh_aux(I,j,k), duhdu, &
                                visc_rem(I,j,k), G, GV, por_face_areaU(I,j,k), G%dy_Cu(I,j), OBC, &
                                OBC%segnum_u(I,j))
           uh_err(I) = uh_err(I) + uh_aux(I,j,k)
-          duhdu_tot(I) = duhdu_tot(I) + duhdu(I,j,k)
+          duhdu_tot(I) = duhdu_tot(I) + duhdu
         enddo ; enddo
         do concurrent (I=ish-1:ieh)
           uh_err_best(I) = min(uh_err_best(I), abs(uh_err(I)))
@@ -2283,9 +2284,10 @@ subroutine meridional_flux_adjust(v, h_in, h_S, h_N, vh_tot_0, dvhdv_tot_0, &
   type(ocean_OBC_type), optional, pointer :: OBC !< Open boundaries control structure.
   ! Local variables
   real, dimension(SZI_(G),SZJB_(G),SZK_(GV)) :: &
-    vh_aux, &  ! An auxiliary meridional volume flux [H L2 T-1 ~> m3 s-1 or kg s-1].
-    dvhdv   ! Partial derivative of vh with v [H L ~> m2 or kg m-1].
-  real :: v_new      ! The velocity with the correction added [L T-1 ~> m s-1].
+    vh_aux     ! An auxiliary meridional volume flux [H L2 T-1 ~> m3 s-1 or kg s-1].
+  real :: &
+    dvhdv, &   ! Partial derivative of vh with v [H L ~> m2 or kg m-1].
+    v_new      ! The velocity with the correction added [L T-1 ~> m s-1].
   real, dimension(SZI_(G)) :: &
     vh_err, &  ! Difference between vhbt and the summed vh [H L2 T-1 ~> m3 s-1 or kg s-1].
     vh_err_best, & ! The smallest value of vh_err found so far [H L2 T-1 ~> m3 s-1 or kg s-1].
@@ -2314,7 +2316,7 @@ subroutine meridional_flux_adjust(v, h_in, h_S, h_N, vh_tot_0, dvhdv_tot_0, &
   tol_vel = CS%tol_vel
 
   !$omp target loop private(vh_err, vh_err_best, dvhdv_tot, dv_min, dv_max, do_I) &
-  !$omp   map(alloc: vh_aux, dvhdv, v_new, vh_err, vh_err_best, dvhdv_tot, dv_min, dv_max, do_I)
+  !$omp   map(alloc: vh_aux, v_new, vh_err, vh_err_best, dvhdv_tot, dv_min, dv_max, do_I)
   do J=jsh-1,jeh
 
     if (present(vh_3d)) then
@@ -2391,15 +2393,15 @@ subroutine meridional_flux_adjust(v, h_in, h_S, h_N, vh_tot_0, dvhdv_tot_0, &
         do k=1,nz ; do concurrent (i=ish:ieh, do_I(i))
           v_new = v(i,J,k) + dv(i,j) * visc_rem(i,j,k)
           call flux_elem(v_new, h_in(i,J,k), h_in(i,J+1,k), h_S(i,J,k), h_S(i,J+1,k), &
-                         h_N(i,J,k), h_N(i,J+1,k), vh_aux(i,J,k), dvhdv(i,J,k), visc_rem(i,J,k), &
+                         h_N(i,J,k), h_N(i,J+1,k), vh_aux(i,J,k), dvhdv, visc_rem(i,J,k), &
                          G%dx_Cv(i,J), G%IareaT(i,J), G%IareaT(i,J+1), G%idyT(i,J), G%IdyT(i,J+1), &
                          dt, G, GV, US, CS%vol_CFL, por_face_areaV(i,J,k))
           if (local_OBC) &
             call flux_elem_OBC(v_new, h_in(i,J,k), h_in(i,J+1,k), vh_aux(i,J,k), &
-                               dvhdv(i,J,k), visc_rem(i,J,k), G, GV, por_face_areaV(i,J,k), &
+                               dvhdv, visc_rem(i,J,k), G, GV, por_face_areaV(i,J,k), &
                                G%dx_Cv(i,J), OBC, OBC%segnum_v(i,J))
           vh_err(i) = vh_err(i) + vh_aux(i,J,k)
-          dvhdv_tot(i) = dvhdv_tot(i) + dvhdv(i,J,k)
+          dvhdv_tot(i) = dvhdv_tot(i) + dvhdv
         enddo ; enddo
         do concurrent (i=ish:ieh, do_I(i))
           vh_err_best(i) = min(vh_err_best(i), abs(vh_err(i)))
