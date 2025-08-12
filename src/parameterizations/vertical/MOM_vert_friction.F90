@@ -823,43 +823,55 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
   call start_nvtx("biggo loopo")
   !$omp target enter data map(to: CS, CS%a_u, CS%h_u)
   !$omp target enter data map(alloc: b1, c1, d1)
+block 
+logical :: is_du_dt_str_associated, is_ray_u_alloc
+
+is_du_dt_str_associated = associated(ADp%du_dt_str)
+is_ray_u_alloc = allocated(visc%Ray_u)
+
 
   do concurrent (j=G%isc:G%jec, I=Isq:Ieq, G%mask2dCu(I,j) > 0.)
-    b_denom_1 = CS%h_u(I,j,1) + dt * (Ray(I,j) + CS%a_u(I,j,1))
-    b1(I,j) = 1.0 / (b_denom_1 + dt*CS%a_u(I,j,2))
-    d1(I,j) = b_denom_1 * b1(I,j)
-    u(I,j,1) = b1(I,j) * (CS%h_u(I,j,1) * u(I,j,1) + surface_stress(I,j))
-  enddo
+        b_denom_1 = CS%h_u(I,j,1) + dt * (Ray(I,j) + CS%a_u(I,j,1))
+        b1(I,j) = 1.0 / (b_denom_1 + dt*CS%a_u(I,j,2))
+        d1(I,j) = b_denom_1 * b1(I,j)
+        u(I,j,1) = b1(I,j) * (CS%h_u(I,j,1) * u(I,j,1) + surface_stress(I,j))
+  end do
 
-  if (associated(ADp%du_dt_str)) then
+  if (is_du_dt_str_associated) then
     do concurrent (j=G%isc:G%jec, I=Isq:Ieq, G%mask2dCu(I,j) > 0.)
-      ADp%du_dt_str(I,j,1) = b1(I,j) * (CS%h_u(I,j,1) * ADp%du_dt_str(I,j,1) + surface_stress(I,j) * Idt)
-    enddo
+         ADp%du_dt_str(I,j,1) = b1(I,j) * (CS%h_u(I,j,1) * ADp%du_dt_str(I,j,1) + surface_stress(I,j) * Idt)
+    end do 
   endif
 
   do k=2,nz
-    if (allocated(visc%Ray_u)) then
+    !if (allocated(visc%Ray_u)) then
+    if (is_ray_u_alloc) then 
       do concurrent (j=G%jsc:G%jec, I=Isq:Ieq)
-        Ray(I,j) = visc%Ray_u(I,j,k)
+          Ray(I,j) = visc%Ray_u(I,j,k)
       enddo
     endif
 
     do concurrent (j=G%isc:G%jec, I=Isq:Ieq, G%mask2dCu(I,j) > 0.)
-      c1(I,j,k) = dt * CS%a_u(I,j,K) * b1(I,j)
-      b_denom_1 = CS%h_u(I,j,k) + dt * (Ray(I,j) + CS%a_u(I,j,K)*d1(I,j))
-      b1(I,j) = 1.0 / (b_denom_1 + dt * CS%a_u(I,j,K+1))
-      d1(I,j) = b_denom_1 * b1(I,j)
-      u(I,j,k) = (CS%h_u(I,j,k) * u(I,j,k) + &
-                  dt * CS%a_u(I,j,K) * u(I,j,k-1)) * b1(I,j)
-    enddo
+          c1(I,j,k) = dt * CS%a_u(I,j,K) * b1(I,j)
+          b_denom_1 = CS%h_u(I,j,k) + dt * (Ray(I,j) + CS%a_u(I,j,K)*d1(I,j))
+          b1(I,j) = 1.0 / (b_denom_1 + dt * CS%a_u(I,j,K+1))
+          d1(I,j) = b_denom_1 * b1(I,j)
+          u(I,j,k) = (CS%h_u(I,j,k) * u(I,j,k) + &
+                      dt * CS%a_u(I,j,K) * u(I,j,k-1)) * b1(I,j)
+    end do
 
-    if (associated(ADp%du_dt_str)) then
-      do concurrent (j=G%isc:G%jec, I=Isq:Ieq, G%mask2dCu(I,j) > 0.)
-        ADp%du_dt_str(I,j,k) = (CS%h_u(I,j,k) * ADp%du_dt_str(I,j,k) &
-            + dt * CS%a_u(I,j,K) * ADp%du_dt_str(I,j,k-1)) * b1(I,j)
-      enddo
+  !  if (associated(ADp%du_dt_str)) then
+    if (is_du_dt_str_associated) then
+        do concurrent (j=G%isc:G%jec, I=Isq:Ieq, G%mask2dCu(I,j) > 0.)
+          ADp%du_dt_str(I,j,k) = (CS%h_u(I,j,k) * ADp%du_dt_str(I,j,k) &
+              + dt * CS%a_u(I,j,K) * ADp%du_dt_str(I,j,k-1)) * b1(I,j)
+      end do
     endif
-  enddo
+
+  enddo ! k loop
+
+
+  end block
 
 
   call end_nvtx
@@ -868,8 +880,8 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
   call start_nvtx("solve for te new velocities")
   ! back substitute to solve for the new velocities
   ! u_k = d'_k - c'_k x_(k+1)
-  do k=nz-1,1,-1
   !$omp target teams loop collapse(2) private(j,i) 
+  do k=nz-1,1,-1
     do j=G%isc,G%jec
       do I=Isq,Ieq 
         if (G%mask2dCu(I,j) > 0.) then
@@ -877,8 +889,8 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
         endif 
       enddo
     enddo
-  !$omp end target teams loop
   enddo
+  !$omp end target teams loop
 
 
   if (associated(ADp%du_dt_str)) then
@@ -1079,8 +1091,8 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
 
   ! When mixing down Eulerian current + Stokes drift add before calling solver
   if (DoStokesMixing) then
-    do k=1,nz
       !$omp target teams loop private(i,j) collapse(2)
+    do k=1,nz
       do J=Jsq,Jeq
         do i=is,ie
           if (G%mask2dCv(i,J) > 0.) then
@@ -1088,14 +1100,14 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
           end if 
         end do 
       end do
-      !$omp end target teams loop
     end do
+      !$omp end target teams loop
   endif
 
 
   if (lfpmix) then
-    do k=1,nz
       !$omp target teams loop private(i,j) collapse(2)
+    do k=1,nz
       do J=Jsq,Jeq
         do i=is,ie
           if (G%mask2dCv(i,J) > 0.) then
@@ -1103,44 +1115,45 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
           end if
         end do 
       end do 
-      !$omp end target teams loop
     end do 
+      !$omp end target teams loop
   endif
 
 
   if (associated(ADp%dv_dt_visc)) then
-    do k=1,nz
       !$omp target teams loop private(i,j) collapse(2)
+    do k=1,nz
       do J=Jsq,Jeq
         do i=is,ie
           ADp%dv_dt_visc(i,J,k) = v(i,J,k)
         end do 
       end do 
     end do 
+      !$omp end target teams loop
   endif
 
   if (associated(ADp%dv_dt_visc_gl90)) then
-    do k=1,nz
       !$omp target teams loop private(i,j) collapse(2)
+    do k=1,nz
       do J=Jsq,Jeq
         do i=is,ie
           ADp%dv_dt_visc_gl90(i,J,k) = v(i,J,k)
         end do 
       end do 
-      !$omp end target teams loop
     end do 
+      !$omp end target teams loop
   endif
 
   if (associated(ADp%dv_dt_str)) then
-    do k=1,nz
       !$omp target teams loop private(i,j) collapse(2)
+    do k=1,nz
       do J=Jsq,Jeq
         do i=is,ie
           ADp%dv_dt_str(i,J,k) = 0.0
         end do 
       end do 
-      !$omp end target teams loop
     end do 
+      !$omp end target teams loop
   endif
 
 
@@ -1255,13 +1268,13 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
     endif
   enddo
 
-  do k=nz-1,1,-1
     !$omp target teams loop private(i,j) collapse(2)
+  do k=nz-1,1,-1
     do J=Jsq,Jeq ; do i=is,ie ; if (G%mask2dCv(i,J) > 0.) then
       v(i,J,k) = v(i,J,k) + c1(i,J,k+1) * v(i,J,k+1)
     endif ; enddo ; enddo
-    !$omp end target teams loop
   enddo
+    !$omp end target teams loop
 
   if (associated(ADp%dv_dt_str)) then
     !$omp target teams loop private(i,j) collapse(2)
@@ -1270,14 +1283,14 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
     enddo ; enddo
     !$omp end target teams loop
 
-    do k=nz-1,1,-1
       !$omp target teams loop private(i,j) collapse(2)
+    do k=nz-1,1,-1
       do J=Jsq,Jeq ; do i=is,ie ; if (G%mask2dCv(i,J) > 0.) then
         ADp%dv_dt_str(i,J,k) = ADp%dv_dt_str(i,J,k) + c1(i,J,k+1) * ADp%dv_dt_str(i,J,k+1)
         if (abs(ADp%dv_dt_str(i,J,k)) < accel_underflow) ADp%dv_dt_str(i,J,k) = 0.0
       endif ; enddo ; enddo
-      !$omp end target teams loop
     enddo
+      !$omp end target teams loop
   endif
 
 
