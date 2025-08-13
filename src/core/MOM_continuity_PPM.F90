@@ -1302,7 +1302,7 @@ subroutine zonal_flux_adjust(u, h_in, h_W, h_E, uh_tot_0, duhdu_tot_0, &
                                                  !! faces = u*h*dy [H L2 T-1 ~> m3 s-1 or kg s-1].
   type(ocean_OBC_type),             optional, pointer       :: OBC !< Open boundaries control structure.
   ! Local variables
-  real, dimension(SZIB_(G),SZJ_(G),SZK_(GV)) :: &
+  real, dimension(SZIB_(G),SZK_(GV)) :: &
     uh_aux         ! An auxiliary zonal volume flux [H L2 T-1 ~> m3 s-1 or kg s-1].
   real :: &
     duhdu, &       ! Partial derivative of uh with u [H L ~> m2 or kg m-1].
@@ -1336,16 +1336,15 @@ subroutine zonal_flux_adjust(u, h_in, h_W, h_E, uh_tot_0, duhdu_tot_0, &
 
   ! NVIDIA needs private arrays to be alloc'ed to prevent data transfers.
   ! GCC doesn't understand map(alloc: ...) for variables also marked private
-  !$omp target enter data map(alloc: do_I, du_max, du_min, duhdu_tot, uh_err, uh_err_best)
+  !$omp target enter data map(alloc: do_I, du_max, du_min, duhdu_tot, uh_err, uh_err_best, uh_aux)
 
   ! NVIDIA do concurrent doesn't work with private arrays (private scalars OK)
-  !$omp target loop private(uh_err, uh_err_best, duhdu_tot, du_min, du_max, do_I) &
-  !$omp   map(alloc: uh_aux)
+  !$omp target loop private(uh_err, uh_err_best, duhdu_tot, du_min, du_max, do_I, uh_aux)
   do j=jsh,jeh
 
     if (present(uh_3d)) then
       do concurrent (k=1:nz, I=ish-1:ieh)
-        uh_aux(I,j,k) = uh_3d(I,j,k)
+        uh_aux(I,k) = uh_3d(I,j,k)
       enddo
     endif
 
@@ -1414,16 +1413,16 @@ subroutine zonal_flux_adjust(u, h_in, h_W, h_E, uh_tot_0, duhdu_tot_0, &
         do k=1,nz ; do concurrent (I=ish-1:ieh, do_I(I))
           u_new = u(I,j,k) + du(I,j) * visc_rem(I,j,k)
           call flux_elem(u_new, h_in(I,j,k), h_in(I+1,j,k), h_W(I,j,k), h_W(I+1,j,k), h_E(I,j,k), &
-                         h_E(I+1,j,k), uh_aux(I,j,k), duhdu, visc_rem(I,j,k), G%dy_Cu(I,j), &
+                         h_E(I+1,j,k), uh_aux(I,k), duhdu, visc_rem(I,j,k), G%dy_Cu(I,j), &
                          G%IareaT(I,j), G%IareaT(I+1,j), G%IdxT(I,j), G%IdxT(i+1,j), dt, G, GV, US, &
                          CS%vol_CFL, por_face_areaU(I,j,k))
           ! Below if statement looks expensive in profiling results, but I believe it's
           ! masking the expensive update of uh_err beneath
           if (local_OBC) &
-            call flux_elem_OBC(u_new, h_in(I,j,k), h_in(I+1,j,k), uh_aux(I,j,k), duhdu, &
+            call flux_elem_OBC(u_new, h_in(I,j,k), h_in(I+1,j,k), uh_aux(I,k), duhdu, &
                                visc_rem(I,j,k), G, GV, por_face_areaU(I,j,k), G%dy_Cu(I,j), OBC, &
                                OBC%segnum_u(I,j))
-          uh_err(I) = uh_err(I) + uh_aux(I,j,k)
+          uh_err(I) = uh_err(I) + uh_aux(I,k)
           duhdu_tot(I) = duhdu_tot(I) + duhdu
         enddo ; enddo
         do concurrent (I=ish-1:ieh)
@@ -1434,7 +1433,7 @@ subroutine zonal_flux_adjust(u, h_in, h_W, h_E, uh_tot_0, duhdu_tot_0, &
     enddo ! itt-loop
     if (present(uh_3d)) then
       do concurrent (k=1:nz, I=ish-1:ieh)
-        uh_3d(I,j,k) = uh_aux(I,j,k)
+        uh_3d(I,j,k) = uh_aux(I,k)
       enddo
     endif
   enddo ! j-loop
@@ -1442,7 +1441,7 @@ subroutine zonal_flux_adjust(u, h_in, h_W, h_E, uh_tot_0, duhdu_tot_0, &
   ! so-be-it, or else use a final upwind correction?
   ! This never seems to happen with 20 iterations as max_itt.
 
-  !$omp target exit data map(release: do_I, du_max, du_min, duhdu_tot, uh_err, uh_err_best)
+  !$omp target exit data map(release: do_I, du_max, du_min, duhdu_tot, uh_err, uh_err_best, uh_aux)
 
 end subroutine zonal_flux_adjust
 
@@ -2292,7 +2291,7 @@ subroutine meridional_flux_adjust(v, h_in, h_S, h_N, vh_tot_0, dvhdv_tot_0, &
                              !! faces = v*h*dx [H L2 T-1 ~> m3 s-1 or kg s-1].
   type(ocean_OBC_type), optional, pointer :: OBC !< Open boundaries control structure.
   ! Local variables
-  real, dimension(SZI_(G),SZJB_(G),SZK_(GV)) :: &
+  real, dimension(SZI_(G),SZK_(GV)) :: &
     vh_aux     ! An auxiliary meridional volume flux [H L2 T-1 ~> m3 s-1 or kg s-1].
   real :: &
     dvhdv, &   ! Partial derivative of vh with v [H L ~> m2 or kg m-1].
@@ -2326,15 +2325,15 @@ subroutine meridional_flux_adjust(v, h_in, h_S, h_N, vh_tot_0, dvhdv_tot_0, &
 
   ! NVIDIA needs private arrays to be alloc'ed to prevent data transfers.
   ! GCC doesn't understand map(alloc: ...) for variables also marked private
-  !$omp target enter data map(alloc: do_I, dv_max, dv_min, dvhdv_tot, vh_err, vh_err_best)
+  !$omp target enter data map(alloc: do_I, dv_max, dv_min, dvhdv_tot, vh_err, vh_err_best, vh_aux)
 
-  !$omp target loop private(vh_err, vh_err_best, dvhdv_tot, dv_min, dv_max, do_I) &
-  !$omp   map(alloc: vh_aux)
+  !$omp target loop &
+  !$omp   private(j, k, vh_err, vh_err_best, dvhdv_tot, dv_min, dv_max, do_I, vh_aux)
   do J=jsh-1,jeh
 
     if (present(vh_3d)) then
       do concurrent (k=1:nz, i=ish:ieh)
-        vh_aux(i,j,k) = vh_3d(i,J,k)
+        vh_aux(i,k) = vh_3d(i,J,k)
       enddo
     endif
 
@@ -2406,14 +2405,14 @@ subroutine meridional_flux_adjust(v, h_in, h_S, h_N, vh_tot_0, dvhdv_tot_0, &
         do k=1,nz ; do concurrent (i=ish:ieh, do_I(i))
           v_new = v(i,J,k) + dv(i,j) * visc_rem(i,j,k)
           call flux_elem(v_new, h_in(i,J,k), h_in(i,J+1,k), h_S(i,J,k), h_S(i,J+1,k), &
-                         h_N(i,J,k), h_N(i,J+1,k), vh_aux(i,J,k), dvhdv, visc_rem(i,J,k), &
+                         h_N(i,J,k), h_N(i,J+1,k), vh_aux(i,k), dvhdv, visc_rem(i,J,k), &
                          G%dx_Cv(i,J), G%IareaT(i,J), G%IareaT(i,J+1), G%idyT(i,J), G%IdyT(i,J+1), &
                          dt, G, GV, US, CS%vol_CFL, por_face_areaV(i,J,k))
           if (local_OBC) &
-            call flux_elem_OBC(v_new, h_in(i,J,k), h_in(i,J+1,k), vh_aux(i,J,k), &
+            call flux_elem_OBC(v_new, h_in(i,J,k), h_in(i,J+1,k), vh_aux(i,k), &
                                dvhdv, visc_rem(i,J,k), G, GV, por_face_areaV(i,J,k), &
                                G%dx_Cv(i,J), OBC, OBC%segnum_v(i,J))
-          vh_err(i) = vh_err(i) + vh_aux(i,J,k)
+          vh_err(i) = vh_err(i) + vh_aux(i,k)
           dvhdv_tot(i) = dvhdv_tot(i) + dvhdv
         enddo ; enddo
         do concurrent (i=ish:ieh, do_I(i))
@@ -2428,12 +2427,12 @@ subroutine meridional_flux_adjust(v, h_in, h_S, h_N, vh_tot_0, dvhdv_tot_0, &
 
     if (present(vh_3d)) then
       do concurrent (k=1:nz, i=ish:ieh)
-        vh_3d(i,J,k) = vh_aux(i,j,k)
+        vh_3d(i,J,k) = vh_aux(i,k)
       enddo
     endif
   enddo ! j-loop
 
-  !$omp target exit data map(release: do_I, dv_max, dv_min, dvhdv_tot, vh_err, vh_err_best)
+  !$omp target exit data map(release: do_I, dv_max, dv_min, dvhdv_tot, vh_err, vh_err_best, vh_aux)
 
 end subroutine meridional_flux_adjust
 
