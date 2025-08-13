@@ -1339,7 +1339,7 @@ subroutine zonal_flux_adjust(u, h_in, h_W, h_E, uh_tot_0, duhdu_tot_0, &
   !$omp target enter data map(alloc: do_I, du_max, du_min, duhdu_tot, uh_err, uh_err_best, uh_aux)
 
   ! NVIDIA do concurrent doesn't work with private arrays (private scalars OK)
-  !$omp target loop private(uh_err, uh_err_best, duhdu_tot, du_min, du_max, do_I, uh_aux)
+  !$omp target teams loop private(uh_err, uh_err_best, duhdu_tot, du_min, du_max, do_I, uh_aux)
   do j=jsh,jeh
 
     if (present(uh_3d)) then
@@ -1533,7 +1533,7 @@ subroutine set_zonal_BT_cont(u, h_in, h_W, h_E, BT_cont, du0, uh_tot_0, duhdu_to
 
   !$omp target enter data map(alloc: duL, duR, du_CFL, FAmt_L, FAmT_R, FAmt_0, uhtot_L, uhtot_R)
 
-  !$omp target loop private(duL, duR, du_CFL, FAmt_L, FAmt_R, FAmt_0, uhtot_L, uhtot_R)
+  !$omp target teams loop private(duL, duR, du_CFL, FAmt_L, FAmt_R, FAmt_0, uhtot_L, uhtot_R)
   do j=jsh,jeh
     ! Determine the westerly- and easterly- fluxes.  Choose a sufficiently
     ! negative velocity correction for the easterly-flux, and a sufficiently
@@ -2327,7 +2327,7 @@ subroutine meridional_flux_adjust(v, h_in, h_S, h_N, vh_tot_0, dvhdv_tot_0, &
   ! GCC doesn't understand map(alloc: ...) for variables also marked private
   !$omp target enter data map(alloc: do_I, dv_max, dv_min, dvhdv_tot, vh_err, vh_err_best, vh_aux)
 
-  !$omp target loop &
+  !$omp target teams loop &
   !$omp   private(j, k, vh_err, vh_err_best, dvhdv_tot, dv_min, dv_max, do_I, vh_aux)
   do J=jsh-1,jeh
 
@@ -2517,7 +2517,7 @@ subroutine set_merid_BT_cont(v, h_in, h_S, h_N, BT_cont, dv0, vh_tot_0, dvhdv_to
 
   !$omp target enter data map(alloc: dvL, dvR, dv_CFL, FAmt_L, FAmt_R, FAmt_0, vhtot_L, vhtot_R)
 
-  !$omp target loop private(dvL, dvR, dv_CFL, FAmt_L, FAmt_R, FAmt_0, vhtot_L, vhtot_R)
+  !$omp target teams loop private(dvL, dvR, dv_CFL, FAmt_L, FAmt_R, FAmt_0, vhtot_L, vhtot_R)
   do J=jsh-1,jeh
     ! Determine the southerly- and northerly- fluxes. Choose a sufficiently
     ! negative velocity correction for the northerly-flux, and a sufficiently
