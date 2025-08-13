@@ -880,8 +880,8 @@ is_ray_u_alloc = allocated(visc%Ray_u)
   call start_nvtx("solve for te new velocities")
   ! back substitute to solve for the new velocities
   ! u_k = d'_k - c'_k x_(k+1)
-  !$omp target teams loop collapse(2) private(j,i) 
   do k=nz-1,1,-1
+  !$omp target teams loop collapse(2) private(j,i) 
     do j=G%isc,G%jec
       do I=Isq,Ieq 
         if (G%mask2dCu(I,j) > 0.) then
@@ -889,8 +889,8 @@ is_ray_u_alloc = allocated(visc%Ray_u)
         endif 
       enddo
     enddo
-  enddo
   !$omp end target teams loop
+  enddo
 
 
   if (associated(ADp%du_dt_str)) then
@@ -1091,8 +1091,8 @@ is_ray_u_alloc = allocated(visc%Ray_u)
 
   ! When mixing down Eulerian current + Stokes drift add before calling solver
   if (DoStokesMixing) then
-      !$omp target teams loop private(i,j) collapse(2)
     do k=1,nz
+      !$omp target teams loop private(i,j) collapse(2)
       do J=Jsq,Jeq
         do i=is,ie
           if (G%mask2dCv(i,J) > 0.) then
@@ -1100,14 +1100,14 @@ is_ray_u_alloc = allocated(visc%Ray_u)
           end if 
         end do 
       end do
-    end do
       !$omp end target teams loop
+    end do
   endif
 
 
   if (lfpmix) then
-      !$omp target teams loop private(i,j) collapse(2)
     do k=1,nz
+      !$omp target teams loop private(i,j) collapse(2)
       do J=Jsq,Jeq
         do i=is,ie
           if (G%mask2dCv(i,J) > 0.) then
@@ -1115,45 +1115,45 @@ is_ray_u_alloc = allocated(visc%Ray_u)
           end if
         end do 
       end do 
-    end do 
       !$omp end target teams loop
+    end do 
   endif
 
 
   if (associated(ADp%dv_dt_visc)) then
-      !$omp target teams loop private(i,j) collapse(2)
     do k=1,nz
+      !$omp target teams loop private(i,j) collapse(2)
       do J=Jsq,Jeq
         do i=is,ie
           ADp%dv_dt_visc(i,J,k) = v(i,J,k)
         end do 
       end do 
-    end do 
       !$omp end target teams loop
+    end do 
   endif
 
   if (associated(ADp%dv_dt_visc_gl90)) then
-      !$omp target teams loop private(i,j) collapse(2)
     do k=1,nz
+      !$omp target teams loop private(i,j) collapse(2)
       do J=Jsq,Jeq
         do i=is,ie
           ADp%dv_dt_visc_gl90(i,J,k) = v(i,J,k)
         end do 
       end do 
-    end do 
       !$omp end target teams loop
+    end do 
   endif
 
   if (associated(ADp%dv_dt_str)) then
-      !$omp target teams loop private(i,j) collapse(2)
     do k=1,nz
+      !$omp target teams loop private(i,j) collapse(2)
       do J=Jsq,Jeq
         do i=is,ie
           ADp%dv_dt_str(i,J,k) = 0.0
         end do 
       end do 
-    end do 
       !$omp end target teams loop
+    end do 
   endif
 
 
@@ -1268,13 +1268,13 @@ is_ray_u_alloc = allocated(visc%Ray_u)
     endif
   enddo
 
-    !$omp target teams loop private(i,j) collapse(2)
   do k=nz-1,1,-1
+    !$omp target teams loop private(i,j) collapse(2)
     do J=Jsq,Jeq ; do i=is,ie ; if (G%mask2dCv(i,J) > 0.) then
       v(i,J,k) = v(i,J,k) + c1(i,J,k+1) * v(i,J,k+1)
     endif ; enddo ; enddo
-  enddo
     !$omp end target teams loop
+  enddo
 
   if (associated(ADp%dv_dt_str)) then
     !$omp target teams loop private(i,j) collapse(2)
@@ -1283,14 +1283,14 @@ is_ray_u_alloc = allocated(visc%Ray_u)
     enddo ; enddo
     !$omp end target teams loop
 
-      !$omp target teams loop private(i,j) collapse(2)
     do k=nz-1,1,-1
+      !$omp target teams loop private(i,j) collapse(2)
       do J=Jsq,Jeq ; do i=is,ie ; if (G%mask2dCv(i,J) > 0.) then
         ADp%dv_dt_str(i,J,k) = ADp%dv_dt_str(i,J,k) + c1(i,J,k+1) * ADp%dv_dt_str(i,J,k+1)
         if (abs(ADp%dv_dt_str(i,J,k)) < accel_underflow) ADp%dv_dt_str(i,J,k) = 0.0
       endif ; enddo ; enddo
-    enddo
       !$omp end target teams loop
+    enddo
   endif
 
 
