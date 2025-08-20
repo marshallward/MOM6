@@ -361,6 +361,10 @@ type, public :: barotropic_CS ; private
   integer :: id_SSH_u_OBC = -1, id_SSH_v_OBC = -1, id_ubt_OBC = -1, id_vbt_OBC = -1
   !>@}
 
+  ! temporary?
+  logical :: reentrant
+    !< True if either axis is re-entrant.  Used for OpenMP halo updates.
+
 end type barotropic_CS
 
 !> A description of the functional dependence of transport at a u-point
@@ -927,12 +931,12 @@ subroutine btstep(U_in, V_in, eta_in, dt, bc_accel_u, bc_accel_v, forces, pbce, 
     ! These calculations can be done almost immediately, but the halo updates
     ! must be done before the [abcd]mer and [abcd]zon are calculated.
     if (id_clock_calc_pre > 0) call cpu_clock_end(id_clock_calc_pre)
-    !$omp target update from(q, DCor_u, DCor_v)
+    !$omp target update from(q, DCor_u, DCor_v) if (CS%reentrant)
     if (nonblock_setup) then
       call start_group_pass(CS%pass_q_DCor, CS%BT_Domain, clock=id_clock_pass_pre)
     else
       call do_group_pass(CS%pass_q_DCor, CS%BT_Domain, clock=id_clock_pass_pre)
-      !$omp target update to(q, DCor_u, DCor_v)
+      !$omp target update to(q, DCor_u, DCor_v) if (CS%reentrant)
     endif
     if (id_clock_calc_pre > 0) call cpu_clock_begin(id_clock_calc_pre)
   endif
@@ -1122,7 +1126,7 @@ subroutine btstep(U_in, V_in, eta_in, dt, bc_accel_u, bc_accel_v, forces, pbce, 
   if (nonblock_setup .and. .not.CS%linearized_BT_PV) then
     if (id_clock_calc_pre > 0) call cpu_clock_end(id_clock_calc_pre)
     call complete_group_pass(CS%pass_q_DCor, CS%BT_Domain, clock=id_clock_pass_pre)
-      !$omp target update to(q, DCor_u, DCor_v)
+    !$omp target update to(q, DCor_u, DCor_v) if (CS%reentrant)
     if (id_clock_calc_pre > 0) call cpu_clock_begin(id_clock_calc_pre)
   endif
 
@@ -1187,10 +1191,10 @@ subroutine btstep(U_in, V_in, eta_in, dt, bc_accel_u, bc_accel_v, forces, pbce, 
       ! Fill in the halo data for ubt, vbt, uhbt, and vhbt.
       if (id_clock_calc_pre > 0) call cpu_clock_end(id_clock_calc_pre)
       if (id_clock_pass_pre > 0) call cpu_clock_begin(id_clock_pass_pre)
-      !$omp target update from(ubt, vbt, uhbt, vhbt)
+      !$omp target update from(ubt, vbt, uhbt, vhbt) if (CS%reentrant)
       call pass_vector(ubt, vbt, CS%BT_Domain, complete=.false., halo=1+ievf-ie)
       call pass_vector(uhbt, vhbt, CS%BT_Domain, complete=.true., halo=1+ievf-ie)
-      !$omp target update to(ubt, vbt, uhbt, vhbt)
+      !$omp target update to(ubt, vbt, uhbt, vhbt) if (CS%reentrant)
       if (id_clock_pass_pre > 0) call cpu_clock_end(id_clock_pass_pre)
       if (id_clock_calc_pre > 0) call cpu_clock_begin(id_clock_calc_pre)
       !$omp target update from(BTCL_u, BTCL_v)
@@ -1415,7 +1419,8 @@ subroutine btstep(U_in, V_in, eta_in, dt, bc_accel_u, bc_accel_v, forces, pbce, 
     if (id_clock_calc_pre > 0) call cpu_clock_end(id_clock_calc_pre)
     if (id_clock_pass_pre > 0) call cpu_clock_begin(id_clock_pass_pre)
     ! ensure correct data on host to be exchanged
-    !$omp target update from(ubt_Cor, vbt_Cor, gtot_E, gtot_W, gtot_N, gtot_S)
+    !$omp target update from(ubt_Cor, vbt_Cor, gtot_E, gtot_W, gtot_N, gtot_S) &
+    !$omp   if (CS%reentrant)
     call start_group_pass(CS%pass_gtot, CS%BT_Domain)
     call start_group_pass(CS%pass_ubt_Cor, G%Domain)
     if (id_clock_pass_pre > 0) call cpu_clock_end(id_clock_pass_pre)
@@ -1438,12 +1443,14 @@ subroutine btstep(U_in, V_in, eta_in, dt, bc_accel_u, bc_accel_v, forces, pbce, 
     call complete_group_pass(CS%pass_gtot, CS%BT_Domain)
     call complete_group_pass(CS%pass_ubt_Cor, G%Domain)
   else
-    !$omp target update from(ubt_Cor, vbt_Cor, gtot_E, gtot_W, gtot_N, gtot_S)
+    !$omp target update from(ubt_Cor, vbt_Cor, gtot_E, gtot_W, gtot_N, gtot_S) &
+    !$omp   if (CS%reentrant)
     call do_group_pass(CS%pass_gtot, CS%BT_Domain)
     call do_group_pass(CS%pass_ubt_Cor, G%Domain)
   endif
   ! Update MPI-updated values are on GPU
-  !$omp target update to(Ubt_Cor, vbt_Cor, gtot_E, gtot_W, gtot_N, gtot_S)
+  !$omp target update to(Ubt_Cor, vbt_Cor, gtot_E, gtot_W, gtot_N, gtot_S) &
+  !$omp   if (CS%reentrant)
   ! The various elements of gtot are positive definite but directional, so use
   ! the polarity arrays to sort out when the directions have shifted.
   do concurrent (j=jsvf-1:jevf+1, i=isvf-1:ievf+1)
@@ -1545,7 +1552,8 @@ subroutine btstep(U_in, V_in, eta_in, dt, bc_accel_u, bc_accel_v, forces, pbce, 
     eta_src(i,j) = 0.0
   enddo
   if (CS%bound_BT_corr) then ; if ((use_BT_Cont.or.integral_BT_cont) .and. CS%BT_cont_bounds) then
-    do concurrent (j=js:je, i=is:ie, G%mask2dT(i,j) > 0.0) local(u_max_cor, v_max_cor)
+    do concurrent (j=js:je, i=is:ie, G%mask2dT(i,j) > 0.0) &
+        local(uint_cor, vint_cor, u_max_cor, v_max_cor)
       if (CS%eta_cor(i,j) > 0.0) then
         !   Limit the source (outward) correction to be a fraction the mass that
         ! can be transported out of the cell by velocities with a CFL number of CFL_cor.
@@ -1631,35 +1639,35 @@ subroutine btstep(U_in, V_in, eta_in, dt, bc_accel_u, bc_accel_v, forces, pbce, 
   if (id_clock_calc_pre > 0) call cpu_clock_end(id_clock_calc_pre)
   if (id_clock_pass_pre > 0) call cpu_clock_begin(id_clock_pass_pre)
   if (nonblock_setup) then
-    !$omp target update from(bt_rem_u, bt_rem_v, eta_src)
-    !$omp target update if(integral_BT_cont) from(eta_IC)
-    !$omp target update if(.not.interp_eta_PF) from(eta_PF)
-    !$omp target update if(interp_eta_PF) from(eta_PF_1, d_eta_PF)
-    !$omp target update if(CS%dynamic_psurf) from(dyn_coef_eta)
+    !$omp target update from (bt_rem_u, bt_rem_v, eta_src) if (CS%reentrant)
+    !$omp target update from (eta_IC) if (integral_BT_cont .and. CS%reentrant)
+    !$omp target update from (eta_PF) if (.not. interp_eta_PF .and. CS%reentrant)
+    !$omp target update from (eta_PF_1, d_eta_PF) if (interp_eta_PF .and. CS%reentrant)
+    !$omp target update from(dyn_coef_eta) if (CS%dynamic_psurf .and. CS%reentrant)
     call start_group_pass(CS%pass_eta_bt_rem, CS%BT_Domain)
     ! The following halo update is not needed without wide halos.  RWH
   else
-    !$omp target update from(bt_rem_u, bt_rem_v, eta_src)
-    !$omp target update if(integral_BT_cont) from(eta_IC)
-    !$omp target update if(.not.interp_eta_PF) from(eta_PF)
-    !$omp target update if(interp_eta_PF) from(eta_PF_1, d_eta_PF)
-    !$omp target update if(CS%dynamic_psurf) from(dyn_coef_eta)
+    !$omp target update from (bt_rem_u, bt_rem_v, eta_src) if (CS%reentrant)
+    !$omp target update from (eta_IC) if (integral_BT_cont .and. CS%reentrant)
+    !$omp target update from (eta_PF) if (.not. interp_eta_PF .and. CS%reentrant)
+    !$omp target update from (eta_PF_1, d_eta_PF) if (interp_eta_PF .and. CS%reentrant)
+    !$omp target update from (dyn_coef_eta) if (CS%dynamic_psurf .and. CS%reentrant)
     call do_group_pass(CS%pass_eta_bt_rem, CS%BT_Domain)
-    !$omp target update to(bt_rem_u, bt_rem_v, eta_src)
-    !$omp target update if(integral_BT_cont) to(eta_IC)
-    !$omp target update if(.not.interp_eta_PF) to(eta_PF)
-    !$omp target update if(interp_eta_PF) to(eta_PF_1, d_eta_PF)
-    !$omp target update if(CS%dynamic_psurf) to(dyn_coef_eta)
+    !$omp target update to (bt_rem_u, bt_rem_v, eta_src) if (CS%reentrant)
+    !$omp target update to (eta_IC) if (integral_BT_cont .and. CS%reentrant)
+    !$omp target update to (eta_PF) if (.not. interp_eta_PF .and. CS%reentrant)
+    !$omp target update to (eta_PF_1, d_eta_PF) if (interp_eta_PF .and. CS%reentrant)
+    !$omp target update to (dyn_coef_eta) if (CS%dynamic_psurf .and. CS%reentrant)
     if (.not.use_BT_cont) then
-      !$omp target update from(Datu, Datv)
+      !$omp target update from(Datu, Datv) if (CS%reentrant)
       call do_group_pass(CS%pass_Dat_uv, CS%BT_Domain)
-      !$omp target update to(Datu, Datv)
+      !$omp target update to(Datu, Datv) if (CS%reentrant)
     endif
-    !$omp target update from(BT_force_u, BT_force_v, Cor_ref_u, Cor_ref_v)
-    !$omp target update if(add_uh0) from(uhbt0, vhbt0)
+    !$omp target update from (BT_force_u, BT_force_v, Cor_ref_u, Cor_ref_v) if (CS%reentrant)
+    !$omp target update from (uhbt0, vhbt0) if (add_uh0 .and. CS%reentrant)
     call do_group_pass(CS%pass_force_hbt0_Cor_ref, CS%BT_Domain)
-    !$omp target update to(BT_force_u, BT_force_v, Cor_ref_u, Cor_ref_v)
-    !$omp target update if(add_uh0) to(uhbt0, vhbt0)
+    !$omp target update to (BT_force_u, BT_force_v, Cor_ref_u, Cor_ref_v) if (CS%reentrant)
+    !$omp target update to(uhbt0, vhbt0) if (add_uh0 .and. CS%reentrant)
   endif
   if (id_clock_pass_pre > 0) call cpu_clock_end(id_clock_pass_pre)
   if (id_clock_calc_pre > 0) call cpu_clock_begin(id_clock_calc_pre)
@@ -1671,16 +1679,16 @@ subroutine btstep(U_in, V_in, eta_in, dt, bc_accel_u, bc_accel_v, forces, pbce, 
 
     if (.not.use_BT_cont) then
       call complete_group_pass(CS%pass_Dat_uv, CS%BT_Domain)
-      !$omp target update to(Datu, Datv)
+      !$omp target update to(Datu, Datv) if (CS%reentrant)
     endif
     call complete_group_pass(CS%pass_force_hbt0_Cor_ref, CS%BT_Domain)
     call complete_group_pass(CS%pass_eta_bt_rem, CS%BT_Domain)
-    !$omp target update to(bt_rem_u, bt_rem_v, BT_force_u, BT_force_v, Cor_ref_u, Cor_ref_v, eta_src)
-    !$omp target update if(integral_BT_cont) to(eta_IC)
-    !$omp target update if(.not.interp_eta_PF) to(eta_PF)
-    !$omp target update if(interp_eta_PF) to(eta_PF_1, d_eta_PF)
-    !$omp target update if(CS%dynamic_psurf) to(dyn_coef_eta)
-    !$omp target update if(add_uh0) to(uhbt0, vhbt0)
+    !$omp target update to (bt_rem_u, bt_rem_v, BT_force_u, BT_force_v, Cor_ref_u, Cor_ref_v, eta_src) if (CS%reentrant)
+    !$omp target update to (eta_IC) if (integral_BT_cont .and. CS%reentrant)
+    !$omp target update to(eta_PF) if (.not.interp_eta_PF .and. CS%reentrant)
+    !$omp target update to(eta_PF_1, d_eta_PF) if (interp_eta_PF .and. CS%reentrant)
+    !$omp target update to(dyn_coef_eta) if (CS%dynamic_psurf .and. CS%reentrant)
+    !$omp target update to(uhbt0, vhbt0) if (add_uh0 .and. CS%reentrant)
 
     if (id_clock_pass_pre > 0) call cpu_clock_end(id_clock_pass_pre)
     if (id_clock_calc_pre > 0) call cpu_clock_begin(id_clock_calc_pre)
@@ -2576,9 +2584,9 @@ subroutine btstep_timeloop(eta, ubt, vbt, uhbt0, Datu, BTCL_u, vhbt0, Datv, BTCL
     if ((iev - stencil < ie) .or. (jev - stencil < je)) then
       if (id_clock_calc > 0) call cpu_clock_end(id_clock_calc)
       ! TODO: direct GPU-to-GPU transfer
-      !$omp target update from(ubt, vbt, eta)
+      !$omp target update from(ubt, vbt, eta) if (CS%reentrant)
       call do_group_pass(CS%pass_eta_ubt, CS%BT_Domain, clock=id_clock_pass_step)
-      !$omp target update to(ubt, vbt, eta)
+      !$omp target update to(ubt, vbt, eta) if (CS%reentrant)
       isv = isvf ; iev = ievf ; jsv = jsvf ; jev = jevf
       if (id_clock_calc > 0) call cpu_clock_begin(id_clock_calc)
     else
@@ -5462,6 +5470,10 @@ subroutine barotropic_init(u, v, h, Time, G, GV, US, param_file, diag, CS, &
   integer :: isdw, iedw, jsdw, jedw
   integer :: i, j, k
   integer :: wd_halos(2), bt_halo_sz
+
+  ! temporary
+  logical :: reentrant_x, reentrant_y
+
   isd = G%isd ; ied = G%ied ; jsd = G%jsd ; jed = G%jed
   IsdB = G%IsdB ; IedB = G%IedB ; JsdB = G%JsdB ; JedB = G%JedB
   is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec ; nz = GV%ke
@@ -5796,6 +5808,15 @@ subroutine barotropic_init(u, v, h, Time, G, GV, US, param_file, diag, CS, &
                  "and improves the reproducibility of certain debugging checksums, but it "//&
                  "does not alter the solutions themselves.", default=.false.)
                  !### Change the default for MASK_COASTAL_PRESSURE_FORCE to true?
+
+  ! temporary
+  call get_param(param_file, mdl, "REENTRANT_X", reentrant_x, &
+      default=.true., do_not_log=.true.)
+
+  call get_param(param_file, mdl, "REENTRANT_Y", reentrant_y, &
+      default=.false., do_not_log=.true.)
+
+  CS%reentrant = reentrant_x .or. reentrant_y
 
   ! Initialize a version of the MOM domain that is specific to the barotropic solver.
   call clone_MOM_domain(G%Domain, CS%BT_Domain, min_halo=wd_halos, symmetric=.true.)
