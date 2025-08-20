@@ -347,6 +347,8 @@ type, public :: BT_cont_type
                                     !! the depth averaged accelerations for the barotropic solver.
   type(group_pass_type) :: pass_polarity_BT !< Structure for polarity group halo updates
   type(group_pass_type) :: pass_FA_uv !< Structure for face area group halo updates
+  ! testing
+  logical :: reentrant
 end type BT_cont_type
 
 !> Container for grids modifying cell metric at porous barriers
