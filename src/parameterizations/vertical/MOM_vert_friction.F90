@@ -2401,6 +2401,7 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
   !$omp target update from(Dmin, zi_dir)
   !$omp target update from(dz_harm) 
   block 
+  ! death block!!
   real :: tmp1, tmp2
 
   do k=nz,1,-1
@@ -2745,7 +2746,6 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
 
   ! Diagnose total Kv at v-points
   if (CS%id_Kv_v > 0) then
-  print *, "AAA"
     do k=1,nz
       do J=Jsq,Jeq ; do i=is,ie ; if (do_i(i,J)) then
         Kv_v(i,J,k) = 0.5 * (CS%a_v(i,J,K)+CS%a_v(i,J,K+1)) * CS%h_v(i,J,k)
