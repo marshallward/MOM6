@@ -737,9 +737,9 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
       ADp%du_dt_str(I,j,k) = 0.0
     enddo
   endif
+
   !$omp target update to(v, h)
   !$omp target enter data map(alloc: surface_stress)
-
   call end_nvtx
 
   ! TODO: Move outside function
@@ -1457,20 +1457,8 @@ is_ray_u_alloc = allocated(visc%Ray_u)
     end do 
   endif
 
-  !$omp target exit data map(from: b1, c1, d1)
-  !$omp target exit data map(from:u, v)
-  ! Temporary
-  !$omp target exit data map(from: ADp%du_dt_str)
-  !$omp target exit data map(from: ADp%du_dt_visc_gl90)
-  !$omp target exit data map(delete: ADp)
-  !$omp target exit data map(from: surface_stress)
-  !$omp target exit data map(delete: CS, CS%a_u, CS%h_u)
-  !$omp target exit data map(delete: CS%a_v, CS%h_v)
-  !$omp target exit data map(from: Ray)
-  !$omp target exit data map(delete: visc%Ray_u) if (allocated(visc%Ray_u))
-  !! TODO jorge: this is the last GPU code
+
   call end_nvtx
-  call start_nvtx("calculate KE source")
 
   ! Calculate the KE source from GL90 vertical viscosity [H L2 T-3 ~> m3 s-3].
   ! We do the KE-rate calculation here (rather than in MOM_diagnostics) to ensure
@@ -1478,19 +1466,37 @@ is_ray_u_alloc = allocated(visc%Ray_u)
   ! and thicknesses used in the vertical solver, but rather uses a time-mean
   ! barotropic transport [uv]h.
   ! JORGE TODO: should be offloaded?
+
+
   if (CS%id_GLwork > 0) then
-    if (.not.G%symmetric) &
+  print *, "A"
+    if (.not.G%symmetric) then
+    print *, "B"
       call do_group_pass(CS%pass_KE_uv, G%domain)
+      end if
     do k=1,nz
       do j=js,je ; do i=is,ie
         KE_term(i,j,k) = 0.5 * G%IareaT(i,j) &
             * (KE_u(I,j,k) + KE_u(I-1,j,k) + KE_v(i,J,k) + KE_v(i,J-1,k))
       enddo ; enddo
     enddo
+    print *, "C"
     call post_data(CS%id_GLwork, KE_term, CS%diag)
   endif
 
   call vertvisc_limit_vel(u, v, h, ADp, CDp, forces, visc, dt, G, GV, US, CS)
+  !! TODO jorge: this is the last GPU code
+  !$omp target exit data map(from: b1, c1, d1)
+  !$omp target exit data map(from:u, v)
+  !$omp target exit data map(from: ADp%du_dt_str)
+  !$omp target exit data map(from: ADp%du_dt_visc_gl90)
+  !$omp target exit data map(from: surface_stress)
+  !$omp target exit data map(from: Ray)
+  !$omp target exit data map(delete: ADp)
+  !$omp target exit data map(delete: CS, CS%a_u, CS%h_u)
+  !$omp target exit data map(delete: CS%a_v, CS%h_v)
+  !$omp target exit data map(delete: visc%Ray_u) if (allocated(visc%Ray_u))
+
 
   ! Here the velocities associated with open boundary conditions are applied.
   ! JORGE TODO: should be offloaded?
@@ -1512,7 +1518,6 @@ is_ray_u_alloc = allocated(visc%Ray_u)
     enddo
   endif
 
-  call end_nvtx
 
   ! Offer diagnostic fields for averaging.
   if (query_averaging_enabled(CS%diag)) then
@@ -1599,10 +1604,16 @@ subroutine vertvisc_remnant(visc, visc_rem_u, visc_rem_v, dt, G, GV, US, CS)
   real :: Ray(SZIB_(G),SZJB_(G))
     ! Ray is the Rayleigh-drag velocity [H T-1 ~> m s-1 or Pa s m-1]
   real :: b_denom_1   ! The first term in the denominator of b1 [H ~> m or kg m-2].
+  real, dimension(SZIB_(G),SZJ_(G),SZK_(GV)) &
+                          :: visc_rem_u_local !< Fraction of a time-step's worth of a
+  real, dimension(SZI_(G),SZJB_(G),SZK_(GV)) &
+                          :: visc_rem_v_local !< Fraction of a time-step's worth of a
 
   integer :: i, j, k, is, ie, Isq, Ieq, Jsq, Jeq, nz
+  integer :: jsc, jec
   is = G%isc ; ie = G%iec
   Isq = G%IscB ; Ieq = G%IecB ; Jsq = G%JscB ; Jeq = G%JecB ; nz = GV%ke
+  jsc = G%jsc ; jec = G%jec
 
   if (.not.associated(CS)) call MOM_error(FATAL,"MOM_vert_friction(visc): "// &
          "Module must be initialized before it is used.")
@@ -1611,43 +1622,57 @@ subroutine vertvisc_remnant(visc, visc_rem_u, visc_rem_v, dt, G, GV, US, CS)
          "Module must be initialized before it is used.")
 
   ! Find the zonal viscous remnant using a modification of a standard tridagonal solver.
+  !$omp target enter data map(alloc: b1, c1, d1, Ray, visc_rem_u)
+
   if (allocated(visc%Ray_u)) then
-    do j=G%jsc,G%jec ; do I=Isq,Ieq
+    do j=jsc, jec ; do I=Isq,Ieq
       Ray(I,j) = visc%Ray_u(I,j,1)
     enddo ; enddo
   else
-    do j=G%jsc,G%jec ; do I=Isq,Ieq
+  !$omp target teams loop collapse(2)
+    do j=jsc, jec ; do I=Isq,Ieq
       Ray(I,j) = 0.
     enddo ; enddo
+    !$omp end target teams loop 
   endif
 
-  do j=G%jsc,G%jec ; do I=Isq,Ieq ; if (G%mask2dCu(I,j) > 0.) then
+  !! TODO JORGE: PORT
+  !$omp target teams loop collapse(2) map(to: CS%h_u, CS%a_u, G, G%mask2dCu) 
+  do j=jsc,jec ; do I=Isq,Ieq ; if (G%mask2dCu(I,j) > 0.) then
     b_denom_1 = CS%h_u(I,j,1) + dt * (Ray(I,j) + CS%a_u(I,j,1))
     b1(I,j) = 1.0 / (b_denom_1 + dt * CS%a_u(I,j,2))
     d1(I,j) = b_denom_1 * b1(I,j)
-    visc_rem_u(I,j,1) = b1(I,j) * CS%h_u(I,j,1)
+    visc_rem_u_local(I,j,1) = b1(I,j) * CS%h_u(I,j,1)
   endif ; enddo ; enddo
+  !$omp end target teams loop
+
 
   do k=2,nz
     if (allocated(visc%Ray_u)) then
-      do j=G%jsc,G%jec ; do I=Isq,Ieq
+      do j=jsc,jec ; do I=Isq,Ieq
         Ray(I,j) = visc%Ray_u(I,j,k)
       enddo ; enddo
     endif
 
-    do j=G%jsc,G%jec ; do I=Isq,Ieq ; if (G%mask2dCu(I,j) > 0.) then
+  !! TODO JORGE: PORT
+  !$omp target teams loop collapse(2) map(to:CS, CS%a_u, CS%h_u, G, G%mask2dCu) 
+    do j=jsc,jec ; do I=Isq,Ieq ; if (G%mask2dCu(I,j) > 0.) then
       c1(I,j,k) = dt * CS%a_u(I,j,K)*b1(I,j)
       b_denom_1 = CS%h_u(I,j,k) + dt * (Ray(I,j) + CS%a_u(I,j,K) * d1(I,j))
       b1(I,j) = 1.0 / (b_denom_1 + dt * CS%a_u(I,j,K+1))
       d1(I,j) = b_denom_1 * b1(I,j)
-      visc_rem_u(I,j,k) = (CS%h_u(I,j,k) + dt * CS%a_u(I,j,K) * visc_rem_u(I,j,k-1)) * b1(I,j)
+      visc_rem_u_local(I,j,k) = (CS%h_u(I,j,k) + dt * CS%a_u(I,j,K) * visc_rem_u_local(I,j,k-1)) * b1(I,j)
     endif ; enddo ; enddo
+    !$omp end target teams loop
   enddo
 
+  !! TODO JORGE: PORT
   do k=nz-1,1,-1
-    do j=G%jsc,G%jec ; do I=Isq,Ieq ; if (G%mask2dCu(I,j) > 0.) then
-      visc_rem_u(I,j,k) = visc_rem_u(I,j,k) + c1(I,j,k+1) * visc_rem_u(I,j,k+1)
+  !$omp target teams loop collapse(2) map(to: G, G%mask2dCu) 
+    do j=jsc,jec ; do I=Isq,Ieq ; if (G%mask2dCu(I,j) > 0.) then
+      visc_rem_u_local(I,j,k) = visc_rem_u_local(I,j,k) + c1(I,j,k+1) * visc_rem_u_local(I,j,k+1)
     endif ; enddo ; enddo
+  !$omp end target teams loop
   enddo
 
   ! Now find the meridional viscous remnant using the robust tridiagonal solver.
@@ -1656,17 +1681,21 @@ subroutine vertvisc_remnant(visc, visc_rem_u, visc_rem_v, dt, G, GV, US, CS)
       Ray(i,J) = visc%Ray_v(i,J,1)
     enddo ; enddo
   else
+  !!$omp target teams loop collapse(2)
     do J=Jsq,Jeq ; do i=is,ie
       Ray(i,J) = 0.
     enddo ; enddo
   endif
 
+  !! TODO JORGE: PORT
+  !$omp target teams loop collapse(2) map(to: CS, CS%h_v, CS%a_v, G, G%mask2dcv) 
   do J=Jsq,Jeq ; do i=is,ie ; if (G%mask2dCv(i,J) > 0.) then
     b_denom_1 = CS%h_v(i,J,1) + dt * (Ray(i,J) + CS%a_v(i,J,1))
     b1(i,J) = 1.0 / (b_denom_1 + dt*CS%a_v(i,J,2))
     d1(i,J) = b_denom_1 * b1(i,J)
-    visc_rem_v(i,J,1) = b1(i,J) * CS%h_v(i,J,1)
+    visc_rem_v_local(i,J,1) = b1(i,J) * CS%h_v(i,J,1)
   endif ; enddo ; enddo
+  !$omp end target teams loop
 
   do k=2,nz
     if (allocated(visc%Ray_v)) then
@@ -1675,20 +1704,32 @@ subroutine vertvisc_remnant(visc, visc_rem_u, visc_rem_v, dt, G, GV, US, CS)
       enddo ; enddo
     endif
 
+  !! TODO JORGE: PORT
+  !$omp target teams loop collapse(2) map(to: CS, CS%a_v, CS%h_v, G, G%mask2dcv) 
     do J=Jsq,Jeq ; do i=is,ie ; if (G%mask2dCv(i,J) > 0.) then
       c1(i,J,k) = dt * CS%a_v(i,J,K) * b1(i,J)
       b_denom_1 = CS%h_v(i,J,k) + dt * (Ray(i,J) + CS%a_v(i,J,K) * d1(i,J))
       b1(i,J) = 1.0 / (b_denom_1 + dt * CS%a_v(i,J,K+1))
       d1(i,J) = b_denom_1 * b1(i,J)
-      visc_rem_v(i,J,k) = (CS%h_v(i,J,k) + dt * CS%a_v(i,J,K) * visc_rem_v(i,J,k-1)) * b1(i,J)
+      visc_rem_v_local(i,J,k) = (CS%h_v(i,J,k) + dt * CS%a_v(i,J,K) * visc_rem_v_local(i,J,k-1)) * b1(i,J)
     endif ; enddo ; enddo
+  !$omp end target teams loop
   enddo
 
+  !! TODO JORGE: PORT
   do k=nz-1,1,-1
+  !$omp target teams loop collapse(2) map(to:G, G%mask2dcv) 
     do J=Jsq,Jeq ; do i=is,ie ; if (G%mask2dCv(i,J) > 0.) then
-      visc_rem_v(i,J,k) = visc_rem_v(i,J,k) + c1(i,J,k+1) * visc_rem_v(i,J,k+1)
+      visc_rem_v_local(i,J,k) = visc_rem_v_local(i,J,k) + c1(i,J,k+1) * visc_rem_v_local(i,J,k+1)
     endif ; enddo ; enddo ! i and k loops
+  !$omp end target teams loop
   enddo
+
+  !$omp target update from(b1, c1, d1, Ray, visc_rem_u_local, visc_rem_v_local)
+  !$omp target exit data map(delete: b1, c1, d1, Ray, visc_rem_u_local, visc_rem_v_local)
+  !JORGE TODO: figure out why I cannot use the intent inout variable
+  visc_rem_u = visc_rem_u_local
+  visc_rem_v = visc_rem_v_local
 
   if (CS%debug) then
     call uvchksum("visc_rem_[uv]", visc_rem_u, visc_rem_v, G%HI, haloshift=0, &
@@ -2401,7 +2442,6 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
   !$omp target update from(Dmin, zi_dir)
   !$omp target update from(dz_harm) 
   block 
-  ! death block!!
   real :: tmp1, tmp2
 
   do k=nz,1,-1
@@ -3571,8 +3611,9 @@ subroutine vertvisc_limit_vel(u, v, h, ADp, CDp, forces, visc, dt, G, GV, US, CS
     !$omp end parallel do 
   else  ! Do not report accelerations leading to large velocities.
     if (CS%CFL_based_trunc) then
+  ! JORGE TODO: PORT
       do k=1,nz
-      !$OMP parallel do default(shared)
+      !$omp target teams loop collapse(2) map(to:G, G%iareaT, G%dy_Cu)
       do j=js,je ; do I=Isq,Ieq
         if (abs(u(I,j,k)) < CS%vel_underflow) then ; u(I,j,k) = 0.0
         elseif ((u(I,j,k) * (dt * G%dy_Cu(I,j))) * G%IareaT(i+1,j) < -CS%CFL_trunc) then
@@ -3583,7 +3624,7 @@ subroutine vertvisc_limit_vel(u, v, h, ADp, CDp, forces, visc, dt, G, GV, US, CS
           if (h(i,j,k) + h(i+1,j,k) > H_report) CS%ntrunc = CS%ntrunc + 1
         endif
       enddo ; enddo
-      !$omp end parallel do
+      !$omp end target teams loop
       enddo
     else
       !$OMP parallel do default(shared)
@@ -3598,6 +3639,7 @@ subroutine vertvisc_limit_vel(u, v, h, ADp, CDp, forces, visc, dt, G, GV, US, CS
   endif
 
   if (len_trim(CS%u_trunc_file) > 0) then
+    ! JORGE TODO: PORT?
     do j=js,je ; do I=Isq,Ieq ; if (dowrite(I,j)) then
       ! Call a diagnostic reporting subroutines are called if unphysically large values are found.
       call write_u_accel(I, j, u_old, h, ADp, CDp, dt, G, GV, US, CS%PointAccel_CSp, &
@@ -3658,7 +3700,8 @@ subroutine vertvisc_limit_vel(u, v, h, ADp, CDp, forces, visc, dt, G, GV, US, CS
     enddo ! J-loop
   else  ! Do not report accelerations leading to large velocities.
     if (CS%CFL_based_trunc) then
-      !$OMP parallel do default(shared)
+  ! JORGE TODO: PORT 
+      !$omp target teams loop collapse(2) map(to: G, G%areaT, G%dx_Cv)
       do k=1,nz ; do J=Jsq,Jeq ; do i=is,ie
         if (abs(v(i,J,k)) < CS%vel_underflow) then ; v(i,J,k) = 0.0
         elseif ((v(i,J,k) * (dt * G%dx_Cv(i,J))) * G%IareaT(i,j+1) < -CS%CFL_trunc) then
@@ -3669,6 +3712,7 @@ subroutine vertvisc_limit_vel(u, v, h, ADp, CDp, forces, visc, dt, G, GV, US, CS
           if (h(i,j,k) + h(i,j+1,k) > H_report) CS%ntrunc = CS%ntrunc + 1
         endif
       enddo ; enddo ; enddo
+      !$omp end target teams loop
     else
       !$OMP parallel do default(shared)
       do k=1,nz ; do J=Jsq,Jeq ; do i=is,ie
