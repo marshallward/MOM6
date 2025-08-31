@@ -870,6 +870,8 @@ subroutine thickness_to_dz_3d(h, tv, dz, G, GV, US, halo_size)
   character(len=128) :: mesg    ! A string for error messages
   integer :: i, j, k, is, ie, js, je, halo, nz
 
+  !$omp target update to(h)
+
   halo = 0 ; if (present(halo_size)) halo = max(0,halo_size)
   is = G%isc-halo ; ie = G%iec+halo ; js = G%jsc-halo ; je = G%jec+halo ; nz = GV%ke
 
@@ -883,15 +885,17 @@ subroutine thickness_to_dz_3d(h, tv, dz, G, GV, US, halo_size)
       endif
       call MOM_error(FATAL, "thickness_to_dz called in fully non-Boussinesq mode with "//trim(mesg))
     endif
-
-    do k=1,nz ; do j=js,je ; do i=is,ie
+    !$omp target update to(tv%SpV_avg)
+    do concurrent (k=1:nz, j=js:je, i=is:ie)
       dz(i,j,k) = GV%H_to_RZ * h(i,j,k) * tv%SpV_avg(i,j,k)
-    enddo ; enddo ; enddo
+    enddo
   else
-    do k=1,nz ; do j=js,je ; do i=is,ie
+    do concurrent (k=1:nz, j=js:je, i=is:ie)
       dz(i,j,k) = GV%H_to_Z * h(i,j,k)
-    enddo ; enddo ; enddo
+    enddo
   endif
+
+  !$omp target update from(dz)
 
 end subroutine thickness_to_dz_3d
 
