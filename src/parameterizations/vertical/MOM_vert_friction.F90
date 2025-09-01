@@ -723,11 +723,9 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
   if (associated(ADp%du_dt_visc_gl90)) then
     do k=1,nz
     !$omp target teams loop private(i,j) collapse(2)
-      do j=G%jsc,G%jec
-        do I=Isq,Ieq
+      do j=G%jsc,G%jec ; do I=Isq,Ieq
           ADp%du_dt_visc_gl90(I,j,k) = u(I,j,k)
-        enddo
-      enddo
+      enddo ; enddo
       !$omp end target teams loop
     enddo
   endif
@@ -750,9 +748,7 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
   ! the wind stress is applied as a stress boundary condition.
   if (CS%direct_stress) then
     !$omp target teams loop private(i,j) collapse(2)
-    do j = G%jsc, G%jec
-      do I = Isq, Ieq
-        if (G%mask2dCu(I,j) > 0.0) then
+    do j = G%jsc, G%jec ; do I = Isq, Ieq ; if (G%mask2dCu(I,j) > 0.0) then
           surface_stress(I,j) = 0.0
           zDS = 0.0
           stress = dt_Rho0 * forces%taux(I,j)
@@ -765,9 +761,7 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
             zDS = zDS + h_a
             if (zDS >= Hmix) exit
           end do
-        end if
-      end do
-    end do
+    endif ; enddo; enddo
     !$omp end target teams loop
 
   else
@@ -823,11 +817,7 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
   call start_nvtx("biggo loopo")
   !$omp target enter data map(to: CS, CS%a_u, CS%h_u)
   !$omp target enter data map(alloc: b1, c1, d1)
-block 
-logical :: is_du_dt_str_associated, is_ray_u_alloc
 
-is_du_dt_str_associated = associated(ADp%du_dt_str)
-is_ray_u_alloc = allocated(visc%Ray_u)
 
 
   do concurrent (j=G%isc:G%jec, I=Isq:Ieq, G%mask2dCu(I,j) > 0.)
@@ -837,15 +827,14 @@ is_ray_u_alloc = allocated(visc%Ray_u)
         u(I,j,1) = b1(I,j) * (CS%h_u(I,j,1) * u(I,j,1) + surface_stress(I,j))
   end do
 
-  if (is_du_dt_str_associated) then
+  if (associated(ADp%du_dt_str)) then
     do concurrent (j=G%isc:G%jec, I=Isq:Ieq, G%mask2dCu(I,j) > 0.)
          ADp%du_dt_str(I,j,1) = b1(I,j) * (CS%h_u(I,j,1) * ADp%du_dt_str(I,j,1) + surface_stress(I,j) * Idt)
     end do 
   endif
 
   do k=2,nz
-    !if (allocated(visc%Ray_u)) then
-    if (is_ray_u_alloc) then 
+    if (allocated(visc%Ray_u)) then
       do concurrent (j=G%jsc:G%jec, I=Isq:Ieq)
           Ray(I,j) = visc%Ray_u(I,j,k)
       enddo
@@ -860,8 +849,7 @@ is_ray_u_alloc = allocated(visc%Ray_u)
                       dt * CS%a_u(I,j,K) * u(I,j,k-1)) * b1(I,j)
     end do
 
-  !  if (associated(ADp%du_dt_str)) then
-    if (is_du_dt_str_associated) then
+    if (associated(ADp%du_dt_str)) then
         do concurrent (j=G%isc:G%jec, I=Isq:Ieq, G%mask2dCu(I,j) > 0.)
           ADp%du_dt_str(I,j,k) = (CS%h_u(I,j,k) * ADp%du_dt_str(I,j,k) &
               + dt * CS%a_u(I,j,K) * ADp%du_dt_str(I,j,k-1)) * b1(I,j)
@@ -871,7 +859,6 @@ is_ray_u_alloc = allocated(visc%Ray_u)
   enddo ! k loop
 
 
-  end block
 
 
   call end_nvtx
@@ -882,41 +869,29 @@ is_ray_u_alloc = allocated(visc%Ray_u)
   ! u_k = d'_k - c'_k x_(k+1)
   do k=nz-1,1,-1
   !$omp target teams loop collapse(2) private(j,i) 
-    do j=G%isc,G%jec
-      do I=Isq,Ieq 
-        if (G%mask2dCu(I,j) > 0.) then
+    do j=G%isc,G%jec ; do I=Isq,Ieq ; if (G%mask2dCu(I,j) > 0.) then
           u(I,j,k) = u(I,j,k) + c1(I,j,k+1) * u(I,j,k+1)
-        endif 
-      enddo
-    enddo
+    endif ; end do ; enddo
   !$omp end target teams loop
   enddo
 
 
   if (associated(ADp%du_dt_str)) then
   !$omp target teams loop collapse(2) private(i,j)
-    do j=G%isc,G%jec
-      do I=Isq,Ieq
-        if (abs(ADp%du_dt_str(I,j,nz)) < accel_underflow) then 
+    do j=G%isc,G%jec ; do I=Isq,Ieq ; if (abs(ADp%du_dt_str(I,j,nz)) < accel_underflow) then 
           ADp%du_dt_str(I,j,nz) = 0.0
-        end if
-      enddo
-    enddo
+    endif ; enddo ; enddo
     !$omp end target teams loop
 
     do k=nz-1,1,-1
       !$omp target teams loop collapse(2) private(i,j)
-      do j=G%isc,G%jec
-        do I=Isq,Ieq
-          if (G%mask2dCu(I,j) > 0.) then
+      do j=G%isc,G%jec ; do I=Isq,Ieq ; if (G%mask2dCu(I,j) > 0.) then
               ADp%du_dt_str(I,j,k) = &
                 ADp%du_dt_str(I,j,k) + c1(I,j,k+1) * ADp%du_dt_str(I,j,k+1)
 
             if (abs(ADp%du_dt_str(I,j,k)) < accel_underflow) &
               ADp%du_dt_str(I,j,k) = 0.0
-          end if
-        enddo
-      enddo
+    endif; enddo ; enddo
     !$omp end target teams loop
     enddo
   endif
@@ -929,28 +904,21 @@ is_ray_u_alloc = allocated(visc%Ray_u)
   ! compute vertical velocity tendency that arises from GL90 viscosity;
   ! follow tridiagonal solve method as above; to avoid corrupting u,
   ! use ADp%du_dt_visc_gl90 as a placeholder for updated u (due to GL90) until last do loop
-  vert_vel_gl90: block
   if ((CS%id_du_dt_visc_gl90 > 0) .or. (CS%id_GLwork > 0)) then
     if (associated(ADp%du_dt_visc_gl90)) then
      !$omp target teams loop private(i,j) collapse(2)
-      do j=G%isc,G%jec
-        do I=Isq,Ieq 
-          if (G%mask2dCu(I,j) > 0.) then
+      do j=G%isc,G%jec ; do I=Isq,Ieq ; if (G%mask2dCu(I,j) > 0.) then
             b_denom_1 = CS%h_u(I,j,1)  ! CS%a_u_gl90(I,j,1) is zero
             b1(I,j) = 1.0 / (b_denom_1 + dt*CS%a_u_gl90(I,j,2))
             d1(I,j) = b_denom_1 * b1(I,j)
 
             ADp%du_dt_visc_gl90(I,j,1) = b1(I,j) * (CS%h_u(I,j,1) * ADp%du_dt_visc_gl90(I,j,1))
-          endif
-        enddo
-      enddo
+      endif ; enddo; enddo
       !$omp end target teams loop
 
       do k=2,nz
         !$omp target teams loop private(i,j) collapse(2)
-        do j=G%isc,G%jec
-          do I=Isq,Ieq
-            if (G%mask2dCu(I,j) > 0.) then
+        do j=G%isc,G%jec ; do I=Isq,Ieq ; if (G%mask2dCu(I,j) > 0.) then
               c1(I,j,k) = dt * CS%a_u_gl90(I,j,K) * b1(I,j)
               b_denom_1 = CS%h_u(I,j,k) + dt * (CS%a_u_gl90(I,j,K)*d1(I,j))
               b1(I,j) = 1.0 / (b_denom_1 + dt * CS%a_u_gl90(I,j,K+1))
@@ -958,31 +926,23 @@ is_ray_u_alloc = allocated(visc%Ray_u)
 
               ADp%du_dt_visc_gl90(I,j,k) = (CS%h_u(I,j,k) * ADp%du_dt_visc_gl90(I,j,k) &
                 + dt * CS%a_u_gl90(I,j,K) * ADp%du_dt_visc_gl90(I,j,k-1)) * b1(I,j)
-            endif
-          enddo
-        enddo
+      end if ; enddo ; enddo
       !$omp end target teams loop
       enddo
 
       do k=nz-1,1,-1
         !$omp target teams loop private(i,j) collapse(2)
-        do j=G%isc,G%jec
-          do I=Isq,Ieq
-            if (G%mask2dCu(I,j) > 0.) then
+        do j=G%isc,G%jec ; do I=Isq,Ieq ; if (G%mask2dCu(I,j) > 0.) then
               ADp%du_dt_visc_gl90(I,j,k) = ADp%du_dt_visc_gl90(I,j,k) &
               + c1(I,j,k+1) * ADp%du_dt_visc_gl90(I,j,k+1)
-            endif
-          enddo
-        enddo
+        endif ; enddo; enddo
         !$omp end target teams loop
       enddo
 
       do k=1,nz
         
         !$omp target teams loop private(i,j) collapse(2)
-        do j=G%isc,G%jec
-          do I=Isq,Ieq
-            if (G%mask2dCu(I,j) > 0.) then
+        do j=G%isc,G%jec ; do I=Isq,Ieq ; if (G%mask2dCu(I,j) > 0.) then
               ! now fill ADp%du_dt_visc_gl90(I,j,k) with actual velocity tendency due to GL90;
               ! note that on RHS: ADp%du_dt_visc(I,j,k) holds the original velocity value u(I,j,k)
               ! and ADp%du_dt_visc_gl90(I,j,k) the updated velocity due to GL90
@@ -992,9 +952,7 @@ is_ray_u_alloc = allocated(visc%Ray_u)
               if (abs(ADp%du_dt_visc_gl90(I,j,k)) < accel_underflow) then
                 ADp%du_dt_visc_gl90(I,j,k) = 0.0
               endif
-            endif
-          enddo
-        enddo
+        endif ; enddo ; enddo 
         !$omp end target teams loop
       enddo
 
@@ -1006,21 +964,14 @@ is_ray_u_alloc = allocated(visc%Ray_u)
       if (CS%id_GLwork > 0) then
         do k=1,nz
         !$omp target teams loop private(i,j) collapse(2)
-          do j=G%isc,G%jec
-            do I=Isq,Ieq
-              if (G%mask2dCu(I,j) > 0.) then
+          do j=G%isc,G%jec ; do I=Isq,Ieq ; if (G%mask2dCu(I,j) > 0.) then
                 KE_u(I,j,k) = ADp%du_dt_visc(I,j,k) * CS%h_u(I,j,k) * G%areaCu(I,j) * ADp%du_dt_visc_gl90(I,j,k)
-              endif
-            enddo
-          enddo
+        endif ; enddo ; enddo
         !$omp end target teams loop
         enddo
       endif
     endif
   endif
-
-  end block vert_vel_gl90
-    ! this block is just for reference since this if is big and does not fit in my screen
 
 
   if (associated(ADp%du_dt_visc)) then
@@ -1093,13 +1044,9 @@ is_ray_u_alloc = allocated(visc%Ray_u)
   if (DoStokesMixing) then
     do k=1,nz
       !$omp target teams loop private(i,j) collapse(2)
-      do J=Jsq,Jeq
-        do i=is,ie
-          if (G%mask2dCv(i,J) > 0.) then
+      do J=Jsq,Jeq ; do i=is,ie ; if (G%mask2dCv(i,J) > 0.) then
             v(i,j,k) = v(i,j,k) + Waves%Us_y(i,j,k)
-          end if 
-        end do 
-      end do
+      endif ; enddo ; enddo
       !$omp end target teams loop
     end do
   endif
@@ -1108,13 +1055,9 @@ is_ray_u_alloc = allocated(visc%Ray_u)
   if (lfpmix) then
     do k=1,nz
       !$omp target teams loop private(i,j) collapse(2)
-      do J=Jsq,Jeq
-        do i=is,ie
-          if (G%mask2dCv(i,J) > 0.) then
+      do J=Jsq,Jeq ; do i=is,ie ; if (G%mask2dCv(i,J) > 0.) then
             v(i,j,k) = v(i,j,k) - Waves%Us_y(i,j,k)
-          end if
-        end do 
-      end do 
+      endif ; enddo; enddo
       !$omp end target teams loop
     end do 
   endif
@@ -1123,11 +1066,9 @@ is_ray_u_alloc = allocated(visc%Ray_u)
   if (associated(ADp%dv_dt_visc)) then
     do k=1,nz
       !$omp target teams loop private(i,j) collapse(2)
-      do J=Jsq,Jeq
-        do i=is,ie
+      do J=Jsq,Jeq ; do i=is,ie
           ADp%dv_dt_visc(i,J,k) = v(i,J,k)
-        end do 
-      end do 
+      enddo ; end do 
       !$omp end target teams loop
     end do 
   endif
@@ -1135,11 +1076,9 @@ is_ray_u_alloc = allocated(visc%Ray_u)
   if (associated(ADp%dv_dt_visc_gl90)) then
     do k=1,nz
       !$omp target teams loop private(i,j) collapse(2)
-      do J=Jsq,Jeq
-        do i=is,ie
+      do J=Jsq,Jeq ; do i=is,ie
           ADp%dv_dt_visc_gl90(i,J,k) = v(i,J,k)
-        end do 
-      end do 
+      enddo ; end do 
       !$omp end target teams loop
     end do 
   endif
@@ -1147,11 +1086,9 @@ is_ray_u_alloc = allocated(visc%Ray_u)
   if (associated(ADp%dv_dt_str)) then
     do k=1,nz
       !$omp target teams loop private(i,j) collapse(2)
-      do J=Jsq,Jeq
-        do i=is,ie
+      do J=Jsq,Jeq ; do i=is,ie
           ADp%dv_dt_str(i,J,k) = 0.0
-        end do 
-      end do 
+      enddo ; end do 
       !$omp end target teams loop
     end do 
   endif
@@ -1163,9 +1100,7 @@ is_ray_u_alloc = allocated(visc%Ray_u)
   if (CS%direct_stress) then
   ! TODO JORGE: refactor this one later
     !$omp target teams loop private(i,j) collapse(2) 
-    do J=Jsq,Jeq
-      do i=is,ie
-        if (G%mask2dCv(i,J) > 0.) then
+    do J=Jsq,Jeq ; do i=is,ie ; if (G%mask2dCv(i,J) > 0.) then
           surface_stress(i,J) = 0.0
           zDS = 0.0
           stress = dt_Rho0 * forces%tauy(i,J)
@@ -1178,17 +1113,13 @@ is_ray_u_alloc = allocated(visc%Ray_u)
             zDS = zDS + h_a
             if (zDS >= Hmix) exit
           enddo
-        endif 
-      end do 
-    end do
+    endif ; enddo ; enddo
     !$omp end target teams loop
   else
     !$omp target teams loop private(i,j)
-    do J=Jsq,Jeq
-      do i=is,ie
+    do J=Jsq,Jeq ; do i=is,ie
         surface_stress(i,J) = dt_Rho0 * (G%mask2dCv(i,J) * forces%tauy(i,J))
-      end do
-    end do
+    enddo ; end do
     !$omp end target teams loop
   endif
 
@@ -1211,28 +1142,20 @@ is_ray_u_alloc = allocated(visc%Ray_u)
   !$omp target enter data map(to: CS, CS%a_v, CS%h_v)
 
   !$omp target teams loop private(i,j) collapse(2)
-  do J=Jsq,Jeq
-    do i=is,ie
-      if (G%mask2dCv(i,J) > 0.) then
+  do J=Jsq,Jeq ; do i=is,ie ; if (G%mask2dCv(i,J) > 0.) then
         b_denom_1 = CS%h_v(i,J,1) + dt * (Ray(i,J) + CS%a_v(i,J,1))
         b1(i,J) = 1.0 / (b_denom_1 + dt*CS%a_v(i,J,2))
         d1(i,J) = b_denom_1 * b1(i,J)
         v(i,J,1) = b1(i,J) * (CS%h_v(i,J,1) * v(i,J,1) + surface_stress(i,J))
-      end if
-    end do 
-  end do
+  endif ; enddo ; enddo
   !$omp end target teams loop
 
 
   if (associated(ADp%dv_dt_str)) then
   !$omp target teams loop private(i,j) collapse(2)
-    do J=Jsq,Jeq
-      do i=is,ie
-        if (G%mask2dCv(i,J) > 0.) then
+    do J=Jsq,Jeq ; do i=is,ie ; if (G%mask2dCv(i,J) > 0.) then
           ADp%dv_dt_str(i,J,1) = b1(i,J) * (CS%h_v(i,J,1) * ADp%dv_dt_str(i,J,1) + surface_stress(i,J) * Idt)
-        end if 
-      end do 
-    end do
+  endif ; end do; end do
   !$omp end target teams loop
   endif
 
@@ -1303,61 +1226,45 @@ is_ray_u_alloc = allocated(visc%Ray_u)
   if ((CS%id_dv_dt_visc_gl90 > 0) .or. (CS%id_GLwork > 0)) then
     if (associated(ADp%dv_dt_visc_gl90)) then
       !$omp target teams loop private(i,j) collapse(2)
-      do J=Jsq,Jeq
-        do i=is,ie
-          if (G%mask2dCv(i,J) > 0.) then
+      do J=Jsq,Jeq ; do i=is,ie ; if (G%mask2dCv(i,J) > 0.) then
             b_denom_1 = CS%h_v(i,J,1)  ! CS%a_v_gl90(i,J,1) is zero
             b1(i,J) = 1.0 / (b_denom_1 + dt*CS%a_v_gl90(i,J,2))
             d1(i,J) = b_denom_1 * b1(i,J)
             ADp%dv_dt_visc_gl90(I,J,1) = b1(i,J) * (CS%h_v(i,J,1) * ADp%dv_dt_visc_gl90(i,J,1))
-          end if 
-        end do 
-      end do 
+      endif ; enddo ; enddo
       !$omp end target teams loop
 
       do k=2,nz
         !$omp target teams loop private(i,j) collapse(2)
-        do J=Jsq,Jeq
-          do i=is,ie
-            if (G%mask2dCv(i,J) > 0.) then
+        do J=Jsq,Jeq ; do i=is,ie ; if (G%mask2dCv(i,J) > 0.) then
               c1(i,J,k) = dt * CS%a_v_gl90(i,J,K) * b1(i,J)
               b_denom_1 = CS%h_v(i,J,k) + dt * (CS%a_v_gl90(i,J,K)*d1(i,J))
               b1(i,J) = 1.0 / (b_denom_1 + dt * CS%a_v_gl90(i,J,K+1))
               d1(i,J) = b_denom_1 * b1(i,J)
               ADp%dv_dt_visc_gl90(i,J,k) = (CS%h_v(i,J,k) * ADp%dv_dt_visc_gl90(i,J,k) + &
                           dt * CS%a_v_gl90(i,J,K) * ADp%dv_dt_visc_gl90(i,J,k-1)) * b1(i,J)
-            end if
-          end do 
-        end do
+        end if ; end do ; end do
         !$omp end target teams loop
       enddo
 
       ! back substitute to solve for new velocities, held by ADp%dv_dt_visc_gl90
       do k=nz-1,1,-1
         !$omp target teams loop private(i,j) collapse(2)
-        do J=Jsq,Jeq
-          do i=is,ie
-            if (G%mask2dCv(i,J) > 0.) then
+        do J=Jsq,Jeq ; do i=is,ie ; if (G%mask2dCv(i,J) > 0.) then
               ADp%dv_dt_visc_gl90(i,J,k) = ADp%dv_dt_visc_gl90(i,J,k) + c1(i,J,k+1) * ADp%dv_dt_visc_gl90(i,J,k+1)
-            end if 
-          end do 
-        end do 
+        end if ; end do ; end do
         !$omp end target teams loop
       enddo
 
       do k=1,nz
         !$omp target teams loop private(i,j) collapse(2)
-        do J=Jsq,Jeq
-          do i=is,ie
-            if (G%mask2dCv(i,J) > 0.) then
+        do J=Jsq,Jeq ; do i=is,ie ; if (G%mask2dCv(i,J) > 0.) then
           ! now fill ADp%dv_dt_visc_gl90(i,J,k) with actual velocity tendency due to GL90;
           ! note that on RHS: ADp%dv_dt_visc(i,J,k) holds the original velocity value v(i,J,k)
           ! and ADp%dv_dt_visc_gl90(i,J,k) the updated velocity due to GL90
               ADp%dv_dt_visc_gl90(i,J,k) = (ADp%dv_dt_visc_gl90(i,J,k) - ADp%dv_dt_visc(i,J,k))*Idt
               if (abs(ADp%dv_dt_visc_gl90(i,J,k)) < accel_underflow) ADp%dv_dt_visc_gl90(i,J,k) = 0.0
-            end if
-          end do 
-        end do 
+        end if ; end do; end do 
         !$omp end target teams loop
       enddo
 
@@ -1366,14 +1273,10 @@ is_ray_u_alloc = allocated(visc%Ray_u)
       if (CS%id_GLwork > 0) then
         do k=1,nz
           !$omp target teams loop private(i,j) collapse(2)
-          do J=Jsq,Jeq
-            do i=is,ie
-              if (G%mask2dCv(i,J) > 0.) then
+          do J=Jsq,Jeq ; do i=is,ie ; if (G%mask2dCv(i,J) > 0.) then
                 ! note that on RHS: ADp%dv_dt_visc(I,j,k) holds the original velocity value v(I,j,k)
                 KE_v(I,j,k) = ADp%dv_dt_visc(i,J,k) * CS%h_v(i,J,k) * G%areaCv(i,J) * ADp%dv_dt_visc_gl90(i,J,k)
-              end if
-            end do 
-          end do 
+          end if ; end do ; end do 
           !$omp end target teams loop
 
         enddo
@@ -1386,43 +1289,35 @@ is_ray_u_alloc = allocated(visc%Ray_u)
   if (associated(ADp%dv_dt_visc)) then
     do k=1,nz
       !$omp target teams loop private(i,j) collapse(2)
-      do J=Jsq,Jeq
-        do i=is,ie
+      do J=Jsq,Jeq ; do i=is,ie
           ADp%dv_dt_visc(i,J,k) = (v(i,J,k) - ADp%dv_dt_visc(i,J,k))*Idt
           if (abs(ADp%dv_dt_visc(i,J,k)) < accel_underflow) ADp%dv_dt_visc(i,J,k) = 0.0
-        end do 
-      end do 
+      end do ; end do 
       !$omp end target teams loop
     end do 
   endif
 
   if (allocated(visc%tauy_shelf)) then
     !$omp target teams loop private(i,j) collapse(2)
-    do J=Jsq,Jeq
-      do i=is,ie
+    do J=Jsq,Jeq ; do i=is,ie
         visc%tauy_shelf(i,J) = -GV%H_to_RZ * CS%a1_shelf_v(i,J) * v(i,J,1) ! - v_shelf?
-      end do 
-    end do 
+    end do ; end do 
     !$omp end target teams loop
   endif
 
   if (present(tauy_bot)) then
     !$omp target teams loop private(i,j) collapse(2)
-    do J=Jsq,Jeq
-      do i=is,ie
+    do J=Jsq,Jeq ; do i=is,ie
         tauy_bot(i,J) = GV%H_to_RZ * (v(i,J,nz) * CS%a_v(i,J,nz+1))
-      end do 
-    end do
+    end do ; end do 
     !$omp end target teams loop
 
     if (allocated(visc%Ray_v)) then
       do k=1,nz
         !$omp target teams loop private(i,j) collapse(2)
-        do J=Jsq,Jeq
-          do i=is,ie
+        do J=Jsq,Jeq ; do i=is,ie
             tauy_bot(i,J) = tauy_bot(i,J) + GV%H_to_RZ * (visc%Ray_v(i,J,k)*v(i,J,k))
-          end do
-        end do
+        end do ; end do
         !$omp end target teams loop
       end do 
     endif
@@ -1432,13 +1327,9 @@ is_ray_u_alloc = allocated(visc%Ray_u)
   if (DoStokesMixing) then
     do k=1,nz
       !$omp target teams loop private(i,j) collapse(2)
-      do J=Jsq,Jeq
-        do i=is,ie
-          if (G%mask2dCv(i,J) > 0.) then
+      do J=Jsq,Jeq ; do i=is,ie ; if (G%mask2dCv(i,J) > 0.) then
             v(i,J,k) = v(i,J,k) - Waves%Us_y(i,J,k)
-          end if
-        end do
-      end do 
+      end if; end do ; end do
       !$omp end target teams loop
     end do 
   endif
@@ -1446,13 +1337,9 @@ is_ray_u_alloc = allocated(visc%Ray_u)
   if (lfpmix) then
     do k=1,nz
       !$omp target teams loop private(i,j) collapse(2)
-      do J=Jsq,Jeq
-        do i=is,ie
-          if (G%mask2dCv(i,J) > 0.) then
+      do J=Jsq,Jeq ; do i=is,ie ; if (G%mask2dCv(i,J) > 0.) then
             v(i,J,k) = v(i,J,k) + Waves%Us_y(i,J,k)
-          end if
-        end do 
-      end do 
+      end if; end do ; end do
       !$omp end target teams loop
     end do 
   endif
@@ -1469,9 +1356,7 @@ is_ray_u_alloc = allocated(visc%Ray_u)
 
 
   if (CS%id_GLwork > 0) then
-  print *, "A"
     if (.not.G%symmetric) then
-    print *, "B"
       call do_group_pass(CS%pass_KE_uv, G%domain)
       end if
     do k=1,nz
@@ -1480,7 +1365,6 @@ is_ray_u_alloc = allocated(visc%Ray_u)
             * (KE_u(I,j,k) + KE_u(I-1,j,k) + KE_v(i,J,k) + KE_v(i,J-1,k))
       enddo ; enddo
     enddo
-    print *, "C"
     call post_data(CS%id_GLwork, KE_term, CS%diag)
   endif
 
@@ -1847,6 +1731,7 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
   integer :: i, j, k, is, ie, js, je, Isq, Ieq, Jsq, Jeq, nz, ij
   integer :: is_N_OBC, is_S_OBC, Is_E_OBC, Is_W_OBC, ie_N_OBC, ie_S_OBC, Ie_E_OBC, Ie_W_OBC
   integer :: js_N_OBC, js_S_OBC, Js_E_OBC, Js_W_OBC, je_N_OBC, je_S_OBC, Je_E_OBC, Je_W_OBC
+  real :: tmp1, tmp2
 
   is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec
   Isq = G%IscB ; Ieq = G%IecB ; Jsq = G%JscB ; Jeq = G%JecB ; nz = GV%ke
@@ -2441,8 +2326,6 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
   !$omp target update from(zh, zcol)
   !$omp target update from(Dmin, zi_dir)
   !$omp target update from(dz_harm) 
-  block 
-  real :: tmp1, tmp2
 
   do k=nz,1,-1
 
@@ -2566,7 +2449,6 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
       endif ; enddo ; enddo
     endif
   enddo ! big k loop above
-  end block 
 
   !$omp target update to(i_hbbl, bbl_thick, kv_bbl)
   !$omp target update to(h_harm,h_arith, h_delta, dz_arith, z_i, hvel, dz_vel) 
