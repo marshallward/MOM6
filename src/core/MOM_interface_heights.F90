@@ -866,7 +866,8 @@ subroutine thickness_to_dz_3d(h, tv, dz, G, GV, US, halo_size, no_update)
                                                !! inout to preserve any initialized values in halo points.
   integer,       optional, intent(in)    :: halo_size !< Width of halo within which to
                                                !! calculate thicknesses
-  logical,       optional, intent(in)    :: no_update
+  logical,       optional, intent(in)    :: no_update !< Flag that, if .true., only uses data
+                                               !! already on GPU and doesn't update CPU result.
   ! Local variables
   character(len=128) :: mesg    ! A string for error messages
   integer :: i, j, k, is, ie, js, je, halo, nz
