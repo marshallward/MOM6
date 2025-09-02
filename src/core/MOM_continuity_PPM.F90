@@ -160,9 +160,7 @@ subroutine continuity_PPM(u, v, hin, h, uh, vh, dt, G, GV, US, CS, OBC, pbv, uhb
       "MOM_continuity_PPM: Either both visc_rem_u and visc_rem_v or neither"// &
       " one must be present in call to continuity_PPM.")
 
-  !$omp target enter data &
-  !$omp   map(to: h) &
-  !$omp   map(alloc: h_W, h_E, h_S, h_N)
+  !$omp target enter data map(alloc: h_W, h_E, h_S, h_N)
 
   if (x_first) then
     !  First advect zonally, with loop bounds that accomodate the subsequent meridional advection.
@@ -197,9 +195,7 @@ subroutine continuity_PPM(u, v, hin, h, uh, vh, dt, G, GV, US, CS, OBC, pbv, uhb
     call continuity_zonal_convergence(h, uh, dt, G, GV, LB, hmin=h_min)
   endif
 
-  !$omp target exit data &
-  !$omp   map(from: h) &
-  !$omp   map(delete: h_W, h_E, h_S, h_N)
+  !$omp target exit data map(delete: h_W, h_E, h_S, h_N)
 
 end subroutine continuity_PPM
 
@@ -3066,7 +3062,7 @@ subroutine continuity_PPM_init(Time, G, GV, US, param_file, diag, CS)
                  "solver for use as the weights in the barotropic solver. "//&
                  "Otherwise use the transport averaged areas.", default=.true.)
   CS%diag => diag
-  !$omp target enter data map(to: CS)
+  !$omp target update to(CS)
 
   id_clock_reconstruct = cpu_clock_id('(Ocean continuity reconstruction)', grain=CLOCK_ROUTINE)
   id_clock_update = cpu_clock_id('(Ocean continuity update)', grain=CLOCK_ROUTINE)
