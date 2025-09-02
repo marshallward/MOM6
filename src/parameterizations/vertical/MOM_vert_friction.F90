@@ -1480,7 +1480,6 @@ subroutine vertvisc_remnant(visc, visc_rem_u, visc_rem_v, dt, G, GV, US, CS)
   ! Local variables
 
   real :: b1(SZIB_(G),SZJB_(G))
-  real :: b1_dc(SZIB_(G),SZJB_(G))
     ! A variable used by the tridiagonal solver [H-1 ~> m-1 or m2 kg-1].
   real :: c1(SZIB_(G),SZJB_(G),SZK_(GV))
     ! A variable used by the tridiagonal solver [nondim].
@@ -1489,11 +1488,6 @@ subroutine vertvisc_remnant(visc, visc_rem_u, visc_rem_v, dt, G, GV, US, CS)
   real :: Ray(SZIB_(G),SZJB_(G))
     ! Ray is the Rayleigh-drag velocity [H T-1 ~> m s-1 or Pa s m-1]
   real :: b_denom_1   ! The first term in the denominator of b1 [H ~> m or kg m-2].
-  real :: b_denom_dc
-  real, dimension(SZIB_(G),SZJ_(G),SZK_(GV)) &
-                          :: visc_rem_u_local !< Fraction of a time-step's worth of a
-  real, dimension(SZI_(G),SZJB_(G),SZK_(GV)) &
-                          :: visc_rem_v_local !< Fraction of a time-step's worth of a
 
   integer :: i, j, k, is, ie, Isq, Ieq, Jsq, Jeq, nz
   integer :: jsc, jec
@@ -1509,13 +1503,10 @@ subroutine vertvisc_remnant(visc, visc_rem_u, visc_rem_v, dt, G, GV, US, CS)
 
   ! Find the zonal viscous remnant using a modification of a standard tridagonal solver.
   !$omp target enter data map(to: CS)
-  !!$omp target update to(CS)
   !$omp target enter data map(to: CS%a_u, CS%h_u, CS%h_v, CS%a_v)
+  !$omp target enter data map(to: visc_rem_u, visc_rem_v)
 
   !$omp target enter data map(alloc: b1, c1, d1, Ray, b_denom_1)
-  !$omp target enter data map(to: visc_rem_u_local, visc_rem_v_local)
-
-  !!$omp target enter data map(to: CS, CS%a_u, CS%h_u)
 
   if (allocated(visc%Ray_u)) then
     do j=jsc, jec ; do I=Isq,Ieq
@@ -1539,7 +1530,7 @@ subroutine vertvisc_remnant(visc, visc_rem_u, visc_rem_v, dt, G, GV, US, CS)
     b_denom_1 = CS%h_u(I,j,1) + dt * (Ray(I,j) + CS%a_u(I,j,1))
     b1(I,j) = 1.0 / (b_denom_1 + dt * CS%a_u(I,j,2))
     d1(I,j) = b_denom_1 * b1(I,j)
-    visc_rem_u_local(I,j,1) = b1(I,j) * CS%h_u(I,j,1)
+    visc_rem_u(I,j,1) = b1(I,j) * CS%h_u(I,j,1)
   !  end do
   endif ; enddo ; enddo
   !$omp end target teams loop
@@ -1559,7 +1550,7 @@ subroutine vertvisc_remnant(visc, visc_rem_u, visc_rem_v, dt, G, GV, US, CS)
       b_denom_1 = CS%h_u(I,j,k) + dt * (Ray(I,j) + CS%a_u(I,j,K) * d1(I,j))
       b1(I,j) = 1.0 / (b_denom_1 + dt * CS%a_u(I,j,K+1))
       d1(I,j) = b_denom_1 * b1(I,j)
-      visc_rem_u_local(I,j,k) = (CS%h_u(I,j,k) + dt * CS%a_u(I,j,K) * visc_rem_u_local(I,j,k-1)) * b1(I,j)
+      visc_rem_u(I,j,k) = (CS%h_u(I,j,k) + dt * CS%a_u(I,j,K) * visc_rem_u(I,j,k-1)) * b1(I,j)
     endif ; enddo ; enddo
     !$omp end target teams loop
   enddo
@@ -1568,7 +1559,7 @@ subroutine vertvisc_remnant(visc, visc_rem_u, visc_rem_v, dt, G, GV, US, CS)
   do k=nz-1,1,-1
   !$omp target teams loop collapse(2)
     do j=jsc,jec ; do I=Isq,Ieq ; if (G%mask2dCu(I,j) > 0.) then
-      visc_rem_u_local(I,j,k) = visc_rem_u_local(I,j,k) + c1(I,j,k+1) * visc_rem_u_local(I,j,k+1)
+      visc_rem_u(I,j,k) = visc_rem_u(I,j,k) + c1(I,j,k+1) * visc_rem_u(I,j,k+1)
     endif ; enddo ; enddo
   !$omp end target teams loop
   enddo
@@ -1591,7 +1582,7 @@ subroutine vertvisc_remnant(visc, visc_rem_u, visc_rem_v, dt, G, GV, US, CS)
     b_denom_1 = CS%h_v(i,J,1) + dt * (Ray(i,J) + CS%a_v(i,J,1))
     b1(i,J) = 1.0 / (b_denom_1 + dt*CS%a_v(i,J,2))
     d1(i,J) = b_denom_1 * b1(i,J)
-    visc_rem_v_local(i,J,1) = b1(i,J) * CS%h_v(i,J,1)
+    visc_rem_v(i,J,1) = b1(i,J) * CS%h_v(i,J,1)
   endif ; enddo ; enddo
   !$omp end target teams loop
 
@@ -1609,7 +1600,7 @@ subroutine vertvisc_remnant(visc, visc_rem_u, visc_rem_v, dt, G, GV, US, CS)
       b_denom_1 = CS%h_v(i,J,k) + dt * (Ray(i,J) + CS%a_v(i,J,K) * d1(i,J))
       b1(i,J) = 1.0 / (b_denom_1 + dt * CS%a_v(i,J,K+1))
       d1(i,J) = b_denom_1 * b1(i,J)
-      visc_rem_v_local(i,J,k) = (CS%h_v(i,J,k) + dt * CS%a_v(i,J,K) * visc_rem_v_local(i,J,k-1)) * b1(i,J)
+      visc_rem_v(i,J,k) = (CS%h_v(i,J,k) + dt * CS%a_v(i,J,K) * visc_rem_v(i,J,k-1)) * b1(i,J)
     endif ; enddo ; enddo
   !$omp end target teams loop
   enddo
@@ -1618,20 +1609,14 @@ subroutine vertvisc_remnant(visc, visc_rem_u, visc_rem_v, dt, G, GV, US, CS)
   do k=nz-1,1,-1
   !$omp target teams loop collapse(2) 
     do J=Jsq,Jeq ; do i=is,ie ; if (G%mask2dCv(i,J) > 0.) then
-      visc_rem_v_local(i,J,k) = visc_rem_v_local(i,J,k) + c1(i,J,k+1) * visc_rem_v_local(i,J,k+1)
+      visc_rem_v(i,J,k) = visc_rem_v(i,J,k) + c1(i,J,k+1) * visc_rem_v(i,J,k+1)
     endif ; enddo ; enddo ! i and k loops
   !$omp end target teams loop
   enddo
 
   !$omp target exit data map(release: CS, CS%h_u, CS%h_v, CS%a_u, CS%a_v)
-  !!$omp target update from(b1, c1, d1, Ray, visc_rem_u_local, visc_rem_v_local, b_denom_1)
-  !$omp target update from(visc_rem_u_local, visc_rem_v_local)
-  !$omp target exit data map(delete:visc_rem_u_local, visc_rem_v_local)
+  !$omp target update from(visc_rem_u, visc_rem_v)
   !$omp target exit data map(delete: b1, c1, d1, Ray,  b_denom_1)
-  !JORGE TODO: figure out why I cannot use the intent inout variable
-  visc_rem_u = visc_rem_u_local
-  visc_rem_v = visc_rem_v_local
-
   if (CS%debug) then
     call uvchksum("visc_rem_[uv]", visc_rem_u, visc_rem_v, G%HI, haloshift=0, &
                   scalar_pair=.true.)
