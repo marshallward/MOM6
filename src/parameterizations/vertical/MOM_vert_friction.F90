@@ -1800,9 +1800,10 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
   endif
 
   !$omp target enter data map(to: G, G%bathyT)
-  !!$omp target enter data map(to: visc, visc%bbl_thick_u)
-  !!$omp target update to(visc, visc%bbl_thick_u)
-  !!$omp target enter data map(to: CS, CS%harm_BL_val)
+  !$omp target enter data map(to: visc, CS)
+  !$omp target enter data map(to: visc%bbl_thick_u, visc%bbl_thick_v, visc%Kv_bbl_u, visc%Kv_bbl_v)
+  !$omp target enter data map(to: CS%a_u, CS%h_u, CS%a_v, CS%h_v)
+
   !$omp target update to(u,h,dz, v)
   !$omp target enter data map(alloc: i_hbbl, bbl_thick, kv_bbl)
   !$omp target enter data map(alloc:h_harm, h_arith, dz_harm, h_delta, dz_arith, hvel, dz_vel, z_i) 
@@ -1814,7 +1815,7 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
   
   ! JORGE TODO: for some reason I need to map visc bbl thuck u like this herem instead of up there 
   ! I am doing this for the reast of the things later
-  !$omp target teams loop collapse(2) map(to: visc, visc%bbl_thick_u, visc%Kv_bbl_u)
+  !$omp target teams loop collapse(2) 
     do j=js,je ; do I=Isq,Ieq ; if (do_i(I,j)) then
       kv_bbl(I,j) = visc%Kv_bbl_u(I,j)
       bbl_thick(I,j) = visc%bbl_thick_u(I,j) + dz_neglect
@@ -2203,7 +2204,7 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
     endif !}
 
     do K=1,nz+1
-    !$omp target teams loop collapse(2) map(tofrom: CS, CS%a_u)
+    !$omp target teams loop collapse(2) 
       do j=js,je ; do I=Isq,Ieq ; if (do_i(I,j)) then
         CS%a_u(I,j,K) = min(a_cpl_max, a_cpl(I,j,K))
       endif; enddo ; enddo
@@ -2211,7 +2212,7 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
     enddo
 
     do k=1,nz
-    !$omp target teams loop collapse(2) map(tofrom: CS, CS%h_u)
+    !$omp target teams loop collapse(2) 
       do j=js,je ; do I=Isq,Ieq ; if (do_i(I,j)) then
         CS%h_u(I,j,k) = hvel(I,j,k) + h_neglect
       endif; enddo ; enddo
@@ -2243,7 +2244,7 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
   ij = touch_ij(i,j)
 
     !JORGE TODO: PORT
-  !$omp target teams loop collapse(2) map(to: G, G%mask2dCV)
+  !$omp target teams loop collapse(2) 
   do J=Jsq,Jeq ; do i=is,ie
     do_i(i,J) = G%mask2dCv(i,J) > 0.
   enddo ; enddo
@@ -2252,7 +2253,7 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
 
   if (CS%bottomdraglaw) then
     !JORGE TODO: PORT
-    !$omp target teams loop collapse(2) map(to:visc, visc%kv_bbl_v,visc%bbl_thick_v)
+    !$omp target teams loop collapse(2) 
     do J=Jsq,Jeq ; do i=is,ie ; if(do_i(i,J)) then
       kv_bbl(i,J) = visc%Kv_bbl_v(i,J)
       bbl_thick(i,J) = visc%bbl_thick_v(i,J) + dz_neglect
@@ -2263,7 +2264,7 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
 
 
     !JORGE TODO: PORT
-  !$omp target teams loop collapse(2) map(to:G, G%bathyT)
+  !$omp target teams loop collapse(2) 
   do J=Jsq,Jeq ; do i=is,ie
     Dmin(i,J) = min(G%bathyT(i,j), G%bathyT(i,j+1))
     zi_dir(i,J) = 0
@@ -2308,7 +2309,7 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
     enddo ; enddo
   !$omp end target teams loop
 
-  !$omp target teams loop collapse(2) map(to:G, G%bathyT)
+  !$omp target teams loop collapse(2) 
     do J=Jsq,Jeq+1 ; do i=is,ie
       zcol(i,j) = -G%bathyT(i,j)
     enddo ; enddo
@@ -2627,7 +2628,7 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
     !JORGE TODO: PORT
 
     do K=1,nz+1
-    !$omp target teams loop collapse(2) map(tofrom: CS, CS%a_v)
+    !$omp target teams loop collapse(2) 
       do J=Jsq,Jeq ; do i=is,ie ; if (do_i(i,J)) then
         CS%a_v(i,J,K) = min(a_cpl_max, a_cpl(i,J,K))
       endif ; enddo ; enddo
@@ -2635,13 +2636,16 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
     enddo
 
     do k=1,nz
-    !$omp target teams loop collapse(2) map(tofrom: CS, CS%h_v)
+    !$omp target teams loop collapse(2) 
       do J=Jsq,Jeq ; do i=is,ie ; if (do_i(i,J)) then
         CS%h_v(i,J,k) = hvel(i,J,k) + h_neglect
       endif; enddo ; enddo
       !$omp end target teams loop
     enddo
   endif
+
+  !$omp target exit data map(from: CS%a_u, CS%h_u, CS%a_v, CS%h_v)
+  !$omp target exit data map(release: visc%bbl_thick_u, visc%bbl_thick_v, visc%Kv_bbl_u, visc%Kv_bbl_v)
 
   !$omp target exit data map(delete: bbl_thick, i_hbbl, kv_bbl)
   !$omp target exit data map(delete:h_harm, h_arith, dz_harm, h_delta, dz_arith, z_i, hvel, dz_vel) 
