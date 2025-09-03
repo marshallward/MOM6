@@ -852,7 +852,7 @@ end subroutine dz_to_thickness_simple
 !> Converts layer thicknesses in thickness units to the vertical distance between edges in height
 !! units, perhaps by multiplication by the precomputed layer-mean specific volume stored in an
 !! array in the thermo_var_ptrs type when in non-Boussinesq mode.
-subroutine thickness_to_dz_3d(h, tv, dz, G, GV, US, halo_size, no_update)
+subroutine thickness_to_dz_3d(h, tv, dz, G, GV, US, halo_size, do_offload)
   type(ocean_grid_type),   intent(in)    :: G  !< The ocean's grid structure
   type(verticalGrid_type), intent(in)    :: GV !< The ocean's vertical grid structure
   type(unit_scale_type),   intent(in)    :: US !< A dimensional unit scaling type
@@ -866,21 +866,16 @@ subroutine thickness_to_dz_3d(h, tv, dz, G, GV, US, halo_size, no_update)
                                                !! inout to preserve any initialized values in halo points.
   integer,       optional, intent(in)    :: halo_size !< Width of halo within which to
                                                !! calculate thicknesses
-  logical,       optional, intent(in)    :: no_update !< Flag that, if .true., only uses data
-                                               !! already on GPU and doesn't update CPU result.
+  logical,       optional, intent(in)    :: do_offload !< If .true., only uses data calculates dz
+                                               !! on GPU (default .false.)
   ! Local variables
   character(len=128) :: mesg    ! A string for error messages
   integer :: i, j, k, is, ie, js, je, halo, nz
-  logical :: do_update
+  logical :: use_doconcurrent
 
-  ! temporary guard to allow turning off update to minimize transfers
-  do_update = .true.
-  if (present(no_update)) do_update = .not.no_update
-
-  !$omp target update to(h) if(do_update)
-
-  ! if h, dz already on GPU, does nothing; otherwise initializes them on GPU
-  !$omp target enter data map(to: h) map(alloc: dz)
+  ! guard to allow turning off/on do concurrent
+  use_doconcurrent = .false.
+  if (present(do_offload)) use_doconcurrent = do_offload
 
   halo = 0 ; if (present(halo_size)) halo = max(0,halo_size)
   is = G%isc-halo ; ie = G%iec+halo ; js = G%jsc-halo ; je = G%jec+halo ; nz = GV%ke
@@ -895,21 +890,26 @@ subroutine thickness_to_dz_3d(h, tv, dz, G, GV, US, halo_size, no_update)
       endif
       call MOM_error(FATAL, "thickness_to_dz called in fully non-Boussinesq mode with "//trim(mesg))
     endif
-    !$omp target update to(tv%SpV_avg) if(do_update)
-    !$omp target enter data map(to: tv, tv%SpV_avg)
-    do concurrent (k=1:nz, j=js:je, i=is:ie)
-      dz(i,j,k) = GV%H_to_RZ * h(i,j,k) * tv%SpV_avg(i,j,k)
-    enddo
-    !$omp target exit data map(release: tv, tv%SpV_avg)
+    if (use_doconcurrent) then
+      do concurrent (k=1:nz, j=js:je, i=is:ie)
+        dz(i,j,k) = GV%H_to_RZ * h(i,j,k) * tv%SpV_avg(i,j,k)
+      enddo
+    else
+      do k=1,nz ; do j=js,je ; do i=is,ie
+        dz(i,j,k) = GV%H_to_RZ * h(i,j,k) * tv%SpV_avg(i,j,k)
+      enddo ; enddo ; enddo
+    endif        
   else
-    do concurrent (k=1:nz, j=js:je, i=is:ie)
-      dz(i,j,k) = GV%H_to_Z * h(i,j,k)
-    enddo
+    if (use_doconcurrent) then
+      do concurrent (k=1:nz, j=js:je, i=is:ie)
+        dz(i,j,k) = GV%H_to_Z * h(i,j,k)
+      enddo
+    else
+      do k=1,nz ; do j=js,je ; do i=is,ie
+        dz(i,j,k) = GV%H_to_Z * h(i,j,k)
+      enddo ; enddo ; enddo
+    endif
   endif
-
-  !$omp target exit data map(release: h) map(from: dz)
-
-  !$omp target update from(dz) if(do_update)
 
 end subroutine thickness_to_dz_3d
 
