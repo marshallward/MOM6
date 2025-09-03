@@ -3428,7 +3428,7 @@ subroutine vertvisc_limit_vel(u, v, h, ADp, CDp, forces, visc, dt, G, GV, US, CS
   maxvel = CS%maxvel
   truncvel = 0.9*maxvel
   H_report = 6.0 * GV%Angstrom_H
-
+!$omp target enter data map(to: G, G%areaT, G%dx_Cv, G%iareaT, G%dy_Cu)
   if (len_trim(CS%u_trunc_file) > 0) then
     !$OMP parallel do default(shared) private(trunc_any,CFL)
     do j=js,je
@@ -3485,7 +3485,7 @@ subroutine vertvisc_limit_vel(u, v, h, ADp, CDp, forces, visc, dt, G, GV, US, CS
     if (CS%CFL_based_trunc) then
   ! JORGE TODO: PORT
       do k=1,nz
-      !$omp target teams loop collapse(2) map(to:G, G%iareaT, G%dy_Cu)
+      !$omp target teams loop collapse(2) 
       do j=js,je ; do I=Isq,Ieq
         if (abs(u(I,j,k)) < CS%vel_underflow) then ; u(I,j,k) = 0.0
         elseif ((u(I,j,k) * (dt * G%dy_Cu(I,j))) * G%IareaT(i+1,j) < -CS%CFL_trunc) then
@@ -3573,7 +3573,7 @@ subroutine vertvisc_limit_vel(u, v, h, ADp, CDp, forces, visc, dt, G, GV, US, CS
   else  ! Do not report accelerations leading to large velocities.
     if (CS%CFL_based_trunc) then
   ! JORGE TODO: PORT 
-      !$omp target teams loop collapse(2) map(to: G, G%areaT, G%dx_Cv)
+      !$omp target teams loop collapse(2) 
       do k=1,nz ; do J=Jsq,Jeq ; do i=is,ie
         if (abs(v(i,J,k)) < CS%vel_underflow) then ; v(i,J,k) = 0.0
         elseif ((v(i,J,k) * (dt * G%dx_Cv(i,J))) * G%IareaT(i,j+1) < -CS%CFL_trunc) then
@@ -3604,6 +3604,7 @@ subroutine vertvisc_limit_vel(u, v, h, ADp, CDp, forces, visc, dt, G, GV, US, CS
                          vel_report(i,J), forces%tauy(i,J), a=CS%a_v, hv=CS%h_v)
     endif ; enddo ; enddo
   endif
+!$omp target exit data map(release: G, G%areaT, G%dx_Cv, G%iareaT, G%dy_Cu)
 
 end subroutine vertvisc_limit_vel
 
