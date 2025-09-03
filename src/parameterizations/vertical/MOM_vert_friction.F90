@@ -2833,8 +2833,10 @@ subroutine find_coupling_coef(a_cpl, hvel, do_i, h_harm, bbl_thick, kv_bbl, z_i,
 
   !$omp target enter data map(alloc: z_t, Kv_tot, Kv_add)
   !$omp target enter data map(alloc: absf) 
-  !$omp target enter data map(to: a_cpl, h_ml)
   !$omp target enter data map(alloc: u_star, tau_mag)
+  !$omp target enter data map(to: a_cpl, h_ml)
+  !$omp target enter data map(to: visc, visc%nkml_visc_v, visc%nkml_visc_u, visc%Kv_shear)
+  !$omp target enter data map(to: G, G%CoriolisBu, Ustar_2d)
   !$omp target update to(a_cpl, h_ml)
 
   if (CS%Kvml_invZ2 > 0. .and. .not. do_shelf) then
@@ -2875,7 +2877,7 @@ subroutine find_coupling_coef(a_cpl, hvel, do_i, h_harm, bbl_thick, kv_bbl, z_i,
       ! layer thicknesses or the surface wind stresses are added later.
       if (work_on_u) then
         ! FIXME: Uppercase i?
-        !$omp target teams loop collapse(2) map(to:visc, visc%Kv_shear)
+        !$omp target teams loop collapse(2) 
         do j=js,je ; do i=is,ie ; if (do_i(i,j)) then
           Kv_add(i,j) = 0.5*(visc%Kv_shear(i,j,k) + visc%Kv_shear(i+1,j,k))
         endif ; enddo ; enddo
@@ -3134,7 +3136,7 @@ subroutine find_coupling_coef(a_cpl, hvel, do_i, h_harm, bbl_thick, kv_bbl, z_i,
     else ! (.not.allocated(tv%SpV_avg))
     ! JORGE TODO: PORT TO GPU
       if (work_on_u) then
-        !$omp target teams loop collapse(2) map(to: G, G%CoriolisBu, Ustar_2d)
+        !$omp target teams loop collapse(2) 
         do j=js,je ; do I=is,ie ; if (do_i(I,j)) then
           u_star(I,j) = 0.5 * (Ustar_2d(i,j) + Ustar_2d(i+1,j))
           absf(I,j) = 0.5 * (abs(G%CoriolisBu(I,J-1)) + abs(G%CoriolisBu(I,J)))
@@ -3160,7 +3162,7 @@ subroutine find_coupling_coef(a_cpl, hvel, do_i, h_harm, bbl_thick, kv_bbl, z_i,
           endif
         endif
       else
-        !$omp target teams loop collapse(2) map(to: G, G%CoriolisBu, Ustar_2d)
+        !$omp target teams loop collapse(2) 
         do J=Js,Je ; do i=is,ie ; if (do_i(i,J)) then
           u_star(i,J) = 0.5 * (Ustar_2d(i,j) + Ustar_2d(i,j+1))
           absf(i,J) = 0.5 * (abs(G%CoriolisBu(I-1,J)) + abs(G%CoriolisBu(I,J)))
@@ -3186,7 +3188,7 @@ subroutine find_coupling_coef(a_cpl, hvel, do_i, h_harm, bbl_thick, kv_bbl, z_i,
         endif
       endif
 
-      !$omp target teams loop collapse(2) map(to:GV, GV%Z_to_H)
+      !$omp target teams loop collapse(2) 
       do J=Js,Je ; do I=is,ie
         tau_mag(I,J) = GV%Z_to_H*u_star(I,J)**2
       enddo ; enddo
@@ -3197,6 +3199,7 @@ subroutine find_coupling_coef(a_cpl, hvel, do_i, h_harm, bbl_thick, kv_bbl, z_i,
     ! Determine the thickness of the surface ocean boundary layer and its extent in index space.
     nk_in_ml(:,:) = 0
     !$omp target enter data map(to: nk_in_ml)
+
     if (CS%dynamic_viscous_ML) then
       ! The fractional number of layers that are within the viscous boundary layer were
       ! previously stored in visc%nkml_visc_[uv].
@@ -3205,7 +3208,7 @@ subroutine find_coupling_coef(a_cpl, hvel, do_i, h_harm, bbl_thick, kv_bbl, z_i,
       !$omp end target
       max_nk = 0
       if (work_on_u) then
-        !$omp target teams loop collapse(2) map(to: visc, visc%nkml_visc_u)
+        !$omp target teams loop collapse(2) 
         do j=js,je ; do i=is,ie ; if (do_i(i,j)) then
           nk_in_ml(I,j) = ceiling(visc%nkml_visc_u(I,j))
           max_nk = max(max_nk, nk_in_ml(I,j))
@@ -3213,7 +3216,7 @@ subroutine find_coupling_coef(a_cpl, hvel, do_i, h_harm, bbl_thick, kv_bbl, z_i,
         !$omp end target teams loop
 
         do k=1,max_nk
-          !$omp target teams loop collapse(2) map(to: visc, visc%nkml_visc_u)
+          !$omp target teams loop collapse(2) 
           do j=js,je ; do i=is,ie ; if (do_i(i,j)) then
             if (k <= visc%nkml_visc_u(I,j)) then ! This layer is all in the ML.
               h_ml(i,j) = h_ml(i,j) + hvel(i,j,k)
@@ -3224,7 +3227,7 @@ subroutine find_coupling_coef(a_cpl, hvel, do_i, h_harm, bbl_thick, kv_bbl, z_i,
           !$omp end target teams loop
         enddo
       else
-        !$omp target teams loop collapse(2) map(to: visc, visc%nkml_visc_v)
+        !$omp target teams loop collapse(2) 
         do j=js,je ; do i=is,ie ; if (do_i(i,j)) then
           nk_in_ml(i,j) = ceiling(visc%nkml_visc_v(i,J))
           max_nk = max(max_nk, nk_in_ml(i,j))
@@ -3232,7 +3235,7 @@ subroutine find_coupling_coef(a_cpl, hvel, do_i, h_harm, bbl_thick, kv_bbl, z_i,
         !$omp end target teams loop
 
         do k=1,max_nk
-        !$omp target teams loop collapse(2) map(to: visc, visc%nkml_visc_v)
+        !$omp target teams loop collapse(2) 
           do j=js,je ; do i=is,ie ; if (do_i(i,j)) then
             if (k <= visc%nkml_visc_v(i,J)) then ! This layer is all in the ML.
               h_ml(i,j) = h_ml(i,j) + hvel(i,j,k)
@@ -3376,15 +3379,16 @@ subroutine find_coupling_coef(a_cpl, hvel, do_i, h_harm, bbl_thick, kv_bbl, z_i,
       enddo
     endif
   endif
+  !check, nk_in_ml can probably be released, instead of frommed
   !$omp target update from(bbl_thick, kv_bbl, Kv_add)
   !$omp target update from(z_t, Kv_tot)
-  !!$omp target update from(h_harm)
-  !!$omp target update from(hvel)
   !$omp target exit data map(from: u_star, tau_mag)
   !$omp target exit data map(from: a_cpl, h_ml, absf, nk_in_ml)
   !$omp target exit data map(delete: u_star, tau_mag)
   !$omp target exit data map(delete: absf)
   !$omp target exit data map(delete: z_t, Kv_tot, Kv_add)
+  !$omp target exit data map(release: visc, visc%nkml_visc_v, visc%nkml_visc_u, visc%Kv_shear)
+  !$omp target exit data map(release: G, G%CoriolisBu, Ustar_2d)
 end subroutine find_coupling_coef
 
 !> Velocity components which exceed a threshold for physically reasonable values
