@@ -1803,7 +1803,7 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
   !!$omp target enter data map(to: visc, visc%bbl_thick_u)
   !!$omp target update to(visc, visc%bbl_thick_u)
   !!$omp target enter data map(to: CS, CS%harm_BL_val)
-  !$omp target update to(u,h,dz)
+  !$omp target update to(u,h,dz, v)
   !$omp target enter data map(alloc: i_hbbl, bbl_thick, kv_bbl)
   !$omp target enter data map(alloc:h_harm, h_arith, dz_harm, h_delta, dz_arith, hvel, dz_vel, z_i) 
   !$omp target enter data map(alloc:  Dmin, zi_dir)
@@ -2322,16 +2322,9 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
     enddo ; enddo
   endif
 
-  !JORGE TODO: PORT
-  !$omp target update from(i_hbbl, bbl_thick, kv_bbl)
-  !$omp target update from(h_harm,h_arith, h_delta, dz_arith, z_i, hvel, dz_vel) 
-  !$omp target update from(zh, zcol)
-  !$omp target update from(Dmin, zi_dir)
-  !$omp target update from(dz_harm) 
-
   do k=nz,1,-1
 
-    !!$omp target teams loop collapse(2) firstprivate(k) 
+    !$omp target teams loop collapse(2) firstprivate(k) 
     do J=Jsq,Jeq ; do i=is,ie ; if (do_i(i,J)) then
       h_harm(i,J) = 2. * h(i,j,k) * h(i,j+1,k) / (h(i,j,k) + h(i,j+1,k) + h_neglect)
       h_arith(i,J) = 0.5 * (h(i,j+1,k) + h(i,j,k))
@@ -2339,7 +2332,7 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
       dz_harm(i,J,k) = 2. * dz(i,j,k) * dz(i,j+1,k) / (dz(i,j,k) + dz(i,j+1,k) + dz_neglect)
       dz_arith(i,J) = 0.5 * (dz(i,j+1,k) + dz(i,j,k))
     endif ; enddo ; enddo
-    !!$omp end target teams loop
+    !$omp end target teams loop
 
     ! Project thickness outward across OBCs using a zero-gradient condition.
     ! not need to port
@@ -2375,15 +2368,14 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
       ! for the vertical viscosity (hvel and dz_vel).  Near the bottom an
       ! upwind biased thickness is used to control the effect of spurious
       ! Montgomery potential gradients at the bottom where nearly massless
-
-      !!$omp target teams loop collapse(2) private(i,j, tmp1, tmp2, z2, botfn) firstprivate(k)
+      !$omp target teams loop collapse(2) private(i,j, tmp1, tmp2, z2, botfn) 
       do J=Jsq,Jeq ; do i=is,ie ; if (do_i(i,J)) then
         hvel(i,J,k) = h_harm(i,J)
         dz_vel(i,J,k) = dz_harm(i,J,k)
 
         tmp1 = v(i,j,k)
         tmp2 = h_delta(i,j)
-        if (tmp1 * tmp2 < 0.0) then
+        if (tmp1*tmp2 < 0.) then
           z2 = z_i(i,J,k+1)
           botfn = 1. / (1. + 0.09 * z2 * z2 * z2 * z2 * z2 * z2)
           hvel(i,J,k) = (1. - botfn) * h_harm(i,J) + botfn * h_arith(i,J)
@@ -2391,17 +2383,16 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
         endif
         z_i(i,J,k) = z_i(i,J,k+1) + dz_harm(i,J,k)*I_Hbbl(i,J)
       endif ; enddo ; enddo
-      !!$omp end target teams loop
+      !$omp end target teams loop
 
     else ! Not harmonic_visc
-  !JORGE TODO: PORT
-      !!$omp target teams loop collapse(2) 
+      !$omp target teams loop collapse(2) 
       do J=Jsq,Jeq+1 ; do i=is,ie
         zcol(i,j) = zcol(i,j) + dz(i,j,k)
       enddo ; enddo
-      !!$omp end target teams loop
+      !$omp end target teams loop
 
-      !!$omp target teams loop collapse(2) 
+      !$omp target teams loop collapse(2) firstprivate(k) 
       do J=Jsq,Jeq ; do i=is,ie ; if (do_i(i,J)) then
         zh(i,J) = zh(i,J) + dz_harm(i,J,k)
 
@@ -2432,7 +2423,7 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
           endif
         endif
       endif ; enddo ; enddo
-      !!$omp end target teams loop
+      !$omp end target teams loop
 
     endif
 
@@ -2451,12 +2442,6 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
       endif ; enddo ; enddo
     endif
   enddo ! big k loop above
-
-  !$omp target update to(i_hbbl, bbl_thick, kv_bbl)
-  !$omp target update to(h_harm,h_arith, h_delta, dz_arith, z_i, hvel, dz_vel) 
-  !$omp target update to(zh, zcol)
-  !$omp target update to(Dmin, zi_dir)
-  !$omp target update to(dz_harm) 
 
   call find_coupling_coef(a_cpl, dz_vel, do_i, dz_harm, bbl_thick, kv_bbl, z_i, &
       h_ml, dt, G, GV, US, CS, visc, Ustar_2d, tv, work_on_u=.false., OBC=OBC)
@@ -2658,11 +2643,6 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
     enddo
   endif
 
-  !$omp target update from(i_hbbl, bbl_thick, kv_bbl)
-  !$omp target update from(h_harm,h_arith, h_delta, dz_arith, z_i, hvel, dz_vel) 
-  !$omp target update from(zh, zcol)
-  !$omp target update from(Dmin, zi_dir)
-  !$omp target update from(dz_harm) 
   !$omp target exit data map(delete: bbl_thick, i_hbbl, kv_bbl)
   !$omp target exit data map(delete:h_harm, h_arith, dz_harm, h_delta, dz_arith, z_i, hvel, dz_vel) 
   !$omp target exit data map(delete: zh, zcol)
