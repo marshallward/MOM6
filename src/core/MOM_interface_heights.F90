@@ -898,7 +898,7 @@ subroutine thickness_to_dz_3d(h, tv, dz, G, GV, US, halo_size, do_offload)
       do k=1,nz ; do j=js,je ; do i=is,ie
         dz(i,j,k) = GV%H_to_RZ * h(i,j,k) * tv%SpV_avg(i,j,k)
       enddo ; enddo ; enddo
-    endif        
+    endif
   else
     if (use_doconcurrent) then
       do concurrent (k=1:nz, j=js:je, i=is:ie)
