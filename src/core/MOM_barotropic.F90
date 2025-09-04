@@ -2552,8 +2552,14 @@ subroutine btstep_timeloop(eta, ubt, vbt, uhbt0, Datu, BTCL_u, vhbt0, Datv, BTCL
     vbt_trans(i,J) = 0.0
   enddo
   if (integral_BT_cont) then
-    ubt_int(:,:) = 0.0 ; uhbt_int(:,:) = 0.0
-    vbt_int(:,:) = 0.0 ; vhbt_int(:,:) = 0.0
+    !ubt_int(:,:) = 0.0 ; uhbt_int(:,:) = 0.0
+    do concurrent (j=jsd:jed, I=IsdB:IedB)
+      ubt_int(I,j) = 0.0 ; uhbt_int(I,j) = 0.0
+    enddo
+    !vbt_int(:,:) = 0.0 ; vhbt_int(:,:) = 0.0
+    do concurrent (J=JsdB:JedB, i=isd:ied)
+      vbt_int(i,J) = 0.0 ; vhbt_int(i,J) = 0.0
+    enddo
   endif
 
   do concurrent (j=CS%jsdw:CS%jedw, i=CS%isdw:CS%iedw)
