@@ -721,12 +721,9 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
   !$omp target enter data map(alloc: ADp%du_dt_visc_gl90)
 
   if (associated(ADp%du_dt_visc_gl90)) then
-    do k=1,nz
-    !$omp target teams loop private(i,j) collapse(2)
-      do j=G%jsc,G%jec ; do I=Isq,Ieq
+    ! probbs not used!
+    do concurrent (k=1:nz, j=G%jsc:G%jec, I=Isq:Ieq)
           ADp%du_dt_visc_gl90(I,j,k) = u(I,j,k)
-      enddo ; enddo
-      !$omp end target teams loop
     enddo
   endif
 
@@ -747,8 +744,7 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
   ! over the topmost Hmix fluid.  If DIRECT_STRESS is not defined,
   ! the wind stress is applied as a stress boundary condition.
   if (CS%direct_stress) then
-    !$omp target teams loop private(i,j) collapse(2)
-    do j = G%jsc, G%jec ; do I = Isq, Ieq ; if (G%mask2dCu(I,j) > 0.0) then
+    do concurrent (j=G%jsc:G%jec, i=isq:ieq, G%mask2dCu(i,j) > 0.0)
           surface_stress(I,j) = 0.0
           zDS = 0.0
           stress = dt_Rho0 * forces%taux(I,j)
@@ -761,8 +757,7 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
             zDS = zDS + h_a
             if (zDS >= Hmix) exit
           end do
-    endif ; enddo; enddo
-    !$omp end target teams loop
+    end do
 
   else
     do concurrent (j=G%jsc:G%jec, I=Isq:Ieq)
@@ -868,31 +863,25 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
   ! back substitute to solve for the new velocities
   ! u_k = d'_k - c'_k x_(k+1)
   do k=nz-1,1,-1
-  !$omp target teams loop collapse(2) private(j,i) 
-    do j=G%isc,G%jec ; do I=Isq,Ieq ; if (G%mask2dCu(I,j) > 0.) then
+  do concurrent (j=G%jsc:G%jec, i=isq:ieq, G%mask2dCu(i,j) > 0.0)
           u(I,j,k) = u(I,j,k) + c1(I,j,k+1) * u(I,j,k+1)
-    endif ; end do ; enddo
-  !$omp end target teams loop
+  end do
   enddo
 
 
   if (associated(ADp%du_dt_str)) then
-  !$omp target teams loop collapse(2) private(i,j)
-    do j=G%isc,G%jec ; do I=Isq,Ieq ; if (abs(ADp%du_dt_str(I,j,nz)) < accel_underflow) then 
+  do concurrent (j=G%jsc:G%jec, i=isq:ieq, abs(ADp%du_dt_str(i,j,nz)) < accel_underflow)
           ADp%du_dt_str(I,j,nz) = 0.0
-    endif ; enddo ; enddo
-    !$omp end target teams loop
+  end do
 
     do k=nz-1,1,-1
-      !$omp target teams loop collapse(2) private(i,j)
-      do j=G%isc,G%jec ; do I=Isq,Ieq ; if (G%mask2dCu(I,j) > 0.) then
+      do concurrent (j=G%jsc:G%jec, i=isq:ieq, G%mask2dCu(i,j) > 0.0)
               ADp%du_dt_str(I,j,k) = &
                 ADp%du_dt_str(I,j,k) + c1(I,j,k+1) * ADp%du_dt_str(I,j,k+1)
 
             if (abs(ADp%du_dt_str(I,j,k)) < accel_underflow) &
               ADp%du_dt_str(I,j,k) = 0.0
-    endif; enddo ; enddo
-    !$omp end target teams loop
+      end do
     enddo
   endif
 
@@ -906,19 +895,16 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
   ! use ADp%du_dt_visc_gl90 as a placeholder for updated u (due to GL90) until last do loop
   if ((CS%id_du_dt_visc_gl90 > 0) .or. (CS%id_GLwork > 0)) then
     if (associated(ADp%du_dt_visc_gl90)) then
-     !$omp target teams loop private(i,j) collapse(2)
-      do j=G%isc,G%jec ; do I=Isq,Ieq ; if (G%mask2dCu(I,j) > 0.) then
+      do j=G%jsc,G%jec ; do I=Isq,Ieq ; if (G%mask2dCu(I,j) > 0.) then
             b_denom_1 = CS%h_u(I,j,1)  ! CS%a_u_gl90(I,j,1) is zero
             b1(I,j) = 1.0 / (b_denom_1 + dt*CS%a_u_gl90(I,j,2))
             d1(I,j) = b_denom_1 * b1(I,j)
 
             ADp%du_dt_visc_gl90(I,j,1) = b1(I,j) * (CS%h_u(I,j,1) * ADp%du_dt_visc_gl90(I,j,1))
       endif ; enddo; enddo
-      !$omp end target teams loop
 
       do k=2,nz
-        !$omp target teams loop private(i,j) collapse(2)
-        do j=G%isc,G%jec ; do I=Isq,Ieq ; if (G%mask2dCu(I,j) > 0.) then
+        do j=G%jsc,G%jec ; do I=Isq,Ieq ; if (G%mask2dCu(I,j) > 0.) then
               c1(I,j,k) = dt * CS%a_u_gl90(I,j,K) * b1(I,j)
               b_denom_1 = CS%h_u(I,j,k) + dt * (CS%a_u_gl90(I,j,K)*d1(I,j))
               b1(I,j) = 1.0 / (b_denom_1 + dt * CS%a_u_gl90(I,j,K+1))
@@ -927,22 +913,18 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
               ADp%du_dt_visc_gl90(I,j,k) = (CS%h_u(I,j,k) * ADp%du_dt_visc_gl90(I,j,k) &
                 + dt * CS%a_u_gl90(I,j,K) * ADp%du_dt_visc_gl90(I,j,k-1)) * b1(I,j)
       end if ; enddo ; enddo
-      !$omp end target teams loop
       enddo
 
       do k=nz-1,1,-1
-        !$omp target teams loop private(i,j) collapse(2)
-        do j=G%isc,G%jec ; do I=Isq,Ieq ; if (G%mask2dCu(I,j) > 0.) then
+        do j=G%jsc,G%jec ; do I=Isq,Ieq ; if (G%mask2dCu(I,j) > 0.) then
               ADp%du_dt_visc_gl90(I,j,k) = ADp%du_dt_visc_gl90(I,j,k) &
               + c1(I,j,k+1) * ADp%du_dt_visc_gl90(I,j,k+1)
         endif ; enddo; enddo
-        !$omp end target teams loop
       enddo
 
       do k=1,nz
         
-        !$omp target teams loop private(i,j) collapse(2)
-        do j=G%isc,G%jec ; do I=Isq,Ieq ; if (G%mask2dCu(I,j) > 0.) then
+        do j=G%jsc,G%jec ; do I=Isq,Ieq ; if (G%mask2dCu(I,j) > 0.) then
               ! now fill ADp%du_dt_visc_gl90(I,j,k) with actual velocity tendency due to GL90;
               ! note that on RHS: ADp%du_dt_visc(I,j,k) holds the original velocity value u(I,j,k)
               ! and ADp%du_dt_visc_gl90(I,j,k) the updated velocity due to GL90
@@ -953,7 +935,6 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
                 ADp%du_dt_visc_gl90(I,j,k) = 0.0
               endif
         endif ; enddo ; enddo 
-        !$omp end target teams loop
       enddo
 
 
@@ -963,11 +944,9 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
       ! velocity update; note that ADp%du_dt_visc(I,j,k) holds the original velocity value u(I,j,k)
       if (CS%id_GLwork > 0) then
         do k=1,nz
-        !$omp target teams loop private(i,j) collapse(2)
-          do j=G%isc,G%jec ; do I=Isq,Ieq ; if (G%mask2dCu(I,j) > 0.) then
+          do j=G%jsc,G%jec ; do I=Isq,Ieq ; if (G%mask2dCu(I,j) > 0.) then
                 KE_u(I,j,k) = ADp%du_dt_visc(I,j,k) * CS%h_u(I,j,k) * G%areaCu(I,j) * ADp%du_dt_visc_gl90(I,j,k)
         endif ; enddo ; enddo
-        !$omp end target teams loop
         enddo
       endif
     endif
@@ -976,39 +955,31 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
 
   if (associated(ADp%du_dt_visc)) then
     do k=1,nz
-      !$omp target teams loop private(i,j) collapse(2)
-      do j=G%jsc,G%jec ; do I=Isq,Ieq
+      do concurrent(j=G%jsc:G%jec, i = isq:ieq)
       ADp%du_dt_visc(I,j,k) = (u(I,j,k) - ADp%du_dt_visc(I,j,k)) * Idt
 
       if (abs(ADp%du_dt_visc(I,j,k)) < accel_underflow) &
         ADp%du_dt_visc(I,j,k) = 0.0
-      enddo ; enddo
-        !$omp end target teams loop
+      end do
     enddo
   endif
 
   if (allocated(visc%taux_shelf)) then
-      !$omp target teams loop private(i,j) collapse(2)
     do j=G%jsc,G%jec ; do I=Isq,Ieq
       visc%taux_shelf(I,j) = -GV%H_to_RZ * CS%a1_shelf_u(I,j) * u(I,j,1) ! - u_shelf?
     enddo ; enddo
-        !$omp end target teams loop
   endif
 
   if (present(taux_bot)) then
-      !$omp target teams loop private(i,j) collapse(2)
-    do j=G%jsc,G%jec ; do I=Isq,Ieq
+      do concurrent(j=G%jsc:G%jec, i = isq:ieq)
       taux_bot(I,j) = GV%H_to_RZ * (u(I,j,nz) * CS%a_u(I,j,nz+1))
-    enddo ; enddo
-        !$omp end target teams loop
+      end do
 
     if (allocated(visc%Ray_u)) then
       do k=1,nz
-      !$omp target teams loop private(i,j) collapse(2)
-        do j=G%jsc,G%jec ; do I=Isq,Ieq
+      do concurrent(j=G%jsc:G%jec, i = isq:ieq)
         taux_bot(I,j) = taux_bot(I,j) + GV%H_to_RZ * (visc%Ray_u(I,j,k) * u(I,j,k))
-        enddo ; enddo
-        !$omp end target teams loop
+      end do
       enddo
     endif
   endif
@@ -1016,21 +987,17 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
   ! When mixing down Eulerian current + Stokes drift subtract after calling solver
   if (DoStokesMixing) then
     do k=1,nz
-      !$omp target teams loop private(i,j) collapse(2)
       do j=G%jsc,G%jec ; do I=Isq,Ieq ; if (G%mask2dCu(I,j) > 0.) then
         u(I,j,k) = u(I,j,k) - Waves%Us_x(I,j,k)
       endif ; enddo ; enddo
-        !$omp end target teams loop
     enddo
   endif
 
   if (lfpmix) then
     do k=1,nz
-      !$omp target teams loop private(i,j) collapse(2)
       do j=G%jsc,G%jec ; do I=Isq,Ieq ; if (G%mask2dCu(I,j) > 0.) then
         u(I,j,k) = u(I,j,k) + Waves%Us_x(I,j,k)
       endif ; enddo ; enddo
-        !$omp end target teams loop
     enddo
   endif
 
@@ -1043,53 +1010,43 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
   ! When mixing down Eulerian current + Stokes drift add before calling solver
   if (DoStokesMixing) then
     do k=1,nz
-      !$omp target teams loop private(i,j) collapse(2)
       do J=Jsq,Jeq ; do i=is,ie ; if (G%mask2dCv(i,J) > 0.) then
             v(i,j,k) = v(i,j,k) + Waves%Us_y(i,j,k)
       endif ; enddo ; enddo
-      !$omp end target teams loop
     end do
   endif
 
 
   if (lfpmix) then
     do k=1,nz
-      !$omp target teams loop private(i,j) collapse(2)
       do J=Jsq,Jeq ; do i=is,ie ; if (G%mask2dCv(i,J) > 0.) then
             v(i,j,k) = v(i,j,k) - Waves%Us_y(i,j,k)
       endif ; enddo; enddo
-      !$omp end target teams loop
     end do 
   endif
 
 
   if (associated(ADp%dv_dt_visc)) then
     do k=1,nz
-      !$omp target teams loop private(i,j) collapse(2)
-      do J=Jsq,Jeq ; do i=is,ie
+      do concurrent (j=jsq:jeq, i=is:ie)
           ADp%dv_dt_visc(i,J,k) = v(i,J,k)
-      enddo ; end do 
-      !$omp end target teams loop
+      end do
     end do 
   endif
 
   if (associated(ADp%dv_dt_visc_gl90)) then
     do k=1,nz
-      !$omp target teams loop private(i,j) collapse(2)
       do J=Jsq,Jeq ; do i=is,ie
           ADp%dv_dt_visc_gl90(i,J,k) = v(i,J,k)
       enddo ; end do 
-      !$omp end target teams loop
     end do 
   endif
 
   if (associated(ADp%dv_dt_str)) then
     do k=1,nz
-      !$omp target teams loop private(i,j) collapse(2)
-      do J=Jsq,Jeq ; do i=is,ie
+      do concurrent (j=jsq:jeq, i=is:ie)
           ADp%dv_dt_str(i,J,k) = 0.0
-      enddo ; end do 
-      !$omp end target teams loop
+      end do
     end do 
   endif
 
@@ -1099,8 +1056,7 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
   ! the wind stress is applied as a stress boundary condition.
   if (CS%direct_stress) then
   ! TODO JORGE: refactor this one later
-    !$omp target teams loop private(i,j) collapse(2) 
-    do J=Jsq,Jeq ; do i=is,ie ; if (G%mask2dCv(i,J) > 0.) then
+    do concurrent (j=jsq:jeq, i=is:ie, G%mask2dCv(i,j) > 0.0)
           surface_stress(i,J) = 0.0
           zDS = 0.0
           stress = dt_Rho0 * forces%tauy(i,J)
@@ -1113,50 +1069,39 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
             zDS = zDS + h_a
             if (zDS >= Hmix) exit
           enddo
-    endif ; enddo ; enddo
-    !$omp end target teams loop
+    end do
   else
-    !$omp target teams loop private(i,j)
-    do J=Jsq,Jeq ; do i=is,ie
+    do concurrent (j=jsq:jeq, i=is:ie)
         surface_stress(i,J) = dt_Rho0 * (G%mask2dCv(i,J) * forces%tauy(i,J))
-    enddo ; end do
-    !$omp end target teams loop
+    end do
   endif
 
 
   if (allocated(visc%Ray_v)) then
     !$omp target enter data map(to: visc%Ray_v)
-    !$omp target teams loop private(i,j)
-    do J=Jsq,Jeq ; do i=is,ie
+    do concurrent (j=jsq:jeq, i=is:ie)
       Ray(i,J) = visc%Ray_v(i,J,1)
-    enddo ; enddo
-    !$omp end target teams loop
+    end do
   else
-    !$omp target teams loop private(i,j)
-    do J=Jsq,Jeq ; do i=is,ie
+    do concurrent (j=jsq:jeq, i=is:ie)
       Ray(i,J) = 0.
-    enddo ; enddo
-    !$omp end target teams loop
+    end do
   endif
 
   !$omp target enter data map(to: CS, CS%a_v, CS%h_v)
 
-  !$omp target teams loop private(i,j) collapse(2)
-  do J=Jsq,Jeq ; do i=is,ie ; if (G%mask2dCv(i,J) > 0.) then
+  do concurrent (j=jsq:jeq, i=is:ie, G%mask2dCv(i,j) > 0.0)
         b_denom_1 = CS%h_v(i,J,1) + dt * (Ray(i,J) + CS%a_v(i,J,1))
         b1(i,J) = 1.0 / (b_denom_1 + dt*CS%a_v(i,J,2))
         d1(i,J) = b_denom_1 * b1(i,J)
         v(i,J,1) = b1(i,J) * (CS%h_v(i,J,1) * v(i,J,1) + surface_stress(i,J))
-  endif ; enddo ; enddo
-  !$omp end target teams loop
+  end do
 
 
   if (associated(ADp%dv_dt_str)) then
-  !$omp target teams loop private(i,j) collapse(2)
-    do J=Jsq,Jeq ; do i=is,ie ; if (G%mask2dCv(i,J) > 0.) then
+  do concurrent (j=jsq:jeq, i=is:ie, G%mask2dCv(i,j) > 0.0)
           ADp%dv_dt_str(i,J,1) = b1(i,J) * (CS%h_v(i,J,1) * ADp%dv_dt_str(i,J,1) + surface_stress(i,J) * Idt)
-  endif ; end do; end do
-  !$omp end target teams loop
+  end do
   endif
 
 
@@ -1164,55 +1109,43 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
 
   do k=2,nz
     if (allocated(visc%Ray_v)) then
-      !$omp target teams loop private(i,j) collapse(2)
-      do J=Jsq,Jeq ; do i=is,ie
+      do concurrent (j=jsq:jeq, i=is:ie)
         Ray(i,J) = visc%Ray_v(i,J,k)
-      enddo ; enddo
-      !$omp end target teams loop
+      end do
     endif
 
-    !$omp target teams loop private(i,j) collapse(2)
-    do J=Jsq,Jeq ; do i=is,ie ; if (G%mask2dCv(i,J) > 0.) then
+    do concurrent (j=jsq:jeq, i=is:ie, G%mask2dCv(i,j) > 0.0)
       c1(i,J,k) = dt * CS%a_v(i,J,K) * b1(i,J)
       b_denom_1 = CS%h_v(i,J,k) + dt * (Ray(i,J) + CS%a_v(i,J,K)*d1(i,J))
       b1(i,J) = 1.0 / (b_denom_1 + dt * CS%a_v(i,J,K+1))
       d1(i,J) = b_denom_1 * b1(i,J)
       v(i,J,k) = (CS%h_v(i,J,k) * v(i,J,k) + dt * CS%a_v(i,J,K) * v(i,J,k-1)) * b1(i,J)
-    endif ; enddo ; enddo
-    !$omp end target teams loop
+    end do
 
     if (associated(ADp%dv_dt_str)) then
-      !$omp target teams loop private(i,j) collapse(2)
-      do J=Jsq,Jeq ; do i=is,ie ; if (G%mask2dCv(i,J) > 0.) then
+      do concurrent (j=jsq:jeq, i=is:ie, G%mask2dCv(i,j) > 0.0)
         ADp%dv_dt_str(i,J,k) = (CS%h_v(i,J,k) * ADp%dv_dt_str(i,J,k) &
             + dt * CS%a_v(i,J,K) * ADp%dv_dt_str(i,J,k-1)) * b1(i,J)
-      endif ; enddo ; enddo
-      !$omp end target teams loop
+      end do
     endif
   enddo
 
   do k=nz-1,1,-1
-    !$omp target teams loop private(i,j) collapse(2)
-    do J=Jsq,Jeq ; do i=is,ie ; if (G%mask2dCv(i,J) > 0.) then
+    do concurrent (j=jsq:jeq, i=is:ie, G%mask2dCv(i,j) > 0.0)
       v(i,J,k) = v(i,J,k) + c1(i,J,k+1) * v(i,J,k+1)
-    endif ; enddo ; enddo
-    !$omp end target teams loop
+    end do
   enddo
 
   if (associated(ADp%dv_dt_str)) then
-    !$omp target teams loop private(i,j) collapse(2)
-    do J=Jsq,Jeq ; do i=is,ie
+    do concurrent (j=jsq:jeq, i=is:ie)
       if (abs(ADp%dv_dt_str(i,J,nz)) < accel_underflow) ADp%dv_dt_str(i,J,nz) = 0.0
-    enddo ; enddo
-    !$omp end target teams loop
+    end do
 
     do k=nz-1,1,-1
-      !$omp target teams loop private(i,j) collapse(2)
-      do J=Jsq,Jeq ; do i=is,ie ; if (G%mask2dCv(i,J) > 0.) then
+      do concurrent (j=jsq:jeq, i=is:ie, G%mask2dCv(i,j) > 0.0)
         ADp%dv_dt_str(i,J,k) = ADp%dv_dt_str(i,J,k) + c1(i,J,k+1) * ADp%dv_dt_str(i,J,k+1)
         if (abs(ADp%dv_dt_str(i,J,k)) < accel_underflow) ADp%dv_dt_str(i,J,k) = 0.0
-      endif ; enddo ; enddo
-      !$omp end target teams loop
+      end do
     enddo
   endif
 
@@ -1225,17 +1158,14 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
   ! use ADp%dv_dt_visc_gl90 as a placeholder for updated u (due to GL90) until last do loop
   if ((CS%id_dv_dt_visc_gl90 > 0) .or. (CS%id_GLwork > 0)) then
     if (associated(ADp%dv_dt_visc_gl90)) then
-      !$omp target teams loop private(i,j) collapse(2)
       do J=Jsq,Jeq ; do i=is,ie ; if (G%mask2dCv(i,J) > 0.) then
             b_denom_1 = CS%h_v(i,J,1)  ! CS%a_v_gl90(i,J,1) is zero
             b1(i,J) = 1.0 / (b_denom_1 + dt*CS%a_v_gl90(i,J,2))
             d1(i,J) = b_denom_1 * b1(i,J)
             ADp%dv_dt_visc_gl90(I,J,1) = b1(i,J) * (CS%h_v(i,J,1) * ADp%dv_dt_visc_gl90(i,J,1))
       endif ; enddo ; enddo
-      !$omp end target teams loop
 
       do k=2,nz
-        !$omp target teams loop private(i,j) collapse(2)
         do J=Jsq,Jeq ; do i=is,ie ; if (G%mask2dCv(i,J) > 0.) then
               c1(i,J,k) = dt * CS%a_v_gl90(i,J,K) * b1(i,J)
               b_denom_1 = CS%h_v(i,J,k) + dt * (CS%a_v_gl90(i,J,K)*d1(i,J))
@@ -1244,20 +1174,16 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
               ADp%dv_dt_visc_gl90(i,J,k) = (CS%h_v(i,J,k) * ADp%dv_dt_visc_gl90(i,J,k) + &
                           dt * CS%a_v_gl90(i,J,K) * ADp%dv_dt_visc_gl90(i,J,k-1)) * b1(i,J)
         end if ; end do ; end do
-        !$omp end target teams loop
       enddo
 
       ! back substitute to solve for new velocities, held by ADp%dv_dt_visc_gl90
       do k=nz-1,1,-1
-        !$omp target teams loop private(i,j) collapse(2)
         do J=Jsq,Jeq ; do i=is,ie ; if (G%mask2dCv(i,J) > 0.) then
               ADp%dv_dt_visc_gl90(i,J,k) = ADp%dv_dt_visc_gl90(i,J,k) + c1(i,J,k+1) * ADp%dv_dt_visc_gl90(i,J,k+1)
         end if ; end do ; end do
-        !$omp end target teams loop
       enddo
 
       do k=1,nz
-        !$omp target teams loop private(i,j) collapse(2)
         do J=Jsq,Jeq ; do i=is,ie ; if (G%mask2dCv(i,J) > 0.) then
           ! now fill ADp%dv_dt_visc_gl90(i,J,k) with actual velocity tendency due to GL90;
           ! note that on RHS: ADp%dv_dt_visc(i,J,k) holds the original velocity value v(i,J,k)
@@ -1265,19 +1191,16 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
               ADp%dv_dt_visc_gl90(i,J,k) = (ADp%dv_dt_visc_gl90(i,J,k) - ADp%dv_dt_visc(i,J,k))*Idt
               if (abs(ADp%dv_dt_visc_gl90(i,J,k)) < accel_underflow) ADp%dv_dt_visc_gl90(i,J,k) = 0.0
         end if ; end do; end do 
-        !$omp end target teams loop
       enddo
 
       ! to compute energetics, we need to multiply by v*h, where u is original velocity before
       ! velocity update; note that ADp%dv_dt_visc(I,j,k) holds the original velocity value v(i,J,k)
       if (CS%id_GLwork > 0) then
         do k=1,nz
-          !$omp target teams loop private(i,j) collapse(2)
           do J=Jsq,Jeq ; do i=is,ie ; if (G%mask2dCv(i,J) > 0.) then
                 ! note that on RHS: ADp%dv_dt_visc(I,j,k) holds the original velocity value v(I,j,k)
                 KE_v(I,j,k) = ADp%dv_dt_visc(i,J,k) * CS%h_v(i,J,k) * G%areaCv(i,J) * ADp%dv_dt_visc_gl90(i,J,k)
           end if ; end do ; end do 
-          !$omp end target teams loop
 
         enddo
       endif
@@ -1288,37 +1211,29 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
 
   if (associated(ADp%dv_dt_visc)) then
     do k=1,nz
-      !$omp target teams loop private(i,j) collapse(2)
-      do J=Jsq,Jeq ; do i=is,ie
+      do concurrent (j=jsq:jeq, i=is:ie)
           ADp%dv_dt_visc(i,J,k) = (v(i,J,k) - ADp%dv_dt_visc(i,J,k))*Idt
           if (abs(ADp%dv_dt_visc(i,J,k)) < accel_underflow) ADp%dv_dt_visc(i,J,k) = 0.0
-      end do ; end do 
-      !$omp end target teams loop
+      end do
     end do 
   endif
 
   if (allocated(visc%tauy_shelf)) then
-    !$omp target teams loop private(i,j) collapse(2)
     do J=Jsq,Jeq ; do i=is,ie
         visc%tauy_shelf(i,J) = -GV%H_to_RZ * CS%a1_shelf_v(i,J) * v(i,J,1) ! - v_shelf?
     end do ; end do 
-    !$omp end target teams loop
   endif
 
   if (present(tauy_bot)) then
-    !$omp target teams loop private(i,j) collapse(2)
-    do J=Jsq,Jeq ; do i=is,ie
+    do concurrent (j=jsq:jeq, i=is:ie)
         tauy_bot(i,J) = GV%H_to_RZ * (v(i,J,nz) * CS%a_v(i,J,nz+1))
-    end do ; end do 
-    !$omp end target teams loop
+    end do
 
     if (allocated(visc%Ray_v)) then
       do k=1,nz
-        !$omp target teams loop private(i,j) collapse(2)
-        do J=Jsq,Jeq ; do i=is,ie
+        do concurrent (j=jsq:jeq, i=is:ie)
             tauy_bot(i,J) = tauy_bot(i,J) + GV%H_to_RZ * (visc%Ray_v(i,J,k)*v(i,J,k))
-        end do ; end do
-        !$omp end target teams loop
+        end do
       end do 
     endif
   endif
@@ -1326,21 +1241,17 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
   ! When mixing down Eulerian current + Stokes drift subtract after calling solver
   if (DoStokesMixing) then
     do k=1,nz
-      !$omp target teams loop private(i,j) collapse(2)
       do J=Jsq,Jeq ; do i=is,ie ; if (G%mask2dCv(i,J) > 0.) then
             v(i,J,k) = v(i,J,k) - Waves%Us_y(i,J,k)
       end if; end do ; end do
-      !$omp end target teams loop
     end do 
   endif
 
   if (lfpmix) then
     do k=1,nz
-      !$omp target teams loop private(i,j) collapse(2)
       do J=Jsq,Jeq ; do i=is,ie ; if (G%mask2dCv(i,J) > 0.) then
             v(i,J,k) = v(i,J,k) + Waves%Us_y(i,J,k)
       end if; end do ; end do
-      !$omp end target teams loop
     end do 
   endif
 
@@ -1513,27 +1424,19 @@ subroutine vertvisc_remnant(visc, visc_rem_u, visc_rem_v, dt, G, GV, US, CS)
       Ray(I,j) = visc%Ray_u(I,j,1)
     enddo ; enddo
   else
-  !$omp target teams loop collapse(2)
-    do j=jsc, jec ; do I=Isq,Ieq
-  !  do concurrent (j=jsc:jec, i=isq:ieq) 
+    do concurrent (j=jsc:jec, i=isq:ieq) 
       Ray(I,j) = 0.
-  !   end do
-    enddo ; enddo
-    !$omp end target teams loop 
+     end do
   endif
 
 
   !! TODO JORGE: PORT
-  !$omp target teams loop collapse(2) 
-  do j=jsc,jec ; do I=Isq,Ieq ; if (G%mask2dCu(I,j) > 0.) then
-  !  do concurrent (j=jsc:jec, i=isq:ieq, G%mask2dCu(i,j)>0.) 
+    do concurrent (j=jsc:jec, i=isq:ieq, G%mask2dCu(i,j)>0.) 
     b_denom_1 = CS%h_u(I,j,1) + dt * (Ray(I,j) + CS%a_u(I,j,1))
     b1(I,j) = 1.0 / (b_denom_1 + dt * CS%a_u(I,j,2))
     d1(I,j) = b_denom_1 * b1(I,j)
     visc_rem_u(I,j,1) = b1(I,j) * CS%h_u(I,j,1)
-  !  end do
-  endif ; enddo ; enddo
-  !$omp end target teams loop
+    end do
 
 
   do k=2,nz
@@ -1544,24 +1447,20 @@ subroutine vertvisc_remnant(visc, visc_rem_u, visc_rem_v, dt, G, GV, US, CS)
     endif
 
   !! TODO JORGE: PORT
-  !$omp target teams loop collapse(2) 
-    do j=jsc,jec ; do I=Isq,Ieq ; if (G%mask2dCu(I,j) > 0.) then
+    do concurrent (j=jsc:jec, i=isq:ieq, G%mask2dCu(i,j)>0.) 
       c1(I,j,k) = dt * CS%a_u(I,j,K)*b1(I,j)
       b_denom_1 = CS%h_u(I,j,k) + dt * (Ray(I,j) + CS%a_u(I,j,K) * d1(I,j))
       b1(I,j) = 1.0 / (b_denom_1 + dt * CS%a_u(I,j,K+1))
       d1(I,j) = b_denom_1 * b1(I,j)
       visc_rem_u(I,j,k) = (CS%h_u(I,j,k) + dt * CS%a_u(I,j,K) * visc_rem_u(I,j,k-1)) * b1(I,j)
-    endif ; enddo ; enddo
-    !$omp end target teams loop
+    end do
   enddo
 
   !! TODO JORGE: PORT
   do k=nz-1,1,-1
-  !$omp target teams loop collapse(2)
-    do j=jsc,jec ; do I=Isq,Ieq ; if (G%mask2dCu(I,j) > 0.) then
+    do concurrent (j=jsc:jec, i=isq:ieq, G%mask2dCu(i,j)>0.) 
       visc_rem_u(I,j,k) = visc_rem_u(I,j,k) + c1(I,j,k+1) * visc_rem_u(I,j,k+1)
-    endif ; enddo ; enddo
-  !$omp end target teams loop
+    end do
   enddo
 
   ! Now find the meridional viscous remnant using the robust tridiagonal solver.
@@ -1570,21 +1469,18 @@ subroutine vertvisc_remnant(visc, visc_rem_u, visc_rem_v, dt, G, GV, US, CS)
       Ray(i,J) = visc%Ray_v(i,J,1)
     enddo ; enddo
   else
-  !!$omp target teams loop collapse(2)
-    do J=Jsq,Jeq ; do i=is,ie
+    do concurrent (j=jsc:jec, i=isq:ieq) 
       Ray(i,J) = 0.
-    enddo ; enddo
+    end do
   endif
 
   !! TODO JORGE: PORT
-  !$omp target teams loop collapse(2) 
-  do J=Jsq,Jeq ; do i=is,ie ; if (G%mask2dCv(i,J) > 0.) then
+  do concurrent (j=jsq:jeq, i=is:ie, G%mask2dCv(i,j)>0.) 
     b_denom_1 = CS%h_v(i,J,1) + dt * (Ray(i,J) + CS%a_v(i,J,1))
     b1(i,J) = 1.0 / (b_denom_1 + dt*CS%a_v(i,J,2))
     d1(i,J) = b_denom_1 * b1(i,J)
     visc_rem_v(i,J,1) = b1(i,J) * CS%h_v(i,J,1)
-  endif ; enddo ; enddo
-  !$omp end target teams loop
+  end do
 
   do k=2,nz
     if (allocated(visc%Ray_v)) then
@@ -1594,24 +1490,20 @@ subroutine vertvisc_remnant(visc, visc_rem_u, visc_rem_v, dt, G, GV, US, CS)
     endif
 
   !! TODO JORGE: PORT
-  !$omp target teams loop collapse(2) 
-    do J=Jsq,Jeq ; do i=is,ie ; if (G%mask2dCv(i,J) > 0.) then
+  do concurrent (j=jsq:jeq, i=is:ie, G%mask2dCv(i,j)>0.) 
       c1(i,J,k) = dt * CS%a_v(i,J,K) * b1(i,J)
       b_denom_1 = CS%h_v(i,J,k) + dt * (Ray(i,J) + CS%a_v(i,J,K) * d1(i,J))
       b1(i,J) = 1.0 / (b_denom_1 + dt * CS%a_v(i,J,K+1))
       d1(i,J) = b_denom_1 * b1(i,J)
       visc_rem_v(i,J,k) = (CS%h_v(i,J,k) + dt * CS%a_v(i,J,K) * visc_rem_v(i,J,k-1)) * b1(i,J)
-    endif ; enddo ; enddo
-  !$omp end target teams loop
+  end do
   enddo
 
   !! TODO JORGE: PORT
   do k=nz-1,1,-1
-  !$omp target teams loop collapse(2) 
-    do J=Jsq,Jeq ; do i=is,ie ; if (G%mask2dCv(i,J) > 0.) then
+    do concurrent (j=jsq:jeq, i=is:ie, G%mask2dCv(i,j)>0.) 
       visc_rem_v(i,J,k) = visc_rem_v(i,J,k) + c1(i,J,k+1) * visc_rem_v(i,J,k+1)
-    endif ; enddo ; enddo ! i and k loops
-  !$omp end target teams loop
+    end do
   enddo
 
   !$omp target exit data map(release: CS, CS%h_u, CS%h_v, CS%a_u, CS%a_v)
@@ -1815,21 +1707,17 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
   
   ! JORGE TODO: for some reason I need to map visc bbl thuck u like this herem instead of up there 
   ! I am doing this for the reast of the things later
-  !$omp target teams loop collapse(2) 
-    do j=js,je ; do I=Isq,Ieq ; if (do_i(I,j)) then
+    do concurrent (j=js:je, i=isq:ieq, do_i(i,j))
       kv_bbl(I,j) = visc%Kv_bbl_u(I,j)
       bbl_thick(I,j) = visc%bbl_thick_u(I,j) + dz_neglect
       I_Hbbl(I,j) = 1. / bbl_thick(I,j)
-    endif ; enddo ; enddo
-    !$omp end target teams loop 
+    end do
   endif
 
-  !$omp target teams loop collapse(2)
-  do j=js,je ; do I=Isq,Ieq
+  do concurrent (j=js:je, i=isq:ieq)
     Dmin(I,j) = min(G%bathyT(i,j), G%bathyT(i+1,j))
     zi_dir(I,j) = 0
-  enddo ; enddo
-  !$omp end target teams loop
+  end do
 
   ! Project thickness outward across OBCs using a zero-gradient condition.
   if (associated(OBC)) then
@@ -1858,62 +1746,47 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
   ! gradients at the bottom where nearly massless layers layers ride over the
   ! topography.
 
-  !$omp target teams loop collapse(2)
-  do j=js,je ; do I=Isq,Ieq
+  do concurrent (j=js:je, i=isq:ieq)
     z_i(I,j,nz+1) = 0.
-  enddo ; enddo
-  !$omp end target teams loop
+  end do
 
   if (.not. CS%harmonic_visc) then
-  !$omp target teams loop collapse(2)
-    do j=js,je ; do I=Isq,Ieq
+  do concurrent (j=js:je, i=isq:ieq)
       zh(I,j) = 0.
-    enddo ; enddo
-  !$omp end target teams loop
+  end do
 
-  !$omp target teams loop collapse(2)
-    do j=js,je ; do I=Isq,Ieq+1
+  do concurrent (j=js:je, i=isq:ieq+1)
       zcol(i,j) = -G%bathyT(i,j)
-    enddo ; enddo
-  !$omp end target teams loop
+  end do
   endif
 
   if (CS%use_GL90_in_SSW) then
-  !$omp target teams loop collapse(2)
     do j=js,je ; do I=Isq,Ieq
       z_i_gl90(I,j,nz+1) = 0.
     enddo ; enddo
-  !$omp end target teams loop
   endif
 
   do k=nz,1,-1
-    !$omp target teams loop collapse(2) 
-      do j = js, je
-        do i = isq, Ieq
+  do concurrent (j=js:je, i=isq:ieq)
           h_harm(i,j) = 0.0
           h_arith(i,j) = 0.0
           h_delta(i,j) = 0.0
           dz_harm(i,j,k) = 0.0
           dz_arith(i,j) = 0.0
-        end do 
-      end do 
-      !$omp end target teams loop
-    end do 
+  end do
+  end do 
   do k=nz,1,-1
-  !$omp target teams loop collapse(2)
-    do j=js,je ; do I=Isq,Ieq ; if (do_i(I,j)) then
+    do concurrent (j=js:je, i=isq:ieq, do_i(i,j))
       h_harm(I,j) = 2. * h(i,j,k) * h(i+1,j,k) / (h(i,j,k) + h(i+1,j,k) + h_neglect)
       h_arith(I,j) = 0.5 * (h(i+1,j,k) + h(i,j,k))
       h_delta(I,j) = h(i+1,j,k) - h(i,j,k)
       dz_harm(I,j,k) = 2. * dz(i,j,k) * dz(i+1,j,k) / (dz(i,j,k) + dz(i+1,j,k) + dz_neglect)
       dz_arith(I,j) = 0.5 * (dz(i+1,j,k) + dz(i,j,k))
-    endif ; enddo ; enddo
-    !$omp end target teams loop
+    end do
 
     ! Project thickness outward across OBCs using a zero-gradient condition.
     if (associated(OBC)) then
       if (OBC%u_E_OBCs_on_PE) then
-        !$omp target teams loop collapse(2)
         do j=js_E_OBC,je_E_OBC ; do I=Is_E_OBC,Ie_E_OBC
           if (do_i(I,j) .and. OBC%segnum_u(I,j) > 0) then
             h_harm(I,j) = h(i,j,k)
@@ -1923,11 +1796,9 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
             dz_arith(I,j) = dz(i,j,k)
           endif
         enddo ; enddo
-        !$omp end target teams loop
       endif
 
       if (OBC%u_W_OBCs_on_PE) then
-      !$omp target teams loop collapse(2)
         do j=js_W_OBC,je_W_OBC ; do I=Is_W_OBC,Ie_W_OBC
           if (do_i(I,j) .and. OBC%segnum_u(I,j) < 0) then
             h_harm(I,j) = h(i+1,j,k)
@@ -1937,7 +1808,6 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
             dz_arith(I,j) = dz(i+1,j,k)
           endif
         enddo ; enddo
-        !$omp end target teams loop
       endif
     endif
 
@@ -1948,8 +1818,7 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
       ! Montgomery potential gradients at the bottom where nearly massless
       ! layers ride over the topography.
 
-      !$omp target teams loop collapse(2) private(z2, botfn)
-      do j=js,je ; do I=Isq,Ieq ; if (do_i(I,j)) then
+      do concurrent (j=js:je, i=isq:ieq, do_i(i,j))
         hvel(I,j,k) = h_harm(I,j)
         dz_vel(I,j,k) = dz_harm(I,j,k)
 
@@ -1962,17 +1831,13 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
         endif
 
         z_i(I,j,k) =  z_i(I,j,k+1) + dz_harm(I,j,k) * I_Hbbl(I,j)
-      endif ; enddo ; enddo
-      !$omp end target teams loop
+      end do
     else
-    !$omp target teams loop collapse(2)
-      do j=js,je ; do I=Isq,Ieq+1
+      do concurrent (j=js:je, i=isq:ieq+1)
         zcol(i,j) = zcol(i,j) + dz(i,j,k)
-      enddo ; enddo
-      !$omp end target teams loop
+      end do
 
-      !$omp target teams loop collapse(2) private(z_clear)
-      do j=js,je ; do I=Isq,Ieq ; if (do_i(I,j)) then
+      do concurrent (j=js:je, i=isq:ieq, do_i(i,j))
         zh(I,j) = zh(I,j) + dz_harm(I,j,k)
 
         z_clear = max(zcol(i,j),zcol(i+1,j)) + Dmin(I,j)
@@ -2000,8 +1865,7 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
             dz_vel(I,j,k) = (1. - botfn) * dz_arith(I,j) + botfn * dz_harm(I,j,k)
           endif
         endif
-      endif ; enddo ; enddo
-      !$omp end target teams loop
+      end do
     endif
 
     if (CS%use_GL90_in_SSW) then
@@ -2204,19 +2068,15 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
     endif !}
 
     do K=1,nz+1
-    !$omp target teams loop collapse(2) 
-      do j=js,je ; do I=Isq,Ieq ; if (do_i(I,j)) then
+      do concurrent (j=js:je, i=isq:ieq, do_i(i,j))
         CS%a_u(I,j,K) = min(a_cpl_max, a_cpl(I,j,K))
-      endif; enddo ; enddo
-      !$omp end target teams loop
+      end do
     enddo
 
     do k=1,nz
-    !$omp target teams loop collapse(2) 
-      do j=js,je ; do I=Isq,Ieq ; if (do_i(I,j)) then
+      do concurrent (j=js:je, i=isq:ieq, do_i(i,j))
         CS%h_u(I,j,k) = hvel(I,j,k) + h_neglect
-      endif; enddo ; enddo
-      !$omp end target teams loop
+      end do
     enddo
   endif !}
 
@@ -2244,32 +2104,26 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
   ij = touch_ij(i,j)
 
     !JORGE TODO: PORT
-  !$omp target teams loop collapse(2) 
-  do J=Jsq,Jeq ; do i=is,ie
+  do concurrent (j=jsq:jeq, i=is:ie)
     do_i(i,J) = G%mask2dCv(i,J) > 0.
-  enddo ; enddo
-  !$omp end target teams loop
+  end do
 
 
   if (CS%bottomdraglaw) then
     !JORGE TODO: PORT
-    !$omp target teams loop collapse(2) 
-    do J=Jsq,Jeq ; do i=is,ie ; if(do_i(i,J)) then
+  do concurrent (j=jsq:jeq, i=is:ie, do_i(i,j))
       kv_bbl(i,J) = visc%Kv_bbl_v(i,J)
       bbl_thick(i,J) = visc%bbl_thick_v(i,J) + dz_neglect
       I_Hbbl(i,J) = 1. / bbl_thick(i,J)
-    endif ; enddo ; enddo
-    !$omp end target teams loop
+  end do
   endif
 
 
     !JORGE TODO: PORT
-  !$omp target teams loop collapse(2) 
-  do J=Jsq,Jeq ; do i=is,ie
+  do concurrent (j=jsq:jeq, i=is:ie)
     Dmin(i,J) = min(G%bathyT(i,j), G%bathyT(i,j+1))
     zi_dir(i,J) = 0
-  enddo ; enddo
-  !$omp end target teams loop
+  end do
 
 
   ! Project thickness outward across OBCs using a zero-gradient condition.
@@ -2294,26 +2148,20 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
   endif
 
     !JORGE TODO: PORT
-  !$omp target teams loop collapse(2)
-  do J=Jsq,Jeq ; do i=is,ie
+  do concurrent (j=jsq:jeq, i=is:ie)
     z_i(i,J,nz+1) = 0.
-  enddo ; enddo
-  !$omp end target teams loop
+  end do
 
 
   if (.not. CS%harmonic_visc) then
     !JORGE TODO: PORT
-  !$omp target teams loop collapse(2)
-    do J=Jsq,Jeq ; do i=is,ie
+  do concurrent (j=jsq:jeq, i=is:ie)
       zh(i,J) = 0.
-    enddo ; enddo
-  !$omp end target teams loop
+  end do
 
-  !$omp target teams loop collapse(2) 
-    do J=Jsq,Jeq+1 ; do i=is,ie
+  do concurrent (j=jsq:jeq+1, i=is:ie)
       zcol(i,j) = -G%bathyT(i,j)
-    enddo ; enddo
-  !$omp end target teams loop
+  end do
   endif
 
 
@@ -2325,15 +2173,13 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
 
   do k=nz,1,-1
 
-    !$omp target teams loop collapse(2) firstprivate(k) 
-    do J=Jsq,Jeq ; do i=is,ie ; if (do_i(i,J)) then
+    do concurrent (j=jsq:jeq, i=is:ie, do_i(i,j))
       h_harm(i,J) = 2. * h(i,j,k) * h(i,j+1,k) / (h(i,j,k) + h(i,j+1,k) + h_neglect)
       h_arith(i,J) = 0.5 * (h(i,j+1,k) + h(i,j,k))
       h_delta(i,J) = h(i,j+1,k) - h(i,j,k)
       dz_harm(i,J,k) = 2. * dz(i,j,k) * dz(i,j+1,k) / (dz(i,j,k) + dz(i,j+1,k) + dz_neglect)
       dz_arith(i,J) = 0.5 * (dz(i,j+1,k) + dz(i,j,k))
-    endif ; enddo ; enddo
-    !$omp end target teams loop
+    end do
 
     ! Project thickness outward across OBCs using a zero-gradient condition.
     ! not need to port
@@ -2369,8 +2215,7 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
       ! for the vertical viscosity (hvel and dz_vel).  Near the bottom an
       ! upwind biased thickness is used to control the effect of spurious
       ! Montgomery potential gradients at the bottom where nearly massless
-      !$omp target teams loop collapse(2) private(i,j, tmp1, tmp2, z2, botfn) 
-      do J=Jsq,Jeq ; do i=is,ie ; if (do_i(i,J)) then
+      do concurrent (j=jsq:jeq, i=is:ie, do_i(i,j))
         hvel(i,J,k) = h_harm(i,J)
         dz_vel(i,J,k) = dz_harm(i,J,k)
 
@@ -2383,18 +2228,14 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
           dz_vel(i,J,k) = (1. - botfn) * dz_harm(i,J,k) + botfn * dz_arith(i,J)
         endif
         z_i(i,J,k) = z_i(i,J,k+1) + dz_harm(i,J,k)*I_Hbbl(i,J)
-      endif ; enddo ; enddo
-      !$omp end target teams loop
+      enddo
 
     else ! Not harmonic_visc
-      !$omp target teams loop collapse(2) 
-      do J=Jsq,Jeq+1 ; do i=is,ie
+      do concurrent (j=jsq:jeq+1, i=is:ie)
         zcol(i,j) = zcol(i,j) + dz(i,j,k)
-      enddo ; enddo
-      !$omp end target teams loop
+      end do
 
-      !$omp target teams loop collapse(2) firstprivate(k) 
-      do J=Jsq,Jeq ; do i=is,ie ; if (do_i(i,J)) then
+      do concurrent (j=jsq:jeq, i=is:ie, do_i(i,j))
         zh(i,J) = zh(i,J) + dz_harm(i,J,k)
 
         z_clear = max(zcol(i,j), zcol(i,j+1)) + Dmin(i,J)
@@ -2423,8 +2264,7 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
             dz_vel(i,J,k) = (1. - botfn) * dz_arith(i,J) + botfn * dz_harm(i,J,k)
           endif
         endif
-      endif ; enddo ; enddo
-      !$omp end target teams loop
+        end do
 
     endif
 
@@ -2628,19 +2468,15 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
     !JORGE TODO: PORT
 
     do K=1,nz+1
-    !$omp target teams loop collapse(2) 
-      do J=Jsq,Jeq ; do i=is,ie ; if (do_i(i,J)) then
+    do concurrent (j=jsq:jeq, i=is:ieq, do_i(i,j))
         CS%a_v(i,J,K) = min(a_cpl_max, a_cpl(i,J,K))
-      endif ; enddo ; enddo
-      !$omp end target teams loop
+    end do
     enddo
 
     do k=1,nz
-    !$omp target teams loop collapse(2) 
-      do J=Jsq,Jeq ; do i=is,ie ; if (do_i(i,J)) then
+    do concurrent (j=jsq:jeq, i=is:ieq, do_i(i,j))
         CS%h_v(i,J,k) = hvel(i,J,k) + h_neglect
-      endif; enddo ; enddo
-      !$omp end target teams loop
+    end do
     enddo
   endif
 
@@ -2841,32 +2677,26 @@ subroutine find_coupling_coef(a_cpl, hvel, do_i, h_harm, bbl_thick, kv_bbl, z_i,
 
   if (CS%Kvml_invZ2 > 0. .and. .not. do_shelf) then
     I_Hmix = 1. / (CS%Hmix + h_neglect)
-    !$omp target teams loop collapse(2) 
-    do j=js,je ; do i=is,ie
+    do concurrent (j=js:je, i=is:ie)
       z_t(i,j) = h_neglect * I_Hmix
-    enddo ; enddo
-    !$omp end target teams loop
+    end do
   endif
 
   do K=2,nz
-    !$omp target teams loop collapse(2) 
-    do j=js,je ; do i=is,ie
+    do concurrent (j=js:je, i=is:ie)
       Kv_tot(i,j) = CS%Kv
-    enddo ; enddo
-    !$omp end target teams loop 
+    end do
 
     if (CS%Kvml_invZ2 > 0. .and. .not. do_shelf) then
       ! This is an older (vintage ~1997) way to prevent wind stresses from driving very
       ! large flows in nearly massless near-surface layers when there is not a physically-
       ! based surface boundary layer parameterization.  It does not have a plausible
       ! physical basis, and probably should not be used.
-      !$omp target teams loop collapse(2) 
-      do j=js,je ; do i=is,ie ; if (do_i(i,j)) then
+    do concurrent (j=js:je, i=is:ie, do_i(i,j))
         z_t(i,j) = z_t(i,j) + h_harm(i,j,k-1) * I_Hmix
         Kv_tot(i,j) = CS%Kv + CS%Kvml_invZ2 / ((z_t(i,j)*z_t(i,j)) *  &
                  (1. + 0.09 * z_t(i,j) * z_t(i,j) * z_t(i,j) * z_t(i,j) * z_t(i,j) * z_t(i,j)))
-      endif ; enddo ; enddo
-      !$omp end target teams loop
+    enddo
     endif
 
     if (associated(visc%Kv_shear)) then
@@ -2877,11 +2707,9 @@ subroutine find_coupling_coef(a_cpl, hvel, do_i, h_harm, bbl_thick, kv_bbl, z_i,
       ! layer thicknesses or the surface wind stresses are added later.
       if (work_on_u) then
         ! FIXME: Uppercase i?
-        !$omp target teams loop collapse(2) 
-        do j=js,je ; do i=is,ie ; if (do_i(i,j)) then
+        do concurrent (j=js:je, i=is:ie, do_i(i,j))
           Kv_add(i,j) = 0.5*(visc%Kv_shear(i,j,k) + visc%Kv_shear(i+1,j,k))
-        endif ; enddo ; enddo
-        !$omp end target teams loop
+        end do
 
         if (do_OBCs) then
           if (OBC%u_E_OBCs_on_PE) then
@@ -2901,11 +2729,9 @@ subroutine find_coupling_coef(a_cpl, hvel, do_i, h_harm, bbl_thick, kv_bbl, z_i,
           endif
         endif
 
-        !$omp target teams loop collapse(2)
-        do j=js,je ; do i=is,ie ; if (do_i(i,j)) then
+        do concurrent (j=js:je, i=is:ie, do_i(i,j))
           Kv_tot(i,j) = Kv_tot(i,j) + Kv_add(i,j)
-        endif ; enddo ; enddo
-        !$omp end target teams loop
+        end do
       else
         ! FIXME: Uppercase j?
         do j=js,je ; do i=is,ie ; if (do_i(i,j)) then
@@ -2954,8 +2780,7 @@ subroutine find_coupling_coef(a_cpl, hvel, do_i, h_harm, bbl_thick, kv_bbl, z_i,
     ! Set the viscous coupling coefficients, excluding surface mixed layer contributions
     ! for now, but including viscous bottom drag, working up from the bottom.
     if (CS%bottomdraglaw) then
-      !$omp target teams loop collapse(2) 
-      do j=js,je ; do i=is,ie ; if (do_i(i,j)) then
+      do concurrent (j=js:je, i=is:ie, do_i(i,j))
         !    botfn determines when a point is within the influence of the bottom
         !  boundary layer, going from 1 at the bottom to 0 in the interior.
         z2 = z_i(i,j,k)
@@ -2971,8 +2796,7 @@ subroutine find_coupling_coef(a_cpl, hvel, do_i, h_harm, bbl_thick, kv_bbl, z_i,
 
         ! Calculate the coupling coefficients from the viscosities.
         a_cpl(i,j,K) = Kv_tot(i,j) / (h_shear + (I_amax * Kv_tot(i,j)))
-      endif ; enddo ; enddo ! i & k loops
-      !$omp end target teams loop
+      end do
     elseif (abs(CS%Kv_extra_bbl) > 0.0) then
       ! There is a simple enhancement of the near-bottom viscosities, but no
       ! adjustment of the viscous coupling length scales to give a particular
@@ -3006,12 +2830,10 @@ subroutine find_coupling_coef(a_cpl, hvel, do_i, h_harm, bbl_thick, kv_bbl, z_i,
 
   ! Assign the bottom coupling coefficients
   if (CS%bottomdraglaw) then
-    !$omp target teams loop collapse(2) 
-    do j=js,je ; do i=is,ie ; if (do_i(i,j)) then
+    do concurrent (j=js:je, i=is:ie, do_i(i,j))
       dhc = hvel(i,j,nz)*0.5
       a_cpl(i,j,nz+1) = kv_bbl(i,j) / ((min(dhc, bbl_thick(i,j)) + h_neglect) + I_amax*kv_bbl(i,j))
-    endif ; enddo ; enddo
-    !$omp end target teams loop
+    end do
   elseif (abs(CS%Kv_extra_bbl) > 0.0) then
     do j=js,je ; do i=is,ie ; if (do_i(i,j)) then
       a_cpl(i,j,nz+1) = (CS%Kv + CS%Kv_extra_bbl) &
@@ -3136,12 +2958,10 @@ subroutine find_coupling_coef(a_cpl, hvel, do_i, h_harm, bbl_thick, kv_bbl, z_i,
     else ! (.not.allocated(tv%SpV_avg))
     ! JORGE TODO: PORT TO GPU
       if (work_on_u) then
-        !$omp target teams loop collapse(2) 
-        do j=js,je ; do I=is,ie ; if (do_i(I,j)) then
+        do concurrent (j=js:je, i=is:ie, do_i(i,j))
           u_star(I,j) = 0.5 * (Ustar_2d(i,j) + Ustar_2d(i+1,j))
           absf(I,j) = 0.5 * (abs(G%CoriolisBu(I,J-1)) + abs(G%CoriolisBu(I,J)))
-        endif ; enddo ; enddo
-        !$omp end target teams loop
+        end do
 
 
         if (do_OBCs) then
@@ -3162,12 +2982,10 @@ subroutine find_coupling_coef(a_cpl, hvel, do_i, h_harm, bbl_thick, kv_bbl, z_i,
           endif
         endif
       else
-        !$omp target teams loop collapse(2) 
-        do J=Js,Je ; do i=is,ie ; if (do_i(i,J)) then
+        do concurrent (j=js:je, i=is:ie, do_i(i,j))
           u_star(i,J) = 0.5 * (Ustar_2d(i,j) + Ustar_2d(i,j+1))
           absf(i,J) = 0.5 * (abs(G%CoriolisBu(I-1,J)) + abs(G%CoriolisBu(I,J)))
-        endif ; enddo ; enddo
-        !$omp end target teams loop
+        end do
 
         if (do_OBCs) then
           if (OBC%v_N_OBCs_on_PE) then
@@ -3188,11 +3006,9 @@ subroutine find_coupling_coef(a_cpl, hvel, do_i, h_harm, bbl_thick, kv_bbl, z_i,
         endif
       endif
 
-      !$omp target teams loop collapse(2) 
-      do J=Js,Je ; do I=is,ie
+      do concurrent (j=js:je, i=is:ie)
         tau_mag(I,J) = GV%Z_to_H*u_star(I,J)**2
-      enddo ; enddo
-      !$omp end target teams loop
+      end do
     endif
 
 
@@ -3208,42 +3024,34 @@ subroutine find_coupling_coef(a_cpl, hvel, do_i, h_harm, bbl_thick, kv_bbl, z_i,
       !$omp end target
       max_nk = 0
       if (work_on_u) then
-        !$omp target teams loop collapse(2) 
-        do j=js,je ; do i=is,ie ; if (do_i(i,j)) then
+        do concurrent (j=js:je, i=is:ie, do_i(i,j))
           nk_in_ml(I,j) = ceiling(visc%nkml_visc_u(I,j))
           max_nk = max(max_nk, nk_in_ml(I,j))
-        endif ; enddo ; enddo
-        !$omp end target teams loop
+        end do
 
         do k=1,max_nk
-          !$omp target teams loop collapse(2) 
-          do j=js,je ; do i=is,ie ; if (do_i(i,j)) then
+        do concurrent (j=js:je, i=is:ie, do_i(i,j))
             if (k <= visc%nkml_visc_u(I,j)) then ! This layer is all in the ML.
               h_ml(i,j) = h_ml(i,j) + hvel(i,j,k)
             elseif (k < visc%nkml_visc_u(I,j) + 1.) then ! Part of this layer is in the ML.
               h_ml(i,j) = h_ml(i,j) + ((visc%nkml_visc_u(I,j) + 1.) - k) * hvel(i,j,k)
             endif
-          endif ; enddo ; enddo
-          !$omp end target teams loop
+        end do
         enddo
       else
-        !$omp target teams loop collapse(2) 
-        do j=js,je ; do i=is,ie ; if (do_i(i,j)) then
+        do concurrent (j=js:je, i=is:ie, do_i(i,j))
           nk_in_ml(i,j) = ceiling(visc%nkml_visc_v(i,J))
           max_nk = max(max_nk, nk_in_ml(i,j))
-        endif ; enddo ; enddo
-        !$omp end target teams loop
+        end do
 
         do k=1,max_nk
-        !$omp target teams loop collapse(2) 
-          do j=js,je ; do i=is,ie ; if (do_i(i,j)) then
+          do concurrent (j=js:je, i=is:ie, do_i(i,j))
             if (k <= visc%nkml_visc_v(i,J)) then ! This layer is all in the ML.
               h_ml(i,j) = h_ml(i,j) + hvel(i,j,k)
             elseif (k < visc%nkml_visc_v(i,J) + 1.) then ! Part of this layer is in the ML.
               h_ml(i,j) = h_ml(i,j) + ((visc%nkml_visc_v(i,J) + 1.) - k) * hvel(i,j,k)
             endif
-          endif ; enddo ; enddo
-        !$omp end target teams loop
+          end do
         enddo
       endif
     elseif (GV%nkml>0) then
@@ -3287,11 +3095,11 @@ subroutine find_coupling_coef(a_cpl, hvel, do_i, h_harm, bbl_thick, kv_bbl, z_i,
     endif
 
     ! Avoid working on land or on columns where the viscous coupling could not be increased.
-    !$omp target teams loop collapse(2)
-    do j=js,je ; do i=is,ie ; if ((u_star(i,j)<=0.0) .or. (.not.do_i(i,j))) then
-      nk_in_ml(i,j) = 0
-    endif ; enddo ; enddo
-    !$omp end target teams loop
+    do concurrent (j=js:je, i=is:ie)
+      if ((u_star(i,j)<=0.0) .or. (.not.do_i(i,j))) then
+        nk_in_ml(i,j) = 0
+      endif
+    end do
 
 
     ! Set the viscous coupling at the interfaces as the larger of what was previously
@@ -3354,8 +3162,8 @@ subroutine find_coupling_coef(a_cpl, hvel, do_i, h_harm, bbl_thick, kv_bbl, z_i,
     else
       ! JORGE TODO: PORT TO GPU
       do K=2,max_nk
-        !$omp target teams loop collapse(2)
-        do j=js,je ; do i=is,ie ; if (k <= nk_in_ml(i,j)) then
+        do concurrent (j=js:je, i=is:ie)
+          if (k <= nk_in_ml(i,j)) then
           z_t(i,j) = z_t(i,j) + hvel(i,j,k-1)
 
           temp1 = (z_t(i,j) * h_ml(i,j) - z_t(i,j) * z_t(i,j))
@@ -3374,8 +3182,8 @@ subroutine find_coupling_coef(a_cpl, hvel, do_i, h_harm, bbl_thick, kv_bbl, z_i,
           ! Choose the largest estimate of a_cpl, but these could be changed to be additive.
           a_cpl(i,j,K) = max(a_cpl(i,j,K), a_ml)
           ! An option could be added to change this to: a_cpl(i,K) = a_cpl(i,K) + a_ml
-        endif ; enddo ; enddo
-        !$omp end target teams loop
+          endif
+        end do
       enddo
     endif
   endif
@@ -3485,8 +3293,7 @@ subroutine vertvisc_limit_vel(u, v, h, ADp, CDp, forces, visc, dt, G, GV, US, CS
     if (CS%CFL_based_trunc) then
   ! JORGE TODO: PORT
       do k=1,nz
-      !$omp target teams loop collapse(2) 
-      do j=js,je ; do I=Isq,Ieq
+      do concurrent (j=js:je, i=isq:ieq)
         if (abs(u(I,j,k)) < CS%vel_underflow) then ; u(I,j,k) = 0.0
         elseif ((u(I,j,k) * (dt * G%dy_Cu(I,j))) * G%IareaT(i+1,j) < -CS%CFL_trunc) then
           u(I,j,k) = (-0.9*CS%CFL_trunc) * (G%areaT(i+1,j) / (dt * G%dy_Cu(I,j)))
@@ -3495,8 +3302,7 @@ subroutine vertvisc_limit_vel(u, v, h, ADp, CDp, forces, visc, dt, G, GV, US, CS
           u(I,j,k) = (0.9*CS%CFL_trunc) * (G%areaT(i,j) / (dt * G%dy_Cu(I,j)))
           if (h(i,j,k) + h(i+1,j,k) > H_report) CS%ntrunc = CS%ntrunc + 1
         endif
-      enddo ; enddo
-      !$omp end target teams loop
+      end do
       enddo
     else
       !$OMP parallel do default(shared)
@@ -3573,8 +3379,7 @@ subroutine vertvisc_limit_vel(u, v, h, ADp, CDp, forces, visc, dt, G, GV, US, CS
   else  ! Do not report accelerations leading to large velocities.
     if (CS%CFL_based_trunc) then
   ! JORGE TODO: PORT 
-      !$omp target teams loop collapse(2) 
-      do k=1,nz ; do J=Jsq,Jeq ; do i=is,ie
+      do concurrent (k=1:nz, j=js:je, i=isq:ieq)
         if (abs(v(i,J,k)) < CS%vel_underflow) then ; v(i,J,k) = 0.0
         elseif ((v(i,J,k) * (dt * G%dx_Cv(i,J))) * G%IareaT(i,j+1) < -CS%CFL_trunc) then
           v(i,J,k) = (-0.9*CS%CFL_trunc) * (G%areaT(i,j+1) / (dt * G%dx_Cv(i,J)))
@@ -3583,8 +3388,7 @@ subroutine vertvisc_limit_vel(u, v, h, ADp, CDp, forces, visc, dt, G, GV, US, CS
           v(i,J,k) = (0.9*CS%CFL_trunc) * (G%areaT(i,j) / (dt * G%dx_Cv(i,J)))
           if (h(i,j,k) + h(i,j+1,k) > H_report) CS%ntrunc = CS%ntrunc + 1
         endif
-      enddo ; enddo ; enddo
-      !$omp end target teams loop
+      end do
     else
       !$OMP parallel do default(shared)
       do k=1,nz ; do J=Jsq,Jeq ; do i=is,ie
