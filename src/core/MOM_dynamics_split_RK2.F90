@@ -517,7 +517,7 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
   !$omp target update to(h)
   call PressureForce(h, tv, CS%PFu, CS%PFv, G, GV, US, CS%PressureForce_CSp, &
                      CS%ALE_CSp, CS%ADp, p_surf, CS%pbce, CS%eta_PF)
-  !$omp target update from(CS%PFu, CS%PFv, CS%pbce)
+  !$omp target update from(CS%PFu, CS%PFv, CS%pbce, CS%eta_PF)
 
   if (dyn_p_surf) then
     !$omp target update from(CS%eta_PF)
@@ -637,6 +637,7 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
 
 
   call cpu_clock_begin(id_clock_pass)
+  !$omp target update to(h)
   if (G%nonblocking_updates) then
     call complete_group_pass(CS%pass_eta, G%Domain)
     call start_group_pass(CS%pass_visc_rem, G%Domain)
@@ -675,6 +676,7 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
                     visc_rem_u=CS%visc_rem_u, visc_rem_v=CS%visc_rem_v, BT_cont=CS%BT_cont)
     call cpu_clock_end(id_clock_continuity)
     if (BT_cont_BT_thick) then
+      !$omp target update to(h, CS%BT_cont%h_u, CS%BT_cont%h_v)
       call btcalc(h, G, GV, CS%barotropic_CSp, CS%BT_cont%h_u, CS%BT_cont%h_v, &
                   OBC=CS%OBC)
     endif
@@ -683,6 +685,7 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
 
   if (CS%BT_use_layer_fluxes) then
     uh_ptr => uh_in ; vh_ptr => vh_in; u_ptr => u_inst ; v_ptr => v_inst
+    !$omp target update to(uh_in, vh_in)
   endif
 
   call cpu_clock_begin(id_clock_btstep)
@@ -698,12 +701,25 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
   if (showCallTree) call callTree_enter("btstep(), MOM_barotropic.F90")
   ! This is the predictor step call to btstep.
   ! The CS%ADp argument here stores the weights for certain integrated diagnostics.
-  !$omp target update to(u_bc_accel, v_bc_accel)
+  !$omp target update to(uh_ptr, vh_ptr, u_ptr, v_ptr, u_bc_accel, v_bc_accel)
+  !$omp target update to(CS%visc_rem_u, CS%visc_rem_v)
+  !$omp target update to(CS%BT_cont%FA_u_EE, CS%BT_cont%FA_u_E0)
+  !$omp target update to(CS%BT_cont%FA_u_W0, CS%BT_cont%FA_u_WW)
+  !$omp target update to(CS%BT_cont%uBT_WW, CS%BT_cont%uBT_EE)
+  !$omp target update to(CS%BT_cont%FA_v_NN, CS%BT_cont%FA_v_N0)
+  !$omp target update to(CS%BT_cont%FA_v_S0, CS%BT_cont%FA_v_SS)
+  !$omp target update to(CS%BT_cont%vBT_SS, CS%BT_cont%vBT_NN)
   call btstep(u_inst, v_inst, eta, dt, u_bc_accel, v_bc_accel, forces, CS%pbce, CS%eta_PF, u_av, v_av, &
               CS%u_accel_bt, CS%v_accel_bt, eta_pred, CS%uhbt, CS%vhbt, G, GV, US, &
               CS%barotropic_CSp, CS%visc_rem_u, CS%visc_rem_v, SpV_avg, CS%ADp, CS%OBC, CS%BT_cont, &
               eta_PF_start, taux_bot, tauy_bot, uh_ptr, vh_ptr, u_ptr, v_ptr)
-  !$omp target update from(CS%u_accel_bt, CS%v_accel_bt)
+  !$omp target update from(CS%u_accel_bt, CS%v_accel_bt, CS%uhbt, CS%vhbt)
+  !$omp target update from(CS%BT_cont%FA_u_EE, CS%BT_cont%FA_u_E0)
+  !$omp target update from(CS%BT_cont%FA_u_W0, CS%BT_cont%FA_u_WW)
+  !$omp target update from(CS%BT_cont%uBT_WW, CS%BT_cont%uBT_EE)
+  !$omp target update from(CS%BT_cont%FA_v_NN, CS%BT_cont%FA_v_N0)
+  !$omp target update from(CS%BT_cont%FA_v_S0, CS%BT_cont%FA_v_SS)
+  !$omp target update from(CS%BT_cont%vBT_SS, CS%BT_cont%vBT_NN)
   if (showCallTree) call callTree_leave("btstep()")
   call cpu_clock_end(id_clock_btstep)
 
@@ -851,6 +867,7 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
   ! hp can be changed if CS%begw /= 0.
   ! eta_cor = ...                 (hidden inside CS%barotropic_CSp)
   call cpu_clock_begin(id_clock_btcalc)
+  !$omp target update to(hp)
   call bt_mass_source(hp, eta_pred, .false., G, GV, CS%barotropic_CSp)
   call cpu_clock_end(id_clock_btcalc)
 
@@ -903,6 +920,7 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
     call complete_group_pass(CS%pass_av_uvh, G%Domain, clock=id_clock_pass)
 
   if (BT_cont_BT_thick) then
+    !$omp target update to(h, CS%BT_cont%h_u, CS%BT_cont%h_v)
     call btcalc(h, G, GV, CS%barotropic_CSp, CS%BT_cont%h_u, CS%BT_cont%h_v, &
                 OBC=CS%OBC)
     if (showCallTree) call callTree_wayPoint("done with btcalc[BT_cont_BT_thick] (step_MOM_dyn_split_RK2)")
@@ -985,12 +1003,25 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
   if (showCallTree) call callTree_enter("btstep(), MOM_barotropic.F90")
   ! This is the corrector step call to btstep.
   !$omp target update to(u_bc_accel, v_bc_accel)
+  !$omp target update to(CS%visc_rem_u, CS%visc_rem_v)
+  !$omp target update to(CS%BT_cont%FA_u_EE, CS%BT_cont%FA_u_E0)
+  !$omp target update to(CS%BT_cont%FA_u_W0, CS%BT_cont%FA_u_WW)
+  !$omp target update to(CS%BT_cont%uBT_WW, CS%BT_cont%uBT_EE)
+  !$omp target update to(CS%BT_cont%FA_v_NN, CS%BT_cont%FA_v_N0)
+  !$omp target update to(CS%BT_cont%FA_v_S0, CS%BT_cont%FA_v_SS)
+  !$omp target update to(CS%BT_cont%vBT_SS, CS%BT_cont%vBT_NN)
   call btstep(u_inst, v_inst, eta, dt, u_bc_accel, v_bc_accel, forces, CS%pbce, CS%eta_PF, u_av, v_av, &
               CS%u_accel_bt, CS%v_accel_bt, eta_pred, CS%uhbt, CS%vhbt, G, GV, US, &
               CS%barotropic_CSp, CS%visc_rem_u, CS%visc_rem_v, SpV_avg, CS%ADp, CS%OBC, CS%BT_cont, &
               eta_PF_start, taux_bot, tauy_bot, uh_ptr, vh_ptr, u_ptr, v_ptr, etaav=eta_av)
   !$omp target update from(CS%u_accel_bt, CS%v_accel_bt)
-  !$omp target update from(eta_pred)
+  !$omp target update from(CS%uhbt, CS%vhbt, eta_pred)
+  !$omp target update from(CS%BT_cont%FA_u_EE, CS%BT_cont%FA_u_E0)
+  !$omp target update from(CS%BT_cont%FA_u_W0, CS%BT_cont%FA_u_WW)
+  !$omp target update from(CS%BT_cont%uBT_WW, CS%BT_cont%uBT_EE)
+  !$omp target update from(CS%BT_cont%FA_v_NN, CS%BT_cont%FA_v_N0)
+  !$omp target update from(CS%BT_cont%FA_v_S0, CS%BT_cont%FA_v_SS)
+  !$omp target update from(CS%BT_cont%vBT_SS, CS%BT_cont%vBT_NN)
   if (CS%id_deta_dt>0) then
     do j=js,je ; do i=is,ie ; deta_dt(i,j) = (eta_pred(i,j) - eta(i,j))*Idt_bc ; enddo ; enddo
   endif
