@@ -714,11 +714,12 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
   ! this could be a function 
   !$omp target enter data map(to: ADp)
   !$omp target enter data map(to: G, G%mask2dCu)
-  !$omp target update to(u)
+  !$omp target update to(u, v, h)
+  !$omp target enter data map(alloc: surface_stress)
   !$omp target enter data map(alloc: ADp%dv_dt_str)
   !$omp target enter data map(alloc: ADp%du_dt_str)
-  !$omp target enter data map(alloc: ADp%dv_dt_visc_gl90)
-  !$omp target enter data map(alloc: ADp%du_dt_visc_gl90)
+  !!$omp target enter data map(alloc: ADp%dv_dt_visc_gl90)
+  !!$omp target enter data map(alloc: ADp%du_dt_visc_gl90)
 
   if (associated(ADp%du_dt_visc_gl90)) then
     ! probbs not used!
@@ -733,8 +734,6 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
     enddo
   endif
 
-  !$omp target update to(v, h)
-  !$omp target enter data map(alloc: surface_stress)
   call end_nvtx
 
   ! TODO: Move outside function
@@ -1279,12 +1278,16 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
     call post_data(CS%id_GLwork, KE_term, CS%diag)
   endif
 
+  !$omp target enter data map(to: G, G%areaT, G%dx_Cv, G%iareaT, G%dy_Cu)
   call vertvisc_limit_vel(u, v, h, ADp, CDp, forces, visc, dt, G, GV, US, CS)
+  !$omp target exit data map(release: G, G%areaT, G%dx_Cv, G%iareaT, G%dy_Cu)
+
   !! TODO jorge: this is the last GPU code
-  !$omp target exit data map(from: b1, c1, d1)
+  !so these get used later in remnant. If I don't delete them here, are they kept in memory? and used or reallocated?
+  !$omp target exit data map(delete: b1, c1, d1)
+
   !$omp target exit data map(from:u, v)
-  !$omp target exit data map(from: ADp%du_dt_str)
-  !$omp target exit data map(from: ADp%du_dt_visc_gl90)
+  !$omp target exit data map(from: ADp%du_dt_str, ADp%dv_dt_str)
   !$omp target exit data map(from: surface_stress)
   !$omp target exit data map(from: Ray)
   !$omp target exit data map(delete: ADp)
@@ -2673,7 +2676,7 @@ subroutine find_coupling_coef(a_cpl, hvel, do_i, h_harm, bbl_thick, kv_bbl, z_i,
   !$omp target enter data map(to: a_cpl, h_ml)
   !$omp target enter data map(to: visc, visc%nkml_visc_v, visc%nkml_visc_u, visc%Kv_shear)
   !$omp target enter data map(to: G, G%CoriolisBu, Ustar_2d)
-  !$omp target update to(a_cpl, h_ml)
+  !!$omp target update to(a_cpl, h_ml)
 
   if (CS%Kvml_invZ2 > 0. .and. .not. do_shelf) then
     I_Hmix = 1. / (CS%Hmix + h_neglect)
@@ -3236,7 +3239,7 @@ subroutine vertvisc_limit_vel(u, v, h, ADp, CDp, forces, visc, dt, G, GV, US, CS
   maxvel = CS%maxvel
   truncvel = 0.9*maxvel
   H_report = 6.0 * GV%Angstrom_H
-!$omp target enter data map(to: G, G%areaT, G%dx_Cv, G%iareaT, G%dy_Cu)
+!!$omp target enter data map(to: G, G%areaT, G%dx_Cv, G%iareaT, G%dy_Cu)
   if (len_trim(CS%u_trunc_file) > 0) then
     !$OMP parallel do default(shared) private(trunc_any,CFL)
     do j=js,je
@@ -3408,7 +3411,7 @@ subroutine vertvisc_limit_vel(u, v, h, ADp, CDp, forces, visc, dt, G, GV, US, CS
                          vel_report(i,J), forces%tauy(i,J), a=CS%a_v, hv=CS%h_v)
     endif ; enddo ; enddo
   endif
-!$omp target exit data map(release: G, G%areaT, G%dx_Cv, G%iareaT, G%dy_Cu)
+!!$omp target exit data map(release: G, G%areaT, G%dx_Cv, G%iareaT, G%dy_Cu)
 
 end subroutine vertvisc_limit_vel
 
