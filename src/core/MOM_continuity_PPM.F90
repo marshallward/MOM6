@@ -2327,10 +2327,10 @@ subroutine meridional_flux_adjust(v, h_in, h_S, h_N, vh_tot_0, dvhdv_tot_0, &
   ! GCC doesn't understand map(alloc: ...) for variables also marked private
   !$omp target enter data map(alloc: do_I, dv_max, dv_min, dvhdv_tot, vh_err, vh_err_best, vh_aux)
 
+  !$omp target teams loop &
+  !$omp   private(j, k, vh_err, vh_err_best, dvhdv_tot, dv_min, dv_max, do_I, vh_aux)
   !!$omp target teams loop &
-  !!$omp   private(j, k, vh_err, vh_err_best, dvhdv_tot, dv_min, dv_max, do_I, vh_aux)
-  !!$omp target teams loop &
-  !!$omp   private(vh_err, vh_err_best, dvhdv_tot, dv_min, dv_max, do_I, vh_aux, domore)
+  !!$omp   private(vh_err, vh_err_best, dvhdv_tot, dv_min, dv_max, do_I, vh_aux, itt, domore)
   do J=jsh-1,jeh
 
     if (present(vh_3d)) then
@@ -2362,9 +2362,11 @@ subroutine meridional_flux_adjust(v, h_in, h_S, h_N, vh_tot_0, dvhdv_tot_0, &
         else ; do_I(i) = .false. ; endif
       enddo
 
-      domore = .false.
+      !domore = .false.
       ! *should* need a reduce clause, but nvfortran seems smart enough
-      do concurrent (i=ish:ieh, do_I(i)) DO_LOCALITY(local(ddv, dv_prev))
+      do concurrent (i=ish:ieh, do_I(i)) &
+          !DO_LOCALITY(local(ddv, dv_prev) reduce(.or.: domore))
+          DO_LOCALITY(local(ddv, dv_prev))
         if ((dt * min(G%IareaT(i,j),G%IareaT(i,j+1))*abs(vh_err(i)) > tol_eta) .or. &
             (CS%better_iter .and. ((abs(vh_err(i)) > tol_vel * dvhdv_tot(i)) .or. &
                                   (abs(vh_err(i)) > vh_err_best(i))) )) then
@@ -2386,18 +2388,21 @@ subroutine meridional_flux_adjust(v, h_in, h_S, h_N, vh_tot_0, dvhdv_tot_0, &
               if (dv_prev - dv_min(i) < 1.0e-15*abs(dv(i,j))) do_I(i) = .false.
             endif
           endif
-          if (do_I(i)) domore = .true.
+          !if (do_I(i)) domore = .true.
         else
           do_I(i) = .false.
         endif
       enddo
 
+      !domore = any(do_I(ish:ieh))
+      if (.not. any(do_I(ish:ieh))) exit
+
       ! Below conditional compilation is to control whether early exit happens when compiled with
       ! OpenMP - compiling with OpenMP prevents early exit. Without OpenMP, enables early exit.
       ! Early exit saves time on CPU, but causes other loops to be serialized on GPU.
-      !$ if (.false.) then
-      if (.not.domore) exit
-      !$ endif
+      !!$ if (.false.) then
+      !if (.not.domore) exit
+      !!$ endif
 
       if ((itt < max_itts) .or. present(vh_3d)) then
         do concurrent (i=ish:ieh)
