@@ -1007,6 +1007,7 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
   ! == Now work on the meridional velocity component.
 
   ! When mixing down Eulerian current + Stokes drift add before calling solver
+  call start_nvtx("mer vel: init")
   if (DoStokesMixing) then
     do k=1,nz
       do J=Jsq,Jeq ; do i=is,ie ; if (G%mask2dCv(i,J) > 0.) then
@@ -1026,11 +1027,9 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
 
 
   if (associated(ADp%dv_dt_visc)) then
-    do k=1,nz
-      do concurrent (j=jsq:jeq, i=is:ie)
+      do concurrent (k=1:nz,j=jsq:jeq, i=is:ie)
           ADp%dv_dt_visc(i,J,k) = v(i,J,k)
       end do
-    end do 
   endif
 
   if (associated(ADp%dv_dt_visc_gl90)) then
@@ -1042,17 +1041,17 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
   endif
 
   if (associated(ADp%dv_dt_str)) then
-    do k=1,nz
-      do concurrent (j=jsq:jeq, i=is:ie)
+      do concurrent (k=1:nz, j=jsq:jeq, i=is:ie)
           ADp%dv_dt_str(i,J,k) = 0.0
       end do
-    end do 
   endif
+  call end_nvtx
 
 
   !   One option is to have the wind stress applied as a body force
   ! over the topmost Hmix fluid.  If DIRECT_STRESS is not defined,
   ! the wind stress is applied as a stress boundary condition.
+  call start_nvtx("mer vel: direct stress")
   if (CS%direct_stress) then
   ! TODO JORGE: refactor this one later
     do concurrent (j=jsq:jeq, i=is:ie, G%mask2dCv(i,j) > 0.0)
@@ -1074,8 +1073,10 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
         surface_stress(i,J) = dt_Rho0 * (G%mask2dCv(i,J) * forces%tauy(i,J))
     end do
   endif
+  call end_nvtx
 
 
+  call start_nvtx(" mer vel: work")
   if (allocated(visc%Ray_v)) then
     !$omp target enter data map(to: visc%Ray_v)
     do concurrent (j=jsq:jeq, i=is:ie)
@@ -1102,8 +1103,8 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
           ADp%dv_dt_str(i,J,1) = b1(i,J) * (CS%h_v(i,J,1) * ADp%dv_dt_str(i,J,1) + surface_stress(i,J) * Idt)
   end do
   endif
-
-
+  call end_nvtx
+  call start_nvtx("mer vel: main k loop")
 
 
   do k=2,nz
@@ -1119,16 +1120,16 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
       b1(i,J) = 1.0 / (b_denom_1 + dt * CS%a_v(i,J,K+1))
       d1(i,J) = b_denom_1 * b1(i,J)
       v(i,J,k) = (CS%h_v(i,J,k) * v(i,J,k) + dt * CS%a_v(i,J,K) * v(i,J,k-1)) * b1(i,J)
-    end do
-
-    if (associated(ADp%dv_dt_str)) then
-      do concurrent (j=jsq:jeq, i=is:ie, G%mask2dCv(i,j) > 0.0)
+      if (associated(ADp%dv_dt_str)) then
         ADp%dv_dt_str(i,J,k) = (CS%h_v(i,J,k) * ADp%dv_dt_str(i,J,k) &
             + dt * CS%a_v(i,J,K) * ADp%dv_dt_str(i,J,k-1)) * b1(i,J)
-      end do
-    endif
-  enddo
+      end if
+    end do
 
+  enddo
+  call end_nvtx
+
+  call start_nvtx("mer vel: update v")
   do k=nz-1,1,-1
     do concurrent (j=jsq:jeq, i=is:ie, G%mask2dCv(i,j) > 0.0)
       v(i,J,k) = v(i,J,k) + c1(i,J,k+1) * v(i,J,k+1)
@@ -1147,6 +1148,7 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
       end do
     enddo
   endif
+  call end_nvtx
 
 
 
@@ -1676,6 +1678,7 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
     js_E_OBC = max(js, OBC%Js_u_E_obc) ; je_E_OBC = min(je, OBC%je_u_E_obc)
     js_W_OBC = max(js, OBC%Js_u_W_obc) ; je_W_OBC = min(je, OBC%je_u_W_obc)
   endif
+  call start_nvtx("vv coef: initialization")
 
   call find_ustar(forces, tv, Ustar_2d, G, GV, US, halo=1)
 
@@ -1768,16 +1771,8 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
       z_i_gl90(I,j,nz+1) = 0.
     enddo ; enddo
   endif
-
-  do k=nz,1,-1
-  do concurrent (j=js:je, i=isq:ieq)
-          h_harm(i,j) = 0.0
-          h_arith(i,j) = 0.0
-          h_delta(i,j) = 0.0
-          dz_harm(i,j,k) = 0.0
-          dz_arith(i,j) = 0.0
-  end do
-  end do 
+  call end_nvtx
+  call start_nvtx("vv coef: first k loop")
   do k=nz,1,-1
     do concurrent (j=js:je, i=isq:ieq, do_i(i,j))
       h_harm(I,j) = 2. * h(i,j,k) * h(i+1,j,k) / (h(i,j,k) + h(i+1,j,k) + h_neglect)
@@ -1886,13 +1881,17 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
       endif ; enddo ; enddo
     endif
   enddo
+  call end_nvtx
 
 
 
   ! enters z_i, dz_vel, 
   ! ported, works
+  call start_nvtx("vv coef: find coupling coef 1")
   call find_coupling_coef(a_cpl, dz_vel, do_i, dz_harm, bbl_thick, kv_bbl, z_i, &
       h_ml, dt, G, GV, US, CS, visc, Ustar_2d, tv, work_on_u=.true., OBC=OBC)
+  call end_nvtx
+
 
 
 
@@ -2104,6 +2103,7 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
   ! Now work on v-points.
 
   ! Force IPO optimizations (e.g. Intel)
+  call start_nvtx("vv coef: updating kv_bbl, bbl_thikc and I-hbbl")
   ij = touch_ij(i,j)
 
     !JORGE TODO: PORT
@@ -2173,6 +2173,8 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
       z_i_gl90(i,J,nz+1) = 0.
     enddo ; enddo
   endif
+  call end_nvtx
+  call start_nvtx("vv coef: second k loop")
 
   do k=nz,1,-1
 
@@ -2286,9 +2288,13 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
       endif ; enddo ; enddo
     endif
   enddo ! big k loop above
+  call end_nvtx
 
+  call start_nvtx("vv coef: find coupling coef 2")
   call find_coupling_coef(a_cpl, dz_vel, do_i, dz_harm, bbl_thick, kv_bbl, z_i, &
       h_ml, dt, G, GV, US, CS, visc, Ustar_2d, tv, work_on_u=.false., OBC=OBC)
+  call end_nvtx
+  call start_nvtx("vv coef: big if shelf work") 
 
 
 
@@ -2490,6 +2496,8 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
   !$omp target exit data map(delete:h_harm, h_arith, dz_harm, h_delta, dz_arith, z_i, hvel, dz_vel) 
   !$omp target exit data map(delete: zh, zcol)
   !$omp target exit data map(delete:  Dmin, zi_dir)
+  call end_nvtx
+  call start_nvtx("vv coef: post processing")
 
   ! Diagnose total Kv at v-points
   if (CS%id_Kv_v > 0) then
@@ -2539,6 +2547,7 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
 
   if (allocated(hML_u)) deallocate(hML_u)
   if (allocated(hML_v)) deallocate(hML_v)
+  call end_nvtx
 
 end subroutine vertvisc_coef
 
@@ -2666,7 +2675,8 @@ subroutine find_coupling_coef(a_cpl, hvel, do_i, h_harm, bbl_thick, kv_bbl, z_i,
       Js_S_OBC = max(G%JscB, OBC%Js_v_S_obc) ; Je_S_OBC = min(G%JecB, OBC%Je_v_S_obc)
     endif
   endif
-
+  call start_nvtx("find CC: initialization")
+  ! TODO: this shoul dbe alloc, not to
   a_cpl(:,:,:) = 0.0
   h_ml(:,:) = 0.
 
@@ -2684,6 +2694,8 @@ subroutine find_coupling_coef(a_cpl, hvel, do_i, h_harm, bbl_thick, kv_bbl, z_i,
       z_t(i,j) = h_neglect * I_Hmix
     end do
   endif
+  call end_nvtx
+  call start_nvtx("find CC: first k loop")
 
   do K=2,nz
     do concurrent (j=js:je, i=is:ie)
@@ -2829,6 +2841,8 @@ subroutine find_coupling_coef(a_cpl, hvel, do_i, h_harm, bbl_thick, kv_bbl, z_i,
       endif ; enddo ; enddo ! i & k loops
     endif
   enddo
+  call end_nvtx
+  call start_nvtx("find CC: bottom drag law")
 
 
   ! Assign the bottom coupling coefficients
@@ -2847,6 +2861,8 @@ subroutine find_coupling_coef(a_cpl, hvel, do_i, h_harm, bbl_thick, kv_bbl, z_i,
       a_cpl(i,j,nz+1) = CS%Kv / ((0.5 * hvel(i,j,nz) + h_neglect) + I_amax * CS%Kv)
     endif ; enddo ; enddo
   endif
+  call end_nvtx
+  call start_nvtx("find CC: shelf if/else")
 
   ! Add surface intensified viscous coupling, either as a no-slip boundary condition under a
   ! rigid ice-shelf, or due to wind-stress driven surface boundary layer mixing that has not
@@ -2892,11 +2908,11 @@ subroutine find_coupling_coef(a_cpl, hvel, do_i, h_harm, bbl_thick, kv_bbl, z_i,
   ! JORGE TODO: PORT TO GPU
 
     ! Find the friction velocity and the absolute value of the Coriolis parameter at this point.
-    !$omp target
-    u_star(:,:) = 0.0  ! Zero out the friction velocity on land points.
-    absf(:,:) = 0.0
-    tau_mag(:,:) = 0.0  ! Zero out the friction velocity on land points.
-    !$omp end target
+    do concurrent (j=js:je, i=is:ie)
+    u_star(i,j) = 0.0  ! Zero out the friction velocity on land points.
+    absf(i,j) = 0.0
+    tau_mag(i,j) = 0.0  ! Zero out the friction velocity on land points.
+    end do 
 
     if (allocated(tv%SpV_avg)) then
       rho_av1(:,:) = 0.0
@@ -3022,9 +3038,10 @@ subroutine find_coupling_coef(a_cpl, hvel, do_i, h_harm, bbl_thick, kv_bbl, z_i,
     if (CS%dynamic_viscous_ML) then
       ! The fractional number of layers that are within the viscous boundary layer were
       ! previously stored in visc%nkml_visc_[uv].
-      !$omp target
-      h_ml(:,:) = h_neglect
-      !$omp end target
+      do concurrent (j=js:je, i=is:ie)
+      h_ml(i,j) = h_neglect
+      end do
+
       max_nk = 0
       if (work_on_u) then
         do concurrent (j=js:je, i=is:ie, do_i(i,j))
@@ -3108,9 +3125,9 @@ subroutine find_coupling_coef(a_cpl, hvel, do_i, h_harm, bbl_thick, kv_bbl, z_i,
     ! Set the viscous coupling at the interfaces as the larger of what was previously
     ! set and the contributions from the surface boundary layer.
     ! JORGE TODO: PORT TO GPU
-    !$omp target
-    z_t(:,:) = 0.0
-    !$omp end target
+    do concurrent (j=js:je, i=is:ie)
+    z_t(i,j) = 0.0
+    end do
     if (CS%apply_LOTW_floor .and. &
         (CS%dynamic_viscous_ML .or. (GV%nkml>0) .or. CS%fixed_LOTW_ML)) then
       do K=2,max_nk
@@ -3200,6 +3217,7 @@ subroutine find_coupling_coef(a_cpl, hvel, do_i, h_harm, bbl_thick, kv_bbl, z_i,
   !$omp target exit data map(delete: z_t, Kv_tot, Kv_add)
   !$omp target exit data map(release: visc, visc%nkml_visc_v, visc%nkml_visc_u, visc%Kv_shear)
   !$omp target exit data map(release: G, G%CoriolisBu, Ustar_2d)
+  call end_nvtx
 end subroutine find_coupling_coef
 
 !> Velocity components which exceed a threshold for physically reasonable values
