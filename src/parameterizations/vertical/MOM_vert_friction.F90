@@ -714,7 +714,8 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
   ! this could be a function 
   !$omp target enter data map(to: ADp)
   !$omp target enter data map(to: G, G%mask2dCu)
-  !$omp target update to(u, v, h)
+  !$omp target update to(u, h,v)
+  !!omp target enter data map(to: u,v,h)
   !$omp target enter data map(alloc: surface_stress)
   !$omp target enter data map(alloc: ADp%dv_dt_str)
   !$omp target enter data map(alloc: ADp%du_dt_str)
@@ -1079,6 +1080,7 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
   call start_nvtx(" mer vel: work")
   if (allocated(visc%Ray_v)) then
     !$omp target enter data map(to: visc%Ray_v)
+
     do concurrent (j=jsq:jeq, i=is:ie)
       Ray(i,J) = visc%Ray_v(i,J,1)
     end do
@@ -1088,6 +1090,7 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
     end do
   endif
 
+  ! check where I can move this
   !$omp target enter data map(to: CS, CS%a_v, CS%h_v)
 
   do concurrent (j=jsq:jeq, i=is:ie, G%mask2dCv(i,j) > 0.0)
@@ -1225,6 +1228,7 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
     end do ; end do 
   endif
 
+  ! JORGE TODO: this has to be malloced
   if (present(tauy_bot)) then
     do concurrent (j=jsq:jeq, i=is:ie)
         tauy_bot(i,J) = GV%H_to_RZ * (v(i,J,nz) * CS%a_v(i,J,nz+1))
@@ -1258,6 +1262,7 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
 
 
   call end_nvtx
+  call start_nvtx("limit vel and cleanup")
 
   ! Calculate the KE source from GL90 vertical viscosity [H L2 T-3 ~> m3 s-3].
   ! We do the KE-rate calculation here (rather than in MOM_diagnostics) to ensure
@@ -1288,7 +1293,8 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
   !so these get used later in remnant. If I don't delete them here, are they kept in memory? and used or reallocated?
   !$omp target exit data map(delete: b1, c1, d1)
 
-  !$omp target exit data map(from:u, v)
+  !!$omp target exit data map(from:u, v)
+  !$omp target update from(u,v)
   !$omp target exit data map(from: ADp%du_dt_str, ADp%dv_dt_str)
   !$omp target exit data map(from: surface_stress)
   !$omp target exit data map(from: Ray)
@@ -1297,6 +1303,7 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
   !$omp target exit data map(delete: CS%a_v, CS%h_v)
   !$omp target exit data map(delete: visc%Ray_u) if (allocated(visc%Ray_u))
 
+  call end_nvtx
 
   ! Here the velocities associated with open boundary conditions are applied.
   ! JORGE TODO: should be offloaded?
@@ -1700,9 +1707,11 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
   !$omp target enter data map(to: G, G%bathyT)
   !$omp target enter data map(to: visc, CS)
   !$omp target enter data map(to: visc%bbl_thick_u, visc%bbl_thick_v, visc%Kv_bbl_u, visc%Kv_bbl_v)
-  !$omp target enter data map(to: CS%a_u, CS%h_u, CS%a_v, CS%h_v)
+  !$omp target enter data map(to: CS%a_u, CS%h_u, CS%a_v, CS%h_v, do_i)
+  !$omp target enter data map(to: dz)
 
-  !$omp target update to(u,h,dz, v)
+  !$omp target update to(u,h, v)
+  !$omp target enter data map(alloc: a_cpl)
   !$omp target enter data map(alloc: i_hbbl, bbl_thick, kv_bbl)
   !$omp target enter data map(alloc:h_harm, h_arith, dz_harm, h_delta, dz_arith, hvel, dz_vel, z_i) 
   !$omp target enter data map(alloc:  Dmin, zi_dir)
@@ -2489,7 +2498,9 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
     enddo
   endif
 
-  !$omp target exit data map(from: CS%a_u, CS%h_u, CS%a_v, CS%h_v)
+  !$omp target exit data map(release: a_cpl)
+  !$omp target exit data map(from: CS%a_u, CS%h_u, CS%a_v, CS%h_v, do_i)
+  !$omp target exit data map(from: dz)
   !$omp target exit data map(release: visc%bbl_thick_u, visc%bbl_thick_v, visc%Kv_bbl_u, visc%Kv_bbl_v)
 
   !$omp target exit data map(delete: bbl_thick, i_hbbl, kv_bbl)
@@ -2677,13 +2688,20 @@ subroutine find_coupling_coef(a_cpl, hvel, do_i, h_harm, bbl_thick, kv_bbl, z_i,
   endif
   call start_nvtx("find CC: initialization")
   ! TODO: this shoul dbe alloc, not to
-  a_cpl(:,:,:) = 0.0
-  h_ml(:,:) = 0.
+  do concurrent (k=1:nz, j=js:je,i=is:ie)
+    a_cpl(i,j,k) = 0.0
+  end do
+  do concurrent (j=js:je, i=is:ie)
+    h_ml(i,j) = 0.0
+  end do
+
+  !a_cpl(:,:,:) = 0.0
+  !h_ml(:,:) = 0.
 
   !$omp target enter data map(alloc: z_t, Kv_tot, Kv_add)
   !$omp target enter data map(alloc: absf) 
   !$omp target enter data map(alloc: u_star, tau_mag)
-  !$omp target enter data map(to: a_cpl, h_ml)
+  !!$omp target enter data map(to: a_cpl, h_ml)
   !$omp target enter data map(to: visc, visc%nkml_visc_v, visc%nkml_visc_u, visc%Kv_shear)
   !$omp target enter data map(to: G, G%CoriolisBu, Ustar_2d)
   !!$omp target update to(a_cpl, h_ml)
@@ -3211,7 +3229,8 @@ subroutine find_coupling_coef(a_cpl, hvel, do_i, h_harm, bbl_thick, kv_bbl, z_i,
   !$omp target update from(bbl_thick, kv_bbl, Kv_add)
   !$omp target update from(z_t, Kv_tot)
   !$omp target exit data map(from: u_star, tau_mag)
-  !$omp target exit data map(from: a_cpl, h_ml, absf, nk_in_ml)
+  !$omp target exit data map(from: absf, nk_in_ml)
+  !!$omp target exit data map(from: a_cpl, h_ml, absf, nk_in_ml)
   !$omp target exit data map(delete: u_star, tau_mag)
   !$omp target exit data map(delete: absf)
   !$omp target exit data map(delete: z_t, Kv_tot, Kv_add)
@@ -3259,8 +3278,9 @@ subroutine vertvisc_limit_vel(u, v, h, ADp, CDp, forces, visc, dt, G, GV, US, CS
   H_report = 6.0 * GV%Angstrom_H
 !!$omp target enter data map(to: G, G%areaT, G%dx_Cv, G%iareaT, G%dy_Cu)
   if (len_trim(CS%u_trunc_file) > 0) then
-    !$OMP parallel do default(shared) private(trunc_any,CFL)
-    do j=js,je
+    !!$OMP parallel do default(shared) private(trunc_any,CFL)
+    ! optimize memory 
+    do concurrent (j=js:je)
       trunc_any = .false.
       do I=Isq,Ieq ; dowrite(I,j) = .false. ; enddo
       if (CS%CFL_based_trunc) then
@@ -3309,7 +3329,6 @@ subroutine vertvisc_limit_vel(u, v, h, ADp, CDp, forces, visc, dt, G, GV, US, CS
         endif ; enddo ; enddo
       endif ; endif
     enddo ! j-loop
-    !$omp end parallel do 
   else  ! Do not report accelerations leading to large velocities.
     if (CS%CFL_based_trunc) then
   ! JORGE TODO: PORT
@@ -3347,8 +3366,8 @@ subroutine vertvisc_limit_vel(u, v, h, ADp, CDp, forces, visc, dt, G, GV, US, CS
   endif
 
   if (len_trim(CS%v_trunc_file) > 0) then
-    !$OMP parallel do default(shared) private(trunc_any,CFL)
-    do J=Jsq,Jeq
+    ! JORGE TOOD: optimize memory
+    do concurrent (J=Jsq:Jeq)
       trunc_any = .false.
       do i=is,ie ; dowrite(i,J) = .false. ; enddo
       if (CS%CFL_based_trunc) then
@@ -3400,7 +3419,8 @@ subroutine vertvisc_limit_vel(u, v, h, ADp, CDp, forces, visc, dt, G, GV, US, CS
   else  ! Do not report accelerations leading to large velocities.
     if (CS%CFL_based_trunc) then
   ! JORGE TODO: PORT 
-      do concurrent (k=1:nz, j=js:je, i=isq:ieq)
+      do k=1,nz
+      do concurrent (j=js:je, i=isq:ieq)
         if (abs(v(i,J,k)) < CS%vel_underflow) then ; v(i,J,k) = 0.0
         elseif ((v(i,J,k) * (dt * G%dx_Cv(i,J))) * G%IareaT(i,j+1) < -CS%CFL_trunc) then
           v(i,J,k) = (-0.9*CS%CFL_trunc) * (G%areaT(i,j+1) / (dt * G%dx_Cv(i,J)))
@@ -3409,6 +3429,7 @@ subroutine vertvisc_limit_vel(u, v, h, ADp, CDp, forces, visc, dt, G, GV, US, CS
           v(i,J,k) = (0.9*CS%CFL_trunc) * (G%areaT(i,j) / (dt * G%dx_Cv(i,J)))
           if (h(i,j,k) + h(i,j+1,k) > H_report) CS%ntrunc = CS%ntrunc + 1
         endif
+      end do
       end do
     else
       !$OMP parallel do default(shared)
