@@ -1316,7 +1316,7 @@ subroutine zonal_flux_adjust(u, h_in, h_W, h_E, uh_tot_0, duhdu_tot_0, &
   real :: tol_eta  ! The tolerance for the current iteration [H ~> m or kg m-2].
   real :: tol_vel  ! The tolerance for velocity in the current iteration [L T-1 ~> m s-1].
   integer :: i, j, k, nz, itt
-  logical :: domore, do_I(SZIB_(G)), local_OBC, use_uhbt
+  logical :: do_I(SZIB_(G)), local_OBC, use_uhbt
   integer, parameter:: max_itts = 20
 
   local_OBC = .false.
@@ -1338,7 +1338,7 @@ subroutine zonal_flux_adjust(u, h_in, h_W, h_E, uh_tot_0, duhdu_tot_0, &
 
   ! NVIDIA do concurrent doesn't work with private arrays (private scalars OK)
   !$omp target teams loop &
-  !$omp   private(uh_aux, do_I, du_max, du_min, uh_err, duhdu_tot, uh_err_best, itt, tol_eta, domore)
+  !$omp   private(uh_aux, do_I, du_max, du_min, uh_err, duhdu_tot, uh_err_best, itt, tol_eta)
   do j=jsh,jeh
 
     if (present(uh_3d)) then
@@ -1364,10 +1364,8 @@ subroutine zonal_flux_adjust(u, h_in, h_W, h_E, uh_tot_0, duhdu_tot_0, &
         case default ; tol_eta = CS%tol_eta
       end select
 
-      domore = .false.
-      ! *should* need a reduce clause, but nvfortran seems smart enough
       do concurrent (I=ish-1:ieh, do_I(I)) &
-          & DO_LOCALITY(local(ddu, du_prev) reduce(.or.: domore))
+          & DO_LOCALITY(local(ddu, du_prev))
         if (uh_err(I) > 0.0) then ; du_max(I) = du(I,j)
         elseif (uh_err(I) < 0.0) then ; du_min(I) = du(I,j)
         else ; do_I(I) = .false. ; endif
@@ -1392,7 +1390,6 @@ subroutine zonal_flux_adjust(u, h_in, h_W, h_E, uh_tot_0, duhdu_tot_0, &
               if (du_prev - du_min(I) < 1.0e-15*abs(du(I,j))) do_I(I) = .false.
             endif
           endif
-          if (do_I(I)) domore = .true.
         else
           do_I(I) = .false.
         endif
@@ -1402,7 +1399,7 @@ subroutine zonal_flux_adjust(u, h_in, h_W, h_E, uh_tot_0, duhdu_tot_0, &
       !! OpenMP - compiling with OpenMP prevents early exit. Without OpenMP, enables early exit.
       !! Early exit saves time on CPU, but causes other loops to be serialized on GPU.
       !$ if (.false.) then
-      if (.not.domore) exit
+      if (.not. any(do_I(ish-1:ieh))) exit
       !$ endif
 
       if ((itt < max_itts) .or. present(uh_3d)) then
@@ -1525,7 +1522,6 @@ subroutine set_zonal_BT_cont(u, h_in, h_W, h_E, BT_cont, du0, uh_tot_0, duhdu_to
   real :: CFL_min ! A minimal increment in the CFL to try to ensure that the
                   ! flow is truly upwind [nondim]
   real :: Idt     ! The inverse of the time step [T-1 ~> s-1].
-  logical :: domore
   integer :: i, j, k, nz
 
   nz = GV%ke ; Idt = 1.0 / dt
@@ -2309,7 +2305,7 @@ subroutine meridional_flux_adjust(v, h_in, h_S, h_N, vh_tot_0, dvhdv_tot_0, &
   real :: tol_eta ! The tolerance for the current iteration [H ~> m or kg m-2].
   real :: tol_vel ! The tolerance for velocity in the current iteration [L T-1 ~> m s-1].
   integer :: i, j, k, nz, itt
-  logical :: domore, do_I(SZI_(G)), local_OBC, use_vhbt
+  logical :: do_I(SZI_(G)), local_OBC, use_vhbt
   integer, parameter :: max_itts = 20
 
   local_OBC = .false.
@@ -2329,9 +2325,8 @@ subroutine meridional_flux_adjust(v, h_in, h_S, h_N, vh_tot_0, dvhdv_tot_0, &
   ! GCC doesn't understand map(alloc: ...) for variables also marked private
   !$omp target enter data map(alloc: do_I, dv_max, dv_min, dvhdv_tot, vh_err, vh_err_best, vh_aux)
 
-  !!$omp target teams loop &
   !$omp target teams loop &
-  !$omp   private(vh_aux, do_I, dv_max, dv_min, vh_err, dvhdv_tot, vh_err_best, itt, tol_eta, domore)
+  !$omp   private(vh_aux, do_I, dv_max, dv_min, vh_err, dvhdv_tot, vh_err_best, itt, tol_eta)
   do J=jsh-1,jeh
 
     if (present(vh_3d)) then
@@ -2363,10 +2358,8 @@ subroutine meridional_flux_adjust(v, h_in, h_S, h_N, vh_tot_0, dvhdv_tot_0, &
         else ; do_I(i) = .false. ; endif
       enddo
 
-      domore = .false.
-      ! *should* need a reduce clause, but nvfortran seems smart enough
       do concurrent (i=ish:ieh, do_I(i)) &
-          & DO_LOCALITY(local(ddv, dv_prev) reduce(.or.: domore))
+          & DO_LOCALITY(local(ddv, dv_prev))
         if ((dt * min(G%IareaT(i,j),G%IareaT(i,j+1))*abs(vh_err(i)) > tol_eta) .or. &
             (CS%better_iter .and. ((abs(vh_err(i)) > tol_vel * dvhdv_tot(i)) .or. &
                                   (abs(vh_err(i)) > vh_err_best(i))) )) then
@@ -2388,7 +2381,6 @@ subroutine meridional_flux_adjust(v, h_in, h_S, h_N, vh_tot_0, dvhdv_tot_0, &
               if (dv_prev - dv_min(i) < 1.0e-15*abs(dv(i,j))) do_I(i) = .false.
             endif
           endif
-          if (do_I(i)) domore = .true.
         else
           do_I(i) = .false.
         endif
@@ -2398,7 +2390,7 @@ subroutine meridional_flux_adjust(v, h_in, h_S, h_N, vh_tot_0, dvhdv_tot_0, &
       ! OpenMP - compiling with OpenMP prevents early exit. Without OpenMP, enables early exit.
       ! Early exit saves time on CPU, but causes other loops to be serialized on GPU.
       !$ if (.false.) then
-      if (.not.domore) exit
+      if (.not. any(do_I(ish:ieh))) exit
       !$ endif
 
       if ((itt < max_itts) .or. present(vh_3d)) then
