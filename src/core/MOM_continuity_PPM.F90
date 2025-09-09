@@ -1337,7 +1337,6 @@ subroutine zonal_flux_adjust(u, h_in, h_W, h_E, uh_tot_0, duhdu_tot_0, &
   !$omp target enter data map(alloc: do_I, du_max, du_min, duhdu_tot, uh_err, uh_err_best, uh_aux)
 
   ! NVIDIA do concurrent doesn't work with private arrays (private scalars OK)
-  !!$omp target teams loop private(uh_err, uh_err_best, duhdu_tot, du_min, du_max, do_I, uh_aux, domore)
   !$omp target teams loop &
   !$omp   private(uh_aux, do_I, du_max, du_min, uh_err, duhdu_tot, uh_err_best, itt, tol_eta, domore)
   do j=jsh,jeh
@@ -1367,7 +1366,8 @@ subroutine zonal_flux_adjust(u, h_in, h_W, h_E, uh_tot_0, duhdu_tot_0, &
 
       domore = .false.
       ! *should* need a reduce clause, but nvfortran seems smart enough
-      do concurrent (I=ish-1:ieh, do_I(I)) DO_LOCALITY(local(ddu, du_prev))
+      do concurrent (I=ish-1:ieh, do_I(I)) &
+          & DO_LOCALITY(local(ddu, du_prev) reduce(.or.: domore))
         if (uh_err(I) > 0.0) then ; du_max(I) = du(I,j)
         elseif (uh_err(I) < 0.0) then ; du_min(I) = du(I,j)
         else ; do_I(I) = .false. ; endif
@@ -1397,8 +1397,6 @@ subroutine zonal_flux_adjust(u, h_in, h_W, h_E, uh_tot_0, duhdu_tot_0, &
           do_I(I) = .false.
         endif
       enddo
-
-      !if (.not. any(do_I(ish-1:ieh))) exit
 
       !! Below conditional compilation is to control whether early exit happens when compiled with
       !! OpenMP - compiling with OpenMP prevents early exit. Without OpenMP, enables early exit.
@@ -2332,9 +2330,6 @@ subroutine meridional_flux_adjust(v, h_in, h_S, h_N, vh_tot_0, dvhdv_tot_0, &
   !$omp target enter data map(alloc: do_I, dv_max, dv_min, dvhdv_tot, vh_err, vh_err_best, vh_aux)
 
   !!$omp target teams loop &
-  !!$omp   private(j, k, vh_err, vh_err_best, dvhdv_tot, dv_min, dv_max, do_I, vh_aux)
-  !!$omp target teams loop &
-  !!$omp   private(vh_err, vh_err_best, dvhdv_tot, dv_min, dv_max, do_I, vh_aux, itt, domore)
   !$omp target teams loop &
   !$omp   private(vh_aux, do_I, dv_max, dv_min, vh_err, dvhdv_tot, vh_err_best, itt, tol_eta, domore)
   do J=jsh-1,jeh
@@ -2372,7 +2367,6 @@ subroutine meridional_flux_adjust(v, h_in, h_S, h_N, vh_tot_0, dvhdv_tot_0, &
       ! *should* need a reduce clause, but nvfortran seems smart enough
       do concurrent (i=ish:ieh, do_I(i)) &
           & DO_LOCALITY(local(ddv, dv_prev) reduce(.or.: domore))
-          !& DO_LOCALITY(local(ddv, dv_prev))
         if ((dt * min(G%IareaT(i,j),G%IareaT(i,j+1))*abs(vh_err(i)) > tol_eta) .or. &
             (CS%better_iter .and. ((abs(vh_err(i)) > tol_vel * dvhdv_tot(i)) .or. &
                                   (abs(vh_err(i)) > vh_err_best(i))) )) then
@@ -2399,9 +2393,6 @@ subroutine meridional_flux_adjust(v, h_in, h_S, h_N, vh_tot_0, dvhdv_tot_0, &
           do_I(i) = .false.
         endif
       enddo
-
-      !domore = any(do_I(ish:ieh))
-      !if (.not. any(do_I(ish:ieh))) exit
 
       ! Below conditional compilation is to control whether early exit happens when compiled with
       ! OpenMP - compiling with OpenMP prevents early exit. Without OpenMP, enables early exit.
