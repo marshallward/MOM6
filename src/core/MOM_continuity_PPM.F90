@@ -1556,7 +1556,7 @@ subroutine set_zonal_BT_cont(u, h_in, h_W, h_E, BT_cont, du0, uh_tot_0, duhdu_to
     enddo ; enddo
 
     do k=1,nz ; do concurrent (I=ish-1:ieh, do_I(I,j)) &
-        DO_LOCALITY(local(u_0, u_L, u_R, uh_0, uh_L, uh_R, duhdu_0, duhdu_L, duhdu_R))
+        & DO_LOCALITY(local(u_0, u_L, u_R, uh_0, uh_L, uh_R, duhdu_0, duhdu_L, duhdu_R))
       u_L = u(I,j,k) + duL(I) * visc_rem(I,j,k)
       u_R = u(I,j,k) + duR(I) * visc_rem(I,j,k)
       u_0 = u(I,j,k) + du0(I,j) * visc_rem(I,j,k)
@@ -2366,7 +2366,7 @@ subroutine meridional_flux_adjust(v, h_in, h_S, h_N, vh_tot_0, dvhdv_tot_0, &
       ! *should* need a reduce clause, but nvfortran seems smart enough
       do concurrent (i=ish:ieh, do_I(i)) &
           !DO_LOCALITY(local(ddv, dv_prev) reduce(.or.: domore))
-          DO_LOCALITY(local(ddv, dv_prev))
+          & DO_LOCALITY(local(ddv, dv_prev))
         if ((dt * min(G%IareaT(i,j),G%IareaT(i,j+1))*abs(vh_err(i)) > tol_eta) .or. &
             (CS%better_iter .and. ((abs(vh_err(i)) > tol_vel * dvhdv_tot(i)) .or. &
                                   (abs(vh_err(i)) > vh_err_best(i))) )) then
@@ -2550,7 +2550,7 @@ subroutine set_merid_BT_cont(v, h_in, h_S, h_N, BT_cont, dv0, vh_tot_0, dvhdv_to
     enddo ; enddo
 
     do k=1,nz ; do concurrent (i=ish:ieh, do_I(i,j)) &
-        DO_LOCALITY(local(v_0, v_L, v_R, dvhdv_0, dvhdv_L, dvhdv_R, vh_0, vh_L, vh_R))
+        & DO_LOCALITY(local(v_0, v_L, v_R, dvhdv_0, dvhdv_L, dvhdv_R, vh_0, vh_L, vh_R))
       v_L = v(I,J,k) + dvL(i) * visc_rem(i,J,k)
       v_R = v(I,J,k) + dvR(i) * visc_rem(i,J,k)
       v_0 = v(I,J,k) + dv0(i,J) * visc_rem(i,J,k)
