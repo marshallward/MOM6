@@ -1338,6 +1338,8 @@ subroutine zonal_flux_adjust(u, h_in, h_W, h_E, uh_tot_0, duhdu_tot_0, &
 
   ! NVIDIA do concurrent doesn't work with private arrays (private scalars OK)
   !!$omp target teams loop private(uh_err, uh_err_best, duhdu_tot, du_min, du_max, do_I, uh_aux, domore)
+  !$omp target teams loop &
+  !$omp   private(uh_aux, do_I, du_max, du_min, uh_err, duhdu_tot, uh_err_best, itt, tol_eta)
   do j=jsh,jeh
 
     if (present(uh_3d)) then
@@ -1363,7 +1365,7 @@ subroutine zonal_flux_adjust(u, h_in, h_W, h_E, uh_tot_0, duhdu_tot_0, &
         case default ; tol_eta = CS%tol_eta
       end select
 
-      domore = .false.
+      !domore = .false.
       ! *should* need a reduce clause, but nvfortran seems smart enough
       do concurrent (I=ish-1:ieh, do_I(I)) DO_LOCALITY(local(ddu, du_prev))
         if (uh_err(I) > 0.0) then ; du_max(I) = du(I,j)
@@ -1390,18 +1392,20 @@ subroutine zonal_flux_adjust(u, h_in, h_W, h_E, uh_tot_0, duhdu_tot_0, &
               if (du_prev - du_min(I) < 1.0e-15*abs(du(I,j))) do_I(I) = .false.
             endif
           endif
-          if (do_I(I)) domore = .true.
+          !if (do_I(I)) domore = .true.
         else
           do_I(I) = .false.
         endif
       enddo
 
-      ! Below conditional compilation is to control whether early exit happens when compiled with
-      ! OpenMP - compiling with OpenMP prevents early exit. Without OpenMP, enables early exit.
-      ! Early exit saves time on CPU, but causes other loops to be serialized on GPU.
-      !$ if (.false.) then
-      if (.not.domore) exit
-      !$ endif
+      if (.not. any(do_I(ish-1:ieh))) exit
+
+      !! Below conditional compilation is to control whether early exit happens when compiled with
+      !! OpenMP - compiling with OpenMP prevents early exit. Without OpenMP, enables early exit.
+      !! Early exit saves time on CPU, but causes other loops to be serialized on GPU.
+      !!$ if (.false.) then
+      !if (.not.domore) exit
+      !!$ endif
 
       if ((itt < max_itts) .or. present(uh_3d)) then
         do concurrent (I=ish-1:ieh)
