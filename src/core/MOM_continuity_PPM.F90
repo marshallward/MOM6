@@ -2331,6 +2331,8 @@ subroutine meridional_flux_adjust(v, h_in, h_S, h_N, vh_tot_0, dvhdv_tot_0, &
   !!$omp   private(j, k, vh_err, vh_err_best, dvhdv_tot, dv_min, dv_max, do_I, vh_aux)
   !!$omp target teams loop &
   !!$omp   private(vh_err, vh_err_best, dvhdv_tot, dv_min, dv_max, do_I, vh_aux, itt, domore)
+  !$omp target teams loop &
+  !$omp   private(vh_aux, do_I, dv_max, dv_min, vh_err, dvhdv_tot, vh_err_best, itt, tol_eta)
   do J=jsh-1,jeh
 
     if (present(vh_3d)) then
