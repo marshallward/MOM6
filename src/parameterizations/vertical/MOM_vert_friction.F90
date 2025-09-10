@@ -1711,7 +1711,7 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
   !$omp target enter data map(to: dz)
 
   !$omp target update to(u,h, v)
-  !$omp target enter data map(alloc: a_cpl)
+  !$omp target enter data map(alloc: a_cpl, h_ml)
   !$omp target enter data map(alloc: i_hbbl, bbl_thick, kv_bbl)
   !$omp target enter data map(alloc:h_harm, h_arith, dz_harm, h_delta, dz_arith, hvel, dz_vel, z_i) 
   !$omp target enter data map(alloc:  Dmin, zi_dir)
@@ -2498,7 +2498,7 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
     enddo
   endif
 
-  !$omp target exit data map(release: a_cpl)
+  !$omp target exit data map(release: a_cpl, h_ml)
   !$omp target exit data map(from: CS%a_u, CS%h_u, CS%a_v, CS%h_v, do_i)
   !$omp target exit data map(from: dz)
   !$omp target exit data map(release: visc%bbl_thick_u, visc%bbl_thick_v, visc%Kv_bbl_u, visc%Kv_bbl_v)
@@ -3056,6 +3056,7 @@ subroutine find_coupling_coef(a_cpl, hvel, do_i, h_harm, bbl_thick, kv_bbl, z_i,
     if (CS%dynamic_viscous_ML) then
       ! The fractional number of layers that are within the viscous boundary layer were
       ! previously stored in visc%nkml_visc_[uv].
+      ! for some reaosn, it seems h_ml is being copied back
       do concurrent (j=js:je, i=is:ie)
       h_ml(i,j) = h_neglect
       end do
@@ -3066,6 +3067,7 @@ subroutine find_coupling_coef(a_cpl, hvel, do_i, h_harm, bbl_thick, kv_bbl, z_i,
           nk_in_ml(I,j) = ceiling(visc%nkml_visc_u(I,j))
           max_nk = max(max_nk, nk_in_ml(I,j))
         end do
+        ! here max_nk is transferred back, try to keep it on the device
 
         do k=1,max_nk
         do concurrent (j=js:je, i=is:ie, do_i(i,j))
