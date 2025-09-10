@@ -596,7 +596,6 @@ subroutine allocate_metrics(G)
   allocate(G%gridLonB(G%IsgB:G%IegB), source=0.0)
   allocate(G%gridLatT(jsg:jeg), source=0.0)
   allocate(G%gridLatB(G%JsgB:G%JegB), source=0.0)
-
 end subroutine allocate_metrics
 
 !> Release memory used by the ocean_grid_type and related structures.
