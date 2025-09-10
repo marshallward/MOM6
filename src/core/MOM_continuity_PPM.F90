@@ -1,3 +1,5 @@
+#include "do_concurrent_compat.h"
+
 !> Solve the layer continuity equation using the PPM method for layer fluxes.
 module MOM_continuity_PPM
 
@@ -1314,7 +1316,7 @@ subroutine zonal_flux_adjust(u, h_in, h_W, h_E, uh_tot_0, duhdu_tot_0, &
   real :: tol_eta  ! The tolerance for the current iteration [H ~> m or kg m-2].
   real :: tol_vel  ! The tolerance for velocity in the current iteration [L T-1 ~> m s-1].
   integer :: i, j, k, nz, itt
-  logical :: domore, do_I(SZIB_(G)), local_OBC, use_uhbt
+  logical :: do_I(SZIB_(G)), local_OBC, use_uhbt
   integer, parameter:: max_itts = 20
 
   local_OBC = .false.
@@ -1335,7 +1337,8 @@ subroutine zonal_flux_adjust(u, h_in, h_W, h_E, uh_tot_0, duhdu_tot_0, &
   !$omp target enter data map(alloc: do_I, du_max, du_min, duhdu_tot, uh_err, uh_err_best, uh_aux)
 
   ! NVIDIA do concurrent doesn't work with private arrays (private scalars OK)
-  !$omp target teams loop private(uh_err, uh_err_best, duhdu_tot, du_min, du_max, do_I, uh_aux)
+  !$omp target teams loop &
+  !$omp   private(uh_err, uh_err_best, duhdu_tot, du_min, du_max, do_I, uh_aux, itt, tol_eta)
   do j=jsh,jeh
 
     if (present(uh_3d)) then
@@ -1361,9 +1364,8 @@ subroutine zonal_flux_adjust(u, h_in, h_W, h_E, uh_tot_0, duhdu_tot_0, &
         case default ; tol_eta = CS%tol_eta
       end select
 
-      domore = .false.
-      ! *should* need a reduce clause, but nvfortran seems smart enough
-      do concurrent (I=ish-1:ieh, do_I(I))
+      do concurrent (I=ish-1:ieh, do_I(I)) &
+          & DO_LOCALITY(local(ddu, du_prev))
         if (uh_err(I) > 0.0) then ; du_max(I) = du(I,j)
         elseif (uh_err(I) < 0.0) then ; du_min(I) = du(I,j)
         else ; do_I(I) = .false. ; endif
@@ -1388,7 +1390,6 @@ subroutine zonal_flux_adjust(u, h_in, h_W, h_E, uh_tot_0, duhdu_tot_0, &
               if (du_prev - du_min(I) < 1.0e-15*abs(du(I,j))) do_I(I) = .false.
             endif
           endif
-          if (do_I(I)) domore = .true.
         else
           do_I(I) = .false.
         endif
@@ -1398,7 +1399,7 @@ subroutine zonal_flux_adjust(u, h_in, h_W, h_E, uh_tot_0, duhdu_tot_0, &
       ! OpenMP - compiling with OpenMP prevents early exit. Without OpenMP, enables early exit.
       ! Early exit saves time on CPU, but causes other loops to be serialized on GPU.
       !$ if (.false.) then
-      if (.not.domore) exit
+      if (.not. any(do_I(ish-1:ieh))) exit
       !$ endif
 
       if ((itt < max_itts) .or. present(uh_3d)) then
@@ -1406,7 +1407,7 @@ subroutine zonal_flux_adjust(u, h_in, h_W, h_E, uh_tot_0, duhdu_tot_0, &
           uh_err(I) = 0.0 ; duhdu_tot(I) = 0.0
           if (use_uhbt) uh_err(I) = -uhbt(I,j)
         enddo
-        do k=1,nz ; do concurrent (I=ish-1:ieh, do_I(I))
+        do k=1,nz ; do concurrent (I=ish-1:ieh, do_I(I)) DO_LOCALITY(local(u_new, duhdu))
           u_new = u(I,j,k) + du(I,j) * visc_rem(I,j,k)
           call flux_elem(u_new, h_in(I,j,k), h_in(I+1,j,k), h_W(I,j,k), h_W(I+1,j,k), h_E(I,j,k), &
                          h_E(I+1,j,k), uh_aux(I,k), duhdu, visc_rem(I,j,k), G%dy_Cu(I,j), &
@@ -1521,7 +1522,6 @@ subroutine set_zonal_BT_cont(u, h_in, h_W, h_E, BT_cont, du0, uh_tot_0, duhdu_to
   real :: CFL_min ! A minimal increment in the CFL to try to ensure that the
                   ! flow is truly upwind [nondim]
   real :: Idt     ! The inverse of the time step [T-1 ~> s-1].
-  logical :: domore
   integer :: i, j, k, nz
 
   nz = GV%ke ; Idt = 1.0 / dt
@@ -1542,8 +1542,7 @@ subroutine set_zonal_BT_cont(u, h_in, h_W, h_E, BT_cont, du0, uh_tot_0, duhdu_to
       uhtot_L(I) = 0.0 ; uhtot_R(I) = 0.0
     enddo
 
-  ! nvfortran do concurrent bad performance if k is inside
-    do k=1,nz ; do concurrent (I=ish-1:ieh, do_I(I,j))
+    do k=1,nz ; do concurrent (I=ish-1:ieh, do_I(I,j)) DO_LOCALITY(local(visc_rem_lim))
       visc_rem_lim = max(visc_rem(I,j,k), min_visc_rem*visc_rem_max(I,j))
       if (visc_rem_lim > 0.0) then ! This is almost always true for ocean points.
         if (u(I,j,k) + duR(I)*visc_rem_lim > -du_CFL(I)*visc_rem(I,j,k)) &
@@ -1553,7 +1552,8 @@ subroutine set_zonal_BT_cont(u, h_in, h_W, h_E, BT_cont, du0, uh_tot_0, duhdu_to
       endif
     enddo ; enddo
 
-    do k=1,nz ; do concurrent (I=ish-1:ieh, do_I(I,j))
+    do k=1,nz ; do concurrent (I=ish-1:ieh, do_I(I,j)) &
+        & DO_LOCALITY(local(u_0, u_L, u_R, uh_0, uh_L, uh_R, duhdu_0, duhdu_L, duhdu_R))
       u_L = u(I,j,k) + duL(I) * visc_rem(I,j,k)
       u_R = u(I,j,k) + duR(I) * visc_rem(I,j,k)
       u_0 = u(I,j,k) + du0(I,j) * visc_rem(I,j,k)
@@ -1575,7 +1575,8 @@ subroutine set_zonal_BT_cont(u, h_in, h_W, h_E, BT_cont, du0, uh_tot_0, duhdu_to
       uhtot_L(I) = uhtot_L(I) + uh_L
       uhtot_R(I) = uhtot_R(I) + uh_R
     enddo ; enddo
-    do concurrent (I=ish-1:ieh)
+
+    do concurrent (I=ish-1:ieh) DO_LOCALITY(local(FA_0, FA_avg))
       if (do_I(I,j)) then
         FA_0 = FAmt_0(I) ; FA_avg = FAmt_0(I)
         if ((duL(I) - du0(I,j)) /= 0.0) &
@@ -2303,7 +2304,7 @@ subroutine meridional_flux_adjust(v, h_in, h_S, h_N, vh_tot_0, dvhdv_tot_0, &
   real :: tol_eta ! The tolerance for the current iteration [H ~> m or kg m-2].
   real :: tol_vel ! The tolerance for velocity in the current iteration [L T-1 ~> m s-1].
   integer :: i, j, k, nz, itt
-  logical :: domore, do_I(SZI_(G)), local_OBC, use_vhbt
+  logical :: do_I(SZI_(G)), local_OBC, use_vhbt
   integer, parameter :: max_itts = 20
 
   local_OBC = .false.
@@ -2324,7 +2325,7 @@ subroutine meridional_flux_adjust(v, h_in, h_S, h_N, vh_tot_0, dvhdv_tot_0, &
   !$omp target enter data map(alloc: do_I, dv_max, dv_min, dvhdv_tot, vh_err, vh_err_best, vh_aux)
 
   !$omp target teams loop &
-  !$omp   private(j, k, vh_err, vh_err_best, dvhdv_tot, dv_min, dv_max, do_I, vh_aux)
+  !$omp   private(vh_err, vh_err_best, dvhdv_tot, dv_min, dv_max, do_I, vh_aux, itt, tol_eta)
   do J=jsh-1,jeh
 
     if (present(vh_3d)) then
@@ -2356,9 +2357,8 @@ subroutine meridional_flux_adjust(v, h_in, h_S, h_N, vh_tot_0, dvhdv_tot_0, &
         else ; do_I(i) = .false. ; endif
       enddo
 
-      domore = .false.
-      ! *should* need a reduce clause, but nvfortran seems smart enough
-      do concurrent (i=ish:ieh, do_I(i))
+      do concurrent (i=ish:ieh, do_I(i)) &
+          & DO_LOCALITY(local(ddv, dv_prev))
         if ((dt * min(G%IareaT(i,j),G%IareaT(i,j+1))*abs(vh_err(i)) > tol_eta) .or. &
             (CS%better_iter .and. ((abs(vh_err(i)) > tol_vel * dvhdv_tot(i)) .or. &
                                   (abs(vh_err(i)) > vh_err_best(i))) )) then
@@ -2380,7 +2380,6 @@ subroutine meridional_flux_adjust(v, h_in, h_S, h_N, vh_tot_0, dvhdv_tot_0, &
               if (dv_prev - dv_min(i) < 1.0e-15*abs(dv(i,j))) do_I(i) = .false.
             endif
           endif
-          if (do_I(i)) domore = .true.
         else
           do_I(i) = .false.
         endif
@@ -2390,7 +2389,7 @@ subroutine meridional_flux_adjust(v, h_in, h_S, h_N, vh_tot_0, dvhdv_tot_0, &
       ! OpenMP - compiling with OpenMP prevents early exit. Without OpenMP, enables early exit.
       ! Early exit saves time on CPU, but causes other loops to be serialized on GPU.
       !$ if (.false.) then
-      if (.not.domore) exit
+      if (.not. any(do_I(ish:ieh))) exit
       !$ endif
 
       if ((itt < max_itts) .or. present(vh_3d)) then
@@ -2398,7 +2397,7 @@ subroutine meridional_flux_adjust(v, h_in, h_S, h_N, vh_tot_0, dvhdv_tot_0, &
           vh_err(i) = 0.0 ; dvhdv_tot(i) = 0.0
           if (use_vhbt) vh_err(i) = -vhbt(i,J)
         enddo
-        do k=1,nz ; do concurrent (i=ish:ieh, do_I(i))
+        do k=1,nz ; do concurrent (i=ish:ieh, do_I(i)) DO_LOCALITY(local(v_new, dvhdv))
           v_new = v(i,J,k) + dv(i,j) * visc_rem(i,j,k)
           call flux_elem(v_new, h_in(i,J,k), h_in(i,J+1,k), h_S(i,J,k), h_S(i,J+1,k), &
                          h_N(i,J,k), h_N(i,J+1,k), vh_aux(i,k), dvhdv, visc_rem(i,J,k), &
@@ -2528,7 +2527,7 @@ subroutine set_merid_BT_cont(v, h_in, h_S, h_N, BT_cont, dv0, vh_tot_0, dvhdv_to
 
     ! not parallelized on k because of dvR/L are calculated per column
     ! nvfortran do concurrent poor performance when k is inside
-    do k=1,nz ; do concurrent (i=ish:ieh, do_I(i,J))
+    do k=1,nz ; do concurrent (i=ish:ieh, do_I(i,J)) DO_LOCALITY(local(visc_rem_lim))
       visc_rem_lim = max(visc_rem(i,J,k), min_visc_rem*visc_rem_max(i,J))
       if (visc_rem_lim > 0.0) then ! This is almost always true for ocean points.
         if (v(i,J,k) + dvR(i)*visc_rem_lim > -dv_CFL(i)*visc_rem(i,J,k)) &
@@ -2538,7 +2537,8 @@ subroutine set_merid_BT_cont(v, h_in, h_S, h_N, BT_cont, dv0, vh_tot_0, dvhdv_to
       endif
     enddo ; enddo
 
-    do k=1,nz ; do concurrent (i=ish:ieh, do_I(i,j))
+    do k=1,nz ; do concurrent (i=ish:ieh, do_I(i,j)) &
+        & DO_LOCALITY(local(v_0, v_L, v_R, dvhdv_0, dvhdv_L, dvhdv_R, vh_0, vh_L, vh_R))
       v_L = v(I,J,k) + dvL(i) * visc_rem(i,J,k)
       v_R = v(I,J,k) + dvR(i) * visc_rem(i,J,k)
       v_0 = v(I,J,k) + dv0(i,J) * visc_rem(i,J,k)
@@ -2561,7 +2561,7 @@ subroutine set_merid_BT_cont(v, h_in, h_S, h_N, BT_cont, dv0, vh_tot_0, dvhdv_to
       vhtot_R(i) = vhtot_R(i) + vh_R
     enddo ; enddo
 
-    do concurrent (i=ish:ieh)
+    do concurrent (i=ish:ieh) DO_LOCALITY(local(FA_0, FA_Avg))
       if (do_I(i,j)) then
         FA_0 = FAmt_0(i) ; FA_avg = FAmt_0(i)
         if ((dvL(i) - dv0(i,J)) /= 0.0) &
