@@ -2,12 +2,12 @@ module mom_nvtx
 use nvtx
 implicit none
 
-contains 
+contains
 
 subroutine start_nvtx(label)
    character(len=*), intent(in) :: label
    call nvtxStartRange(label)
-end subroutine start_nvtx 
+end subroutine start_nvtx
 
 subroutine end_nvtx()
   call nvtxEndRange
@@ -711,9 +711,8 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
   ! This should be conditional, but the first do-concurrent always copies the
   ! array, so for now it always happens.
   call start_nvtx("ADp initialize to 0.0")
-  ! this could be a function 
+  ! this could be a function
   !$omp target enter data map(to: ADp)
-  !$omp target enter data map(to: G, G%mask2dCu)
   !$omp target update to(u, h,v)
   !!omp target enter data map(to: u,v,h)
   !$omp target enter data map(alloc: surface_stress)
@@ -810,7 +809,6 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
 
   ! TODO: Move outside
   call start_nvtx("biggo loopo")
-  !$omp target enter data map(to: CS, CS%a_u, CS%h_u)
   !$omp target enter data map(alloc: b1, c1, d1)
 
 
@@ -825,7 +823,7 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
   if (associated(ADp%du_dt_str)) then
     do concurrent (j=G%isc:G%jec, I=Isq:Ieq, G%mask2dCu(I,j) > 0.)
          ADp%du_dt_str(I,j,1) = b1(I,j) * (CS%h_u(I,j,1) * ADp%du_dt_str(I,j,1) + surface_stress(I,j) * Idt)
-    end do 
+    end do
   endif
 
   do k=2,nz
@@ -923,7 +921,7 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
       enddo
 
       do k=1,nz
-        
+
         do j=G%jsc,G%jec ; do I=Isq,Ieq ; if (G%mask2dCu(I,j) > 0.) then
               ! now fill ADp%du_dt_visc_gl90(I,j,k) with actual velocity tendency due to GL90;
               ! note that on RHS: ADp%du_dt_visc(I,j,k) holds the original velocity value u(I,j,k)
@@ -934,7 +932,7 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
               if (abs(ADp%du_dt_visc_gl90(I,j,k)) < accel_underflow) then
                 ADp%du_dt_visc_gl90(I,j,k) = 0.0
               endif
-        endif ; enddo ; enddo 
+        endif ; enddo ; enddo
       enddo
 
 
@@ -1023,7 +1021,7 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
       do J=Jsq,Jeq ; do i=is,ie ; if (G%mask2dCv(i,J) > 0.) then
             v(i,j,k) = v(i,j,k) - Waves%Us_y(i,j,k)
       endif ; enddo; enddo
-    end do 
+    end do
   endif
 
 
@@ -1037,8 +1035,8 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
     do k=1,nz
       do J=Jsq,Jeq ; do i=is,ie
           ADp%dv_dt_visc_gl90(i,J,k) = v(i,J,k)
-      enddo ; end do 
-    end do 
+      enddo ; end do
+    end do
   endif
 
   if (associated(ADp%dv_dt_str)) then
@@ -1089,9 +1087,6 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
       Ray(i,J) = 0.
     end do
   endif
-
-  ! check where I can move this
-  !$omp target enter data map(to: CS, CS%a_v, CS%h_v)
 
   do concurrent (j=jsq:jeq, i=is:ie, G%mask2dCv(i,j) > 0.0)
         b_denom_1 = CS%h_v(i,J,1) + dt * (Ray(i,J) + CS%a_v(i,J,1))
@@ -1194,7 +1189,7 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
           ! and ADp%dv_dt_visc_gl90(i,J,k) the updated velocity due to GL90
               ADp%dv_dt_visc_gl90(i,J,k) = (ADp%dv_dt_visc_gl90(i,J,k) - ADp%dv_dt_visc(i,J,k))*Idt
               if (abs(ADp%dv_dt_visc_gl90(i,J,k)) < accel_underflow) ADp%dv_dt_visc_gl90(i,J,k) = 0.0
-        end if ; end do; end do 
+        end if ; end do; end do
       enddo
 
       ! to compute energetics, we need to multiply by v*h, where u is original velocity before
@@ -1204,7 +1199,7 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
           do J=Jsq,Jeq ; do i=is,ie ; if (G%mask2dCv(i,J) > 0.) then
                 ! note that on RHS: ADp%dv_dt_visc(I,j,k) holds the original velocity value v(I,j,k)
                 KE_v(I,j,k) = ADp%dv_dt_visc(i,J,k) * CS%h_v(i,J,k) * G%areaCv(i,J) * ADp%dv_dt_visc_gl90(i,J,k)
-          end if ; end do ; end do 
+          end if ; end do ; end do
 
         enddo
       endif
@@ -1219,13 +1214,13 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
           ADp%dv_dt_visc(i,J,k) = (v(i,J,k) - ADp%dv_dt_visc(i,J,k))*Idt
           if (abs(ADp%dv_dt_visc(i,J,k)) < accel_underflow) ADp%dv_dt_visc(i,J,k) = 0.0
       end do
-    end do 
+    end do
   endif
 
   if (allocated(visc%tauy_shelf)) then
     do J=Jsq,Jeq ; do i=is,ie
         visc%tauy_shelf(i,J) = -GV%H_to_RZ * CS%a1_shelf_v(i,J) * v(i,J,1) ! - v_shelf?
-    end do ; end do 
+    end do ; end do
   endif
 
   ! JORGE TODO: this has to be malloced
@@ -1239,7 +1234,7 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
         do concurrent (j=jsq:jeq, i=is:ie)
             tauy_bot(i,J) = tauy_bot(i,J) + GV%H_to_RZ * (visc%Ray_v(i,J,k)*v(i,J,k))
         end do
-      end do 
+      end do
     endif
   endif
 
@@ -1249,7 +1244,7 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
       do J=Jsq,Jeq ; do i=is,ie ; if (G%mask2dCv(i,J) > 0.) then
             v(i,J,k) = v(i,J,k) - Waves%Us_y(i,J,k)
       end if; end do ; end do
-    end do 
+    end do
   endif
 
   if (lfpmix) then
@@ -1257,7 +1252,7 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
       do J=Jsq,Jeq ; do i=is,ie ; if (G%mask2dCv(i,J) > 0.) then
             v(i,J,k) = v(i,J,k) + Waves%Us_y(i,J,k)
       end if; end do ; end do
-    end do 
+    end do
   endif
 
 
@@ -1285,9 +1280,7 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
     call post_data(CS%id_GLwork, KE_term, CS%diag)
   endif
 
-  !$omp target enter data map(to: G, G%areaT, G%dx_Cv, G%iareaT, G%dy_Cu)
   call vertvisc_limit_vel(u, v, h, ADp, CDp, forces, visc, dt, G, GV, US, CS)
-  !$omp target exit data map(release: G, G%areaT, G%dx_Cv, G%iareaT, G%dy_Cu)
 
   !! TODO jorge: this is the last GPU code
   !so these get used later in remnant. If I don't delete them here, are they kept in memory? and used or reallocated?
@@ -1299,8 +1292,6 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
   !$omp target exit data map(from: surface_stress)
   !$omp target exit data map(from: Ray)
   !$omp target exit data map(delete: ADp)
-  !$omp target exit data map(delete: CS, CS%a_u, CS%h_u)
-  !$omp target exit data map(delete: CS%a_v, CS%h_v)
   !$omp target exit data map(delete: visc%Ray_u) if (allocated(visc%Ray_u))
 
   call end_nvtx
@@ -1425,8 +1416,6 @@ subroutine vertvisc_remnant(visc, visc_rem_u, visc_rem_v, dt, G, GV, US, CS)
          "Module must be initialized before it is used.")
 
   ! Find the zonal viscous remnant using a modification of a standard tridagonal solver.
-  !$omp target enter data map(to: CS)
-  !$omp target enter data map(to: CS%a_u, CS%h_u, CS%h_v, CS%a_v)
   !$omp target enter data map(to: visc_rem_u, visc_rem_v)
 
   !$omp target enter data map(alloc: b1, c1, d1, Ray, b_denom_1)
@@ -1436,14 +1425,14 @@ subroutine vertvisc_remnant(visc, visc_rem_u, visc_rem_v, dt, G, GV, US, CS)
       Ray(I,j) = visc%Ray_u(I,j,1)
     enddo ; enddo
   else
-    do concurrent (j=jsc:jec, i=isq:ieq) 
+    do concurrent (j=jsc:jec, i=isq:ieq)
       Ray(I,j) = 0.
      end do
   endif
 
 
   !! TODO JORGE: PORT
-    do concurrent (j=jsc:jec, i=isq:ieq, G%mask2dCu(i,j)>0.) 
+    do concurrent (j=jsc:jec, i=isq:ieq, G%mask2dCu(i,j)>0.)
     b_denom_1 = CS%h_u(I,j,1) + dt * (Ray(I,j) + CS%a_u(I,j,1))
     b1(I,j) = 1.0 / (b_denom_1 + dt * CS%a_u(I,j,2))
     d1(I,j) = b_denom_1 * b1(I,j)
@@ -1459,7 +1448,7 @@ subroutine vertvisc_remnant(visc, visc_rem_u, visc_rem_v, dt, G, GV, US, CS)
     endif
 
   !! TODO JORGE: PORT
-    do concurrent (j=jsc:jec, i=isq:ieq, G%mask2dCu(i,j)>0.) 
+    do concurrent (j=jsc:jec, i=isq:ieq, G%mask2dCu(i,j)>0.)
       c1(I,j,k) = dt * CS%a_u(I,j,K)*b1(I,j)
       b_denom_1 = CS%h_u(I,j,k) + dt * (Ray(I,j) + CS%a_u(I,j,K) * d1(I,j))
       b1(I,j) = 1.0 / (b_denom_1 + dt * CS%a_u(I,j,K+1))
@@ -1470,7 +1459,7 @@ subroutine vertvisc_remnant(visc, visc_rem_u, visc_rem_v, dt, G, GV, US, CS)
 
   !! TODO JORGE: PORT
   do k=nz-1,1,-1
-    do concurrent (j=jsc:jec, i=isq:ieq, G%mask2dCu(i,j)>0.) 
+    do concurrent (j=jsc:jec, i=isq:ieq, G%mask2dCu(i,j)>0.)
       visc_rem_u(I,j,k) = visc_rem_u(I,j,k) + c1(I,j,k+1) * visc_rem_u(I,j,k+1)
     end do
   enddo
@@ -1481,13 +1470,13 @@ subroutine vertvisc_remnant(visc, visc_rem_u, visc_rem_v, dt, G, GV, US, CS)
       Ray(i,J) = visc%Ray_v(i,J,1)
     enddo ; enddo
   else
-    do concurrent (j=jsc:jec, i=isq:ieq) 
+    do concurrent (j=jsc:jec, i=isq:ieq)
       Ray(i,J) = 0.
     end do
   endif
 
   !! TODO JORGE: PORT
-  do concurrent (j=jsq:jeq, i=is:ie, G%mask2dCv(i,j)>0.) 
+  do concurrent (j=jsq:jeq, i=is:ie, G%mask2dCv(i,j)>0.)
     b_denom_1 = CS%h_v(i,J,1) + dt * (Ray(i,J) + CS%a_v(i,J,1))
     b1(i,J) = 1.0 / (b_denom_1 + dt*CS%a_v(i,J,2))
     d1(i,J) = b_denom_1 * b1(i,J)
@@ -1502,7 +1491,7 @@ subroutine vertvisc_remnant(visc, visc_rem_u, visc_rem_v, dt, G, GV, US, CS)
     endif
 
   !! TODO JORGE: PORT
-  do concurrent (j=jsq:jeq, i=is:ie, G%mask2dCv(i,j)>0.) 
+  do concurrent (j=jsq:jeq, i=is:ie, G%mask2dCv(i,j)>0.)
       c1(i,J,k) = dt * CS%a_v(i,J,K) * b1(i,J)
       b_denom_1 = CS%h_v(i,J,k) + dt * (Ray(i,J) + CS%a_v(i,J,K) * d1(i,J))
       b1(i,J) = 1.0 / (b_denom_1 + dt * CS%a_v(i,J,K+1))
@@ -1513,12 +1502,11 @@ subroutine vertvisc_remnant(visc, visc_rem_u, visc_rem_v, dt, G, GV, US, CS)
 
   !! TODO JORGE: PORT
   do k=nz-1,1,-1
-    do concurrent (j=jsq:jeq, i=is:ie, G%mask2dCv(i,j)>0.) 
+    do concurrent (j=jsq:jeq, i=is:ie, G%mask2dCv(i,j)>0.)
       visc_rem_v(i,J,k) = visc_rem_v(i,J,k) + c1(i,J,k+1) * visc_rem_v(i,J,k+1)
     end do
   enddo
 
-  !$omp target exit data map(release: CS, CS%h_u, CS%h_v, CS%a_u, CS%a_v)
   !$omp target update from(visc_rem_u, visc_rem_v)
   !$omp target exit data map(delete: b1, c1, d1, Ray,  b_denom_1)
   if (CS%debug) then
@@ -1704,23 +1692,20 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
     endif ; enddo ; enddo
   endif
 
-  !$omp target enter data map(to: G, G%bathyT)
-  !$omp target enter data map(to: visc, CS)
-  !$omp target enter data map(to: visc%bbl_thick_u, visc%bbl_thick_v, visc%Kv_bbl_u, visc%Kv_bbl_v)
-  !$omp target enter data map(to: CS%a_u, CS%h_u, CS%a_v, CS%h_v, do_i)
+  !$omp target enter data map(to: do_i)
   !$omp target enter data map(to: dz)
 
   !$omp target update to(u,h, v)
   !$omp target enter data map(alloc: a_cpl, h_ml)
   !$omp target enter data map(alloc: i_hbbl, bbl_thick, kv_bbl)
-  !$omp target enter data map(alloc:h_harm, h_arith, dz_harm, h_delta, dz_arith, hvel, dz_vel, z_i) 
+  !$omp target enter data map(alloc:h_harm, h_arith, dz_harm, h_delta, dz_arith, hvel, dz_vel, z_i)
   !$omp target enter data map(alloc:  Dmin, zi_dir)
   !$omp target enter data map(alloc:  zh, zcol)
 
   if (CS%bottomdraglaw) then
 
-  
-  ! JORGE TODO: for some reason I need to map visc bbl thuck u like this herem instead of up there 
+
+  ! JORGE TODO: for some reason I need to map visc bbl thuck u like this herem instead of up there
   ! I am doing this for the reast of the things later
     do concurrent (j=js:je, i=isq:ieq, do_i(i,j))
       kv_bbl(I,j) = visc%Kv_bbl_u(I,j)
@@ -1894,7 +1879,7 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
 
 
 
-  ! enters z_i, dz_vel, 
+  ! enters z_i, dz_vel,
   ! ported, works
   call start_nvtx("vv coef: find coupling coef 1")
   call find_coupling_coef(a_cpl, dz_vel, do_i, dz_harm, bbl_thick, kv_bbl, z_i, &
@@ -1904,7 +1889,7 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
 
 
 
-  
+
 
   if (allocated(hML_u)) then
     do j=js,je ; do I=Isq,Ieq ; if (do_i(I,j)) then
@@ -2303,7 +2288,7 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
   call find_coupling_coef(a_cpl, dz_vel, do_i, dz_harm, bbl_thick, kv_bbl, z_i, &
       h_ml, dt, G, GV, US, CS, visc, Ustar_2d, tv, work_on_u=.false., OBC=OBC)
   call end_nvtx
-  call start_nvtx("vv coef: big if shelf work") 
+  call start_nvtx("vv coef: big if shelf work")
 
 
 
@@ -2499,12 +2484,11 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
   endif
 
   !$omp target exit data map(release: a_cpl, h_ml)
-  !$omp target exit data map(from: CS%a_u, CS%h_u, CS%a_v, CS%h_v, do_i)
+  !$omp target exit data map(from: do_i)
   !$omp target exit data map(from: dz)
-  !$omp target exit data map(release: visc%bbl_thick_u, visc%bbl_thick_v, visc%Kv_bbl_u, visc%Kv_bbl_v)
 
   !$omp target exit data map(delete: bbl_thick, i_hbbl, kv_bbl)
-  !$omp target exit data map(delete:h_harm, h_arith, dz_harm, h_delta, dz_arith, z_i, hvel, dz_vel) 
+  !$omp target exit data map(delete:h_harm, h_arith, dz_harm, h_delta, dz_arith, z_i, hvel, dz_vel)
   !$omp target exit data map(delete: zh, zcol)
   !$omp target exit data map(delete:  Dmin, zi_dir)
   call end_nvtx
@@ -2699,11 +2683,11 @@ subroutine find_coupling_coef(a_cpl, hvel, do_i, h_harm, bbl_thick, kv_bbl, z_i,
   !h_ml(:,:) = 0.
 
   !$omp target enter data map(alloc: z_t, Kv_tot, Kv_add)
-  !$omp target enter data map(alloc: absf) 
+  !$omp target enter data map(alloc: absf)
   !$omp target enter data map(alloc: u_star, tau_mag)
   !!$omp target enter data map(to: a_cpl, h_ml)
-  !$omp target enter data map(to: visc, visc%nkml_visc_v, visc%nkml_visc_u, visc%Kv_shear)
-  !$omp target enter data map(to: G, G%CoriolisBu, Ustar_2d)
+  !$omp target enter data map(to: visc%Kv_shear)
+  !$omp target enter data map(to: Ustar_2d)
   !!$omp target update to(a_cpl, h_ml)
 
   if (CS%Kvml_invZ2 > 0. .and. .not. do_shelf) then
@@ -2930,7 +2914,7 @@ subroutine find_coupling_coef(a_cpl, hvel, do_i, h_harm, bbl_thick, kv_bbl, z_i,
     u_star(i,j) = 0.0  ! Zero out the friction velocity on land points.
     absf(i,j) = 0.0
     tau_mag(i,j) = 0.0  ! Zero out the friction velocity on land points.
-    end do 
+    end do
 
     if (allocated(tv%SpV_avg)) then
       rho_av1(:,:) = 0.0
@@ -3236,8 +3220,8 @@ subroutine find_coupling_coef(a_cpl, hvel, do_i, h_harm, bbl_thick, kv_bbl, z_i,
   !$omp target exit data map(delete: u_star, tau_mag)
   !$omp target exit data map(delete: absf)
   !$omp target exit data map(delete: z_t, Kv_tot, Kv_add)
-  !$omp target exit data map(release: visc, visc%nkml_visc_v, visc%nkml_visc_u, visc%Kv_shear)
-  !$omp target exit data map(release: G, G%CoriolisBu, Ustar_2d)
+  !$omp target exit data map(release: visc%Kv_shear)
+  !$omp target exit data map(release: Ustar_2d)
   call end_nvtx
 end subroutine find_coupling_coef
 
@@ -3279,17 +3263,16 @@ subroutine vertvisc_limit_vel(u, v, h, ADp, CDp, forces, visc, dt, G, GV, US, CS
   maxvel = CS%maxvel
   truncvel = 0.9*maxvel
   H_report = 6.0 * GV%Angstrom_H
-!!$omp target enter data map(to: G, G%areaT, G%dx_Cv, G%iareaT, G%dy_Cu)
 !$omp target enter data map(alloc: dowrite, vel_report, trunc_any_array)
 !$omp target enter data map(alloc: u_old, v_old)
   if (len_trim(CS%u_trunc_file) > 0) then
     !!$OMP parallel do default(shared) private(trunc_any,CFL)
-    ! optimize memory 
+    ! optimize memory
     !do concurrent (j=js:je)
     do concurrent (j=js:je, k=1:nz, i=isq:ieq)
       trunc_any_array(i,j,k) = .false.
     end do
-    if(CS%CFL_based_trunc) then 
+    if(CS%CFL_based_trunc) then
       do concurrent (j=js:je, i=isq:ieq)
           dowrite(i,j) = .false.
           vel_report(i,j) = 3.0e8*US%m_s_to_L_T
@@ -3297,13 +3280,13 @@ subroutine vertvisc_limit_vel(u, v, h, ADp, CDp, forces, visc, dt, G, GV, US, CS
 
       do concurrent (j=js:je, k=1:nz, i=isq:ieq)
             if (abs(u(i,j,k)) < CS%vel_underflow) u(i,j,k) = 0.0
-            if (u(i,j,k) < 0.0) then 
+            if (u(i,j,k) < 0.0) then
               CFL = (-u(I,j,k) * dt) * (G%dy_Cu(I,j) * G%IareaT(i+1,j))
-            else 
+            else
               CFL = (u(I,j,k) * dt) * (G%dy_Cu(I,j) * G%IareaT(i,j))
             end if
             if (CFL > CS%CFL_trunc) trunc_any_array(i,j,k) = .true.
-            if (CFL > CS%CFL_report) then 
+            if (CFL > CS%CFL_report) then
               dowrite(i,j) = .true.
               vel_report(i,j) = min(vel_report(i,j), abs(u(i,j,k)))
             end if
@@ -3323,12 +3306,12 @@ subroutine vertvisc_limit_vel(u, v, h, ADp, CDp, forces, visc, dt, G, GV, US, CS
           endif
       end do
 
-    else 
+    else
       do j = js, je
         do i = isq, ieq
           dowrite(i,j) = .false.
           vel_report(i,j) = maxvel
-        end do 
+        end do
       end do
 
       do j = js, je
@@ -3346,7 +3329,7 @@ subroutine vertvisc_limit_vel(u, v, h, ADp, CDp, forces, visc, dt, G, GV, US, CS
 
       do j = js, je
         do k=1,nz ; do I=Isq,Ieq
-        if(trunc_any_array(i,j,k)) then 
+        if(trunc_any_array(i,j,k)) then
         if (abs(u(I,j,k)) > maxvel) then
           u(I,j,k) = SIGN(truncvel,u(I,j,k))
           if (h(i,j,k) + h(i+1,j,k) > H_report) CS%ntrunc = CS%ntrunc + 1
@@ -3390,7 +3373,7 @@ subroutine vertvisc_limit_vel(u, v, h, ADp, CDp, forces, visc, dt, G, GV, US, CS
     do concurrent (j=jsq:jeq, k=1:nz, i=is:ie)
       trunc_any_array(i,j,k) = .false.
     end do
-    if(CS%CFL_based_trunc) then 
+    if(CS%CFL_based_trunc) then
       do concurrent (j=jsq:jeq, i=is:ie)
           dowrite(i,j) = .false.
           vel_report(i,j) = 3.0e8*US%m_s_to_L_T
@@ -3398,13 +3381,13 @@ subroutine vertvisc_limit_vel(u, v, h, ADp, CDp, forces, visc, dt, G, GV, US, CS
 
       do concurrent (j=jsq:jeq, k=1:nz, i=is:ie)
             if (abs(v(i,j,k)) < CS%vel_underflow) v(i,j,k) = 0.0
-            if (v(i,j,k) < 0.0) then 
+            if (v(i,j,k) < 0.0) then
               CFL = (-v(I,j,k) * dt) * (G%dx_Cv(I,j) * G%IareaT(i+1,j))
-            else 
+            else
               CFL = (v(I,j,k) * dt) * (G%dx_Cv(I,j) * G%IareaT(i,j))
             end if
             if (CFL > CS%CFL_trunc) trunc_any_array(i,j,k) = .true.
-            if (CFL > CS%CFL_report) then 
+            if (CFL > CS%CFL_report) then
               dowrite(i,j) = .true.
               vel_report(i,j) = min(vel_report(i,j), abs(v(i,j,k)))
             end if
@@ -3424,12 +3407,12 @@ subroutine vertvisc_limit_vel(u, v, h, ADp, CDp, forces, visc, dt, G, GV, US, CS
           endif
       end do
 
-    else 
+    else
       do j = jsq, jeq
         do i = is, ie
           dowrite(i,j) = .false.
           vel_report(i,j) = maxvel
-        end do 
+        end do
       end do
 
       do j = jsq, jeq
@@ -3447,7 +3430,7 @@ subroutine vertvisc_limit_vel(u, v, h, ADp, CDp, forces, visc, dt, G, GV, US, CS
 
       do j = jsq, jeq
         do k=1,nz ; do I=Is,Ie
-        if(trunc_any_array(i,j,k)) then 
+        if(trunc_any_array(i,j,k)) then
         if (abs(v(I,j,k)) > maxvel) then
           v(I,j,k) = SIGN(truncvel,v(I,j,k))
           if (h(i,j,k) + h(i+1,j,k) > H_report) CS%ntrunc = CS%ntrunc + 1
@@ -3459,7 +3442,7 @@ subroutine vertvisc_limit_vel(u, v, h, ADp, CDp, forces, visc, dt, G, GV, US, CS
 
   else  ! Do not report accelerations leading to large velocities.
     if (CS%CFL_based_trunc) then
-  ! JORGE TODO: PORT 
+  ! JORGE TODO: PORT
       do k=1,nz
       do concurrent (j=js:je, i=isq:ieq)
         if (abs(v(i,J,k)) < CS%vel_underflow) then ; v(i,J,k) = 0.0
@@ -3487,7 +3470,7 @@ subroutine vertvisc_limit_vel(u, v, h, ADp, CDp, forces, visc, dt, G, GV, US, CS
 !$omp target exit data map(from:u_old, v_old)
 
   if (len_trim(CS%u_trunc_file) > 0) then
-    !I need to port this 
+    !I need to port this
     do j=js,je ; do I=Isq,Ieq ; if (dowrite(I,j)) then
       ! Call a diagnostic reporting subroutines are called if unphysically large values are found.
       call write_u_accel(I, j, u_old, h, ADp, CDp, dt, G, GV, US, CS%PointAccel_CSp, &
@@ -3503,7 +3486,6 @@ subroutine vertvisc_limit_vel(u, v, h, ADp, CDp, forces, visc, dt, G, GV, US, CS
     endif ; enddo ; enddo
   endif
   !$omp target exit data map(release: u_old, v_old)
-!!$omp target exit data map(release: G, G%areaT, G%dx_Cv, G%iareaT, G%dy_Cu)
 
 end subroutine vertvisc_limit_vel
 
@@ -3540,13 +3522,7 @@ subroutine vertvisc_init(MIS, Time, G, GV, US, param_file, diag, ADp, dirs, &
   character(len=40)  :: thickness_units
   real :: Kv_mks ! KVML in MKS [m2 s-1]
 
-  if (associated(CS)) then
-    call MOM_error(WARNING, "vertvisc_init called with an associated "// &
-                            "control structure.")
-    return
-  endif
-  allocate(CS)
-
+  ! TODO: Remove?
   CS%initialized = .true.
 
   if (GV%Boussinesq) then; thickness_units = "m"
@@ -3810,12 +3786,19 @@ subroutine vertvisc_init(MIS, Time, G, GV, US, param_file, diag, ADp, dirs, &
                  "1e-30 m/s, which is less than an Angstrom divided by "//&
                  "the age of the universe.", units="m s-1", default=0.0, scale=US%m_s_to_L_T)
 
+  !$omp target update to(CS)
+
   ALLOC_(CS%a_u(IsdB:IedB,jsd:jed,nz+1)) ; CS%a_u(:,:,:) = 0.0
   ALLOC_(CS%a_u_gl90(IsdB:IedB,jsd:jed,nz+1)) ; CS%a_u_gl90(:,:,:) = 0.0
   ALLOC_(CS%h_u(IsdB:IedB,jsd:jed,nz))   ; CS%h_u(:,:,:) = 0.0
   ALLOC_(CS%a_v(isd:ied,JsdB:JedB,nz+1)) ; CS%a_v(:,:,:) = 0.0
   ALLOC_(CS%a_v_gl90(isd:ied,JsdB:JedB,nz+1)) ; CS%a_v_gl90(:,:,:) = 0.0
   ALLOC_(CS%h_v(isd:ied,JsdB:JedB,nz))   ; CS%h_v(:,:,:) = 0.0
+
+  !$omp target enter data map(to: CS%a_u, CS%a_v)
+  !$omp target enter data map(to: CS%h_u, CS%h_v)
+  ! TODO: Conditional?
+  !$omp target enter data map(to: CS%a_u_gl90, CS%a_v_gl90)
 
   CS%id_Kv_slow = register_diag_field('ocean_model', 'Kv_slow', diag%axesTi, Time, &
       'Slow varying vertical viscosity', 'm2 s-1', conversion=GV%HZ_T_to_m2_s)
