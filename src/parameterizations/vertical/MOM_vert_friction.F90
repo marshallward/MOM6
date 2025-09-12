@@ -1890,6 +1890,7 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
 
 
   if (allocated(hML_u)) then
+    !$omp target update from(h_ml)
     do j=js,je ; do I=Isq,Ieq ; if (do_i(I,j)) then
       hML_u(I,j) = h_ml(I,j)
     endif ; enddo ; enddo
@@ -2293,6 +2294,7 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
   !JORGE TODO: PORT
 
   if ( allocated(hML_v)) then
+    !$omp target update from(h_ml)
     do J=Jsq,Jeq ; do i=is,ie ; if (do_i(i,J)) then
       hML_v(i,J) = h_ml(i,J)
     endif ; enddo ; enddo
@@ -2516,9 +2518,10 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
     !$omp target update from(CS%a_u, CS%a_v)
     call uvchksum("vertvisc_coef a_[uv]", CS%a_u, CS%a_v, G%HI, haloshift=0, &
                   unscale=GV%H_to_m*US%s_to_T, scalar_pair=.true.)
-    if (allocated(hML_u) .and. allocated(hML_v)) &
+    if (allocated(hML_u) .and. allocated(hML_v)) then
       call uvchksum("vertvisc_coef hML_[uv]", hML_u, hML_v, G%HI, &
                     haloshift=0, unscale=US%Z_to_m, scalar_pair=.true.)
+    endif
   endif
 
 ! Offer diagnostic fields for averaging.

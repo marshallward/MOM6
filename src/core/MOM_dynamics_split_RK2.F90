@@ -693,7 +693,6 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
     call cpu_clock_end(id_clock_continuity)
     if (BT_cont_BT_thick) then
     call start_nvtx("btcalc")
-      !$omp target update to(h, CS%BT_cont%h_u, CS%BT_cont%h_v)
 
       call btcalc(h, G, GV, CS%barotropic_CSp, CS%BT_cont%h_u, CS%BT_cont%h_v, &
                   OBC=CS%OBC)
