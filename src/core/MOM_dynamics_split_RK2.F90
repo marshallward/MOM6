@@ -639,9 +639,9 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
   endif
   call start_nvtx("thickness to dz")
   call thickness_to_dz(h, tv, dz, G, GV, US, halo_size=1)
-  !$omp target update from(dz)
   call end_nvtx
   call start_nvtx("vertvisc coef")
+  !$omp target update to(up, vp, h, dz)
   call vertvisc_coef(up, vp, h, dz, forces, visc, tv, dt, G, GV, US, CS%vertvisc_CSp, CS%OBC, VarMix)
   call end_nvtx
   call start_nvtx("vertvisc remnan")
@@ -791,14 +791,13 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
   endif
 
   call thickness_to_dz(h, tv, dz, G, GV, US, halo_size=1, do_offload=.true.)
-  !$omp target update from(dz)
   call end_nvtx
   call start_nvtx("seocnd vertvisc coef")
+  !$omp target update to (up, vp, h)
   call vertvisc_coef(up, vp, h, dz, forces, visc, tv, dt_pred, G, GV, US, CS%vertvisc_CSp, &
                      CS%OBC, VarMix)
   call end_nvtx
 
-  !$omp target update to (up, vp, h)
   if (CS%fpmix) then
     hbl(:,:) = 0.0
     if (ASSOCIATED(CS%KPP_CSp)) call KPP_get_BLD(CS%KPP_CSp, hbl, G, US, m_to_BLD_units=GV%m_to_H)
@@ -1097,6 +1096,7 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
   call thickness_to_dz(h, tv, dz, G, GV, US, halo_size=1)
   call end_nvtx
   call start_nvtx("Vertvisc coeff after thickness to dz")
+  !$omp target update to(u_inst, v_inst, h, dz)
   call vertvisc_coef(u_inst, v_inst, h, dz, forces, visc, tv, dt, G, GV, US, CS%vertvisc_CSp, CS%OBC, VarMix)
   call end_nvtx
 
@@ -1690,7 +1690,7 @@ subroutine initialize_dyn_split_RK2(u, v, h, tv, uh, vh, eta, Time, G, GV, US, p
   call hor_visc_init(Time, G, GV, US, param_file, diag, CS%hor_visc, ADp=CS%ADp)
 
   allocate(CS%vertvisc_CSp)
-  !!$omp target enter data map(to: CS%vertvisc_CSp)
+  !$omp target enter data map(to: CS%vertvisc_CSp)
   call vertvisc_init(MIS, Time, G, GV, US, param_file, diag, CS%ADp, dirs, &
                      ntrunc, CS%vertvisc_CSp, CS%fpmix)
   CS%set_visc_CSp => set_visc
