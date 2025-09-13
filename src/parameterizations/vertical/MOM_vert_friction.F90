@@ -1693,9 +1693,7 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
   endif
 
   !$omp target enter data map(to: do_i)
-  !$omp target enter data map(to: dz)
 
-  !$omp target update to(u,h, v)
   !$omp target enter data map(alloc: a_cpl, h_ml)
   !$omp target enter data map(alloc: i_hbbl, bbl_thick, kv_bbl)
   !$omp target enter data map(alloc:h_harm, h_arith, dz_harm, h_delta, dz_arith, hvel, dz_vel, z_i)
@@ -1892,6 +1890,7 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
 
 
   if (allocated(hML_u)) then
+    !$omp target update from(h_ml)
     do j=js,je ; do I=Isq,Ieq ; if (do_i(I,j)) then
       hML_u(I,j) = h_ml(I,j)
     endif ; enddo ; enddo
@@ -2295,6 +2294,7 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
   !JORGE TODO: PORT
 
   if ( allocated(hML_v)) then
+    !$omp target update from(h_ml)
     do J=Jsq,Jeq ; do i=is,ie ; if (do_i(i,J)) then
       hML_v(i,J) = h_ml(i,J)
     endif ; enddo ; enddo
@@ -2485,7 +2485,6 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
 
   !$omp target exit data map(release: a_cpl, h_ml)
   !$omp target exit data map(from: do_i)
-  !$omp target exit data map(from: dz)
 
   !$omp target exit data map(delete: bbl_thick, i_hbbl, kv_bbl)
   !$omp target exit data map(delete:h_harm, h_arith, dz_harm, h_delta, dz_arith, z_i, hvel, dz_vel)
@@ -2513,13 +2512,16 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
   endif
 
   if (CS%debug) then
+    !$omp target update from(CS%h_u, CS%h_v)
     call uvchksum("vertvisc_coef h_[uv]", CS%h_u, CS%h_v, G%HI, haloshift=0, &
                   unscale=GV%H_to_m, scalar_pair=.true.)
+    !$omp target update from(CS%a_u, CS%a_v)
     call uvchksum("vertvisc_coef a_[uv]", CS%a_u, CS%a_v, G%HI, haloshift=0, &
                   unscale=GV%H_to_m*US%s_to_T, scalar_pair=.true.)
-    if (allocated(hML_u) .and. allocated(hML_v)) &
+    if (allocated(hML_u) .and. allocated(hML_v)) then
       call uvchksum("vertvisc_coef hML_[uv]", hML_u, hML_v, G%HI, &
                     haloshift=0, unscale=US%Z_to_m, scalar_pair=.true.)
+    endif
   endif
 
 ! Offer diagnostic fields for averaging.
@@ -3211,6 +3213,7 @@ subroutine find_coupling_coef(a_cpl, hvel, do_i, h_harm, bbl_thick, kv_bbl, z_i,
       enddo
     endif
   endif
+
   !check, nk_in_ml can probably be released, instead of frommed
   !$omp target update from(bbl_thick, kv_bbl, Kv_add)
   !$omp target update from(z_t, Kv_tot)
