@@ -617,15 +617,6 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
   !$omp target update to(u_bc_accel, v_bc_accel, u_inst, v_inst)
   !$omp target update to(up, vp)
 
-  !!$OMP parallel do default(shared)
-  !do k=1,nz
-  !  do j=js,je ; do I=Isq,Ieq
-  !    up(I,j,k) = G%mask2dCu(I,j) * (u_inst(I,j,k) + dt * u_bc_accel(I,j,k))
-  !  enddo ; enddo
-  !  do J=Jsq,Jeq ; do i=is,ie
-  !    vp(i,J,k) = G%mask2dCv(i,J) * (v_inst(i,J,k) + dt * v_bc_accel(i,J,k))
-  !  enddo ; enddo
-  !enddo
   do concurrent (k = 1:nz)
     do concurrent (j=js:je, i=isq:ieq)
       up(I,j,k) = G%mask2dCu(I,j) * (u_inst(I,j,k) + dt * u_bc_accel(I,j,k))
@@ -873,14 +864,11 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
   endif
 
   ! h_av = (h + hp)/2
-  !!$OMP parallel do default(shared)
-  !do k=1,nz ; do j=js-2,je+2 ; do i=is-2,ie+2
   !$omp target update to(h_av, hp)
   do concurrent (k=1:nz, j=js-2:je+2,i=is-2:ie+2)
     h_av(i,j,k) = 0.5*(h(i,j,k) + hp(i,j,k))
   end do
   !$omp target update from(h_av, hp)
-  !enddo ; enddo ; enddo
 
   ! The correction phase of the time step starts here.
   call enable_averages(dt, Time_local, CS%diag)
@@ -1130,7 +1118,6 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
   if (showCallTree) call callTree_wayPoint("done with vertvisc (step_MOM_dyn_split_RK2)")
 
 ! Later, h_av = (h_in + h_out)/2, but for now use h_av to store h_in.
-  !!$OMP parallel do default(shared)
   !$omp target update to(h_av, h)
   do concurrent (k=1:nz, j=js-2:je+2,i=is-2:ie+2)
     h_av(i,j,k) = h(i,j,k)
@@ -1177,19 +1164,15 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
   endif
 
 ! h_av = (h_in + h_out)/2 . Going in to this line, h_av = h_in.
-  !!$OMP parallel do default(shared)
   !$omp target update to(h_av, h)
   do concurrent (k=1:nz, j=js-2:je+2,i=is-2:ie+2)
-  !do k=1,nz ; do j=js-2,je+2 ; do i=is-2,ie+2
     h_av(i,j,k) = 0.5*(h_av(i,j,k) + h(i,j,k))
   end do
   !$omp target update from(h_av, h)
-  !enddo ; enddo ; enddo
 
   if (G%nonblocking_updates) &
     call complete_group_pass(CS%pass_av_uvh, G%Domain, clock=id_clock_pass)
 
-  !!$OMP parallel do default(shared)
   !$omp target update to(uhtr, uh, vhtr, vh)
 
   do concurrent (k=1:nz)
