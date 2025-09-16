@@ -428,12 +428,19 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
   !$omp target enter data map(alloc: up, vp, hp, dz, h_tmp)
   !$omp target update to(eta, pbv, pbv%por_face_areaU, pbv%por_face_areaV)
 
-  !$OMP parallel do default(shared)
-  do k=1,nz
-    do j=G%jsd,G%jed   ; do i=G%isdB,G%iedB ;  up(i,j,k) = 0.0 ; enddo ; enddo
-    do j=G%jsdB,G%jedB ; do i=G%isd,G%ied   ;  vp(i,j,k) = 0.0 ; enddo ; enddo
-    do j=G%jsd,G%jed   ; do i=G%isd,G%ied   ;  hp(i,j,k) = h(i,j,k) ; enddo ; enddo
+  !$omp target update to(h)
+  do concurrent (k=1:nz)
+    do concurrent (j=G%jsd:G%jed, i=G%isdB:G%iedB)
+      up(i,j,k) = 0.0
+    end do
+    do concurrent (j=G%jsdB:G%jedB, i=G%isd:G%ied)
+      vp(i,j,k) = 0.0
+    end do
+    do concurrent (j=G%jsd:G%jed, i=G%isd:G%ied)
+      hp(i,j,k) = h(i,j,k)
+    end do
   enddo
+  !$omp target update from(up, vp, h)
   ! TODO: hp needs accurate +/-2 halos.
   ! For now we need to update the GPU halo here, but this can be phased out.
   !$omp target update to(hp)
@@ -637,7 +644,9 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
   if (CS%debug) then
     call uvchksum("before vertvisc: up", up, vp, G%HI, haloshift=0, symmetric=sym, unscale=US%L_T_to_m_s)
   endif
-  call thickness_to_dz(h, tv, dz, G, GV, US, halo_size=1)
+  !$omp target update to(dz,h, tv%SpV_avg)
+  call thickness_to_dz(h, tv, dz, G, GV, US, halo_size=1, do_offload=.true.)
+  !$omp target update from(dz,h, tv%SpV_avg)
   
   !$omp target update to(up, vp, h, dz)
   call vertvisc_coef(up, vp, h, dz, forces, visc, tv, dt, G, GV, US, CS%vertvisc_CSp, CS%OBC, VarMix)
@@ -727,7 +736,6 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
   dt_pred = dt * CS%be
   call cpu_clock_begin(id_clock_mom_update)
 
-  !!$OMP parallel do default(shared)
   !$omp target update to (CS%u_accel_bt, CS%v_accel_bt, u_bc_accel, v_bc_accel)
   !$omp target update to(vp, up)
   do concurrent (k=1:nz)
@@ -1088,7 +1096,7 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
     enddo
   endif
 
-  call thickness_to_dz(h, tv, dz, G, GV, US, halo_size=1)
+  call thickness_to_dz(h, tv, dz, G, GV, US, halo_size=1, do_offload=.true.)
   
   !$omp target update to(u_inst, v_inst, h, dz)
   call vertvisc_coef(u_inst, v_inst, h, dz, forces, visc, tv, dt, G, GV, US, CS%vertvisc_CSp, CS%OBC, VarMix)
@@ -1174,7 +1182,6 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
     call complete_group_pass(CS%pass_av_uvh, G%Domain, clock=id_clock_pass)
 
   !$omp target update to(uhtr, uh, vhtr, vh)
-
   do concurrent (k=1:nz)
     do concurrent (j=js-2:je+2, i=isq-2:ieq+2)
       uhtr(I,j,k) = uhtr(I,j,k) + uh(I,j,k)*dt
