@@ -2734,7 +2734,8 @@ pure subroutine find_coupling_coef_k(a_cpl, hvel, i, j, h_harm, bbl_thick, kv_bb
                              intent(out) :: a_cpl !< Coupling coefficient across interfaces [H T-1 ~> m s-1 or Pa s m-1]
   real, dimension(SZK_(GV)), &
                              intent(in)  :: hvel !< Distance between interfaces at velocity points [Z ~> m]
-  integer,                   intent(in)  :: i, j !< Column index
+  integer,                   intent(in)  :: i    !< Column i-index
+  integer,                   intent(in)  :: j    !< Column j-index
   real, dimension(SZK_(GV)), &
                              intent(in)  :: h_harm !< Harmonic mean of thicknesses around a velocity
                                                    !! grid point [Z ~> m]
