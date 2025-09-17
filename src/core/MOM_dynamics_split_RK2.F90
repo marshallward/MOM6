@@ -627,11 +627,11 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
   do concurrent (k = 1:nz)
     do concurrent (j=js:je, i=isq:ieq)
       up(I,j,k) = G%mask2dCu(I,j) * (u_inst(I,j,k) + dt * u_bc_accel(I,j,k))
-    end do 
+    end do
     do concurrent (j=jsq:jeq, i=is:ie)
       vp(i,J,k) = G%mask2dCv(i,J) * (v_inst(i,J,k) + dt * v_bc_accel(i,J,k))
     end do
-  end do 
+  end do
 
   !$omp target update from(up, vp, u_inst, v_inst)
   !$omp target update from (u_bc_accel, v_bc_accel)
@@ -648,7 +648,7 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
   !$omp target update to(dz,h, tv%SpV_avg)
   call thickness_to_dz(h, tv, dz, G, GV, US, halo_size=1, do_offload=.true.)
   !$omp target update from(dz,h, tv%SpV_avg)
-  
+
   !$omp target update to(up, vp, h, dz)
   call vertvisc_coef(up, vp, h, dz, forces, visc, tv, dt, G, GV, US, CS%vertvisc_CSp, CS%OBC, VarMix)
 
@@ -730,7 +730,7 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
               eta_PF_start, taux_bot, tauy_bot, uh_ptr, vh_ptr, u_ptr, v_ptr)
 
   !$omp target update from(CS%u_accel_bt, CS%v_accel_bt, u_bc_accel, v_bc_accel)
-  
+
   if (showCallTree) call callTree_leave("btstep()")
   call cpu_clock_end(id_clock_btstep)
 
