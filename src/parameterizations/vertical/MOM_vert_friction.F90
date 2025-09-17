@@ -822,6 +822,7 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
     end do
 
     if (associated(ADp%du_dt_str)) then
+    ! is this worng?
         do concurrent (j=G%isc:G%jec, I=Isq:Ieq, G%mask2dCu(I,j) > 0.)
           ADp%du_dt_str(I,j,k) = (CS%h_u(I,j,k) * ADp%du_dt_str(I,j,k) &
               + dt * CS%a_u(I,j,K) * ADp%du_dt_str(I,j,k-1)) * b1(I,j)
@@ -1438,7 +1439,7 @@ subroutine vertvisc_remnant(visc, visc_rem_u, visc_rem_v, dt, G, GV, US, CS)
       Ray(i,J) = visc%Ray_v(i,J,1)
     enddo ; enddo
   else
-    do concurrent (j=jsc:jec, i=isq:ieq)
+    do concurrent (j=jsq:jeq, i=is:ie)
       Ray(i,J) = 0.
     end do
   endif
@@ -2432,13 +2433,13 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
     !JORGE TODO: PORT
 
     do K=1,nz+1
-    do concurrent (j=jsq:jeq, i=is:ieq, do_i(i,j))
+    do concurrent (j=jsq:jeq, i=is:ie, do_i(i,j))
         CS%a_v(i,J,K) = min(a_cpl_max, a_cpl(i,J,K))
     end do
     enddo
 
     do k=1,nz
-    do concurrent (j=jsq:jeq, i=is:ieq, do_i(i,j))
+    do concurrent (j=jsq:jeq, i=is:ie, do_i(i,j))
         CS%h_v(i,J,k) = hvel(i,J,k) + h_neglect
     end do
     enddo
@@ -3403,7 +3404,7 @@ subroutine vertvisc_limit_vel(u, v, h, ADp, CDp, forces, visc, dt, G, GV, US, CS
     if (CS%CFL_based_trunc) then
   ! JORGE TODO: PORT
       do k=1,nz
-      do concurrent (j=js:je, i=isq:ieq)
+      do concurrent (j=jsq:jeq, i=is:ie)
         if (abs(v(i,J,k)) < CS%vel_underflow) then ; v(i,J,k) = 0.0
         elseif ((v(i,J,k) * (dt * G%dx_Cv(i,J))) * G%IareaT(i,j+1) < -CS%CFL_trunc) then
           v(i,J,k) = (-0.9*CS%CFL_trunc) * (G%areaT(i,j+1) / (dt * G%dx_Cv(i,J)))
@@ -3482,9 +3483,7 @@ subroutine vertvisc_init(MIS, Time, G, GV, US, param_file, diag, ADp, dirs, &
   real :: Kv_mks ! KVML in MKS [m2 s-1]
 
   ! TODO: Remove?
-#ifdef __NVCOMPILER_LLVM__
-
-#else
+#ifndef __NVCOMPILER_LLVM__
     if (associated(CS)) then
     call MOM_error(WARNING, "vertvisc_init called with an associated "// &
                             "control structure.")
