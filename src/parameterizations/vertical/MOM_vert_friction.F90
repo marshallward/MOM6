@@ -716,7 +716,7 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
     enddo
   endif
 
-  
+
 
   ! TODO: Move outside function
 
@@ -744,7 +744,7 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
       surface_stress(I,j) = dt_Rho0 * (G%mask2dCu(I,j)*forces%taux(I,j))
     enddo
   endif
-  
+
 
   ! perform forward elimination on the tridiagonal system
   !
@@ -785,7 +785,7 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
       Ray(I,j) = 0.
     enddo
   endif
-  
+
 
   ! TODO: Move outside
   !$omp target enter data map(alloc: b1, c1, d1)
@@ -822,6 +822,7 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
     end do
 
     if (associated(ADp%du_dt_str)) then
+    ! is this worng?
         do concurrent (j=G%isc:G%jec, I=Isq:Ieq, G%mask2dCu(I,j) > 0.)
           ADp%du_dt_str(I,j,k) = (CS%h_u(I,j,k) * ADp%du_dt_str(I,j,k) &
               + dt * CS%a_u(I,j,K) * ADp%du_dt_str(I,j,k-1)) * b1(I,j)
@@ -833,7 +834,7 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
 
 
 
-  
+
 
 
   ! back substitute to solve for the new velocities
@@ -976,7 +977,7 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
   endif
 
 
-  
+
 
   ! == Now work on the meridional velocity component.
 
@@ -1018,7 +1019,7 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
           ADp%dv_dt_str(i,J,k) = 0.0
       end do
   endif
-  
+
 
 
   !   One option is to have the wind stress applied as a body force
@@ -1045,7 +1046,7 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
         surface_stress(i,J) = dt_Rho0 * (G%mask2dCv(i,J) * forces%tauy(i,J))
     end do
   endif
-  
+
 
 
   if (allocated(visc%Ray_v)) then
@@ -1073,7 +1074,7 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
           ADp%dv_dt_str(i,J,1) = b1(i,J) * (CS%h_v(i,J,1) * ADp%dv_dt_str(i,J,1) + surface_stress(i,J) * Idt)
   end do
   endif
-  
+
 
 
   do k=2,nz
@@ -1096,7 +1097,7 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
     end do
 
   enddo
-  
+
 
   do k=nz-1,1,-1
     do concurrent (j=jsq:jeq, i=is:ie, G%mask2dCv(i,j) > 0.0)
@@ -1116,11 +1117,11 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
       end do
     enddo
   endif
-  
 
 
 
-  
+
+
   ! compute vertical velocity tendency that arises from GL90 viscosity;
   ! follow tridiagonal solve method as above; to avoid corrupting v,
   ! use ADp%dv_dt_visc_gl90 as a placeholder for updated u (due to GL90) until last do loop
@@ -1225,7 +1226,7 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
   endif
 
 
-  
+
 
   ! Calculate the KE source from GL90 vertical viscosity [H L2 T-3 ~> m3 s-3].
   ! We do the KE-rate calculation here (rather than in MOM_diagnostics) to ensure
@@ -1262,7 +1263,7 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
   !$omp target exit data map(delete: ADp)
   !$omp target exit data map(delete: visc%Ray_u) if (allocated(visc%Ray_u))
 
-  
+
 
   ! Here the velocities associated with open boundary conditions are applied.
   ! JORGE TODO: should be offloaded?
@@ -1438,7 +1439,7 @@ subroutine vertvisc_remnant(visc, visc_rem_u, visc_rem_v, dt, G, GV, US, CS)
       Ray(i,J) = visc%Ray_v(i,J,1)
     enddo ; enddo
   else
-    do concurrent (j=jsc:jec, i=isq:ieq)
+    do concurrent (j=jsq:jeq, i=is:ie)
       Ray(i,J) = 0.
     end do
   endif
@@ -1730,7 +1731,7 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
       z_i_gl90(I,j,nz+1) = 0.
     enddo ; enddo
   endif
-  
+
   do k=nz,1,-1
     do concurrent (j=js:je, i=isq:ieq, do_i(i,j))
       h_harm(I,j) = 2. * h(i,j,k) * h(i+1,j,k) / (h(i,j,k) + h(i+1,j,k) + h_neglect)
@@ -1839,7 +1840,7 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
       endif ; enddo ; enddo
     endif
   enddo
-  
+
 
 
 
@@ -1847,7 +1848,7 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
   ! ported, works
   call find_coupling_coef(a_cpl, dz_vel, do_i, dz_harm, bbl_thick, kv_bbl, z_i, &
       h_ml, dt, G, GV, US, CS, visc, Ustar_2d, tv, work_on_u=.true., OBC=OBC)
-  
+
 
 
 
@@ -2130,7 +2131,7 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
       z_i_gl90(i,J,nz+1) = 0.
     enddo ; enddo
   endif
-  
+
 
   do k=nz,1,-1
 
@@ -2244,11 +2245,11 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
       endif ; enddo ; enddo
     endif
   enddo ! big k loop above
-  
+
 
   call find_coupling_coef(a_cpl, dz_vel, do_i, dz_harm, bbl_thick, kv_bbl, z_i, &
       h_ml, dt, G, GV, US, CS, visc, Ustar_2d, tv, work_on_u=.false., OBC=OBC)
-  
+
 
 
 
@@ -2432,13 +2433,13 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
     !JORGE TODO: PORT
 
     do K=1,nz+1
-    do concurrent (j=jsq:jeq, i=is:ieq, do_i(i,j))
+    do concurrent (j=jsq:jeq, i=is:ie, do_i(i,j))
         CS%a_v(i,J,K) = min(a_cpl_max, a_cpl(i,J,K))
     end do
     enddo
 
     do k=1,nz
-    do concurrent (j=jsq:jeq, i=is:ieq, do_i(i,j))
+    do concurrent (j=jsq:jeq, i=is:ie, do_i(i,j))
         CS%h_v(i,J,k) = hvel(i,J,k) + h_neglect
     end do
     enddo
@@ -2451,7 +2452,7 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
   !$omp target exit data map(delete:h_harm, h_arith, dz_harm, h_delta, dz_arith, z_i, hvel, dz_vel)
   !$omp target exit data map(delete: zh, zcol)
   !$omp target exit data map(delete:  Dmin, zi_dir)
-  
+
 
   ! Diagnose total Kv at v-points
   if (CS%id_Kv_v > 0) then
@@ -2504,7 +2505,7 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
 
   if (allocated(hML_u)) deallocate(hML_u)
   if (allocated(hML_v)) deallocate(hML_v)
-  
+
 
 end subroutine vertvisc_coef
 
@@ -2657,7 +2658,7 @@ subroutine find_coupling_coef(a_cpl, hvel, do_i, h_harm, bbl_thick, kv_bbl, z_i,
       z_t(i,j) = h_neglect * I_Hmix
     end do
   endif
-  
+
 
   do K=2,nz
     do concurrent (j=js:je, i=is:ie)
@@ -2803,7 +2804,7 @@ subroutine find_coupling_coef(a_cpl, hvel, do_i, h_harm, bbl_thick, kv_bbl, z_i,
       endif ; enddo ; enddo ! i & k loops
     endif
   enddo
-  
+
 
 
   ! Assign the bottom coupling coefficients
@@ -2822,7 +2823,7 @@ subroutine find_coupling_coef(a_cpl, hvel, do_i, h_harm, bbl_thick, kv_bbl, z_i,
       a_cpl(i,j,nz+1) = CS%Kv / ((0.5 * hvel(i,j,nz) + h_neglect) + I_amax * CS%Kv)
     endif ; enddo ; enddo
   endif
-  
+
 
   ! Add surface intensified viscous coupling, either as a no-slip boundary condition under a
   ! rigid ice-shelf, or due to wind-stress driven surface boundary layer mixing that has not
@@ -3181,7 +3182,7 @@ subroutine find_coupling_coef(a_cpl, hvel, do_i, h_harm, bbl_thick, kv_bbl, z_i,
   !$omp target exit data map(delete: z_t, Kv_tot, Kv_add)
   !$omp target exit data map(release: visc%Kv_shear)
   !$omp target exit data map(release: Ustar_2d)
-  
+
 end subroutine find_coupling_coef
 
 !> Velocity components which exceed a threshold for physically reasonable values
@@ -3403,7 +3404,7 @@ subroutine vertvisc_limit_vel(u, v, h, ADp, CDp, forces, visc, dt, G, GV, US, CS
     if (CS%CFL_based_trunc) then
   ! JORGE TODO: PORT
       do k=1,nz
-      do concurrent (j=js:je, i=isq:ieq)
+      do concurrent (j=jsq:jeq, i=is:ie)
         if (abs(v(i,J,k)) < CS%vel_underflow) then ; v(i,J,k) = 0.0
         elseif ((v(i,J,k) * (dt * G%dx_Cv(i,J))) * G%IareaT(i,j+1) < -CS%CFL_trunc) then
           v(i,J,k) = (-0.9*CS%CFL_trunc) * (G%areaT(i,j+1) / (dt * G%dx_Cv(i,J)))
@@ -3482,6 +3483,14 @@ subroutine vertvisc_init(MIS, Time, G, GV, US, param_file, diag, ADp, dirs, &
   real :: Kv_mks ! KVML in MKS [m2 s-1]
 
   ! TODO: Remove?
+#ifndef __NVCOMPILER_LLVM__
+    if (associated(CS)) then
+    call MOM_error(WARNING, "vertvisc_init called with an associated "// &
+                            "control structure.")
+    return
+  endif
+  allocate(CS)
+#endif
   CS%initialized = .true.
 
   if (GV%Boussinesq) then; thickness_units = "m"
