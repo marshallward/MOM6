@@ -1593,7 +1593,6 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
   integer :: i, j, k, is, ie, js, je, Isq, Ieq, Jsq, Jeq, nz, ij
   integer :: is_N_OBC, is_S_OBC, Is_E_OBC, Is_W_OBC, ie_N_OBC, ie_S_OBC, Ie_E_OBC, Ie_W_OBC
   integer :: js_N_OBC, js_S_OBC, Js_E_OBC, Js_W_OBC, je_N_OBC, je_S_OBC, Je_E_OBC, Je_W_OBC
-  real :: tmp1, tmp2
 
   is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec
   Isq = G%IscB ; Ieq = G%IecB ; Jsq = G%JscB ; Jeq = G%JecB ; nz = GV%ke
@@ -1867,41 +1866,41 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
   endif
 
   do_any_shelf = .false.
-  if (associated(forces%frac_shelf_u)) then !{
+  if (associated(forces%frac_shelf_u)) then
     do j=js,je ; do I=Isq,Ieq
       CS%a1_shelf_u(I,j) = 0.
       do_i_shelf(I,j) = do_i(I,j) .and. forces%frac_shelf_u(I,j) > 0.
     enddo ; enddo
     do_any_shelf = any(do_i_shelf)
 
-    if (do_any_shelf) then !{
-      if (.not. CS%harmonic_visc) then !{
+    if (do_any_shelf) then
+      if (.not. CS%harmonic_visc) then
         do j=js,je ; do I=Isq,Ieq ; if (do_i_shelf(I,j)) then
           zh(I,j) = 0.
           Ztop_min(I,j) = min(zcol(i,j), zcol(i+1,j))
           I_HTbl(I,j) = 1. / (visc%tbl_thick_shelf_u(I,j) + dz_neglect)
         endif ; enddo ; enddo
-      endif !}
+      endif
 
       do k=1,nz
-        if (CS%harmonic_visc) then !{
+        if (CS%harmonic_visc) then
           do j=js,je ; do I=Isq,Ieq
             hvel_shelf(I,j,k) = hvel(I,j,k)
             dz_vel_shelf(I,j,k) = dz_vel(I,j,k)
           enddo ; enddo
-        else !}{
+        else
           ! Find upwind-biased thickness near the surface.
           ! (Perhaps this needs to be done more carefully, via find_eta.)
-          do j=js,je ; do I=Isq,Ieq ; if (do_i(I,j)) then !{
+          do j=js,je ; do I=Isq,Ieq ; if (do_i(I,j)) then
             h_harm(I,j) = 2. * h(i,j,k) * h(i+1,j,k) &
                 / (h(i,j,k) + h(i+1,j,k) + h_neglect)
             h_arith(I,j) = 0.5 * (h(i+1,j,k) + h(i,j,k))
             h_delta(I,j) = h(i+1,j,k) - h(i,j,k)
             dz_arith(I,j) = 0.5 * (dz(i+1,j,k) + dz(i,j,k))
-          endif ; enddo ; enddo !}
+          endif ; enddo ; enddo
 
-          if (associated(OBC)) then !{
-            if (OBC%u_E_OBCs_on_PE) then !{
+          if (associated(OBC)) then
+            if (OBC%u_E_OBCs_on_PE) then
               do j=js_E_OBC,je_E_OBC ; do I=Is_E_OBC,Ie_E_OBC
                 if (do_i(I,j) .and. OBC%segnum_u(I,j) > 0) then
                   h_harm(I,j) = h(i,j,k)
@@ -1910,9 +1909,9 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
                   dz_arith(I,j) = dz(i,j,k)
                 endif
               enddo ; enddo
-            endif !}
+            endif
 
-            if (OBC%u_W_OBCs_on_PE) then !{
+            if (OBC%u_W_OBCs_on_PE) then
               do j=js_W_OBC,je_W_OBC ; do I=Is_W_OBC,Ie_W_OBC
                 if (do_i(I,j) .and. OBC%segnum_u(I,j) < 0) then
                   h_harm(I,j) = h(i+1,j,k)
@@ -1921,24 +1920,24 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
                   dz_arith(I,j) = dz(i+1,j,k)
                 endif
               enddo ; enddo
-            endif !}
-          endif !}
+            endif
+          endif
 
           do j=js,je ; do i=Isq,Ieq+1
             zcol(i,j) = zcol(i,j) - dz(i,j,k)
           enddo ; enddo
 
-          do j=js,je ; do I=Isq,Ieq ; if (do_i_shelf(I,j)) then !{
+          do j=js,je ; do I=Isq,Ieq ; if (do_i_shelf(I,j)) then
             zh(I,j) = zh(I,j) + dz_harm(I,j,k)
 
             hvel_shelf(I,j,k) = hvel(I,j,k)
             dz_vel_shelf(I,j,k) = dz_vel(I,j,k)
 
-            if (u(I,j,k) * h_delta(I,j) > 0) then !{
-              if (zh(I,j) * I_HTbl(I,j) < CS%harm_BL_val) then !{
+            if (u(I,j,k) * h_delta(I,j) > 0) then
+              if (zh(I,j) * I_HTbl(I,j) < CS%harm_BL_val) then
                 hvel_shelf(I,j,k) = min(hvel(I,j,k), h_harm(I,j))
                 dz_vel_shelf(I,j,k) = min(dz_vel(I,j,k), dz_harm(I,j,k))
-              else !}{
+              else
                 z2_wt = 1.
                 if (zh(I,j) * I_HTbl(I,j) < 2. * CS%harm_BL_val) &
                   z2_wt = max(0., min(1., zh(I,j) * I_HTbl(I,j) * I_valBL - 1.))
@@ -1951,10 +1950,10 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
 
                 hvel_shelf(I,j,k) = min(hvel(I,j,k), (1. - topfn) * h_arith(I,j) + topfn * h_harm(I,j))
                 dz_vel_shelf(I,j,k) = min(dz_vel(I,j,k), (1. - topfn) * dz_arith(I,j) + topfn * dz_harm(I,j,k))
-              endif !}
-            endif !}
-          endif ; enddo ; enddo !}
-        endif !}
+              endif
+            endif
+          endif ; enddo ; enddo
+        endif
       enddo
       call find_coupling_coef(a_shelf, dz_vel_shelf, do_i_shelf, dz_harm, &
           bbl_thick, kv_bbl, z_i, h_ml, dt, G, GV, US, CS, visc, Ustar_2d, &
@@ -1963,11 +1962,11 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
       do j=js,je ; do I=Isq,Ieq ; if (do_i_shelf(I,j)) then
         CS%a1_shelf_u(I,j) = a_shelf(I,j,1)
       endif ; enddo ; enddo
-    endif !}
-  endif !}
+    endif
+  endif
 
-  if (do_any_shelf) then !{
-    if (CS%use_GL90_in_SSW) then !{
+  if (do_any_shelf) then
+    if (CS%use_GL90_in_SSW) then
       do K=1,nz+1
         do j=js,je ; do I=Isq,Ieq
           if (do_i_shelf(I,j)) then
@@ -1984,7 +1983,7 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
           endif
         enddo ; enddo
       enddo
-    else !}{
+    else
       do K=1,nz+1
         do j=js,je ; do I=Isq,Ieq
           if (do_i_shelf(I,j)) then
@@ -1999,7 +1998,7 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
           endif
         enddo ; enddo
       enddo
-    endif !}
+    endif
 
     do k=1,nz
       do j=js,je ; do I=Isq,Ieq
@@ -2012,8 +2011,8 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
         endif
       enddo ; enddo
     enddo
-  else !}{
-    if (CS%use_GL90_in_SSW) then !{
+  else
+    if (CS%use_GL90_in_SSW) then
       do K=1,nz+1
         do j=js,je ; do I=Isq,Ieq ; if (do_i(I,j)) then
           a_cpl(I,j,K) = a_cpl(I,j,K) + a_cpl_gl90(I,j,K)
@@ -2025,7 +2024,7 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
           CS%a_u_gl90(I,j,K) = min(a_cpl_max, a_cpl_gl90(I,j,K))
         endif; enddo ; enddo
       enddo
-    endif !}
+    endif
 
     do K=1,nz+1
       do concurrent (j=js:je, I=Isq:Ieq, do_i(I,j))
@@ -2038,7 +2037,7 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
         CS%h_u(I,j,k) = hvel(I,j,k) + h_neglect
       end do
     enddo
-  endif !}
+  endif
 
   ! Diagnose total Kv at u-points
   if (CS%id_Kv_u > 0) then
@@ -2182,7 +2181,7 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
 
         tmp1 = v(i,j,k)
         tmp2 = h_delta(i,j)
-        if (tmp1*tmp2 < 0.) then
+        if (v(i,J,k) * h_delta(i,J) < 0.) then
           z2 = z_i(i,J,k+1)
           botfn = 1. / (1. + 0.09 * z2 * z2 * z2 * z2 * z2 * z2)
           hvel(i,J,k) = (1. - botfn) * h_harm(i,J) + botfn * h_arith(i,J)
@@ -3742,6 +3741,7 @@ subroutine vertvisc_init(MIS, Time, G, GV, US, param_file, diag, ADp, dirs, &
   !   care is given to the previously mentioned issues.  Comment out the following
   !   MOM_error to use, but do so at your own risk and with these points in mind.
   !}
+
   if (CS%StokesMixing) then
     call MOM_error(FATAL, "Stokes mixing requires user intervention in the code.\n"//&
                           "  Model now exiting.  See MOM_vert_friction.F90 for \n"//&
