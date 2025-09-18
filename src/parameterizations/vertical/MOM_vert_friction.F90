@@ -724,7 +724,7 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
   ! over the topmost Hmix fluid.  If DIRECT_STRESS is not defined,
   ! the wind stress is applied as a stress boundary condition.
   if (CS%direct_stress) then
-    do concurrent (j=G%jsc:G%jec, i=isq:ieq, G%mask2dCu(i,j) > 0.0)
+    do concurrent (j=G%jsc:G%jec, I=Isq:Ieq, G%mask2dCu(i,j) > 0.0)
           surface_stress(I,j) = 0.0
           zDS = 0.0
           stress = dt_Rho0 * forces%taux(I,j)
@@ -812,7 +812,7 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
       enddo
     endif
 
-    do concurrent (j=G%isc:G%jec, I=Isq:Ieq, G%mask2dCu(I,j) > 0.)
+    do concurrent (j=G%jsc:G%jec, I=Isq:Ieq, G%mask2dCu(I,j) > 0.)
           c1(I,j,k) = dt * CS%a_u(I,j,K) * b1(I,j)
           b_denom_1 = CS%h_u(I,j,k) + dt * (Ray(I,j) + CS%a_u(I,j,K)*d1(I,j))
           b1(I,j) = 1.0 / (b_denom_1 + dt * CS%a_u(I,j,K+1))
@@ -822,8 +822,7 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
     end do
 
     if (associated(ADp%du_dt_str)) then
-    ! is this worng?
-        do concurrent (j=G%isc:G%jec, I=Isq:Ieq, G%mask2dCu(I,j) > 0.)
+        do concurrent (j=G%jsc:G%jec, I=Isq:Ieq, G%mask2dCu(I,j) > 0.)
           ADp%du_dt_str(I,j,k) = (CS%h_u(I,j,k) * ADp%du_dt_str(I,j,k) &
               + dt * CS%a_u(I,j,K) * ADp%du_dt_str(I,j,k-1)) * b1(I,j)
       end do
@@ -840,19 +839,19 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
   ! back substitute to solve for the new velocities
   ! u_k = d'_k - c'_k x_(k+1)
   do k=nz-1,1,-1
-  do concurrent (j=G%jsc:G%jec, i=isq:ieq, G%mask2dCu(i,j) > 0.0)
+  do concurrent (j=G%jsc:G%jec, I=Isq:Ieq, G%mask2dCu(I,j) > 0.0)
           u(I,j,k) = u(I,j,k) + c1(I,j,k+1) * u(I,j,k+1)
   end do
   enddo
 
 
   if (associated(ADp%du_dt_str)) then
-  do concurrent (j=G%jsc:G%jec, i=isq:ieq, abs(ADp%du_dt_str(i,j,nz)) < accel_underflow)
+  do concurrent (j=G%jsc:G%jec, I=Isq:Ieq, abs(ADp%du_dt_str(I,j,nz)) < accel_underflow)
           ADp%du_dt_str(I,j,nz) = 0.0
   end do
 
     do k=nz-1,1,-1
-      do concurrent (j=G%jsc:G%jec, i=isq:ieq, G%mask2dCu(i,j) > 0.0)
+      do concurrent (j=G%jsc:G%jec, I=Isq:Ieq, G%mask2dCu(i,j) > 0.0)
               ADp%du_dt_str(I,j,k) = &
                 ADp%du_dt_str(I,j,k) + c1(I,j,k+1) * ADp%du_dt_str(I,j,k+1)
 
@@ -930,7 +929,7 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
 
   if (associated(ADp%du_dt_visc)) then
     do k=1,nz
-      do concurrent(j=G%jsc:G%jec, i = isq:ieq)
+      do concurrent(j=G%jsc:G%jec, I = Isq:Ieq)
       ADp%du_dt_visc(I,j,k) = (u(I,j,k) - ADp%du_dt_visc(I,j,k)) * Idt
 
       if (abs(ADp%du_dt_visc(I,j,k)) < accel_underflow) &
@@ -946,13 +945,13 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
   endif
 
   if (present(taux_bot)) then
-      do concurrent(j=G%jsc:G%jec, i = isq:ieq)
+      do concurrent(j=G%jsc:G%jec, I = Isq:Ieq)
       taux_bot(I,j) = GV%H_to_RZ * (u(I,j,nz) * CS%a_u(I,j,nz+1))
       end do
 
     if (allocated(visc%Ray_u)) then
       do k=1,nz
-      do concurrent(j=G%jsc:G%jec, i = isq:ieq)
+      do concurrent(j=G%jsc:G%jec, I = Isq:Ieq)
         taux_bot(I,j) = taux_bot(I,j) + GV%H_to_RZ * (visc%Ray_u(I,j,k) * u(I,j,k))
       end do
       enddo
@@ -1394,14 +1393,14 @@ subroutine vertvisc_remnant(visc, visc_rem_u, visc_rem_v, dt, G, GV, US, CS)
       Ray(I,j) = visc%Ray_u(I,j,1)
     enddo ; enddo
   else
-    do concurrent (j=jsc:jec, i=isq:ieq)
+    do concurrent (j=jsc:jec, I=Isq:Ieq)
       Ray(I,j) = 0.
      end do
   endif
 
 
   !! TODO JORGE: PORT
-    do concurrent (j=jsc:jec, i=isq:ieq, G%mask2dCu(i,j)>0.)
+    do concurrent (j=jsc:jec, I=Isq:Ieq, G%mask2dCu(i,j)>0.)
     b_denom_1 = CS%h_u(I,j,1) + dt * (Ray(I,j) + CS%a_u(I,j,1))
     b1(I,j) = 1.0 / (b_denom_1 + dt * CS%a_u(I,j,2))
     d1(I,j) = b_denom_1 * b1(I,j)
@@ -1417,7 +1416,7 @@ subroutine vertvisc_remnant(visc, visc_rem_u, visc_rem_v, dt, G, GV, US, CS)
     endif
 
   !! TODO JORGE: PORT
-    do concurrent (j=jsc:jec, i=isq:ieq, G%mask2dCu(i,j)>0.)
+    do concurrent (j=jsc:jec, I=Isq:Ieq, G%mask2dCu(I,j)>0.)
       c1(I,j,k) = dt * CS%a_u(I,j,K)*b1(I,j)
       b_denom_1 = CS%h_u(I,j,k) + dt * (Ray(I,j) + CS%a_u(I,j,K) * d1(I,j))
       b1(I,j) = 1.0 / (b_denom_1 + dt * CS%a_u(I,j,K+1))
@@ -1428,7 +1427,7 @@ subroutine vertvisc_remnant(visc, visc_rem_u, visc_rem_v, dt, G, GV, US, CS)
 
   !! TODO JORGE: PORT
   do k=nz-1,1,-1
-    do concurrent (j=jsc:jec, i=isq:ieq, G%mask2dCu(i,j)>0.)
+    do concurrent (j=jsc:jec, I=Isq:Ieq, G%mask2dCu(I,j)>0.)
       visc_rem_u(I,j,k) = visc_rem_u(I,j,k) + c1(I,j,k+1) * visc_rem_u(I,j,k+1)
     end do
   enddo
@@ -1673,15 +1672,15 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
 
   ! JORGE TODO: for some reason I need to map visc bbl thuck u like this herem instead of up there
   ! I am doing this for the reast of the things later
-    do concurrent (j=js:je, i=isq:ieq, do_i(i,j))
+    do concurrent (j=js:je, I=Isq:Ieq, do_i(I,j))
       kv_bbl(I,j) = visc%Kv_bbl_u(I,j)
       bbl_thick(I,j) = visc%bbl_thick_u(I,j) + dz_neglect
       I_Hbbl(I,j) = 1. / bbl_thick(I,j)
     end do
   endif
 
-  do concurrent (j=js:je, i=isq:ieq)
-    Dmin(I,j) = min(G%bathyT(i,j), G%bathyT(i+1,j))
+  do concurrent (j=js:je, I=Isq:Ieq)
+    Dmin(I,j) = min(G%bathyT(I,j), G%bathyT(I+1,j))
     zi_dir(I,j) = 0
   end do
 
@@ -1712,16 +1711,16 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
   ! gradients at the bottom where nearly massless layers layers ride over the
   ! topography.
 
-  do concurrent (j=js:je, i=isq:ieq)
+  do concurrent (j=js:je, I=Isq:Ieq)
     z_i(I,j,nz+1) = 0.
   end do
 
   if (.not. CS%harmonic_visc) then
-  do concurrent (j=js:je, i=isq:ieq)
+  do concurrent (j=js:je, I=Isq:Ieq)
       zh(I,j) = 0.
   end do
 
-  do concurrent (j=js:je, i=isq:ieq+1)
+  do concurrent (j=js:je, I=Isq:Ieq+1)
       zcol(i,j) = -G%bathyT(i,j)
   end do
   endif
@@ -1733,7 +1732,7 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
   endif
 
   do k=nz,1,-1
-    do concurrent (j=js:je, i=isq:ieq, do_i(i,j))
+    do concurrent (j=js:je, I=Isq:Ieq, do_i(I,j))
       h_harm(I,j) = 2. * h(i,j,k) * h(i+1,j,k) / (h(i,j,k) + h(i+1,j,k) + h_neglect)
       h_arith(I,j) = 0.5 * (h(i+1,j,k) + h(i,j,k))
       h_delta(I,j) = h(i+1,j,k) - h(i,j,k)
@@ -1775,7 +1774,7 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
       ! Montgomery potential gradients at the bottom where nearly massless
       ! layers ride over the topography.
 
-      do concurrent (j=js:je, i=isq:ieq, do_i(i,j))
+      do concurrent (j=js:je, I=Isq:Ieq, do_i(I,j))
         hvel(I,j,k) = h_harm(I,j)
         dz_vel(I,j,k) = dz_harm(I,j,k)
 
@@ -1790,11 +1789,11 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
         z_i(I,j,k) =  z_i(I,j,k+1) + dz_harm(I,j,k) * I_Hbbl(I,j)
       end do
     else
-      do concurrent (j=js:je, i=isq:ieq+1)
+      do concurrent (j=js:je, I=Isq:Ieq+1)
         zcol(i,j) = zcol(i,j) + dz(i,j,k)
       end do
 
-      do concurrent (j=js:je, i=isq:ieq, do_i(i,j))
+      do concurrent (j=js:je, i=Isq:Ieq, do_i(I,j))
         zh(I,j) = zh(I,j) + dz_harm(I,j,k)
 
         z_clear = max(zcol(i,j),zcol(i+1,j)) + Dmin(I,j)
@@ -2029,13 +2028,13 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
     endif !}
 
     do K=1,nz+1
-      do concurrent (j=js:je, i=isq:ieq, do_i(i,j))
+      do concurrent (j=js:je, I=Isq:Ieq, do_i(I,j))
         CS%a_u(I,j,K) = min(a_cpl_max, a_cpl(I,j,K))
       end do
     enddo
 
     do k=1,nz
-      do concurrent (j=js:je, i=isq:ieq, do_i(i,j))
+      do concurrent (j=js:je, I=Isq:Ieq, do_i(I,j))
         CS%h_u(I,j,k) = hvel(I,j,k) + h_neglect
       end do
     enddo
@@ -3229,17 +3228,17 @@ subroutine vertvisc_limit_vel(u, v, h, ADp, CDp, forces, visc, dt, G, GV, US, CS
     !!$OMP parallel do default(shared) private(trunc_any,CFL)
     ! optimize memory
     !do concurrent (j=js:je)
-    do concurrent (j=js:je, k=1:nz, i=isq:ieq)
-      trunc_any_array(i,j,k) = .false.
+    do concurrent (j=js:je, k=1:nz, I=Isq:Ieq)
+      trunc_any_array(I,j,k) = .false.
     end do
     if(CS%CFL_based_trunc) then
-      do concurrent (j=js:je, i=isq:ieq)
-          dowrite(i,j) = .false.
-          vel_report(i,j) = 3.0e8*US%m_s_to_L_T
+      do concurrent (j=js:je, I=Isq:Ieq)
+          dowrite(I,j) = .false.
+          vel_report(I,j) = 3.0e8*US%m_s_to_L_T
       end do
 
-      do concurrent (j=js:je, k=1:nz, i=isq:ieq)
-            if (abs(u(i,j,k)) < CS%vel_underflow) u(i,j,k) = 0.0
+      do concurrent (j=js:je, k=1:nz, I=Isq:Ieq)
+            if (abs(u(I,j,k)) < CS%vel_underflow) u(I,j,k) = 0.0
             if (u(i,j,k) < 0.0) then
               CFL = (-u(I,j,k) * dt) * (G%dy_Cu(I,j) * G%IareaT(i+1,j))
             else
@@ -3252,11 +3251,11 @@ subroutine vertvisc_limit_vel(u, v, h, ADp, CDp, forces, visc, dt, G, GV, US, CS
             end if
       end do
 
-      do concurrent (j = js:je, i=isq:ieq, dowrite(i,j))
+      do concurrent (j = js:je, I=Isq:Ieq, dowrite(I,j))
         u_old(I,j,:) = u(I,j,:)
       end do
 
-      do concurrent (j=js:je, k=1:nz, i=isq:ieq, trunc_any_array(i,j,k))
+      do concurrent (j=js:je, k=1:nz, I=Isq:Ieq, trunc_any_array(I,j,k))
           if ((u(I,j,k) * (dt * G%dy_Cu(I,j))) * G%IareaT(i+1,j) < -CS%CFL_trunc) then
             u(I,j,k) = (-0.9*CS%CFL_trunc) * (G%areaT(i+1,j) / (dt * G%dy_Cu(I,j)))
             if (h(i,j,k) + h(i+1,j,k) > H_report) CS%ntrunc = CS%ntrunc + 1
@@ -3268,9 +3267,9 @@ subroutine vertvisc_limit_vel(u, v, h, ADp, CDp, forces, visc, dt, G, GV, US, CS
 
     else
       do j = js, je
-        do i = isq, ieq
-          dowrite(i,j) = .false.
-          vel_report(i,j) = maxvel
+        do I = Isq, Ieq
+          dowrite(I,j) = .false.
+          vel_report(I,j) = maxvel
         end do
       end do
 
@@ -3303,7 +3302,7 @@ subroutine vertvisc_limit_vel(u, v, h, ADp, CDp, forces, visc, dt, G, GV, US, CS
     if (CS%CFL_based_trunc) then
   ! JORGE TODO: PORT
       do k=1,nz
-      do concurrent (j=js:je, i=isq:ieq)
+      do concurrent (j=js:je, I=Isq:Ieq)
         if (abs(u(I,j,k)) < CS%vel_underflow) then ; u(I,j,k) = 0.0
         elseif ((u(I,j,k) * (dt * G%dy_Cu(I,j))) * G%IareaT(i+1,j) < -CS%CFL_trunc) then
           u(I,j,k) = (-0.9*CS%CFL_trunc) * (G%areaT(i+1,j) / (dt * G%dy_Cu(I,j)))
