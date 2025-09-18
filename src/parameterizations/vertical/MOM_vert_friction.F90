@@ -3349,7 +3349,7 @@ subroutine vertvisc_limit_vel(u, v, h, ADp, CDp, forces, visc, dt, G, GV, US, CS
             end if
       end do
 
-      do concurrent (j = jsq:Jeq, i=is:ie, dowrite(i,j))
+      do concurrent (J = Jsq:Jeq, i=is:ie, dowrite(i,j))
         v_old(I,j,:) = v(I,j,:)
       end do
 
