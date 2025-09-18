@@ -2179,8 +2179,6 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
         hvel(i,J,k) = h_harm(i,J)
         dz_vel(i,J,k) = dz_harm(i,J,k)
 
-        tmp1 = v(i,j,k)
-        tmp2 = h_delta(i,j)
         if (v(i,J,k) * h_delta(i,J) < 0.) then
           z2 = z_i(i,J,k+1)
           botfn = 1. / (1. + 0.09 * z2 * z2 * z2 * z2 * z2 * z2)
