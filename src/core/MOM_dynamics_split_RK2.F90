@@ -1052,7 +1052,7 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
 
   ! u = u + dt*( u_bc_accel + u_accel_bt )
   call cpu_clock_begin(id_clock_mom_update)
-  !$omp taget update to(u_inst, v_inst, v_bc_accel, u_bc_accel)
+  !$omp target update to(u_inst, v_inst, v_bc_accel, u_bc_accel)
   do concurrent (k=1:nz)
     do concurrent (j=js:je, I=Isq:Ieq)
       u_inst(I,j,k) = G%mask2dCu(I,j) * (u_inst(I,j,k) + dt * &
