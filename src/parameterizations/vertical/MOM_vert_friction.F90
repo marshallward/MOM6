@@ -1000,7 +1000,7 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
 
 
   if (associated(ADp%dv_dt_visc)) then
-      do concurrent (k=1:nz,j=jsq:jeq, i=is:ie)
+      do concurrent (k=1:nz,J=Jsq:Jeq, i=is:ie)
           ADp%dv_dt_visc(i,J,k) = v(i,J,k)
       end do
   endif
@@ -1014,7 +1014,7 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
   endif
 
   if (associated(ADp%dv_dt_str)) then
-      do concurrent (k=1:nz, j=jsq:jeq, i=is:ie)
+      do concurrent (k=1:nz, J=Jsq:Jeq, i=is:ie)
           ADp%dv_dt_str(i,J,k) = 0.0
       end do
   endif
@@ -1026,7 +1026,7 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
   ! the wind stress is applied as a stress boundary condition.
   if (CS%direct_stress) then
   ! TODO JORGE: refactor this one later
-    do concurrent (j=jsq:jeq, i=is:ie, G%mask2dCv(i,j) > 0.0)
+    do concurrent (J=Jsq:Jeq, i=is:ie, G%mask2dCv(i,J) > 0.0)
           surface_stress(i,J) = 0.0
           zDS = 0.0
           stress = dt_Rho0 * forces%tauy(i,J)
@@ -1041,7 +1041,7 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
           enddo
     end do
   else
-    do concurrent (j=jsq:jeq, i=is:ie)
+    do concurrent (J=Jsq:Jeq, i=is:ie)
         surface_stress(i,J) = dt_Rho0 * (G%mask2dCv(i,J) * forces%tauy(i,J))
     end do
   endif
@@ -1051,16 +1051,16 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
   if (allocated(visc%Ray_v)) then
     !$omp target enter data map(to: visc%Ray_v)
 
-    do concurrent (j=jsq:jeq, i=is:ie)
+    do concurrent (J=Jsq:Jeq, i=is:ie)
       Ray(i,J) = visc%Ray_v(i,J,1)
     end do
   else
-    do concurrent (j=jsq:jeq, i=is:ie)
+    do concurrent (J=Jsq:Jeq, i=is:ie)
       Ray(i,J) = 0.
     end do
   endif
 
-  do concurrent (j=jsq:jeq, i=is:ie, G%mask2dCv(i,j) > 0.0)
+  do concurrent (J=Jsq:Jeq, i=is:ie, G%mask2dCv(i,j) > 0.0)
         b_denom_1 = CS%h_v(i,J,1) + dt * (Ray(i,J) + CS%a_v(i,J,1))
         b1(i,J) = 1.0 / (b_denom_1 + dt*CS%a_v(i,J,2))
         d1(i,J) = b_denom_1 * b1(i,J)
@@ -1069,7 +1069,7 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
 
 
   if (associated(ADp%dv_dt_str)) then
-  do concurrent (j=jsq:jeq, i=is:ie, G%mask2dCv(i,j) > 0.0)
+  do concurrent (J=Jsq:Jeq, i=is:ie, G%mask2dCv(i,j) > 0.0)
           ADp%dv_dt_str(i,J,1) = b1(i,J) * (CS%h_v(i,J,1) * ADp%dv_dt_str(i,J,1) + surface_stress(i,J) * Idt)
   end do
   endif
@@ -1078,12 +1078,12 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
 
   do k=2,nz
     if (allocated(visc%Ray_v)) then
-      do concurrent (j=jsq:jeq, i=is:ie)
+      do concurrent (J=Jsq:Jeq, i=is:ie)
         Ray(i,J) = visc%Ray_v(i,J,k)
       end do
     endif
 
-    do concurrent (j=jsq:jeq, i=is:ie, G%mask2dCv(i,j) > 0.0)
+    do concurrent (J=Jsq:Jeq, i=is:ie, G%mask2dCv(i,j) > 0.0)
       c1(i,J,k) = dt * CS%a_v(i,J,K) * b1(i,J)
       b_denom_1 = CS%h_v(i,J,k) + dt * (Ray(i,J) + CS%a_v(i,J,K)*d1(i,J))
       b1(i,J) = 1.0 / (b_denom_1 + dt * CS%a_v(i,J,K+1))
@@ -1099,18 +1099,18 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
 
 
   do k=nz-1,1,-1
-    do concurrent (j=jsq:jeq, i=is:ie, G%mask2dCv(i,j) > 0.0)
+    do concurrent (J=Jsq:Jeq, i=is:ie, G%mask2dCv(i,j) > 0.0)
       v(i,J,k) = v(i,J,k) + c1(i,J,k+1) * v(i,J,k+1)
     end do
   enddo
 
   if (associated(ADp%dv_dt_str)) then
-    do concurrent (j=jsq:jeq, i=is:ie)
+    do concurrent (J=Jsq:Jeq, i=is:ie)
       if (abs(ADp%dv_dt_str(i,J,nz)) < accel_underflow) ADp%dv_dt_str(i,J,nz) = 0.0
     end do
 
     do k=nz-1,1,-1
-      do concurrent (j=jsq:jeq, i=is:ie, G%mask2dCv(i,j) > 0.0)
+      do concurrent (J=Jsq:Jeq, i=is:ie, G%mask2dCv(i,j) > 0.0)
         ADp%dv_dt_str(i,J,k) = ADp%dv_dt_str(i,J,k) + c1(i,J,k+1) * ADp%dv_dt_str(i,J,k+1)
         if (abs(ADp%dv_dt_str(i,J,k)) < accel_underflow) ADp%dv_dt_str(i,J,k) = 0.0
       end do
@@ -1179,7 +1179,7 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
 
   if (associated(ADp%dv_dt_visc)) then
     do k=1,nz
-      do concurrent (j=jsq:jeq, i=is:ie)
+      do concurrent (J=Jsq:Jeq, i=is:ie)
           ADp%dv_dt_visc(i,J,k) = (v(i,J,k) - ADp%dv_dt_visc(i,J,k))*Idt
           if (abs(ADp%dv_dt_visc(i,J,k)) < accel_underflow) ADp%dv_dt_visc(i,J,k) = 0.0
       end do
@@ -1194,13 +1194,13 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
 
   ! JORGE TODO: this has to be malloced
   if (present(tauy_bot)) then
-    do concurrent (j=jsq:jeq, i=is:ie)
+    do concurrent (J=Jsq:Jeq, i=is:ie)
         tauy_bot(i,J) = GV%H_to_RZ * (v(i,J,nz) * CS%a_v(i,J,nz+1))
     end do
 
     if (allocated(visc%Ray_v)) then
       do k=1,nz
-        do concurrent (j=jsq:jeq, i=is:ie)
+        do concurrent (J=Jsq:Jeq, i=is:ie)
             tauy_bot(i,J) = tauy_bot(i,J) + GV%H_to_RZ * (visc%Ray_v(i,J,k)*v(i,J,k))
         end do
       end do
@@ -1438,13 +1438,13 @@ subroutine vertvisc_remnant(visc, visc_rem_u, visc_rem_v, dt, G, GV, US, CS)
       Ray(i,J) = visc%Ray_v(i,J,1)
     enddo ; enddo
   else
-    do concurrent (j=jsq:jeq, i=is:ie)
+    do concurrent (J=Jsq:Jeq, i=is:ie)
       Ray(i,J) = 0.
     end do
   endif
 
   !! TODO JORGE: PORT
-  do concurrent (j=jsq:jeq, i=is:ie, G%mask2dCv(i,j)>0.)
+  do concurrent (J=Jsq:Jeq, i=is:ie, G%mask2dCv(i,j)>0.)
     b_denom_1 = CS%h_v(i,J,1) + dt * (Ray(i,J) + CS%a_v(i,J,1))
     b1(i,J) = 1.0 / (b_denom_1 + dt*CS%a_v(i,J,2))
     d1(i,J) = b_denom_1 * b1(i,J)
@@ -1459,7 +1459,7 @@ subroutine vertvisc_remnant(visc, visc_rem_u, visc_rem_v, dt, G, GV, US, CS)
     endif
 
   !! TODO JORGE: PORT
-  do concurrent (j=jsq:jeq, i=is:ie, G%mask2dCv(i,j)>0.)
+  do concurrent (J=Jsq:Jeq, i=is:ie, G%mask2dCv(i,j)>0.)
       c1(i,J,k) = dt * CS%a_v(i,J,K) * b1(i,J)
       b_denom_1 = CS%h_v(i,J,k) + dt * (Ray(i,J) + CS%a_v(i,J,K) * d1(i,J))
       b1(i,J) = 1.0 / (b_denom_1 + dt * CS%a_v(i,J,K+1))
@@ -1470,7 +1470,7 @@ subroutine vertvisc_remnant(visc, visc_rem_u, visc_rem_v, dt, G, GV, US, CS)
 
   !! TODO JORGE: PORT
   do k=nz-1,1,-1
-    do concurrent (j=jsq:jeq, i=is:ie, G%mask2dCv(i,j)>0.)
+    do concurrent (J=Jsq:Jeq, i=is:ie, G%mask2dCv(i,j)>0.)
       visc_rem_v(i,J,k) = visc_rem_v(i,J,k) + c1(i,J,k+1) * visc_rem_v(i,J,k+1)
     end do
   enddo
@@ -2064,14 +2064,14 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
   ij = touch_ij(i,j)
 
     !JORGE TODO: PORT
-  do concurrent (j=jsq:jeq, i=is:ie)
+  do concurrent (J=Jsq:Jeq, i=is:ie)
     do_i(i,J) = G%mask2dCv(i,J) > 0.
   end do
 
 
   if (CS%bottomdraglaw) then
     !JORGE TODO: PORT
-  do concurrent (j=jsq:jeq, i=is:ie, do_i(i,j))
+  do concurrent (J=Jsq:Jeq, i=is:ie, do_i(i,j))
       kv_bbl(i,J) = visc%Kv_bbl_v(i,J)
       bbl_thick(i,J) = visc%bbl_thick_v(i,J) + dz_neglect
       I_Hbbl(i,J) = 1. / bbl_thick(i,J)
@@ -2080,7 +2080,7 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
 
 
     !JORGE TODO: PORT
-  do concurrent (j=jsq:jeq, i=is:ie)
+  do concurrent (J=Jsq:Jeq, i=is:ie)
     Dmin(i,J) = min(G%bathyT(i,j), G%bathyT(i,j+1))
     zi_dir(i,J) = 0
   end do
@@ -2108,18 +2108,18 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
   endif
 
     !JORGE TODO: PORT
-  do concurrent (j=jsq:jeq, i=is:ie)
+  do concurrent (J=Jsq:Jeq, i=is:ie)
     z_i(i,J,nz+1) = 0.
   end do
 
 
   if (.not. CS%harmonic_visc) then
     !JORGE TODO: PORT
-  do concurrent (j=jsq:jeq, i=is:ie)
+  do concurrent (J=Jsq:Jeq, i=is:ie)
       zh(i,J) = 0.
   end do
 
-  do concurrent (j=jsq:jeq+1, i=is:ie)
+  do concurrent (J=Jsq:Jeq+1, i=is:ie)
       zcol(i,j) = -G%bathyT(i,j)
   end do
   endif
@@ -2134,7 +2134,7 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
 
   do k=nz,1,-1
 
-    do concurrent (j=jsq:jeq, i=is:ie, do_i(i,j))
+    do concurrent (J=Jsq:Jeq, i=is:ie, do_i(i,j))
       h_harm(i,J) = 2. * h(i,j,k) * h(i,j+1,k) / (h(i,j,k) + h(i,j+1,k) + h_neglect)
       h_arith(i,J) = 0.5 * (h(i,j+1,k) + h(i,j,k))
       h_delta(i,J) = h(i,j+1,k) - h(i,j,k)
@@ -2176,7 +2176,7 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
       ! for the vertical viscosity (hvel and dz_vel).  Near the bottom an
       ! upwind biased thickness is used to control the effect of spurious
       ! Montgomery potential gradients at the bottom where nearly massless
-      do concurrent (j=jsq:jeq, i=is:ie, do_i(i,j))
+      do concurrent (J=Jsq:Jeq, i=is:ie, do_i(i,j))
         hvel(i,J,k) = h_harm(i,J)
         dz_vel(i,J,k) = dz_harm(i,J,k)
 
@@ -2192,11 +2192,11 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
       enddo
 
     else ! Not harmonic_visc
-      do concurrent (j=jsq:jeq+1, i=is:ie)
+      do concurrent (J=Jsq:Jeq+1, i=is:ie)
         zcol(i,j) = zcol(i,j) + dz(i,j,k)
       end do
 
-      do concurrent (j=jsq:jeq, i=is:ie, do_i(i,j))
+      do concurrent (J=Jsq:Jeq, i=is:ie, do_i(i,j))
         zh(i,J) = zh(i,J) + dz_harm(i,J,k)
 
         z_clear = max(zcol(i,j), zcol(i,j+1)) + Dmin(i,J)
@@ -2432,13 +2432,13 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
     !JORGE TODO: PORT
 
     do K=1,nz+1
-    do concurrent (j=jsq:jeq, i=is:ie, do_i(i,j))
+    do concurrent (J=Jsq:Jeq, i=is:ie, do_i(i,j))
         CS%a_v(i,J,K) = min(a_cpl_max, a_cpl(i,J,K))
     end do
     enddo
 
     do k=1,nz
-    do concurrent (j=jsq:jeq, i=is:ie, do_i(i,j))
+    do concurrent (J=Jsq:Jeq, i=is:ie, do_i(i,j))
         CS%h_v(i,J,k) = hvel(i,J,k) + h_neglect
     end do
     enddo
@@ -3329,16 +3329,16 @@ subroutine vertvisc_limit_vel(u, v, h, ADp, CDp, forces, visc, dt, G, GV, US, CS
   if (len_trim(CS%v_trunc_file) > 0) then
 
 
-    do concurrent (j=jsq:jeq, k=1:nz, i=is:ie)
+    do concurrent (J=Jsq:Jeq, k=1:nz, i=is:ie)
       trunc_any_array(i,j,k) = .false.
     end do
     if(CS%CFL_based_trunc) then
-      do concurrent (j=jsq:jeq, i=is:ie)
+      do concurrent (J=Jsq:Jeq, i=is:ie)
           dowrite(i,j) = .false.
           vel_report(i,j) = 3.0e8*US%m_s_to_L_T
       end do
 
-      do concurrent (j=jsq:jeq, k=1:nz, i=is:ie)
+      do concurrent (J=Jsq:Jeq, k=1:nz, i=is:ie)
             if (abs(v(i,j,k)) < CS%vel_underflow) v(i,j,k) = 0.0
             if (v(i,j,k) < 0.0) then
               CFL = (-v(I,j,k) * dt) * (G%dx_Cv(I,j) * G%IareaT(i+1,j))
@@ -3352,11 +3352,11 @@ subroutine vertvisc_limit_vel(u, v, h, ADp, CDp, forces, visc, dt, G, GV, US, CS
             end if
       end do
 
-      do concurrent (j = jsq:jeq, i=is:ie, dowrite(i,j))
+      do concurrent (j = jsq:Jeq, i=is:ie, dowrite(i,j))
         v_old(I,j,:) = v(I,j,:)
       end do
 
-      do concurrent (j=jsq:jeq, k=1:nz, i=is:ie, trunc_any_array(i,j,k))
+      do concurrent (J=Jsq:Jeq, k=1:nz, i=is:ie, trunc_any_array(i,j,k))
           if ((v(I,j,k) * (dt * G%dx_Cv(I,j))) * G%IareaT(i+1,j) < -CS%CFL_trunc) then
             v(I,j,k) = (-0.9*CS%CFL_trunc) * (G%areaT(i+1,j) / (dt * G%dx_Cv(I,j)))
             if (h(i,j,k) + h(i+1,j,k) > H_report) CS%ntrunc = CS%ntrunc + 1
@@ -3367,14 +3367,14 @@ subroutine vertvisc_limit_vel(u, v, h, ADp, CDp, forces, visc, dt, G, GV, US, CS
       end do
 
     else
-      do j = jsq, jeq
+      do J = Jsq, Jeq
         do i = is, ie
           dowrite(i,j) = .false.
           vel_report(i,j) = maxvel
         end do
       end do
 
-      do j = jsq, jeq
+      do J = Jsq, Jeq
         do k=1,nz ; do I=Is,Ie
           if (abs(v(I,j,k)) < CS%vel_underflow) then ; v(I,j,k) = 0.0
           elseif (abs(v(I,j,k)) > maxvel) then
@@ -3383,11 +3383,11 @@ subroutine vertvisc_limit_vel(u, v, h, ADp, CDp, forces, visc, dt, G, GV, US, CS
         enddo ; enddo
       end do
 
-      do j = jsq, jeq; do I=Is,Ie ; if (dowrite(I,j)) then
+      do J = Jsq, Jeq; do I=Is,Ie ; if (dowrite(I,j)) then
         v_old(I,j,:) = v(I,j,:)
       endif ; enddo ; enddo
 
-      do j = jsq, jeq
+      do J = Jsq, Jeq
         do k=1,nz ; do I=Is,Ie
         if(trunc_any_array(i,j,k)) then
         if (abs(v(I,j,k)) > maxvel) then
@@ -3403,7 +3403,7 @@ subroutine vertvisc_limit_vel(u, v, h, ADp, CDp, forces, visc, dt, G, GV, US, CS
     if (CS%CFL_based_trunc) then
   ! JORGE TODO: PORT
       do k=1,nz
-      do concurrent (j=jsq:jeq, i=is:ie)
+      do concurrent (J=Jsq:Jeq, i=is:ie)
         if (abs(v(i,J,k)) < CS%vel_underflow) then ; v(i,J,k) = 0.0
         elseif ((v(i,J,k) * (dt * G%dx_Cv(i,J))) * G%IareaT(i,j+1) < -CS%CFL_trunc) then
           v(i,J,k) = (-0.9*CS%CFL_trunc) * (G%areaT(i,j+1) / (dt * G%dx_Cv(i,J)))
