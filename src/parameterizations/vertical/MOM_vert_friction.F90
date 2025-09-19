@@ -3485,8 +3485,9 @@ subroutine vertvisc_init(MIS, Time, G, GV, US, param_file, diag, ADp, dirs, &
                             "control structure.")
     return
   endif
-  allocate(CS)
 #endif
+  allocate(CS)
+  !$omp target enter data map(to: CS)
   CS%initialized = .true.
 
   if (GV%Boussinesq) then; thickness_units = "m"
