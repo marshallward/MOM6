@@ -628,7 +628,7 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
     do concurrent (j=js:je, i=isq:ieq)
       up(I,j,k) = G%mask2dCu(I,j) * (u_inst(I,j,k) + dt * u_bc_accel(I,j,k))
     end do
-    do concurrent (j=jsq:jeq, i=is:ie)
+    do concurrent (J=Jsq:Jeq, i=is:ie)
       vp(i,J,k) = G%mask2dCv(i,J) * (v_inst(i,J,k) + dt * v_bc_accel(i,J,k))
     end do
   end do
@@ -1058,7 +1058,7 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
       u_inst(I,j,k) = G%mask2dCu(I,j) * (u_inst(I,j,k) + dt * &
                       (u_bc_accel(I,j,k) + CS%u_accel_bt(I,j,k)))
     end do
-    do concurrent (j=jsq:jeq, I=Is:Ie)
+    do concurrent (J=Jsq:Jeq, i=is:ie)
       v_inst(i,J,k) = G%mask2dCv(i,J) * (v_inst(i,J,k) + dt * &
                       (v_bc_accel(i,J,k) + CS%v_accel_bt(i,J,k)))
     end do
@@ -1185,10 +1185,10 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
 
   !$omp target update to(uhtr, uh, vhtr, vh)
   do concurrent (k=1:nz)
-    do concurrent (j=js-2:je+2, i=isq-2:ieq+2)
+    do concurrent (j=js-2:je+2, I=Isq-2:Ieq+2)
       uhtr(I,j,k) = uhtr(I,j,k) + uh(I,j,k)*dt
     end do
-    do concurrent (j=jsq-2:jeq+2, i=is-2:ie+2)
+    do concurrent (J=Jsq-2:Jeq+2, i=is-2:ie+2)
       vhtr(i,J,k) = vhtr(i,J,k) + vh(i,J,k)*dt
     end do
   enddo
