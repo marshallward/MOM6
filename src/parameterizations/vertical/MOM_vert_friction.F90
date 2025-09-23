@@ -2850,8 +2850,10 @@ subroutine find_coupling_coef(a_cpl, hvel, do_i, h_harm, bbl_thick, kv_bbl, z_i,
     endif
 
     ! Determine the thickness of the surface ocean boundary layer and its extent in index space.
-    nk_in_ml(:,:) = 0
-    !$omp target enter data map(to: nk_in_ml)
+    !$omp target enter data map(alloc: nk_in_ml)
+    do concurrent (j=js:je, i=is:ie, do_i(i,j))
+      nk_in_ml(i,j) = 0
+    enddo
 
     if (CS%dynamic_viscous_ML) then
       ! The fractional number of layers that are within the viscous boundary layer were
@@ -3024,6 +3026,7 @@ subroutine find_coupling_coef(a_cpl, hvel, do_i, h_harm, bbl_thick, kv_bbl, z_i,
 
   !$omp target exit data map(delete: u_star, absf, tau_mag)
   !$omp target exit data map(delete: z_t, Kv_tot, Kv_add)
+  !$omp target exit data map(delete: nk_in_ml)
   !$omp target exit data map(release: visc%Kv_shear)
 
 end subroutine find_coupling_coef
