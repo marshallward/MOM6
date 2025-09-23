@@ -690,7 +690,7 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
   endif
 
   !$omp target enter data map(to: ADp)
-  !$omp target update to(u, h,v)
+  !!$omp target update to(u, h,v)
   !$omp target enter data map(alloc: surface_stress)
   !$omp target enter data map(alloc: ADp%dv_dt_str)
   !$omp target enter data map(alloc: ADp%du_dt_str)
@@ -1178,14 +1178,14 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
 
   call vertvisc_limit_vel(u, v, h, ADp, CDp, forces, visc, dt, G, GV, US, CS)
 
-  !$omp target exit data map(delete: b1, c1, d1)
+  !$omp target exit data map(delete: b1, c1, d1, Ray)
 
-  !$omp target update from(u,v)
+  !!$omp target update from(u,v)
   !$omp target exit data map(from: ADp%du_dt_str, ADp%dv_dt_str)
-  !$omp target exit data map(from: surface_stress)
-  !$omp target exit data map(from: Ray)
   !$omp target exit data map(delete: ADp)
+  !$omp target exit data map(delete: surface_stress)
   !$omp target exit data map(delete: visc%Ray_u) if (allocated(visc%Ray_u))
+  !$omp target exit data map(delete: visc%Ray_v) if (allocated(visc%Ray_v))
 
   ! Here the velocities associated with open boundary conditions are applied.
   if (associated(OBC)) then
@@ -1303,7 +1303,6 @@ subroutine vertvisc_remnant(visc, visc_rem_u, visc_rem_v, dt, G, GV, US, CS)
          "Module must be initialized before it is used.")
 
   ! Find the zonal viscous remnant using a modification of a standard tridagonal solver.
-  !$omp target enter data map(to: visc_rem_u, visc_rem_v)
 
   !$omp target enter data map(alloc: b1, c1, d1, Ray, b_denom_1)
 
@@ -1386,10 +1385,10 @@ subroutine vertvisc_remnant(visc, visc_rem_u, visc_rem_v, dt, G, GV, US, CS)
       visc_rem_v(i,J,k) = visc_rem_v(i,J,k) + c1(i,J,k+1) * visc_rem_v(i,J,k+1)
     enddo
   enddo
+  !$omp target exit data map(delete: b1, c1, d1, Ray, b_denom_1)
 
-  !$omp target update from(visc_rem_u, visc_rem_v)
-  !$omp target exit data map(delete: b1, c1, d1, Ray,  b_denom_1)
   if (CS%debug) then
+    !$omp target update from(visc_rem_u, visc_rem_v)
     call uvchksum("visc_rem_[uv]", visc_rem_u, visc_rem_v, G%HI, haloshift=0, &
                   scalar_pair=.true.)
   endif
@@ -1555,15 +1554,17 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
   endif
 
   call find_ustar(forces, tv, Ustar_2d, G, GV, US, halo=1)
+  !$omp target enter data map(to: Ustar_2d)
 
   ! First do u-points
 
   ! Force IPO optimizations (e.g. Intel)
   ij = touch_ij(i,j)
 
-  do j=js,je ; do I=Isq,Ieq
+  !$omp target enter data map(alloc: do_i)
+  do concurrent (j=js:je, I=Isq:Ieq)
     do_i(I,j) = G%mask2dCu(I,j) > 0.
-  enddo ; enddo
+  enddo
 
   if (CS%bottomdraglaw) then
     do j=js,je ; do I=Isq,Ieq ; if (do_i(I,j)) then
@@ -1571,10 +1572,8 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
     endif ; enddo ; enddo
   endif
 
-  !$omp target enter data map(to: do_i)
-
   !$omp target enter data map(alloc: a_cpl, h_ml)
-  !$omp target enter data map(alloc: i_hbbl, bbl_thick, kv_bbl)
+  !$omp target enter data map(alloc: kv_bbl, bbl_thick, I_Hbbl)
   !$omp target enter data map(alloc: h_harm, h_arith, dz_harm, h_delta, dz_arith, hvel, dz_vel, z_i)
   !$omp target enter data map(alloc: Dmin, zi_dir)
   !$omp target enter data map(alloc: zh, zcol)
@@ -2325,12 +2324,13 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
   endif
 
   !$omp target exit data map(release: a_cpl, h_ml)
-  !$omp target exit data map(from: do_i)
 
-  !$omp target exit data map(delete: bbl_thick, i_hbbl, kv_bbl)
+  !$omp target exit data map(delete: kv_bbl, bbl_thick, I_Hbbl)
   !$omp target exit data map(delete: h_harm, h_arith, dz_harm, h_delta, dz_arith, z_i, hvel, dz_vel)
   !$omp target exit data map(delete: zh, zcol)
   !$omp target exit data map(delete: Dmin, zi_dir)
+  !$omp target exit data map(delete: do_i)
+  !$omp target exit data map(delete: Ustar_2d)
 
   ! Diagnose total Kv at v-points
   if (CS%id_Kv_v > 0) then
@@ -2518,10 +2518,8 @@ subroutine find_coupling_coef(a_cpl, hvel, do_i, h_harm, bbl_thick, kv_bbl, z_i,
   enddo
 
   !$omp target enter data map(alloc: z_t, Kv_tot, Kv_add)
-  !$omp target enter data map(alloc: absf)
-  !$omp target enter data map(alloc: u_star, tau_mag)
+  !$omp target enter data map(alloc: u_star, absf, tau_mag)
   !$omp target enter data map(to: visc%Kv_shear)
-  !$omp target enter data map(to: Ustar_2d)
 
   if (CS%Kvml_invZ2 > 0. .and. .not. do_shelf) then
     I_Hmix = 1. / (CS%Hmix + h_neglect)
@@ -2859,7 +2857,6 @@ subroutine find_coupling_coef(a_cpl, hvel, do_i, h_harm, bbl_thick, kv_bbl, z_i,
       enddo
     endif
 
-
     ! Determine the thickness of the surface ocean boundary layer and its extent in index space.
     nk_in_ml(:,:) = 0
     !$omp target enter data map(to: nk_in_ml)
@@ -3034,15 +3031,9 @@ subroutine find_coupling_coef(a_cpl, hvel, do_i, h_harm, bbl_thick, kv_bbl, z_i,
   endif
 
   !check, nk_in_ml can probably be released, instead of frommed
-  !$omp target update from(bbl_thick, kv_bbl, Kv_add)
-  !$omp target update from(z_t, Kv_tot)
-  !$omp target exit data map(from: u_star, tau_mag)
-  !$omp target exit data map(from: absf, nk_in_ml)
-  !$omp target exit data map(delete: u_star, tau_mag)
-  !$omp target exit data map(delete: absf)
+  !$omp target exit data map(delete: u_star, absf, tau_mag)
   !$omp target exit data map(delete: z_t, Kv_tot, Kv_add)
   !$omp target exit data map(release: visc%Kv_shear)
-  !$omp target exit data map(release: Ustar_2d)
 
 end subroutine find_coupling_coef
 
