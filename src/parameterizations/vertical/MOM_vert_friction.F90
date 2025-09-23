@@ -3331,15 +3331,6 @@ subroutine vertvisc_init(MIS, Time, G, GV, US, param_file, diag, ADp, dirs, &
   character(len=40)  :: thickness_units
   real :: Kv_mks ! KVML in MKS [m2 s-1]
 
-  ! TODO: Remove?
-#ifndef __NVCOMPILER_LLVM__
-    if (associated(CS)) then
-    call MOM_error(WARNING, "vertvisc_init called with an associated "// &
-                            "control structure.")
-    return
-  endif
-  allocate(CS)
-#endif
   CS%initialized = .true.
 
   if (GV%Boussinesq) then; thickness_units = "m"
