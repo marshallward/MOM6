@@ -525,7 +525,6 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
   call PressureForce(h, tv, CS%PFu, CS%PFv, G, GV, US, CS%PressureForce_CSp, &
                      CS%ALE_CSp, CS%ADp, p_surf, CS%pbce, CS%eta_PF)
 
-  
   !$omp target update from(CS%PFu, CS%PFv, CS%pbce)
 
   if (dyn_p_surf) then
@@ -584,7 +583,6 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
     call CorAdCalc(u_av, v_av, h_av, uh, vh, CS%CAu_pred, CS%CAv_pred, CS%OBC, CS%AD_pred, &
                    G, GV, US, CS%CoriolisAdv, pbv, Waves=Waves)
     !$omp target update from(CS%CAu_pred, CS%CAv_pred)
-    
     call cpu_clock_end(id_clock_Cor)
     if (showCallTree) call callTree_wayPoint("done with CorAdCalc (step_MOM_dyn_split_RK2)")
   endif
@@ -651,7 +649,9 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
   !$omp target update to(up, vp, h, dz)
   call vertvisc_coef(up, vp, h, dz, forces, visc, tv, dt, G, GV, US, CS%vertvisc_CSp, CS%OBC, VarMix)
   
+  !$omp target update to(CS%visc_rem_u, CS%visc_rem_v)
   call vertvisc_remnant(visc, CS%visc_rem_u, CS%visc_rem_v, dt, G, GV, US, CS%vertvisc_CSp)
+  !$omp target update from(CS%visc_rem_u, CS%visc_rem_v)
   
   call cpu_clock_end(id_clock_vertvisc)
   if (showCallTree) call callTree_wayPoint("done with vertvisc_coef (step_MOM_dyn_split_RK2)")
@@ -808,8 +808,11 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
 
     ! lFPpost must be false in the predictor step to avoid averaging into the diagnostics
     lFPpost = .false.
+    !$omp target update from(up, vp, h)
     call vertFPmix(up, vp, uold, vold, hbl, h, forces, dt_pred, lFPpost, CS%Cemp_NL,  &
                    G, GV, US, CS%vertvisc_CSp, CS%OBC, waves=waves)
+    !$omp target update to (up, vp)
+
     call vertvisc(up, vp, h, forces, visc, dt_pred, CS%OBC, CS%AD_pred, CS%CDp, G, &
                   GV, US, CS%vertvisc_CSp, CS%taux_bot, CS%tauy_bot, fpmix=CS%fpmix, waves=waves)
   else
@@ -817,6 +820,8 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
                   GV, US, CS%vertvisc_CSp, CS%taux_bot, CS%tauy_bot, waves=waves)
     
   endif
+  !$omp target update from(up, vp)
+  !$omp target update from(CS%taux_bot, CS%tauy_bot)
 
   if (showCallTree) call callTree_wayPoint("done with vertvisc (step_MOM_dyn_split_RK2)")
   if (G%nonblocking_updates) then
@@ -824,12 +829,14 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
     call start_group_pass(CS%pass_uvp, G%Domain, clock=id_clock_pass)
     call cpu_clock_begin(id_clock_vertvisc)
   endif
+  !$omp target update to(CS%visc_rem_u, CS%visc_rem_v)
   if (CS%visc_rem_dt_bug) then
     call vertvisc_remnant(visc, CS%visc_rem_u, CS%visc_rem_v, dt_pred, G, GV, US, CS%vertvisc_CSp)
     
   else
     call vertvisc_remnant(visc, CS%visc_rem_u, CS%visc_rem_v, dt, G, GV, US, CS%vertvisc_CSp)
   endif
+  !$omp target update from(CS%visc_rem_u, CS%visc_rem_v)
   call cpu_clock_end(id_clock_vertvisc)
 
   call do_group_pass(CS%pass_visc_rem, G%Domain, clock=id_clock_pass)
@@ -1104,8 +1111,11 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
 
   if (CS%fpmix) then
     lFPpost = .true.
+    !$omp target update from(u_inst, v_inst, h)
     call vertFPmix(u_inst, v_inst, uold, vold, hbl, h, forces, dt, lFPpost, CS%Cemp_NL, &
                    G, GV, US, CS%vertvisc_CSp, CS%OBC, Waves=Waves)
+    !$omp target update to(u_inst, v_inst)
+
     call vertvisc(u_inst, v_inst, h, forces, visc, dt, CS%OBC, CS%ADp, CS%CDp, G, GV, US, &
          CS%vertvisc_CSp, CS%taux_bot, CS%tauy_bot, fpmix=CS%fpmix, waves=waves)
 
@@ -1114,14 +1124,18 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
                   CS%vertvisc_CSp, CS%taux_bot, CS%tauy_bot, waves=waves)
     
   endif
+  !$omp target update from(u_inst, v_inst)
+  !$omp target update from(CS%taux_bot, CS%tauy_bot)
 
   if (G%nonblocking_updates) then
     call cpu_clock_end(id_clock_vertvisc)
     call start_group_pass(CS%pass_uv, G%Domain, clock=id_clock_pass)
     call cpu_clock_begin(id_clock_vertvisc)
   endif
-    call vertvisc_remnant(visc, CS%visc_rem_u, CS%visc_rem_v, dt, G, GV, US, CS%vertvisc_CSp)
-  
+  !$omp target update to(CS%visc_rem_u, CS%visc_rem_v)
+  call vertvisc_remnant(visc, CS%visc_rem_u, CS%visc_rem_v, dt, G, GV, US, CS%vertvisc_CSp)
+  !$omp target update from(CS%visc_rem_u, CS%visc_rem_v)
+
   call cpu_clock_end(id_clock_vertvisc)
   if (showCallTree) call callTree_wayPoint("done with vertvisc (step_MOM_dyn_split_RK2)")
 
@@ -1213,6 +1227,7 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
     CS%CAu_pred_stored = .false.
   endif
   
+
 
   ! The time-averaged free surface height has already been set by the last call to btstep.
 
@@ -1319,6 +1334,7 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
  !  call MOM_state_chksum("Corrector avg ", u_av, v_av, h_av, uh, vh, G, GV, US)
   endif
   
+
 
   if (showCallTree) call callTree_leave("step_MOM_dyn_split_RK2()")
   
@@ -1615,6 +1631,7 @@ subroutine initialize_dyn_split_RK2(u, v, h, tv, uh, vh, eta, Time, G, GV, US, p
 
   allocate(CS%taux_bot(IsdB:IedB,jsd:jed), source=0.0)
   allocate(CS%tauy_bot(isd:ied,JsdB:JedB), source=0.0)
+  !$omp target enter data map(to: CS%taux_bot, CS%tauy_bot)
 
   ALLOC_(CS%uhbt(IsdB:IedB,jsd:jed))          ; CS%uhbt(:,:)         = 0.0
   ALLOC_(CS%vhbt(isd:ied,JsdB:JedB))          ; CS%vhbt(:,:)         = 0.0
@@ -1627,9 +1644,9 @@ subroutine initialize_dyn_split_RK2(u, v, h, tv, uh, vh, eta, Time, G, GV, US, p
   !$omp target enter data map(alloc: CS%pbce, CS%eta_PF)
   ALLOC_(CS%u_accel_bt(IsdB:IedB,jsd:jed,nz)) ; CS%u_accel_bt(:,:,:) = 0.0
   ALLOC_(CS%v_accel_bt(isd:ied,JsdB:JedB,nz)) ; CS%v_accel_bt(:,:,:) = 0.0
+  !$omp target enter data map(alloc: CS%u_accel_bt, CS%v_accel_bt)
   ALLOC_(CS%PFu_Stokes(IsdB:IedB,jsd:jed,nz)) ; CS%PFu_Stokes(:,:,:) = 0.0
   ALLOC_(CS%PFv_Stokes(isd:ied,JsdB:JedB,nz)) ; CS%PFv_Stokes(:,:,:) = 0.0
-  !$omp target enter data map(alloc: CS%u_accel_bt, CS%v_accel_bt)
 
   MIS%diffu      => CS%diffu
   MIS%diffv      => CS%diffv
@@ -1690,7 +1707,7 @@ subroutine initialize_dyn_split_RK2(u, v, h, tv, uh, vh, eta, Time, G, GV, US, p
   call hor_visc_init(Time, G, GV, US, param_file, diag, CS%hor_visc, ADp=CS%ADp)
 
   allocate(CS%vertvisc_CSp)
-  !$omp target enter data map(to: CS%vertvisc_CSp)
+  !$omp target enter data map(alloc: CS%vertvisc_CSp)
   call vertvisc_init(MIS, Time, G, GV, US, param_file, diag, CS%ADp, dirs, &
                      ntrunc, CS%vertvisc_CSp, CS%fpmix)
   CS%set_visc_CSp => set_visc

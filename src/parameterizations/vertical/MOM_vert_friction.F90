@@ -512,7 +512,7 @@ subroutine find_coupling_coef_gl90(a_cpl_gl90, hvel, do_i, z_i, G, GV, CS, VarMi
         z2 = z_i(I,j,k)
         botfn = 1. / (1. + 0.09 * z2 * z2 * z2 * z2 * z2 * z2)
         a_cpl_gl90(I,j,K) = a_cpl_gl90(I,j,K) * (1. - botfn)
-      endif; enddo ; enddo
+      endif ; enddo ; enddo
     else
       ! compute viscosities at v-points
       do J=Js,Je ; do i=is,ie ; if (do_i(i,J)) then
@@ -687,26 +687,18 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
   if (associated(ADp%du_dt_visc)) then
     do k=1,nz ; do j=G%jsc,G%jec ; do I=Isq,Ieq
       ADp%du_dt_visc(I,j,k) = u(I,j,k)
-    enddo ; enddo; enddo
+    enddo ; enddo ; enddo
   endif
 
-
-  ! This should be conditional, but the first do-concurrent always copies the
-  ! array, so for now it always happens.
-  ! this could be a function
   !$omp target enter data map(to: ADp)
-  !$omp target update to(u, h,v)
-  !!omp target enter data map(to: u,v,h)
+  !!$omp target update to(u, h,v)
   !$omp target enter data map(alloc: surface_stress)
   !$omp target enter data map(alloc: ADp%dv_dt_str)
   !$omp target enter data map(alloc: ADp%du_dt_str)
-  !!$omp target enter data map(alloc: ADp%dv_dt_visc_gl90)
-  !!$omp target enter data map(alloc: ADp%du_dt_visc_gl90)
 
   if (associated(ADp%du_dt_visc_gl90)) then
-    ! probbs not used!
     do concurrent (k=1:nz, j=G%jsc:G%jec, I=Isq:Ieq)
-          ADp%du_dt_visc_gl90(I,j,k) = u(I,j,k)
+      ADp%du_dt_visc_gl90(I,j,k) = u(I,j,k)
     enddo
   endif
 
@@ -724,21 +716,18 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
   ! over the topmost Hmix fluid.  If DIRECT_STRESS is not defined,
   ! the wind stress is applied as a stress boundary condition.
   if (CS%direct_stress) then
-    do concurrent (j=G%jsc:G%jec, i=isq:ieq, G%mask2dCu(i,j) > 0.0)
-          surface_stress(I,j) = 0.0
-          zDS = 0.0
-          stress = dt_Rho0 * forces%taux(I,j)
-          do k = 1, nz
-            h_a = 0.5 * (h(i,j,k) + h(i+1,j,k)) + h_neglect
-            hfr = 1.0
-            if ((zDS+h_a) > Hmix) hfr = (Hmix - zDS) / h_a
-            u(I,j,k) = u(I,j,k) + I_Hmix * hfr * stress
-            if (associated(ADp%du_dt_str)) ADp%du_dt_str(i,j,k) = (I_Hmix * hfr * stress) * Idt
-            zDS = zDS + h_a
-            if (zDS >= Hmix) exit
-          end do
-    end do
-
+    do concurrent (j=G%jsc:G%jec, I=Isq:Ieq, G%mask2dCu(i,j) > 0.0)
+      surface_stress(I,j) = 0.0
+      zDS = 0.0
+      stress = dt_Rho0 * forces%taux(I,j)
+      do k=1,nz
+        h_a = 0.5 * (h(i,j,k) + h(i+1,j,k)) + h_neglect
+        hfr = 1.0 ; if ((zDS+h_a) > Hmix) hfr = (Hmix - zDS) / h_a
+        u(I,j,k) = u(I,j,k) + I_Hmix * hfr * stress
+        if (associated(ADp%du_dt_str)) ADp%du_dt_str(I,j,k) = (I_Hmix * hfr * stress) * Idt
+        zDS = zDS + h_a ; if (zDS >= Hmix) exit
+      enddo
+    enddo
   else
     do concurrent (j=G%jsc:G%jec, I=Isq:Ieq)
       surface_stress(I,j) = dt_Rho0 * (G%mask2dCu(I,j)*forces%taux(I,j))
@@ -774,9 +763,7 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
   !$omp target enter data map(alloc: Ray)
 
   if (allocated(visc%Ray_u)) then
-    ! TODO: Move outside
     !$omp target enter data map(to: visc%Ray_u)
-
     do concurrent (j=G%jsc:G%jec, I=Isq:Ieq)
       Ray(I,j) = visc%Ray_u(I,j,1)
     enddo
@@ -785,47 +772,42 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
       Ray(I,j) = 0.
     enddo
   endif
-  
 
-  ! TODO: Move outside
   !$omp target enter data map(alloc: b1, c1, d1)
-
-
-
-  do concurrent (j=G%isc:G%jec, I=Isq:Ieq, G%mask2dCu(I,j) > 0.)
-        b_denom_1 = CS%h_u(I,j,1) + dt * (Ray(I,j) + CS%a_u(I,j,1))
-        b1(I,j) = 1.0 / (b_denom_1 + dt*CS%a_u(I,j,2))
-        d1(I,j) = b_denom_1 * b1(I,j)
-        u(I,j,1) = b1(I,j) * (CS%h_u(I,j,1) * u(I,j,1) + surface_stress(I,j))
-  end do
+  do concurrent (j=G%jsc:G%jec, I=Isq:Ieq, G%mask2dCu(I,j) > 0.)
+    b_denom_1 = CS%h_u(I,j,1) + dt * (Ray(I,j) + CS%a_u(I,j,1))
+    b1(I,j) = 1.0 / (b_denom_1 + dt*CS%a_u(I,j,2))
+    d1(I,j) = b_denom_1 * b1(I,j)
+    u(I,j,1) = b1(I,j) * (CS%h_u(I,j,1) * u(I,j,1) + surface_stress(I,j))
+  enddo
 
   if (associated(ADp%du_dt_str)) then
-    do concurrent (j=G%isc:G%jec, I=Isq:Ieq, G%mask2dCu(I,j) > 0.)
-         ADp%du_dt_str(I,j,1) = b1(I,j) * (CS%h_u(I,j,1) * ADp%du_dt_str(I,j,1) + surface_stress(I,j) * Idt)
-    end do
+    do concurrent (j=G%jsc:G%jec, I=Isq:Ieq, G%mask2dCu(I,j) > 0.)
+      ADp%du_dt_str(I,j,1) = b1(I,j) * (CS%h_u(I,j,1) * ADp%du_dt_str(I,j,1) + surface_stress(I,j) * Idt)
+    enddo
   endif
 
   do k=2,nz
     if (allocated(visc%Ray_u)) then
       do concurrent (j=G%jsc:G%jec, I=Isq:Ieq)
-          Ray(I,j) = visc%Ray_u(I,j,k)
+        Ray(I,j) = visc%Ray_u(I,j,k)
       enddo
     endif
 
-    do concurrent (j=G%isc:G%jec, I=Isq:Ieq, G%mask2dCu(I,j) > 0.)
-          c1(I,j,k) = dt * CS%a_u(I,j,K) * b1(I,j)
-          b_denom_1 = CS%h_u(I,j,k) + dt * (Ray(I,j) + CS%a_u(I,j,K)*d1(I,j))
-          b1(I,j) = 1.0 / (b_denom_1 + dt * CS%a_u(I,j,K+1))
-          d1(I,j) = b_denom_1 * b1(I,j)
-          u(I,j,k) = (CS%h_u(I,j,k) * u(I,j,k) + &
-                      dt * CS%a_u(I,j,K) * u(I,j,k-1)) * b1(I,j)
-    end do
+    do concurrent (j=G%jsc:G%jec, I=Isq:Ieq, G%mask2dCu(I,j) > 0.)
+      c1(I,j,k) = dt * CS%a_u(I,j,K) * b1(I,j)
+      b_denom_1 = CS%h_u(I,j,k) + dt * (Ray(I,j) + CS%a_u(I,j,K)*d1(I,j))
+      b1(I,j) = 1.0 / (b_denom_1 + dt * CS%a_u(I,j,K+1))
+      d1(I,j) = b_denom_1 * b1(I,j)
+      u(I,j,k) = (CS%h_u(I,j,k) * u(I,j,k) + &
+                  dt * CS%a_u(I,j,K) * u(I,j,k-1)) * b1(I,j)
+    enddo
 
     if (associated(ADp%du_dt_str)) then
-        do concurrent (j=G%isc:G%jec, I=Isq:Ieq, G%mask2dCu(I,j) > 0.)
-          ADp%du_dt_str(I,j,k) = (CS%h_u(I,j,k) * ADp%du_dt_str(I,j,k) &
-              + dt * CS%a_u(I,j,K) * ADp%du_dt_str(I,j,k-1)) * b1(I,j)
-      end do
+      do concurrent (j=G%jsc:G%jec, I=Isq:Ieq, G%mask2dCu(I,j) > 0.)
+        ADp%du_dt_str(I,j,k) = (CS%h_u(I,j,k) * ADp%du_dt_str(I,j,k) &
+            + dt * CS%a_u(I,j,K) * ADp%du_dt_str(I,j,k-1)) * b1(I,j)
+      enddo
     endif
 
   enddo ! k loop
@@ -839,25 +821,25 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
   ! back substitute to solve for the new velocities
   ! u_k = d'_k - c'_k x_(k+1)
   do k=nz-1,1,-1
-  do concurrent (j=G%jsc:G%jec, i=isq:ieq, G%mask2dCu(i,j) > 0.0)
-          u(I,j,k) = u(I,j,k) + c1(I,j,k+1) * u(I,j,k+1)
-  end do
+    do concurrent (j=G%jsc:G%jec, I=Isq:Ieq, G%mask2dCu(I,j) > 0.0)
+      u(I,j,k) = u(I,j,k) + c1(I,j,k+1) * u(I,j,k+1)
+    enddo
   enddo
 
 
   if (associated(ADp%du_dt_str)) then
-  do concurrent (j=G%jsc:G%jec, i=isq:ieq, abs(ADp%du_dt_str(i,j,nz)) < accel_underflow)
-          ADp%du_dt_str(I,j,nz) = 0.0
-  end do
+    do concurrent (j=G%jsc:G%jec, I=Isq:Ieq, abs(ADp%du_dt_str(I,j,nz)) < accel_underflow)
+      ADp%du_dt_str(I,j,nz) = 0.0
+    enddo
 
     do k=nz-1,1,-1
-      do concurrent (j=G%jsc:G%jec, i=isq:ieq, G%mask2dCu(i,j) > 0.0)
-              ADp%du_dt_str(I,j,k) = &
-                ADp%du_dt_str(I,j,k) + c1(I,j,k+1) * ADp%du_dt_str(I,j,k+1)
+      do concurrent (j=G%jsc:G%jec, I=Isq:Ieq, G%mask2dCu(i,j) > 0.0)
+        ADp%du_dt_str(I,j,k) = &
+            ADp%du_dt_str(I,j,k) + c1(I,j,k+1) * ADp%du_dt_str(I,j,k+1)
 
-            if (abs(ADp%du_dt_str(I,j,k)) < accel_underflow) &
-              ADp%du_dt_str(I,j,k) = 0.0
-      end do
+        if (abs(ADp%du_dt_str(I,j,k)) < accel_underflow) &
+          ADp%du_dt_str(I,j,k) = 0.0
+      enddo
     enddo
   endif
 
@@ -870,19 +852,19 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
   if ((CS%id_du_dt_visc_gl90 > 0) .or. (CS%id_GLwork > 0)) then
     if (associated(ADp%du_dt_visc_gl90)) then
       do j=G%jsc,G%jec ; do I=Isq,Ieq ; if (G%mask2dCu(I,j) > 0.) then
-            b_denom_1 = CS%h_u(I,j,1)  ! CS%a_u_gl90(I,j,1) is zero
-            b1(I,j) = 1.0 / (b_denom_1 + dt*CS%a_u_gl90(I,j,2))
-            d1(I,j) = b_denom_1 * b1(I,j)
+        b_denom_1 = CS%h_u(I,j,1)  ! CS%a_u_gl90(I,j,1) is zero
+        b1(I,j) = 1.0 / (b_denom_1 + dt*CS%a_u_gl90(I,j,2))
+        d1(I,j) = b_denom_1 * b1(I,j)
 
             ADp%du_dt_visc_gl90(I,j,1) = b1(I,j) * (CS%h_u(I,j,1) * ADp%du_dt_visc_gl90(I,j,1))
       endif ; enddo; enddo
 
       do k=2,nz
         do j=G%jsc,G%jec ; do I=Isq,Ieq ; if (G%mask2dCu(I,j) > 0.) then
-              c1(I,j,k) = dt * CS%a_u_gl90(I,j,K) * b1(I,j)
-              b_denom_1 = CS%h_u(I,j,k) + dt * (CS%a_u_gl90(I,j,K)*d1(I,j))
-              b1(I,j) = 1.0 / (b_denom_1 + dt * CS%a_u_gl90(I,j,K+1))
-              d1(I,j) = b_denom_1 * b1(I,j)
+          c1(I,j,k) = dt * CS%a_u_gl90(I,j,K) * b1(I,j)
+          b_denom_1 = CS%h_u(I,j,k) + dt * (CS%a_u_gl90(I,j,K)*d1(I,j))
+          b1(I,j) = 1.0 / (b_denom_1 + dt * CS%a_u_gl90(I,j,K+1))
+          d1(I,j) = b_denom_1 * b1(I,j)
 
               ADp%du_dt_visc_gl90(I,j,k) = (CS%h_u(I,j,k) * ADp%du_dt_visc_gl90(I,j,k) &
                 + dt * CS%a_u_gl90(I,j,K) * ADp%du_dt_visc_gl90(I,j,k-1)) * b1(I,j)
@@ -891,12 +873,18 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
 
       do k=nz-1,1,-1
         do j=G%jsc,G%jec ; do I=Isq,Ieq ; if (G%mask2dCu(I,j) > 0.) then
-              ADp%du_dt_visc_gl90(I,j,k) = ADp%du_dt_visc_gl90(I,j,k) &
+          ADp%du_dt_visc_gl90(I,j,k) = ADp%du_dt_visc_gl90(I,j,k) &
               + c1(I,j,k+1) * ADp%du_dt_visc_gl90(I,j,k+1)
         endif ; enddo; enddo
       enddo
 
       do k=1,nz
+        do j=G%jsc,G%jec ; do I=Isq,Ieq ; if (G%mask2dCu(I,j) > 0.) then
+          ! now fill ADp%du_dt_visc_gl90(I,j,k) with actual velocity tendency due to GL90;
+          ! note that on RHS: ADp%du_dt_visc(I,j,k) holds the original velocity value u(I,j,k)
+          ! and ADp%du_dt_visc_gl90(I,j,k) the updated velocity due to GL90
+          ADp%du_dt_visc_gl90(I,j,k) = &
+              (ADp%du_dt_visc_gl90(I,j,k) - ADp%du_dt_visc(I,j,k)) * Idt
 
         do j=G%jsc,G%jec ; do I=Isq,Ieq ; if (G%mask2dCu(I,j) > 0.) then
               ! now fill ADp%du_dt_visc_gl90(I,j,k) with actual velocity tendency due to GL90;
@@ -919,8 +907,8 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
       if (CS%id_GLwork > 0) then
         do k=1,nz
           do j=G%jsc,G%jec ; do I=Isq,Ieq ; if (G%mask2dCu(I,j) > 0.) then
-                KE_u(I,j,k) = ADp%du_dt_visc(I,j,k) * CS%h_u(I,j,k) * G%areaCu(I,j) * ADp%du_dt_visc_gl90(I,j,k)
-        endif ; enddo ; enddo
+            KE_u(I,j,k) = ADp%du_dt_visc(I,j,k) * CS%h_u(I,j,k) * G%areaCu(I,j) * ADp%du_dt_visc_gl90(I,j,k)
+          endif ; enddo ; enddo
         enddo
       endif
     endif
@@ -929,12 +917,12 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
 
   if (associated(ADp%du_dt_visc)) then
     do k=1,nz
-      do concurrent(j=G%jsc:G%jec, i = isq:ieq)
-      ADp%du_dt_visc(I,j,k) = (u(I,j,k) - ADp%du_dt_visc(I,j,k)) * Idt
+      do concurrent (j=G%jsc:G%jec, I=Isq:Ieq)
+        ADp%du_dt_visc(I,j,k) = (u(I,j,k) - ADp%du_dt_visc(I,j,k)) * Idt
 
-      if (abs(ADp%du_dt_visc(I,j,k)) < accel_underflow) &
-        ADp%du_dt_visc(I,j,k) = 0.0
-      end do
+        if (abs(ADp%du_dt_visc(I,j,k)) < accel_underflow) &
+          ADp%du_dt_visc(I,j,k) = 0.0
+      enddo
     enddo
   endif
 
@@ -945,15 +933,15 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
   endif
 
   if (present(taux_bot)) then
-      do concurrent(j=G%jsc:G%jec, i = isq:ieq)
+    do concurrent (j=G%jsc:G%jec, I=Isq:Ieq)
       taux_bot(I,j) = GV%H_to_RZ * (u(I,j,nz) * CS%a_u(I,j,nz+1))
-      end do
+    enddo
 
     if (allocated(visc%Ray_u)) then
       do k=1,nz
-      do concurrent(j=G%jsc:G%jec, i = isq:ieq)
-        taux_bot(I,j) = taux_bot(I,j) + GV%H_to_RZ * (visc%Ray_u(I,j,k) * u(I,j,k))
-      end do
+        do concurrent (j=G%jsc:G%jec, I=Isq:Ieq)
+          taux_bot(I,j) = taux_bot(I,j) + GV%H_to_RZ * (visc%Ray_u(I,j,k) * u(I,j,k))
+        enddo
       enddo
     endif
   endif
@@ -984,39 +972,39 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
   if (DoStokesMixing) then
     do k=1,nz
       do J=Jsq,Jeq ; do i=is,ie ; if (G%mask2dCv(i,J) > 0.) then
-            v(i,j,k) = v(i,j,k) + Waves%Us_y(i,j,k)
+        v(i,j,k) = v(i,j,k) + Waves%Us_y(i,j,k)
       endif ; enddo ; enddo
-    end do
+    enddo
   endif
 
 
   if (lfpmix) then
     do k=1,nz
       do J=Jsq,Jeq ; do i=is,ie ; if (G%mask2dCv(i,J) > 0.) then
-            v(i,j,k) = v(i,j,k) - Waves%Us_y(i,j,k)
-      endif ; enddo; enddo
-    end do
+        v(i,j,k) = v(i,j,k) - Waves%Us_y(i,j,k)
+      endif ; enddo ; enddo
+    enddo
   endif
 
 
   if (associated(ADp%dv_dt_visc)) then
-      do concurrent (k=1:nz,j=jsq:jeq, i=is:ie)
-          ADp%dv_dt_visc(i,J,k) = v(i,J,k)
-      end do
+    do concurrent (k=1:nz, J=Jsq:Jeq, i=is:ie)
+      ADp%dv_dt_visc(i,J,k) = v(i,J,k)
+    enddo
   endif
 
   if (associated(ADp%dv_dt_visc_gl90)) then
     do k=1,nz
       do J=Jsq,Jeq ; do i=is,ie
-          ADp%dv_dt_visc_gl90(i,J,k) = v(i,J,k)
-      enddo ; end do
-    end do
+        ADp%dv_dt_visc_gl90(i,J,k) = v(i,J,k)
+      enddo ; enddo
+    enddo
   endif
 
   if (associated(ADp%dv_dt_str)) then
-      do concurrent (k=1:nz, j=jsq:jeq, i=is:ie)
-          ADp%dv_dt_str(i,J,k) = 0.0
-      end do
+    do concurrent (k=1:nz, J=Jsq:Jeq, i=is:ie)
+      ADp%dv_dt_str(i,J,k) = 0.0
+    enddo
   endif
   
 
@@ -1025,53 +1013,48 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
   ! over the topmost Hmix fluid.  If DIRECT_STRESS is not defined,
   ! the wind stress is applied as a stress boundary condition.
   if (CS%direct_stress) then
-  ! TODO JORGE: refactor this one later
-    do concurrent (j=jsq:jeq, i=is:ie, G%mask2dCv(i,j) > 0.0)
-          surface_stress(i,J) = 0.0
-          zDS = 0.0
-          stress = dt_Rho0 * forces%tauy(i,J)
-          do k=1,nz
-            h_a = 0.5 * (h(i,J,k) + h(i,J+1,k)) + h_neglect
-            hfr = 1.0
-            if ((zDS+h_a) > Hmix) hfr = (Hmix - zDS) / h_a
-            v(i,J,k) = v(i,J,k) + I_Hmix * hfr * stress
-            if (associated(ADp%dv_dt_str)) ADp%dv_dt_str(i,J,k) = (I_Hmix * hfr * stress) * Idt
-            zDS = zDS + h_a
-            if (zDS >= Hmix) exit
-          enddo
-    end do
+    do concurrent (J=Jsq:Jeq, i=is:ie, G%mask2dCv(i,J) > 0.0)
+      surface_stress(i,J) = 0.0
+      zDS = 0.0
+      stress = dt_Rho0 * forces%tauy(i,J)
+      do k=1,nz
+        h_a = 0.5 * (h(i,J,k) + h(i,J+1,k)) + h_neglect
+        hfr = 1.0 ; if ((zDS+h_a) > Hmix) hfr = (Hmix - zDS) / h_a
+        v(i,J,k) = v(i,J,k) + I_Hmix * hfr * stress
+        if (associated(ADp%dv_dt_str)) ADp%dv_dt_str(i,J,k) = (I_Hmix * hfr * stress) * Idt
+        zDS = zDS + h_a ; if (zDS >= Hmix) exit
+      enddo
+    enddo
   else
-    do concurrent (j=jsq:jeq, i=is:ie)
-        surface_stress(i,J) = dt_Rho0 * (G%mask2dCv(i,J) * forces%tauy(i,J))
-    end do
+    do concurrent (J=Jsq:Jeq, i=is:ie)
+      surface_stress(i,J) = dt_Rho0 * (G%mask2dCv(i,J) * forces%tauy(i,J))
+    enddo
   endif
   
 
 
   if (allocated(visc%Ray_v)) then
     !$omp target enter data map(to: visc%Ray_v)
-
-    do concurrent (j=jsq:jeq, i=is:ie)
+    do concurrent (J=Jsq:Jeq, i=is:ie)
       Ray(i,J) = visc%Ray_v(i,J,1)
-    end do
+    enddo
   else
     do concurrent (j=jsq:jeq, i=is:ie)
       Ray(i,J) = 0.
-    end do
+    enddo
   endif
 
-  do concurrent (j=jsq:jeq, i=is:ie, G%mask2dCv(i,j) > 0.0)
-        b_denom_1 = CS%h_v(i,J,1) + dt * (Ray(i,J) + CS%a_v(i,J,1))
-        b1(i,J) = 1.0 / (b_denom_1 + dt*CS%a_v(i,J,2))
-        d1(i,J) = b_denom_1 * b1(i,J)
-        v(i,J,1) = b1(i,J) * (CS%h_v(i,J,1) * v(i,J,1) + surface_stress(i,J))
-  end do
-
+  do concurrent (J=Jsq:Jeq, i=is:ie, G%mask2dCv(i,j) > 0.0)
+    b_denom_1 = CS%h_v(i,J,1) + dt * (Ray(i,J) + CS%a_v(i,J,1))
+    b1(i,J) = 1.0 / (b_denom_1 + dt*CS%a_v(i,J,2))
+    d1(i,J) = b_denom_1 * b1(i,J)
+    v(i,J,1) = b1(i,J) * (CS%h_v(i,J,1) * v(i,J,1) + surface_stress(i,J))
+  enddo
 
   if (associated(ADp%dv_dt_str)) then
-  do concurrent (j=jsq:jeq, i=is:ie, G%mask2dCv(i,j) > 0.0)
-          ADp%dv_dt_str(i,J,1) = b1(i,J) * (CS%h_v(i,J,1) * ADp%dv_dt_str(i,J,1) + surface_stress(i,J) * Idt)
-  end do
+    do concurrent (J=Jsq:Jeq, i=is:ie, G%mask2dCv(i,j) > 0.0)
+      ADp%dv_dt_str(i,J,1) = b1(i,J) * (CS%h_v(i,J,1) * ADp%dv_dt_str(i,J,1) + surface_stress(i,J) * Idt)
+    enddo
   endif
   
 
@@ -1080,7 +1063,7 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
     if (allocated(visc%Ray_v)) then
       do concurrent (j=jsq:jeq, i=is:ie)
         Ray(i,J) = visc%Ray_v(i,J,k)
-      end do
+      enddo
     endif
 
     do concurrent (j=jsq:jeq, i=is:ie, G%mask2dCv(i,j) > 0.0)
@@ -1089,31 +1072,33 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
       b1(i,J) = 1.0 / (b_denom_1 + dt * CS%a_v(i,J,K+1))
       d1(i,J) = b_denom_1 * b1(i,J)
       v(i,J,k) = (CS%h_v(i,J,k) * v(i,J,k) + dt * CS%a_v(i,J,K) * v(i,J,k-1)) * b1(i,J)
-      if (associated(ADp%dv_dt_str)) then
+    enddo
+
+    if (associated(ADp%dv_dt_str)) then
+      do concurrent (J=Jsq:Jeq, i=is:ie, G%mask2dCv(i,j) > 0.0)
         ADp%dv_dt_str(i,J,k) = (CS%h_v(i,J,k) * ADp%dv_dt_str(i,J,k) &
             + dt * CS%a_v(i,J,K) * ADp%dv_dt_str(i,J,k-1)) * b1(i,J)
-      end if
-    end do
-
+      enddo
+    endif
   enddo
   
 
   do k=nz-1,1,-1
     do concurrent (j=jsq:jeq, i=is:ie, G%mask2dCv(i,j) > 0.0)
       v(i,J,k) = v(i,J,k) + c1(i,J,k+1) * v(i,J,k+1)
-    end do
+    enddo
   enddo
 
   if (associated(ADp%dv_dt_str)) then
     do concurrent (j=jsq:jeq, i=is:ie)
       if (abs(ADp%dv_dt_str(i,J,nz)) < accel_underflow) ADp%dv_dt_str(i,J,nz) = 0.0
-    end do
+    enddo
 
     do k=nz-1,1,-1
       do concurrent (j=jsq:jeq, i=is:ie, G%mask2dCv(i,j) > 0.0)
         ADp%dv_dt_str(i,J,k) = ADp%dv_dt_str(i,J,k) + c1(i,J,k+1) * ADp%dv_dt_str(i,J,k+1)
         if (abs(ADp%dv_dt_str(i,J,k)) < accel_underflow) ADp%dv_dt_str(i,J,k) = 0.0
-      end do
+      enddo
     enddo
   endif
   
@@ -1179,11 +1164,11 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
 
   if (associated(ADp%dv_dt_visc)) then
     do k=1,nz
-      do concurrent (j=jsq:jeq, i=is:ie)
-          ADp%dv_dt_visc(i,J,k) = (v(i,J,k) - ADp%dv_dt_visc(i,J,k))*Idt
-          if (abs(ADp%dv_dt_visc(i,J,k)) < accel_underflow) ADp%dv_dt_visc(i,J,k) = 0.0
-      end do
-    end do
+      do concurrent (J=Jsq:Jeq, i=is:ie)
+        ADp%dv_dt_visc(i,J,k) = (v(i,J,k) - ADp%dv_dt_visc(i,J,k))*Idt
+        if (abs(ADp%dv_dt_visc(i,J,k)) < accel_underflow) ADp%dv_dt_visc(i,J,k) = 0.0
+      enddo
+    enddo
   endif
 
   if (allocated(visc%tauy_shelf)) then
@@ -1194,16 +1179,16 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
 
   ! JORGE TODO: this has to be malloced
   if (present(tauy_bot)) then
-    do concurrent (j=jsq:jeq, i=is:ie)
-        tauy_bot(i,J) = GV%H_to_RZ * (v(i,J,nz) * CS%a_v(i,J,nz+1))
-    end do
+    do concurrent (J=Jsq:Jeq, i=is:ie)
+      tauy_bot(i,J) = GV%H_to_RZ * (v(i,J,nz) * CS%a_v(i,J,nz+1))
+    enddo
 
     if (allocated(visc%Ray_v)) then
       do k=1,nz
-        do concurrent (j=jsq:jeq, i=is:ie)
-            tauy_bot(i,J) = tauy_bot(i,J) + GV%H_to_RZ * (visc%Ray_v(i,J,k)*v(i,J,k))
-        end do
-      end do
+        do concurrent (J=Jsq:Jeq, i=is:ie)
+          tauy_bot(i,J) = tauy_bot(i,J) + GV%H_to_RZ * (visc%Ray_v(i,J,k)*v(i,J,k))
+        enddo
+      enddo
     endif
   endif
 
@@ -1250,19 +1235,14 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
 
   call vertvisc_limit_vel(u, v, h, ADp, CDp, forces, visc, dt, G, GV, US, CS)
 
-  !! TODO jorge: this is the last GPU code
-  !so these get used later in remnant. If I don't delete them here, are they kept in memory? and used or reallocated?
-  !$omp target exit data map(delete: b1, c1, d1)
+  !$omp target exit data map(delete: b1, c1, d1, Ray)
 
-  !!$omp target exit data map(from:u, v)
-  !$omp target update from(u,v)
+  !!$omp target update from(u,v)
   !$omp target exit data map(from: ADp%du_dt_str, ADp%dv_dt_str)
-  !$omp target exit data map(from: surface_stress)
-  !$omp target exit data map(from: Ray)
   !$omp target exit data map(delete: ADp)
+  !$omp target exit data map(delete: surface_stress)
   !$omp target exit data map(delete: visc%Ray_u) if (allocated(visc%Ray_u))
-
-  
+  !$omp target exit data map(delete: visc%Ray_v) if (allocated(visc%Ray_v))
 
   ! Here the velocities associated with open boundary conditions are applied.
   ! JORGE TODO: should be offloaded?
@@ -1384,7 +1364,6 @@ subroutine vertvisc_remnant(visc, visc_rem_u, visc_rem_v, dt, G, GV, US, CS)
          "Module must be initialized before it is used.")
 
   ! Find the zonal viscous remnant using a modification of a standard tridagonal solver.
-  !$omp target enter data map(to: visc_rem_u, visc_rem_v)
 
   !$omp target enter data map(alloc: b1, c1, d1, Ray, b_denom_1)
 
@@ -1393,19 +1372,17 @@ subroutine vertvisc_remnant(visc, visc_rem_u, visc_rem_v, dt, G, GV, US, CS)
       Ray(I,j) = visc%Ray_u(I,j,1)
     enddo ; enddo
   else
-    do concurrent (j=jsc:jec, i=isq:ieq)
+    do concurrent (j=G%jsc:G%jec, I=Isq:Ieq)
       Ray(I,j) = 0.
-     end do
+    enddo
   endif
 
-
-  !! TODO JORGE: PORT
-    do concurrent (j=jsc:jec, i=isq:ieq, G%mask2dCu(i,j)>0.)
+  do concurrent (j=G%jsc:G%jec, I=Isq:Ieq, G%mask2dCu(i,j) > 0.)
     b_denom_1 = CS%h_u(I,j,1) + dt * (Ray(I,j) + CS%a_u(I,j,1))
     b1(I,j) = 1.0 / (b_denom_1 + dt * CS%a_u(I,j,2))
     d1(I,j) = b_denom_1 * b1(I,j)
     visc_rem_u(I,j,1) = b1(I,j) * CS%h_u(I,j,1)
-    end do
+  enddo
 
 
   do k=2,nz
@@ -1415,21 +1392,20 @@ subroutine vertvisc_remnant(visc, visc_rem_u, visc_rem_v, dt, G, GV, US, CS)
       enddo ; enddo
     endif
 
-  !! TODO JORGE: PORT
-    do concurrent (j=jsc:jec, i=isq:ieq, G%mask2dCu(i,j)>0.)
+    do concurrent (j=G%jsc:G%jec, I=Isq:Ieq, G%mask2dCu(I,j) > 0.)
       c1(I,j,k) = dt * CS%a_u(I,j,K)*b1(I,j)
       b_denom_1 = CS%h_u(I,j,k) + dt * (Ray(I,j) + CS%a_u(I,j,K) * d1(I,j))
       b1(I,j) = 1.0 / (b_denom_1 + dt * CS%a_u(I,j,K+1))
       d1(I,j) = b_denom_1 * b1(I,j)
       visc_rem_u(I,j,k) = (CS%h_u(I,j,k) + dt * CS%a_u(I,j,K) * visc_rem_u(I,j,k-1)) * b1(I,j)
-    end do
+    enddo
   enddo
 
   !! TODO JORGE: PORT
   do k=nz-1,1,-1
-    do concurrent (j=jsc:jec, i=isq:ieq, G%mask2dCu(i,j)>0.)
+    do concurrent (j=G%jsc:G%jec, I=Isq:Ieq, G%mask2dCu(I,j) > 0.)
       visc_rem_u(I,j,k) = visc_rem_u(I,j,k) + c1(I,j,k+1) * visc_rem_u(I,j,k+1)
-    end do
+    enddo
   enddo
 
   ! Now find the meridional viscous remnant using the robust tridiagonal solver.
@@ -1438,18 +1414,17 @@ subroutine vertvisc_remnant(visc, visc_rem_u, visc_rem_v, dt, G, GV, US, CS)
       Ray(i,J) = visc%Ray_v(i,J,1)
     enddo ; enddo
   else
-    do concurrent (j=jsc:jec, i=isq:ieq)
+    do concurrent (j=jsq:jeq, i=is:ie)
       Ray(i,J) = 0.
-    end do
+    enddo
   endif
 
-  !! TODO JORGE: PORT
-  do concurrent (j=jsq:jeq, i=is:ie, G%mask2dCv(i,j)>0.)
+  do concurrent (J=Jsq:Jeq, i=is:ie, G%mask2dCv(i,j) > 0.)
     b_denom_1 = CS%h_v(i,J,1) + dt * (Ray(i,J) + CS%a_v(i,J,1))
     b1(i,J) = 1.0 / (b_denom_1 + dt*CS%a_v(i,J,2))
     d1(i,J) = b_denom_1 * b1(i,J)
     visc_rem_v(i,J,1) = b1(i,J) * CS%h_v(i,J,1)
-  end do
+  enddo
 
   do k=2,nz
     if (allocated(visc%Ray_v)) then
@@ -1458,26 +1433,27 @@ subroutine vertvisc_remnant(visc, visc_rem_u, visc_rem_v, dt, G, GV, US, CS)
       enddo ; enddo
     endif
 
-  !! TODO JORGE: PORT
-  do concurrent (j=jsq:jeq, i=is:ie, G%mask2dCv(i,j)>0.)
+    do concurrent (J=Jsq:Jeq, i=is:ie, G%mask2dCv(i,j) > 0.)
       c1(i,J,k) = dt * CS%a_v(i,J,K) * b1(i,J)
       b_denom_1 = CS%h_v(i,J,k) + dt * (Ray(i,J) + CS%a_v(i,J,K) * d1(i,J))
       b1(i,J) = 1.0 / (b_denom_1 + dt * CS%a_v(i,J,K+1))
       d1(i,J) = b_denom_1 * b1(i,J)
       visc_rem_v(i,J,k) = (CS%h_v(i,J,k) + dt * CS%a_v(i,J,K) * visc_rem_v(i,J,k-1)) * b1(i,J)
-  end do
+    enddo
   enddo
 
   !! TODO JORGE: PORT
   do k=nz-1,1,-1
-    do concurrent (j=jsq:jeq, i=is:ie, G%mask2dCv(i,j)>0.)
+    do concurrent (J=Jsq:Jeq, i=is:ie, G%mask2dCv(i,j) > 0.)
       visc_rem_v(i,J,k) = visc_rem_v(i,J,k) + c1(i,J,k+1) * visc_rem_v(i,J,k+1)
-    end do
+    enddo
   enddo
+  !$omp target exit data map(delete: b1, c1, d1, Ray, b_denom_1)
 
   !$omp target update from(visc_rem_u, visc_rem_v)
   !$omp target exit data map(delete: b1, c1, d1, Ray,  b_denom_1)
   if (CS%debug) then
+    !$omp target update from(visc_rem_u, visc_rem_v)
     call uvchksum("visc_rem_[uv]", visc_rem_u, visc_rem_v, G%HI, haloshift=0, &
                   scalar_pair=.true.)
   endif
@@ -1643,46 +1619,37 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
   endif
 
   call find_ustar(forces, tv, Ustar_2d, G, GV, US, halo=1)
+  !$omp target enter data map(to: Ustar_2d)
 
   ! First do u-points
 
   ! Force IPO optimizations (e.g. Intel)
   ij = touch_ij(i,j)
 
-  do j=js,je ; do I=Isq,Ieq
+  !$omp target enter data map(alloc: do_i)
+  do concurrent (j=js:je, I=Isq:Ieq)
     do_i(I,j) = G%mask2dCu(I,j) > 0.
-  enddo ; enddo
-
-  if (CS%bottomdraglaw) then
-    do j=js,je ; do I=Isq,Ieq ; if (do_i(I,j)) then
-      test_bbl_thick(I,j) = visc%bbl_thick_u(I,j) + dz_neglect
-    endif ; enddo ; enddo
-  endif
-
-  !$omp target enter data map(to: do_i)
+  enddo
 
   !$omp target enter data map(alloc: a_cpl, h_ml)
-  !$omp target enter data map(alloc: i_hbbl, bbl_thick, kv_bbl)
-  !$omp target enter data map(alloc:h_harm, h_arith, dz_harm, h_delta, dz_arith, hvel, dz_vel, z_i)
-  !$omp target enter data map(alloc:  Dmin, zi_dir)
-  !$omp target enter data map(alloc:  zh, zcol)
+  !$omp target enter data map(alloc: kv_bbl, bbl_thick, I_Hbbl)
+  !$omp target enter data map(alloc: h_harm, h_arith, h_delta, hvel)
+  !$omp target enter data map(alloc: dz_harm, dz_arith, dz_vel)
+  !$omp target enter data map(alloc: Dmin, zi_dir)
+  !$omp target enter data map(alloc: z_i, zh, zcol)
 
   if (CS%bottomdraglaw) then
-
-
-  ! JORGE TODO: for some reason I need to map visc bbl thuck u like this herem instead of up there
-  ! I am doing this for the reast of the things later
-    do concurrent (j=js:je, i=isq:ieq, do_i(i,j))
+    do concurrent (j=js:je, I=Isq:Ieq, do_i(I,j))
       kv_bbl(I,j) = visc%Kv_bbl_u(I,j)
       bbl_thick(I,j) = visc%bbl_thick_u(I,j) + dz_neglect
       I_Hbbl(I,j) = 1. / bbl_thick(I,j)
-    end do
+    enddo
   endif
 
-  do concurrent (j=js:je, i=isq:ieq)
+  do concurrent (j=js:je, I=Isq:Ieq)
     Dmin(I,j) = min(G%bathyT(i,j), G%bathyT(i+1,j))
     zi_dir(I,j) = 0
-  end do
+  enddo
 
   ! Project thickness outward across OBCs using a zero-gradient condition.
   if (associated(OBC)) then
@@ -1713,16 +1680,16 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
 
   do concurrent (j=js:je, i=isq:ieq)
     z_i(I,j,nz+1) = 0.
-  end do
+  enddo
 
   if (.not. CS%harmonic_visc) then
-  do concurrent (j=js:je, i=isq:ieq)
+    do concurrent (j=js:je, I=Isq:Ieq)
       zh(I,j) = 0.
-  end do
+    enddo
 
-  do concurrent (j=js:je, i=isq:ieq+1)
+    do concurrent (j=js:je, I=Isq:Ieq+1)
       zcol(i,j) = -G%bathyT(i,j)
-  end do
+    enddo
   endif
 
   if (CS%use_GL90_in_SSW) then
@@ -1738,7 +1705,7 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
       h_delta(I,j) = h(i+1,j,k) - h(i,j,k)
       dz_harm(I,j,k) = 2. * dz(i,j,k) * dz(i+1,j,k) / (dz(i,j,k) + dz(i+1,j,k) + dz_neglect)
       dz_arith(I,j) = 0.5 * (dz(i+1,j,k) + dz(i,j,k))
-    end do
+    enddo
 
     ! Project thickness outward across OBCs using a zero-gradient condition.
     if (associated(OBC)) then
@@ -1787,11 +1754,11 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
         endif
 
         z_i(I,j,k) =  z_i(I,j,k+1) + dz_harm(I,j,k) * I_Hbbl(I,j)
-      end do
+      enddo
     else
       do concurrent (j=js:je, i=isq:ieq+1)
         zcol(i,j) = zcol(i,j) + dz(i,j,k)
-      end do
+      enddo
 
       do concurrent (j=js:je, i=isq:ieq, do_i(i,j))
         zh(I,j) = zh(I,j) + dz_harm(I,j,k)
@@ -1821,7 +1788,7 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
             dz_vel(I,j,k) = (1. - botfn) * dz_arith(I,j) + botfn * dz_harm(I,j,k)
           endif
         endif
-      end do
+      enddo
     endif
 
     if (CS%use_GL90_in_SSW) then
@@ -2017,26 +1984,26 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
       do K=1,nz+1
         do j=js,je ; do I=Isq,Ieq ; if (do_i(I,j)) then
           a_cpl(I,j,K) = a_cpl(I,j,K) + a_cpl_gl90(I,j,K)
-        endif; enddo ; enddo
+        endif ; enddo ; enddo
       enddo
 
       do K=1,nz+1
         do j=js,je ; do I=Isq,Ieq ; if (do_i(I,j)) then
           CS%a_u_gl90(I,j,K) = min(a_cpl_max, a_cpl_gl90(I,j,K))
-        endif; enddo ; enddo
+        endif ; enddo ; enddo
       enddo
     endif !}
 
     do K=1,nz+1
       do concurrent (j=js:je, i=isq:ieq, do_i(i,j))
         CS%a_u(I,j,K) = min(a_cpl_max, a_cpl(I,j,K))
-      end do
+      enddo
     enddo
 
     do k=1,nz
       do concurrent (j=js:je, i=isq:ieq, do_i(i,j))
         CS%h_u(I,j,k) = hvel(I,j,k) + h_neglect
-      end do
+      enddo
     enddo
   endif !}
 
@@ -2063,27 +2030,23 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
   ! Force IPO optimizations (e.g. Intel)
   ij = touch_ij(i,j)
 
-    !JORGE TODO: PORT
-  do concurrent (j=jsq:jeq, i=is:ie)
+  do concurrent (J=Jsq:Jeq, i=is:ie)
     do_i(i,J) = G%mask2dCv(i,J) > 0.
-  end do
+  enddo
 
 
   if (CS%bottomdraglaw) then
-    !JORGE TODO: PORT
-  do concurrent (j=jsq:jeq, i=is:ie, do_i(i,j))
+    do concurrent (J=Jsq:Jeq, i=is:ie, do_i(i,j))
       kv_bbl(i,J) = visc%Kv_bbl_v(i,J)
       bbl_thick(i,J) = visc%bbl_thick_v(i,J) + dz_neglect
       I_Hbbl(i,J) = 1. / bbl_thick(i,J)
-  end do
+    enddo
   endif
 
-
-    !JORGE TODO: PORT
-  do concurrent (j=jsq:jeq, i=is:ie)
+  do concurrent (J=Jsq:Jeq, i=is:ie)
     Dmin(i,J) = min(G%bathyT(i,j), G%bathyT(i,j+1))
     zi_dir(i,J) = 0
-  end do
+  enddo
 
 
   ! Project thickness outward across OBCs using a zero-gradient condition.
@@ -2107,21 +2070,18 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
     endif
   endif
 
-    !JORGE TODO: PORT
-  do concurrent (j=jsq:jeq, i=is:ie)
+  do concurrent (J=Jsq:Jeq, i=is:ie)
     z_i(i,J,nz+1) = 0.
-  end do
-
+  enddo
 
   if (.not. CS%harmonic_visc) then
-    !JORGE TODO: PORT
-  do concurrent (j=jsq:jeq, i=is:ie)
+    do concurrent (J=Jsq:Jeq, i=is:ie)
       zh(i,J) = 0.
-  end do
+    enddo
 
-  do concurrent (j=jsq:jeq+1, i=is:ie)
+    do concurrent (J=Jsq:Jeq+1, i=is:ie)
       zcol(i,j) = -G%bathyT(i,j)
-  end do
+    enddo
   endif
 
 
@@ -2133,14 +2093,13 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
   
 
   do k=nz,1,-1
-
-    do concurrent (j=jsq:jeq, i=is:ie, do_i(i,j))
+    do concurrent (J=Jsq:Jeq, i=is:ie, do_i(i,j))
       h_harm(i,J) = 2. * h(i,j,k) * h(i,j+1,k) / (h(i,j,k) + h(i,j+1,k) + h_neglect)
       h_arith(i,J) = 0.5 * (h(i,j+1,k) + h(i,j,k))
       h_delta(i,J) = h(i,j+1,k) - h(i,j,k)
       dz_harm(i,J,k) = 2. * dz(i,j,k) * dz(i,j+1,k) / (dz(i,j,k) + dz(i,j+1,k) + dz_neglect)
       dz_arith(i,J) = 0.5 * (dz(i,j+1,k) + dz(i,j,k))
-    end do
+    enddo
 
     ! Project thickness outward across OBCs using a zero-gradient condition.
     ! not need to port
@@ -2176,7 +2135,9 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
       ! for the vertical viscosity (hvel and dz_vel).  Near the bottom an
       ! upwind biased thickness is used to control the effect of spurious
       ! Montgomery potential gradients at the bottom where nearly massless
-      do concurrent (j=jsq:jeq, i=is:ie, do_i(i,j))
+      ! layers ride over the topography.
+
+      do concurrent (J=Jsq:Jeq, i=is:ie, do_i(i,j))
         hvel(i,J,k) = h_harm(i,J)
         dz_vel(i,J,k) = dz_harm(i,J,k)
 
@@ -2194,7 +2155,7 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
     else ! Not harmonic_visc
       do concurrent (j=jsq:jeq+1, i=is:ie)
         zcol(i,j) = zcol(i,j) + dz(i,j,k)
-      end do
+      enddo
 
       do concurrent (j=jsq:jeq, i=is:ie, do_i(i,j))
         zh(i,J) = zh(i,J) + dz_harm(i,J,k)
@@ -2225,8 +2186,7 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
             dz_vel(i,J,k) = (1. - botfn) * dz_arith(i,J) + botfn * dz_harm(i,J,k)
           endif
         endif
-        end do
-
+      enddo
     endif
 
     if (CS%use_GL90_in_SSW) then
@@ -2432,26 +2392,26 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
     !JORGE TODO: PORT
 
     do K=1,nz+1
-    do concurrent (j=jsq:jeq, i=is:ieq, do_i(i,j))
+      do concurrent (J=Jsq:Jeq, i=is:ie, do_i(i,j))
         CS%a_v(i,J,K) = min(a_cpl_max, a_cpl(i,J,K))
-    end do
+      enddo
     enddo
 
     do k=1,nz
-    do concurrent (j=jsq:jeq, i=is:ieq, do_i(i,j))
+      do concurrent (J=Jsq:Jeq, i=is:ie, do_i(i,j))
         CS%h_v(i,J,k) = hvel(i,J,k) + h_neglect
-    end do
+      enddo
     enddo
   endif
 
   !$omp target exit data map(release: a_cpl, h_ml)
-  !$omp target exit data map(from: do_i)
 
-  !$omp target exit data map(delete: bbl_thick, i_hbbl, kv_bbl)
-  !$omp target exit data map(delete:h_harm, h_arith, dz_harm, h_delta, dz_arith, z_i, hvel, dz_vel)
+  !$omp target exit data map(delete: kv_bbl, bbl_thick, I_Hbbl)
+  !$omp target exit data map(delete: h_harm, h_arith, dz_harm, h_delta, dz_arith, z_i, hvel, dz_vel)
   !$omp target exit data map(delete: zh, zcol)
-  !$omp target exit data map(delete:  Dmin, zi_dir)
-  
+  !$omp target exit data map(delete: Dmin, zi_dir)
+  !$omp target exit data map(delete: do_i)
+  !$omp target exit data map(delete: Ustar_2d)
 
   ! Diagnose total Kv at v-points
   if (CS%id_Kv_v > 0) then
@@ -2640,40 +2600,42 @@ subroutine find_coupling_coef(a_cpl, hvel, do_i, h_harm, bbl_thick, kv_bbl, z_i,
     h_ml(i,j) = 0.0
   end do
 
-  !a_cpl(:,:,:) = 0.0
-  !h_ml(:,:) = 0.
+  ! TODO: Fix bounds
+  do concurrent (k=1:nz, j=js:je,i=is:ie)
+    a_cpl(i,j,k) = 0.0
+  enddo
+
+  do concurrent (j=js:je, i=is:ie)
+    h_ml(i,j) = 0.0
+  enddo
 
   !$omp target enter data map(alloc: z_t, Kv_tot, Kv_add)
-  !$omp target enter data map(alloc: absf)
-  !$omp target enter data map(alloc: u_star, tau_mag)
-  !!$omp target enter data map(to: a_cpl, h_ml)
+  !$omp target enter data map(alloc: u_star, absf, tau_mag)
   !$omp target enter data map(to: visc%Kv_shear)
-  !$omp target enter data map(to: Ustar_2d)
-  !!$omp target update to(a_cpl, h_ml)
 
   if (CS%Kvml_invZ2 > 0. .and. .not. do_shelf) then
     I_Hmix = 1. / (CS%Hmix + h_neglect)
     do concurrent (j=js:je, i=is:ie)
       z_t(i,j) = h_neglect * I_Hmix
-    end do
+    enddo
   endif
   
 
   do K=2,nz
     do concurrent (j=js:je, i=is:ie)
       Kv_tot(i,j) = CS%Kv
-    end do
+    enddo
 
     if (CS%Kvml_invZ2 > 0. .and. .not. do_shelf) then
       ! This is an older (vintage ~1997) way to prevent wind stresses from driving very
       ! large flows in nearly massless near-surface layers when there is not a physically-
       ! based surface boundary layer parameterization.  It does not have a plausible
       ! physical basis, and probably should not be used.
-    do concurrent (j=js:je, i=is:ie, do_i(i,j))
+      do concurrent (j=js:je, i=is:ie, do_i(i,j))
         z_t(i,j) = z_t(i,j) + h_harm(i,j,k-1) * I_Hmix
         Kv_tot(i,j) = CS%Kv + CS%Kvml_invZ2 / ((z_t(i,j)*z_t(i,j)) *  &
                  (1. + 0.09 * z_t(i,j) * z_t(i,j) * z_t(i,j) * z_t(i,j) * z_t(i,j) * z_t(i,j)))
-    enddo
+      enddo
     endif
 
     if (associated(visc%Kv_shear)) then
@@ -2686,7 +2648,7 @@ subroutine find_coupling_coef(a_cpl, hvel, do_i, h_harm, bbl_thick, kv_bbl, z_i,
         ! FIXME: Uppercase i?
         do concurrent (j=js:je, i=is:ie, do_i(i,j))
           Kv_add(i,j) = 0.5*(visc%Kv_shear(i,j,k) + visc%Kv_shear(i+1,j,k))
-        end do
+        enddo
 
         if (do_OBCs) then
           if (OBC%u_E_OBCs_on_PE) then
@@ -2708,7 +2670,7 @@ subroutine find_coupling_coef(a_cpl, hvel, do_i, h_harm, bbl_thick, kv_bbl, z_i,
 
         do concurrent (j=js:je, i=is:ie, do_i(i,j))
           Kv_tot(i,j) = Kv_tot(i,j) + Kv_add(i,j)
-        end do
+        enddo
       else
         ! FIXME: Uppercase j?
         do j=js,je ; do i=is,ie ; if (do_i(i,j)) then
@@ -2773,7 +2735,7 @@ subroutine find_coupling_coef(a_cpl, hvel, do_i, h_harm, bbl_thick, kv_bbl, z_i,
 
         ! Calculate the coupling coefficients from the viscosities.
         a_cpl(i,j,K) = Kv_tot(i,j) / (h_shear + (I_amax * Kv_tot(i,j)))
-      end do
+      enddo
     elseif (abs(CS%Kv_extra_bbl) > 0.0) then
       ! There is a simple enhancement of the near-bottom viscosities, but no
       ! adjustment of the viscous coupling length scales to give a particular
@@ -2806,12 +2768,14 @@ subroutine find_coupling_coef(a_cpl, hvel, do_i, h_harm, bbl_thick, kv_bbl, z_i,
   
 
 
+
+
   ! Assign the bottom coupling coefficients
   if (CS%bottomdraglaw) then
     do concurrent (j=js:je, i=is:ie, do_i(i,j))
       dhc = hvel(i,j,nz)*0.5
       a_cpl(i,j,nz+1) = kv_bbl(i,j) / ((min(dhc, bbl_thick(i,j)) + h_neglect) + I_amax*kv_bbl(i,j))
-    end do
+    enddo
   elseif (abs(CS%Kv_extra_bbl) > 0.0) then
     do j=js,je ; do i=is,ie ; if (do_i(i,j)) then
       a_cpl(i,j,nz+1) = (CS%Kv + CS%Kv_extra_bbl) &
@@ -2823,6 +2787,7 @@ subroutine find_coupling_coef(a_cpl, hvel, do_i, h_harm, bbl_thick, kv_bbl, z_i,
     endif ; enddo ; enddo
   endif
   
+
 
   ! Add surface intensified viscous coupling, either as a no-slip boundary condition under a
   ! rigid ice-shelf, or due to wind-stress driven surface boundary layer mixing that has not
@@ -2868,11 +2833,12 @@ subroutine find_coupling_coef(a_cpl, hvel, do_i, h_harm, bbl_thick, kv_bbl, z_i,
   ! JORGE TODO: PORT TO GPU
 
     ! Find the friction velocity and the absolute value of the Coriolis parameter at this point.
+    ! NOTE: why was absf(:,:) zerored?
     do concurrent (j=js:je, i=is:ie)
-    u_star(i,j) = 0.0  ! Zero out the friction velocity on land points.
-    absf(i,j) = 0.0
-    tau_mag(i,j) = 0.0  ! Zero out the friction velocity on land points.
-    end do
+      u_star(i,j) = 0.0  ! Zero out the friction velocity on land points.
+      absf(i,j) = 0.0
+      tau_mag(i,j) = 0.0  ! Zero out the friction velocity on land points.
+    enddo
 
     if (allocated(tv%SpV_avg)) then
       rho_av1(:,:) = 0.0
@@ -2937,11 +2903,10 @@ subroutine find_coupling_coef(a_cpl, hvel, do_i, h_harm, bbl_thick, kv_bbl, z_i,
     else ! (.not.allocated(tv%SpV_avg))
     ! JORGE TODO: PORT TO GPU
       if (work_on_u) then
-        do concurrent (j=js:je, i=is:ie, do_i(i,j))
+        do concurrent (j=js:je, I=Is:Ie, do_i(i,j))
           u_star(I,j) = 0.5 * (Ustar_2d(i,j) + Ustar_2d(i+1,j))
           absf(I,j) = 0.5 * (abs(G%CoriolisBu(I,J-1)) + abs(G%CoriolisBu(I,J)))
-        end do
-
+        enddo
 
         if (do_OBCs) then
           if (OBC%u_E_OBCs_on_PE) then
@@ -2961,10 +2926,10 @@ subroutine find_coupling_coef(a_cpl, hvel, do_i, h_harm, bbl_thick, kv_bbl, z_i,
           endif
         endif
       else
-        do concurrent (j=js:je, i=is:ie, do_i(i,j))
+        do concurrent (J=Js:Je, i=is:ie, do_i(i,j))
           u_star(i,J) = 0.5 * (Ustar_2d(i,j) + Ustar_2d(i,j+1))
           absf(i,J) = 0.5 * (abs(G%CoriolisBu(I-1,J)) + abs(G%CoriolisBu(I,J)))
-        end do
+        enddo
 
         if (do_OBCs) then
           if (OBC%v_N_OBCs_on_PE) then
@@ -2985,46 +2950,48 @@ subroutine find_coupling_coef(a_cpl, hvel, do_i, h_harm, bbl_thick, kv_bbl, z_i,
         endif
       endif
 
-      do concurrent (j=js:je, i=is:ie)
+      do concurrent (J=Js:Je, I=is:ie)
         tau_mag(I,J) = GV%Z_to_H*u_star(I,J)**2
-      end do
+      enddo
     endif
 
 
     ! Determine the thickness of the surface ocean boundary layer and its extent in index space.
-    nk_in_ml(:,:) = 0
-    !$omp target enter data map(to: nk_in_ml)
+    !$omp target enter data map(alloc: nk_in_ml)
+    do concurrent (j=js:je, i=is:ie, do_i(i,j))
+      nk_in_ml(i,j) = 0
+    enddo
 
     if (CS%dynamic_viscous_ML) then
       ! The fractional number of layers that are within the viscous boundary layer were
       ! previously stored in visc%nkml_visc_[uv].
-      ! for some reaosn, it seems h_ml is being copied back
+      ! TODO: for some reaosn, it seems h_ml is being copied back
       do concurrent (j=js:je, i=is:ie)
-      h_ml(i,j) = h_neglect
-      end do
+        h_ml(i,j) = h_neglect
+      enddo
 
       max_nk = 0
       if (work_on_u) then
         do concurrent (j=js:je, i=is:ie, do_i(i,j))
           nk_in_ml(I,j) = ceiling(visc%nkml_visc_u(I,j))
           max_nk = max(max_nk, nk_in_ml(I,j))
-        end do
-        ! here max_nk is transferred back, try to keep it on the device
+        enddo
+        ! TODO: max_nk is transferred back, try to keep it on the device
 
         do k=1,max_nk
-        do concurrent (j=js:je, i=is:ie, do_i(i,j))
+          do concurrent (j=js:je, i=is:ie, do_i(i,j))
             if (k <= visc%nkml_visc_u(I,j)) then ! This layer is all in the ML.
               h_ml(i,j) = h_ml(i,j) + hvel(i,j,k)
             elseif (k < visc%nkml_visc_u(I,j) + 1.) then ! Part of this layer is in the ML.
               h_ml(i,j) = h_ml(i,j) + ((visc%nkml_visc_u(I,j) + 1.) - k) * hvel(i,j,k)
             endif
-        end do
+          enddo
         enddo
       else
         do concurrent (j=js:je, i=is:ie, do_i(i,j))
           nk_in_ml(i,j) = ceiling(visc%nkml_visc_v(i,J))
           max_nk = max(max_nk, nk_in_ml(i,j))
-        end do
+        enddo
 
         do k=1,max_nk
           do concurrent (j=js:je, i=is:ie, do_i(i,j))
@@ -3033,7 +3000,7 @@ subroutine find_coupling_coef(a_cpl, hvel, do_i, h_harm, bbl_thick, kv_bbl, z_i,
             elseif (k < visc%nkml_visc_v(i,J) + 1.) then ! Part of this layer is in the ML.
               h_ml(i,j) = h_ml(i,j) + ((visc%nkml_visc_v(i,J) + 1.) - k) * hvel(i,j,k)
             endif
-          end do
+          enddo
         enddo
       endif
     elseif (GV%nkml>0) then
@@ -3077,19 +3044,16 @@ subroutine find_coupling_coef(a_cpl, hvel, do_i, h_harm, bbl_thick, kv_bbl, z_i,
     endif
 
     ! Avoid working on land or on columns where the viscous coupling could not be increased.
-    do concurrent (j=js:je, i=is:ie)
-      if ((u_star(i,j)<=0.0) .or. (.not.do_i(i,j))) then
-        nk_in_ml(i,j) = 0
-      endif
-    end do
-
+    do concurrent (j=js:je, i=is:ie, u_star(i,j) <= 0. .or. .not. do_i(i,j))
+      nk_in_ml(i,j) = 0
+    enddo
 
     ! Set the viscous coupling at the interfaces as the larger of what was previously
     ! set and the contributions from the surface boundary layer.
-    ! JORGE TODO: PORT TO GPU
     do concurrent (j=js:je, i=is:ie)
-    z_t(i,j) = 0.0
-    end do
+      z_t(i,j) = 0.0
+    enddo
+
     if (CS%apply_LOTW_floor .and. &
         (CS%dynamic_viscous_ML .or. (GV%nkml>0) .or. CS%fixed_LOTW_ML)) then
       do K=2,max_nk
@@ -3144,8 +3108,7 @@ subroutine find_coupling_coef(a_cpl, hvel, do_i, h_harm, bbl_thick, kv_bbl, z_i,
     else
       ! JORGE TODO: PORT TO GPU
       do K=2,max_nk
-        do concurrent (j=js:je, i=is:ie)
-          if (k <= nk_in_ml(i,j)) then
+        do concurrent (j=js:je, i=is:ie, k <= nk_in_ml(i,j))
           z_t(i,j) = z_t(i,j) + hvel(i,j,k-1)
 
           temp1 = (z_t(i,j) * h_ml(i,j) - z_t(i,j) * z_t(i,j))
@@ -3164,24 +3127,16 @@ subroutine find_coupling_coef(a_cpl, hvel, do_i, h_harm, bbl_thick, kv_bbl, z_i,
           ! Choose the largest estimate of a_cpl, but these could be changed to be additive.
           a_cpl(i,j,K) = max(a_cpl(i,j,K), a_ml)
           ! An option could be added to change this to: a_cpl(i,K) = a_cpl(i,K) + a_ml
-          endif
-        end do
+        enddo
       enddo
     endif
   endif
 
-  !check, nk_in_ml can probably be released, instead of frommed
-  !$omp target update from(bbl_thick, kv_bbl, Kv_add)
-  !$omp target update from(z_t, Kv_tot)
-  !$omp target exit data map(from: u_star, tau_mag)
-  !$omp target exit data map(from: absf, nk_in_ml)
-  !!$omp target exit data map(from: a_cpl, h_ml, absf, nk_in_ml)
-  !$omp target exit data map(delete: u_star, tau_mag)
-  !$omp target exit data map(delete: absf)
+  !$omp target exit data map(delete: u_star, absf, tau_mag)
   !$omp target exit data map(delete: z_t, Kv_tot, Kv_add)
+  !$omp target exit data map(delete: nk_in_ml)
   !$omp target exit data map(release: visc%Kv_shear)
-  !$omp target exit data map(release: Ustar_2d)
-  
+
 end subroutine find_coupling_coef
 
 !> Velocity components which exceed a threshold for physically reasonable values
@@ -3213,7 +3168,7 @@ subroutine vertvisc_limit_vel(u, v, h, ADp, CDp, forces, visc, dt, G, GV, US, CS
   real :: vel_report(SZIB_(G),SZJB_(G))   ! The velocity to report [L T-1 ~> m s-1]
   real :: u_old(SZIB_(G),SZJ_(G),SZK_(GV)) ! The previous u-velocity [L T-1 ~> m s-1]
   real :: v_old(SZI_(G),SZJB_(G),SZK_(GV)) ! The previous v-velocity [L T-1 ~> m s-1]
-  logical :: trunc_any_array(SZI_(G),SZJB_(G),SZK_(GV)) ! The previous v-velocity [L T-1 ~> m s-1]
+  logical :: trunc_any_array(SZI_(G),SZJB_(G),SZK_(GV))
   logical :: trunc_any, dowrite(SZIB_(G),SZJB_(G))
   integer :: i, j, k, is, ie, js, je, Isq, Ieq, Jsq, Jeq, nz
   is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec ; nz = GV%ke
@@ -3222,96 +3177,95 @@ subroutine vertvisc_limit_vel(u, v, h, ADp, CDp, forces, visc, dt, G, GV, US, CS
   maxvel = CS%maxvel
   truncvel = 0.9*maxvel
   H_report = 6.0 * GV%Angstrom_H
-!$omp target enter data map(alloc: dowrite, vel_report, trunc_any_array)
-!$omp target enter data map(alloc: u_old, v_old)
+
+  !$omp target enter data map(alloc: dowrite, vel_report, trunc_any_array)
+  !$omp target enter data map(alloc: u_old, v_old)
+
   if (len_trim(CS%u_trunc_file) > 0) then
     !!$OMP parallel do default(shared) private(trunc_any,CFL)
     ! optimize memory
     !do concurrent (j=js:je)
-    do concurrent (j=js:je, k=1:nz, i=isq:ieq)
-      trunc_any_array(i,j,k) = .false.
-    end do
-    if(CS%CFL_based_trunc) then
-      do concurrent (j=js:je, i=isq:ieq)
-          dowrite(i,j) = .false.
-          vel_report(i,j) = 3.0e8*US%m_s_to_L_T
-      end do
+    do concurrent (j=js:je, k=1:nz, I=Isq:Ieq)
+      trunc_any_array(I,j,k) = .false.
+    enddo
 
-      do concurrent (j=js:je, k=1:nz, i=isq:ieq)
-            if (abs(u(i,j,k)) < CS%vel_underflow) u(i,j,k) = 0.0
-            if (u(i,j,k) < 0.0) then
-              CFL = (-u(I,j,k) * dt) * (G%dy_Cu(I,j) * G%IareaT(i+1,j))
-            else
-              CFL = (u(I,j,k) * dt) * (G%dy_Cu(I,j) * G%IareaT(i,j))
-            end if
-            if (CFL > CS%CFL_trunc) trunc_any_array(i,j,k) = .true.
-            if (CFL > CS%CFL_report) then
-              dowrite(i,j) = .true.
-              vel_report(i,j) = min(vel_report(i,j), abs(u(i,j,k)))
-            end if
-      end do
+    if(CS%CFL_based_trunc) then
+      do concurrent (j=js:je, I=Isq:Ieq)
+        dowrite(I,j) = .false.
+        vel_report(I,j) = 3.0e8*US%m_s_to_L_T
+      enddo
+
+      do concurrent (j=js:je, k=1:nz, I=Isq:Ieq)
+        if (abs(u(I,j,k)) < CS%vel_underflow) u(I,j,k) = 0.0
+        if (u(i,j,k) < 0.0) then
+          CFL = (-u(I,j,k) * dt) * (G%dy_Cu(I,j) * G%IareaT(i+1,j))
+        else
+          CFL = (u(I,j,k) * dt) * (G%dy_Cu(I,j) * G%IareaT(i,j))
+        endif
+        if (CFL > CS%CFL_trunc) trunc_any_array(i,j,k) = .true.
+        if (CFL > CS%CFL_report) then
+          dowrite(i,j) = .true.
+          vel_report(i,j) = min(vel_report(i,j), abs(u(i,j,k)))
+        endif
+      enddo
 
       do concurrent (j = js:je, i=isq:ieq, dowrite(i,j))
         u_old(I,j,:) = u(I,j,:)
-      end do
+      enddo
 
-      do concurrent (j=js:je, k=1:nz, i=isq:ieq, trunc_any_array(i,j,k))
-          if ((u(I,j,k) * (dt * G%dy_Cu(I,j))) * G%IareaT(i+1,j) < -CS%CFL_trunc) then
-            u(I,j,k) = (-0.9*CS%CFL_trunc) * (G%areaT(i+1,j) / (dt * G%dy_Cu(I,j)))
-            if (h(i,j,k) + h(i+1,j,k) > H_report) CS%ntrunc = CS%ntrunc + 1
-          elseif ((u(I,j,k) * (dt * G%dy_Cu(I,j))) * G%IareaT(i,j) > CS%CFL_trunc) then
-            u(I,j,k) = (0.9*CS%CFL_trunc) * (G%areaT(i,j) / (dt * G%dy_Cu(I,j)))
-            if (h(i,j,k) + h(i+1,j,k) > H_report) CS%ntrunc = CS%ntrunc + 1
-          endif
-      end do
-
-    else
-      do j = js, je
-        do i = isq, ieq
-          dowrite(i,j) = .false.
-          vel_report(i,j) = maxvel
-        end do
-      end do
-
-      do j = js, je
-        do k=1,nz ; do I=Isq,Ieq
-          if (abs(u(I,j,k)) < CS%vel_underflow) then ; u(I,j,k) = 0.0
-          elseif (abs(u(I,j,k)) > maxvel) then
-            dowrite(I,j) = .true. ; trunc_any_array(i,j,k) = .true.
-          endif
-        enddo ; enddo
-      end do
-
-      do j = js, je; do I=Isq,Ieq ; if (dowrite(I,j)) then
-        u_old(I,j,:) = u(I,j,:)
-      endif ; enddo ; enddo
-
-      do j = js, je
-        do k=1,nz ; do I=Isq,Ieq
-        if(trunc_any_array(i,j,k)) then
-        if (abs(u(I,j,k)) > maxvel) then
-          u(I,j,k) = SIGN(truncvel,u(I,j,k))
-          if (h(i,j,k) + h(i+1,j,k) > H_report) CS%ntrunc = CS%ntrunc + 1
-        end if
-        endif ; enddo ; enddo
-      end do
-
-    end if
-
-  else  ! Do not report accelerations leading to large velocities.
-    if (CS%CFL_based_trunc) then
-  ! JORGE TODO: PORT
-      do k=1,nz
-      do concurrent (j=js:je, i=isq:ieq)
-        if (abs(u(I,j,k)) < CS%vel_underflow) then ; u(I,j,k) = 0.0
-        elseif ((u(I,j,k) * (dt * G%dy_Cu(I,j))) * G%IareaT(i+1,j) < -CS%CFL_trunc) then
+      do concurrent (j=js:je, k=1:nz, I=Isq:Ieq, trunc_any_array(I,j,k))
+        if ((u(I,j,k) * (dt * G%dy_Cu(I,j))) * G%IareaT(i+1,j) < -CS%CFL_trunc) then
           u(I,j,k) = (-0.9*CS%CFL_trunc) * (G%areaT(i+1,j) / (dt * G%dy_Cu(I,j)))
           if (h(i,j,k) + h(i+1,j,k) > H_report) CS%ntrunc = CS%ntrunc + 1
         elseif ((u(I,j,k) * (dt * G%dy_Cu(I,j))) * G%IareaT(i,j) > CS%CFL_trunc) then
           u(I,j,k) = (0.9*CS%CFL_trunc) * (G%areaT(i,j) / (dt * G%dy_Cu(I,j)))
           if (h(i,j,k) + h(i+1,j,k) > H_report) CS%ntrunc = CS%ntrunc + 1
         endif
-      end do
+      enddo
+    else
+      do j=js,je
+        do I=Isq,Ieq
+          dowrite(I,j) = .false.
+          vel_report(I,j) = maxvel
+        enddo
+      enddo
+
+      do j=js,je
+        do k=1,nz ; do I=Isq,Ieq
+          if (abs(u(I,j,k)) < CS%vel_underflow) then ; u(I,j,k) = 0.0
+          elseif (abs(u(I,j,k)) > maxvel) then
+            dowrite(I,j) = .true. ; trunc_any_array(i,j,k) = .true.
+          endif
+        enddo ; enddo
+      enddo
+
+      do j=js,je; do I=Isq,Ieq ; if (dowrite(I,j)) then
+        u_old(I,j,:) = u(I,j,:)
+      endif ; enddo ; enddo
+
+      do j=js,je
+        do k=1,nz ; do I=Isq,Ieq ; if(trunc_any_array(i,j,k)) then
+          if (abs(u(I,j,k)) > maxvel) then
+            u(I,j,k) = SIGN(truncvel,u(I,j,k))
+            if (h(i,j,k) + h(i+1,j,k) > H_report) CS%ntrunc = CS%ntrunc + 1
+          end if
+        endif ; enddo ; enddo
+      enddo
+    endif
+  else  ! Do not report accelerations leading to large velocities.
+    if (CS%CFL_based_trunc) then
+  ! JORGE TODO: PORT
+      do k=1,nz
+        do concurrent (j=js:je, I=Isq:Ieq)
+          if (abs(u(I,j,k)) < CS%vel_underflow) then ; u(I,j,k) = 0.0
+          elseif ((u(I,j,k) * (dt * G%dy_Cu(I,j))) * G%IareaT(i+1,j) < -CS%CFL_trunc) then
+            u(I,j,k) = (-0.9*CS%CFL_trunc) * (G%areaT(i+1,j) / (dt * G%dy_Cu(I,j)))
+            if (h(i,j,k) + h(i+1,j,k) > H_report) CS%ntrunc = CS%ntrunc + 1
+          elseif ((u(I,j,k) * (dt * G%dy_Cu(I,j))) * G%IareaT(i,j) > CS%CFL_trunc) then
+            u(I,j,k) = (0.9*CS%CFL_trunc) * (G%areaT(i,j) / (dt * G%dy_Cu(I,j)))
+            if (h(i,j,k) + h(i+1,j,k) > H_report) CS%ntrunc = CS%ntrunc + 1
+          endif
+        enddo
       enddo
     else
       !$OMP parallel do default(shared)
@@ -3325,95 +3279,84 @@ subroutine vertvisc_limit_vel(u, v, h, ADp, CDp, forces, visc, dt, G, GV, US, CS
     endif
   endif
 
-
   if (len_trim(CS%v_trunc_file) > 0) then
-
-
-    do concurrent (j=jsq:jeq, k=1:nz, i=is:ie)
+    do concurrent (J=Jsq:Jeq, k=1:nz, i=is:ie)
       trunc_any_array(i,j,k) = .false.
-    end do
+    enddo
     if(CS%CFL_based_trunc) then
-      do concurrent (j=jsq:jeq, i=is:ie)
-          dowrite(i,j) = .false.
-          vel_report(i,j) = 3.0e8*US%m_s_to_L_T
-      end do
+      do concurrent (J=Jsq:Jeq, i=is:ie)
+        dowrite(i,j) = .false.
+        vel_report(i,j) = 3.0e8*US%m_s_to_L_T
+      enddo
 
-      do concurrent (j=jsq:jeq, k=1:nz, i=is:ie)
-            if (abs(v(i,j,k)) < CS%vel_underflow) v(i,j,k) = 0.0
-            if (v(i,j,k) < 0.0) then
-              CFL = (-v(I,j,k) * dt) * (G%dx_Cv(I,j) * G%IareaT(i+1,j))
-            else
-              CFL = (v(I,j,k) * dt) * (G%dx_Cv(I,j) * G%IareaT(i,j))
-            end if
-            if (CFL > CS%CFL_trunc) trunc_any_array(i,j,k) = .true.
-            if (CFL > CS%CFL_report) then
-              dowrite(i,j) = .true.
-              vel_report(i,j) = min(vel_report(i,j), abs(v(i,j,k)))
-            end if
-      end do
+      do concurrent (J=Jsq:Jeq, k=1:nz, i=is:ie)
+        if (abs(v(i,j,k)) < CS%vel_underflow) v(i,j,k) = 0.0
+        if (v(i,j,k) < 0.0) then
+          CFL = (-v(I,j,k) * dt) * (G%dx_Cv(I,j) * G%IareaT(i+1,j))
+        else
+          CFL = (v(I,j,k) * dt) * (G%dx_Cv(I,j) * G%IareaT(i,j))
+        end if
+        if (CFL > CS%CFL_trunc) trunc_any_array(i,j,k) = .true.
+        if (CFL > CS%CFL_report) then
+          dowrite(i,j) = .true.
+          vel_report(i,j) = min(vel_report(i,j), abs(v(i,j,k)))
+        end if
+      enddo
 
       do concurrent (j = jsq:jeq, i=is:ie, dowrite(i,j))
         v_old(I,j,:) = v(I,j,:)
-      end do
+      enddo
 
-      do concurrent (j=jsq:jeq, k=1:nz, i=is:ie, trunc_any_array(i,j,k))
-          if ((v(I,j,k) * (dt * G%dx_Cv(I,j))) * G%IareaT(i+1,j) < -CS%CFL_trunc) then
-            v(I,j,k) = (-0.9*CS%CFL_trunc) * (G%areaT(i+1,j) / (dt * G%dx_Cv(I,j)))
-            if (h(i,j,k) + h(i+1,j,k) > H_report) CS%ntrunc = CS%ntrunc + 1
-          elseif ((v(I,j,k) * (dt * G%dx_Cv(I,j))) * G%IareaT(i,j) > CS%CFL_trunc) then
-            v(I,j,k) = (0.9*CS%CFL_trunc) * (G%areaT(i,j) / (dt * G%dx_Cv(I,j)))
-            if (h(i,j,k) + h(i+1,j,k) > H_report) CS%ntrunc = CS%ntrunc + 1
-          endif
-      end do
-
+      do concurrent (J=Jsq:Jeq, k=1:nz, i=is:ie, trunc_any_array(i,j,k))
+        if ((v(I,j,k) * (dt * G%dx_Cv(I,j))) * G%IareaT(i+1,j) < -CS%CFL_trunc) then
+          v(I,j,k) = (-0.9*CS%CFL_trunc) * (G%areaT(i+1,j) / (dt * G%dx_Cv(I,j)))
+          if (h(i,j,k) + h(i+1,j,k) > H_report) CS%ntrunc = CS%ntrunc + 1
+        elseif ((v(I,j,k) * (dt * G%dx_Cv(I,j))) * G%IareaT(i,j) > CS%CFL_trunc) then
+          v(I,j,k) = (0.9*CS%CFL_trunc) * (G%areaT(i,j) / (dt * G%dx_Cv(I,j)))
+          if (h(i,j,k) + h(i+1,j,k) > H_report) CS%ntrunc = CS%ntrunc + 1
+        endif
+      enddo
     else
-      do j = jsq, jeq
-        do i = is, ie
-          dowrite(i,j) = .false.
-          vel_report(i,j) = maxvel
-        end do
-      end do
+      do J=Jsq,Jeq ; do i=is,ie
+        dowrite(i,j) = .false.
+        vel_report(i,j) = maxvel
+      enddo ; enddo
 
-      do j = jsq, jeq
-        do k=1,nz ; do I=Is,Ie
-          if (abs(v(I,j,k)) < CS%vel_underflow) then ; v(I,j,k) = 0.0
-          elseif (abs(v(I,j,k)) > maxvel) then
-            dowrite(I,j) = .true. ; trunc_any_array(i,j,k) = .true.
-          endif
-        enddo ; enddo
-      end do
+      do J=Jsq,Jeq ; do k=1,nz ; do I=Is,Ie
+        if (abs(v(I,j,k)) < CS%vel_underflow) then ; v(I,j,k) = 0.0
+        elseif (abs(v(I,j,k)) > maxvel) then
+          dowrite(I,j) = .true. ; trunc_any_array(i,j,k) = .true.
+        endif
+      enddo ; enddo ; enddo
 
-      do j = jsq, jeq; do I=Is,Ie ; if (dowrite(I,j)) then
+      do J=Jsq,Jeq; do I=Is,Ie ; if (dowrite(I,j)) then
         v_old(I,j,:) = v(I,j,:)
       endif ; enddo ; enddo
 
-      do j = jsq, jeq
-        do k=1,nz ; do I=Is,Ie
+      do J=Jsq,Jeq ; do k=1,nz ; do I=Is,Ie
         if(trunc_any_array(i,j,k)) then
-        if (abs(v(I,j,k)) > maxvel) then
-          v(I,j,k) = SIGN(truncvel,v(I,j,k))
-          if (h(i,j,k) + h(i+1,j,k) > H_report) CS%ntrunc = CS%ntrunc + 1
-        end if
-        endif ; enddo ; enddo
-      end do
-
+          if (abs(v(I,j,k)) > maxvel) then
+            v(I,j,k) = SIGN(truncvel,v(I,j,k))
+            if (h(i,j,k) + h(i+1,j,k) > H_report) CS%ntrunc = CS%ntrunc + 1
+          endif
+        endif
+      enddo ; enddo ; enddo
     end if
 
   else  ! Do not report accelerations leading to large velocities.
     if (CS%CFL_based_trunc) then
-  ! JORGE TODO: PORT
       do k=1,nz
-      do concurrent (j=js:je, i=isq:ieq)
-        if (abs(v(i,J,k)) < CS%vel_underflow) then ; v(i,J,k) = 0.0
-        elseif ((v(i,J,k) * (dt * G%dx_Cv(i,J))) * G%IareaT(i,j+1) < -CS%CFL_trunc) then
-          v(i,J,k) = (-0.9*CS%CFL_trunc) * (G%areaT(i,j+1) / (dt * G%dx_Cv(i,J)))
-          if (h(i,j,k) + h(i,j+1,k) > H_report) CS%ntrunc = CS%ntrunc + 1
-        elseif ((v(i,J,k) * (dt * G%dx_Cv(i,J))) * G%IareaT(i,j) > CS%CFL_trunc) then
-          v(i,J,k) = (0.9*CS%CFL_trunc) * (G%areaT(i,j) / (dt * G%dx_Cv(i,J)))
-          if (h(i,j,k) + h(i,j+1,k) > H_report) CS%ntrunc = CS%ntrunc + 1
-        endif
-      end do
-      end do
+        do concurrent (J=Jsq:Jeq, i=is:ie)
+          if (abs(v(i,J,k)) < CS%vel_underflow) then ; v(i,J,k) = 0.0
+          elseif ((v(i,J,k) * (dt * G%dx_Cv(i,J))) * G%IareaT(i,j+1) < -CS%CFL_trunc) then
+            v(i,J,k) = (-0.9*CS%CFL_trunc) * (G%areaT(i,j+1) / (dt * G%dx_Cv(i,J)))
+            if (h(i,j,k) + h(i,j+1,k) > H_report) CS%ntrunc = CS%ntrunc + 1
+          elseif ((v(i,J,k) * (dt * G%dx_Cv(i,J))) * G%IareaT(i,j) > CS%CFL_trunc) then
+            v(i,J,k) = (0.9*CS%CFL_trunc) * (G%areaT(i,j) / (dt * G%dx_Cv(i,J)))
+            if (h(i,j,k) + h(i,j+1,k) > H_report) CS%ntrunc = CS%ntrunc + 1
+          endif
+        enddo
+      enddo
     else
       !$OMP parallel do default(shared)
       do k=1,nz ; do J=Jsq,Jeq ; do i=is,ie
@@ -3425,8 +3368,8 @@ subroutine vertvisc_limit_vel(u, v, h, ADp, CDp, forces, visc, dt, G, GV, US, CS
       enddo ; enddo ; enddo
     endif
   endif
-!$omp target exit data map(release: dowrite, vel_report, trunc_any_array)
-!$omp target exit data map(from:u_old, v_old)
+  !$omp target exit data map(release: dowrite, vel_report, trunc_any_array)
+  !$omp target exit data map(from:u_old, v_old)
 
   if (len_trim(CS%u_trunc_file) > 0) then
     !I need to port this
@@ -3481,7 +3424,6 @@ subroutine vertvisc_init(MIS, Time, G, GV, US, param_file, diag, ADp, dirs, &
   character(len=40)  :: thickness_units
   real :: Kv_mks ! KVML in MKS [m2 s-1]
 
-  ! TODO: Remove?
   CS%initialized = .true.
 
   if (GV%Boussinesq) then; thickness_units = "m"
