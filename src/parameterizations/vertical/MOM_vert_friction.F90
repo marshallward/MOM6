@@ -636,7 +636,6 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
   if (.not.CS%initialized) call MOM_error(FATAL,"MOM_vert_friction(visc): "// &
          "Module must be initialized before it is used.")
 
-  !JORGE TODO: depending on the size, allocating this might be a bottleneck
   if (CS%id_GLwork > 0) then
     allocate(KE_u(G%IsdB:G%IedB,G%jsd:G%jed,GV%ke), source=0.0)
     allocate(KE_v(G%isd:G%ied,G%JsdB:G%JedB,GV%ke), source=0.0)
@@ -708,10 +707,6 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
     enddo
   endif
 
-  
-
-  ! TODO: Move outside function
-
   !   One option is to have the wind stress applied as a body force
   ! over the topmost Hmix fluid.  If DIRECT_STRESS is not defined,
   ! the wind stress is applied as a stress boundary condition.
@@ -733,7 +728,6 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
       surface_stress(I,j) = dt_Rho0 * (G%mask2dCu(I,j)*forces%taux(I,j))
     enddo
   endif
-  
 
   ! perform forward elimination on the tridiagonal system
   !
@@ -809,14 +803,7 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
             + dt * CS%a_u(I,j,K) * ADp%du_dt_str(I,j,k-1)) * b1(I,j)
       enddo
     endif
-
-  enddo ! k loop
-
-
-
-
-  
-
+  enddo
 
   ! back substitute to solve for the new velocities
   ! u_k = d'_k - c'_k x_(k+1)
@@ -825,7 +812,6 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
       u(I,j,k) = u(I,j,k) + c1(I,j,k+1) * u(I,j,k+1)
     enddo
   enddo
-
 
   if (associated(ADp%du_dt_str)) then
     do concurrent (j=G%jsc:G%jec, I=Isq:Ieq, abs(ADp%du_dt_str(I,j,nz)) < accel_underflow)
@@ -843,9 +829,6 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
     enddo
   endif
 
-
-
-
   ! compute vertical velocity tendency that arises from GL90 viscosity;
   ! follow tridiagonal solve method as above; to avoid corrupting u,
   ! use ADp%du_dt_visc_gl90 as a placeholder for updated u (due to GL90) until last do loop
@@ -856,8 +839,8 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
         b1(I,j) = 1.0 / (b_denom_1 + dt*CS%a_u_gl90(I,j,2))
         d1(I,j) = b_denom_1 * b1(I,j)
 
-            ADp%du_dt_visc_gl90(I,j,1) = b1(I,j) * (CS%h_u(I,j,1) * ADp%du_dt_visc_gl90(I,j,1))
-      endif ; enddo; enddo
+        ADp%du_dt_visc_gl90(I,j,1) = b1(I,j) * (CS%h_u(I,j,1) * ADp%du_dt_visc_gl90(I,j,1))
+      endif ; enddo ; enddo
 
       do k=2,nz
         do j=G%jsc,G%jec ; do I=Isq,Ieq ; if (G%mask2dCu(I,j) > 0.) then
@@ -866,16 +849,17 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
           b1(I,j) = 1.0 / (b_denom_1 + dt * CS%a_u_gl90(I,j,K+1))
           d1(I,j) = b_denom_1 * b1(I,j)
 
-              ADp%du_dt_visc_gl90(I,j,k) = (CS%h_u(I,j,k) * ADp%du_dt_visc_gl90(I,j,k) &
-                + dt * CS%a_u_gl90(I,j,K) * ADp%du_dt_visc_gl90(I,j,k-1)) * b1(I,j)
-      end if ; enddo ; enddo
+          ADp%du_dt_visc_gl90(I,j,k) = (CS%h_u(I,j,k) * ADp%du_dt_visc_gl90(I,j,k) &
+              + dt * CS%a_u_gl90(I,j,K) * ADp%du_dt_visc_gl90(I,j,k-1)) * b1(I,j)
+        endif ; enddo ; enddo
       enddo
 
+      ! back substitute to solve for new velocities, held by ADp%du_dt_visc_gl90
       do k=nz-1,1,-1
         do j=G%jsc,G%jec ; do I=Isq,Ieq ; if (G%mask2dCu(I,j) > 0.) then
           ADp%du_dt_visc_gl90(I,j,k) = ADp%du_dt_visc_gl90(I,j,k) &
               + c1(I,j,k+1) * ADp%du_dt_visc_gl90(I,j,k+1)
-        endif ; enddo; enddo
+        endif ; enddo ; enddo
       enddo
 
       do k=1,nz
@@ -886,22 +870,12 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
           ADp%du_dt_visc_gl90(I,j,k) = &
               (ADp%du_dt_visc_gl90(I,j,k) - ADp%du_dt_visc(I,j,k)) * Idt
 
-        do j=G%jsc,G%jec ; do I=Isq,Ieq ; if (G%mask2dCu(I,j) > 0.) then
-              ! now fill ADp%du_dt_visc_gl90(I,j,k) with actual velocity tendency due to GL90;
-              ! note that on RHS: ADp%du_dt_visc(I,j,k) holds the original velocity value u(I,j,k)
-              ! and ADp%du_dt_visc_gl90(I,j,k) the updated velocity due to GL90
-              ADp%du_dt_visc_gl90(I,j,k) = &
-                  (ADp%du_dt_visc_gl90(I,j,k) - ADp%du_dt_visc(I,j,k)) * Idt
-
-              if (abs(ADp%du_dt_visc_gl90(I,j,k)) < accel_underflow) then
-                ADp%du_dt_visc_gl90(I,j,k) = 0.0
-              endif
+          if (abs(ADp%du_dt_visc_gl90(I,j,k)) < accel_underflow) then
+            ADp%du_dt_visc_gl90(I,j,k) = 0.0
+          endif
         endif ; enddo ; enddo
       enddo
 
-
-
-      ! back substitute to solve for new velocities, held by ADp%du_dt_visc_gl90
       ! to compute energetics, we need to multiply by u*h, where u is original velocity before
       ! velocity update; note that ADp%du_dt_visc(I,j,k) holds the original velocity value u(I,j,k)
       if (CS%id_GLwork > 0) then
@@ -913,7 +887,6 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
       endif
     endif
   endif
-
 
   if (associated(ADp%du_dt_visc)) then
     do k=1,nz
@@ -963,9 +936,6 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
     enddo
   endif
 
-
-  
-
   ! == Now work on the meridional velocity component.
 
   ! When mixing down Eulerian current + Stokes drift add before calling solver
@@ -977,7 +947,6 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
     enddo
   endif
 
-
   if (lfpmix) then
     do k=1,nz
       do J=Jsq,Jeq ; do i=is,ie ; if (G%mask2dCv(i,J) > 0.) then
@@ -985,7 +954,6 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
       endif ; enddo ; enddo
     enddo
   endif
-
 
   if (associated(ADp%dv_dt_visc)) then
     do concurrent (k=1:nz, J=Jsq:Jeq, i=is:ie)
@@ -1006,8 +974,6 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
       ADp%dv_dt_str(i,J,k) = 0.0
     enddo
   endif
-  
-
 
   !   One option is to have the wind stress applied as a body force
   ! over the topmost Hmix fluid.  If DIRECT_STRESS is not defined,
@@ -1030,8 +996,6 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
       surface_stress(i,J) = dt_Rho0 * (G%mask2dCv(i,J) * forces%tauy(i,J))
     enddo
   endif
-  
-
 
   if (allocated(visc%Ray_v)) then
     !$omp target enter data map(to: visc%Ray_v)
@@ -1056,8 +1020,6 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
       ADp%dv_dt_str(i,J,1) = b1(i,J) * (CS%h_v(i,J,1) * ADp%dv_dt_str(i,J,1) + surface_stress(i,J) * Idt)
     enddo
   endif
-  
-
 
   do k=2,nz
     if (allocated(visc%Ray_v)) then
@@ -1081,7 +1043,6 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
       enddo
     endif
   enddo
-  
 
   do k=nz-1,1,-1
     do concurrent (j=jsq:jeq, i=is:ie, G%mask2dCv(i,j) > 0.0)
@@ -1101,39 +1062,35 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
       enddo
     enddo
   endif
-  
 
-
-
-  
   ! compute vertical velocity tendency that arises from GL90 viscosity;
   ! follow tridiagonal solve method as above; to avoid corrupting v,
   ! use ADp%dv_dt_visc_gl90 as a placeholder for updated u (due to GL90) until last do loop
   if ((CS%id_dv_dt_visc_gl90 > 0) .or. (CS%id_GLwork > 0)) then
     if (associated(ADp%dv_dt_visc_gl90)) then
       do J=Jsq,Jeq ; do i=is,ie ; if (G%mask2dCv(i,J) > 0.) then
-            b_denom_1 = CS%h_v(i,J,1)  ! CS%a_v_gl90(i,J,1) is zero
-            b1(i,J) = 1.0 / (b_denom_1 + dt*CS%a_v_gl90(i,J,2))
-            d1(i,J) = b_denom_1 * b1(i,J)
-            ADp%dv_dt_visc_gl90(I,J,1) = b1(i,J) * (CS%h_v(i,J,1) * ADp%dv_dt_visc_gl90(i,J,1))
+        b_denom_1 = CS%h_v(i,J,1)  ! CS%a_v_gl90(i,J,1) is zero
+        b1(i,J) = 1.0 / (b_denom_1 + dt*CS%a_v_gl90(i,J,2))
+        d1(i,J) = b_denom_1 * b1(i,J)
+        ADp%dv_dt_visc_gl90(I,J,1) = b1(i,J) * (CS%h_v(i,J,1) * ADp%dv_dt_visc_gl90(i,J,1))
       endif ; enddo ; enddo
 
       do k=2,nz
         do J=Jsq,Jeq ; do i=is,ie ; if (G%mask2dCv(i,J) > 0.) then
-              c1(i,J,k) = dt * CS%a_v_gl90(i,J,K) * b1(i,J)
-              b_denom_1 = CS%h_v(i,J,k) + dt * (CS%a_v_gl90(i,J,K)*d1(i,J))
-              b1(i,J) = 1.0 / (b_denom_1 + dt * CS%a_v_gl90(i,J,K+1))
-              d1(i,J) = b_denom_1 * b1(i,J)
-              ADp%dv_dt_visc_gl90(i,J,k) = (CS%h_v(i,J,k) * ADp%dv_dt_visc_gl90(i,J,k) + &
-                          dt * CS%a_v_gl90(i,J,K) * ADp%dv_dt_visc_gl90(i,J,k-1)) * b1(i,J)
-        end if ; end do ; end do
+          c1(i,J,k) = dt * CS%a_v_gl90(i,J,K) * b1(i,J)
+          b_denom_1 = CS%h_v(i,J,k) + dt * (CS%a_v_gl90(i,J,K)*d1(i,J))
+          b1(i,J) = 1.0 / (b_denom_1 + dt * CS%a_v_gl90(i,J,K+1))
+          d1(i,J) = b_denom_1 * b1(i,J)
+          ADp%dv_dt_visc_gl90(i,J,k) = (CS%h_v(i,J,k) * ADp%dv_dt_visc_gl90(i,J,k) + &
+                      dt * CS%a_v_gl90(i,J,K) * ADp%dv_dt_visc_gl90(i,J,k-1)) * b1(i,J)
+        endif ; enddo ; enddo
       enddo
 
       ! back substitute to solve for new velocities, held by ADp%dv_dt_visc_gl90
       do k=nz-1,1,-1
         do J=Jsq,Jeq ; do i=is,ie ; if (G%mask2dCv(i,J) > 0.) then
-              ADp%dv_dt_visc_gl90(i,J,k) = ADp%dv_dt_visc_gl90(i,J,k) + c1(i,J,k+1) * ADp%dv_dt_visc_gl90(i,J,k+1)
-        end if ; end do ; end do
+          ADp%dv_dt_visc_gl90(i,J,k) = ADp%dv_dt_visc_gl90(i,J,k) + c1(i,J,k+1) * ADp%dv_dt_visc_gl90(i,J,k+1)
+        endif ; enddo ; enddo
       enddo
 
       do k=1,nz
@@ -1141,9 +1098,9 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
           ! now fill ADp%dv_dt_visc_gl90(i,J,k) with actual velocity tendency due to GL90;
           ! note that on RHS: ADp%dv_dt_visc(i,J,k) holds the original velocity value v(i,J,k)
           ! and ADp%dv_dt_visc_gl90(i,J,k) the updated velocity due to GL90
-              ADp%dv_dt_visc_gl90(i,J,k) = (ADp%dv_dt_visc_gl90(i,J,k) - ADp%dv_dt_visc(i,J,k))*Idt
-              if (abs(ADp%dv_dt_visc_gl90(i,J,k)) < accel_underflow) ADp%dv_dt_visc_gl90(i,J,k) = 0.0
-        end if ; end do; end do
+          ADp%dv_dt_visc_gl90(i,J,k) = (ADp%dv_dt_visc_gl90(i,J,k) - ADp%dv_dt_visc(i,J,k))*Idt
+          if (abs(ADp%dv_dt_visc_gl90(i,J,k)) < accel_underflow) ADp%dv_dt_visc_gl90(i,J,k) = 0.0
+        endif ; enddo ; enddo
       enddo
 
       ! to compute energetics, we need to multiply by v*h, where u is original velocity before
@@ -1151,16 +1108,13 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
       if (CS%id_GLwork > 0) then
         do k=1,nz
           do J=Jsq,Jeq ; do i=is,ie ; if (G%mask2dCv(i,J) > 0.) then
-                ! note that on RHS: ADp%dv_dt_visc(I,j,k) holds the original velocity value v(I,j,k)
-                KE_v(I,j,k) = ADp%dv_dt_visc(i,J,k) * CS%h_v(i,J,k) * G%areaCv(i,J) * ADp%dv_dt_visc_gl90(i,J,k)
-          end if ; end do ; end do
-
+            ! note that on RHS: ADp%dv_dt_visc(I,j,k) holds the original velocity value v(I,j,k)
+            KE_v(I,j,k) = ADp%dv_dt_visc(i,J,k) * CS%h_v(i,J,k) * G%areaCv(i,J) * ADp%dv_dt_visc_gl90(i,J,k)
+          endif ; enddo ; enddo
         enddo
       endif
-
     endif
   endif
-
 
   if (associated(ADp%dv_dt_visc)) then
     do k=1,nz
@@ -1173,8 +1127,8 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
 
   if (allocated(visc%tauy_shelf)) then
     do J=Jsq,Jeq ; do i=is,ie
-        visc%tauy_shelf(i,J) = -GV%H_to_RZ * CS%a1_shelf_v(i,J) * v(i,J,1) ! - v_shelf?
-    end do ; end do
+      visc%tauy_shelf(i,J) = -GV%H_to_RZ * CS%a1_shelf_v(i,J) * v(i,J,1) ! - v_shelf?
+    enddo ; enddo
   endif
 
   ! JORGE TODO: this has to be malloced
@@ -1194,36 +1148,25 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
 
   ! When mixing down Eulerian current + Stokes drift subtract after calling solver
   if (DoStokesMixing) then
-    do k=1,nz
-      do J=Jsq,Jeq ; do i=is,ie ; if (G%mask2dCv(i,J) > 0.) then
-            v(i,J,k) = v(i,J,k) - Waves%Us_y(i,J,k)
-      end if; end do ; end do
-    end do
+    do k=1,nz ; do J=Jsq,Jeq ; do i=is,ie ; if (G%mask2dCv(i,J) > 0.) then
+      v(i,J,k) = v(i,J,k) - Waves%Us_y(i,J,k)
+    endif ; enddo ; enddo ; enddo
   endif
 
   if (lfpmix) then
-    do k=1,nz
-      do J=Jsq,Jeq ; do i=is,ie ; if (G%mask2dCv(i,J) > 0.) then
-            v(i,J,k) = v(i,J,k) + Waves%Us_y(i,J,k)
-      end if; end do ; end do
-    end do
+    do k=1,nz ; do J=Jsq,Jeq ; do i=is,ie ; if (G%mask2dCv(i,J) > 0.) then
+      v(i,J,k) = v(i,J,k) + Waves%Us_y(i,J,k)
+    endif ; enddo ; enddo ; enddo
   endif
-
-
-  
 
   ! Calculate the KE source from GL90 vertical viscosity [H L2 T-3 ~> m3 s-3].
   ! We do the KE-rate calculation here (rather than in MOM_diagnostics) to ensure
   ! a sign-definite term. MOM_diagnostics does not have access to the velocities
   ! and thicknesses used in the vertical solver, but rather uses a time-mean
   ! barotropic transport [uv]h.
-  ! JORGE TODO: should be offloaded?
-
-
   if (CS%id_GLwork > 0) then
-    if (.not.G%symmetric) then
+    if (.not.G%symmetric) &
       call do_group_pass(CS%pass_KE_uv, G%domain)
-      end if
     do k=1,nz
       do j=js,je ; do i=is,ie
         KE_term(i,j,k) = 0.5 * G%IareaT(i,j) &
@@ -1245,7 +1188,6 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
   !$omp target exit data map(delete: visc%Ray_v) if (allocated(visc%Ray_v))
 
   ! Here the velocities associated with open boundary conditions are applied.
-  ! JORGE TODO: should be offloaded?
   if (associated(OBC)) then
     do n=1,OBC%number_of_segments
       if (OBC%segment(n)%specified) then
@@ -1263,7 +1205,6 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
       endif
     enddo
   endif
-
 
   ! Offer diagnostic fields for averaging.
   if (query_averaging_enabled(CS%diag)) then
@@ -1352,10 +1293,8 @@ subroutine vertvisc_remnant(visc, visc_rem_u, visc_rem_v, dt, G, GV, US, CS)
   real :: b_denom_1   ! The first term in the denominator of b1 [H ~> m or kg m-2].
 
   integer :: i, j, k, is, ie, Isq, Ieq, Jsq, Jeq, nz
-  integer :: jsc, jec
   is = G%isc ; ie = G%iec
   Isq = G%IscB ; Ieq = G%IecB ; Jsq = G%JscB ; Jeq = G%JecB ; nz = GV%ke
-  jsc = G%jsc ; jec = G%jec
 
   if (.not.associated(CS)) call MOM_error(FATAL,"MOM_vert_friction(visc): "// &
          "Module must be initialized before it is used.")
@@ -1368,7 +1307,7 @@ subroutine vertvisc_remnant(visc, visc_rem_u, visc_rem_v, dt, G, GV, US, CS)
   !$omp target enter data map(alloc: b1, c1, d1, Ray, b_denom_1)
 
   if (allocated(visc%Ray_u)) then
-    do j=jsc, jec ; do I=Isq,Ieq
+    do j=G%jsc,G%jec ; do I=Isq,Ieq
       Ray(I,j) = visc%Ray_u(I,j,1)
     enddo ; enddo
   else
@@ -1387,7 +1326,7 @@ subroutine vertvisc_remnant(visc, visc_rem_u, visc_rem_v, dt, G, GV, US, CS)
 
   do k=2,nz
     if (allocated(visc%Ray_u)) then
-      do j=jsc,jec ; do I=Isq,Ieq
+      do j=G%jsc,G%jec ; do I=Isq,Ieq
         Ray(I,j) = visc%Ray_u(I,j,k)
       enddo ; enddo
     endif
@@ -1401,7 +1340,6 @@ subroutine vertvisc_remnant(visc, visc_rem_u, visc_rem_v, dt, G, GV, US, CS)
     enddo
   enddo
 
-  !! TODO JORGE: PORT
   do k=nz-1,1,-1
     do concurrent (j=G%jsc:G%jec, I=Isq:Ieq, G%mask2dCu(I,j) > 0.)
       visc_rem_u(I,j,k) = visc_rem_u(I,j,k) + c1(I,j,k+1) * visc_rem_u(I,j,k+1)
@@ -1442,7 +1380,6 @@ subroutine vertvisc_remnant(visc, visc_rem_u, visc_rem_v, dt, G, GV, US, CS)
     enddo
   enddo
 
-  !! TODO JORGE: PORT
   do k=nz-1,1,-1
     do concurrent (J=Jsq:Jeq, i=is:ie, G%mask2dCv(i,j) > 0.)
       visc_rem_v(i,J,k) = visc_rem_v(i,J,k) + c1(i,J,k+1) * visc_rem_v(i,J,k+1)
@@ -1450,8 +1387,6 @@ subroutine vertvisc_remnant(visc, visc_rem_u, visc_rem_v, dt, G, GV, US, CS)
   enddo
   !$omp target exit data map(delete: b1, c1, d1, Ray, b_denom_1)
 
-  !$omp target update from(visc_rem_u, visc_rem_v)
-  !$omp target exit data map(delete: b1, c1, d1, Ray,  b_denom_1)
   if (CS%debug) then
     !$omp target update from(visc_rem_u, visc_rem_v)
     call uvchksum("visc_rem_[uv]", visc_rem_u, visc_rem_v, G%HI, haloshift=0, &
@@ -1517,7 +1452,6 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
   real, dimension(SZIB_(G),SZJB_(G)) :: &
     kv_bbl, &     ! The bottom boundary layer viscosity [H Z T-1 ~> m2 s-1 or Pa s].
     bbl_thick, &  ! The bottom boundary layer thickness [Z ~> m].
-    test_bbl_thick, &  ! The bottom boundary layer thickness [Z ~> m].
     I_Hbbl, &     ! The inverse of the bottom boundary layer thickness [Z-1 ~> m-1].
     I_Hbbl_gl90, &! The inverse of the bottom boundary layer thickness used for the GL90 scheme
                   ! [Z-1 ~> m-1].
@@ -1697,7 +1631,7 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
       z_i_gl90(I,j,nz+1) = 0.
     enddo ; enddo
   endif
-  
+
   do k=nz,1,-1
     do concurrent (j=js:je, i=isq:ieq, do_i(i,j))
       h_harm(I,j) = 2. * h(i,j,k) * h(i+1,j,k) / (h(i,j,k) + h(i+1,j,k) + h_neglect)
@@ -1806,20 +1740,9 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
       endif ; enddo ; enddo
     endif
   enddo
-  
 
-
-
-  ! enters z_i, dz_vel,
-  ! ported, works
   call find_coupling_coef(a_cpl, dz_vel, do_i, dz_harm, bbl_thick, kv_bbl, z_i, &
       h_ml, dt, G, GV, US, CS, visc, Ustar_2d, tv, work_on_u=.true., OBC=OBC)
-  
-
-
-
-
-
 
   if (allocated(hML_u)) then
     !$omp target update from(h_ml)
@@ -1834,41 +1757,41 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
   endif
 
   do_any_shelf = .false.
-  if (associated(forces%frac_shelf_u)) then !{
+  if (associated(forces%frac_shelf_u)) then
     do j=js,je ; do I=Isq,Ieq
       CS%a1_shelf_u(I,j) = 0.
       do_i_shelf(I,j) = do_i(I,j) .and. forces%frac_shelf_u(I,j) > 0.
     enddo ; enddo
     do_any_shelf = any(do_i_shelf)
 
-    if (do_any_shelf) then !{
-      if (.not. CS%harmonic_visc) then !{
+    if (do_any_shelf) then
+      if (.not. CS%harmonic_visc) then
         do j=js,je ; do I=Isq,Ieq ; if (do_i_shelf(I,j)) then
           zh(I,j) = 0.
           Ztop_min(I,j) = min(zcol(i,j), zcol(i+1,j))
           I_HTbl(I,j) = 1. / (visc%tbl_thick_shelf_u(I,j) + dz_neglect)
         endif ; enddo ; enddo
-      endif !}
+      endif
 
       do k=1,nz
-        if (CS%harmonic_visc) then !{
+        if (CS%harmonic_visc) then
           do j=js,je ; do I=Isq,Ieq
             hvel_shelf(I,j,k) = hvel(I,j,k)
             dz_vel_shelf(I,j,k) = dz_vel(I,j,k)
           enddo ; enddo
-        else !}{
+        else
           ! Find upwind-biased thickness near the surface.
           ! (Perhaps this needs to be done more carefully, via find_eta.)
-          do j=js,je ; do I=Isq,Ieq ; if (do_i(I,j)) then !{
+          do j=js,je ; do I=Isq,Ieq ; if (do_i(I,j)) then
             h_harm(I,j) = 2. * h(i,j,k) * h(i+1,j,k) &
                 / (h(i,j,k) + h(i+1,j,k) + h_neglect)
             h_arith(I,j) = 0.5 * (h(i+1,j,k) + h(i,j,k))
             h_delta(I,j) = h(i+1,j,k) - h(i,j,k)
             dz_arith(I,j) = 0.5 * (dz(i+1,j,k) + dz(i,j,k))
-          endif ; enddo ; enddo !}
+          endif ; enddo ; enddo
 
-          if (associated(OBC)) then !{
-            if (OBC%u_E_OBCs_on_PE) then !{
+          if (associated(OBC)) then
+            if (OBC%u_E_OBCs_on_PE) then
               do j=js_E_OBC,je_E_OBC ; do I=Is_E_OBC,Ie_E_OBC
                 if (do_i(I,j) .and. OBC%segnum_u(I,j) > 0) then
                   h_harm(I,j) = h(i,j,k)
@@ -1877,9 +1800,9 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
                   dz_arith(I,j) = dz(i,j,k)
                 endif
               enddo ; enddo
-            endif !}
+            endif
 
-            if (OBC%u_W_OBCs_on_PE) then !{
+            if (OBC%u_W_OBCs_on_PE) then
               do j=js_W_OBC,je_W_OBC ; do I=Is_W_OBC,Ie_W_OBC
                 if (do_i(I,j) .and. OBC%segnum_u(I,j) < 0) then
                   h_harm(I,j) = h(i+1,j,k)
@@ -1888,24 +1811,24 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
                   dz_arith(I,j) = dz(i+1,j,k)
                 endif
               enddo ; enddo
-            endif !}
-          endif !}
+            endif
+          endif
 
           do j=js,je ; do i=Isq,Ieq+1
             zcol(i,j) = zcol(i,j) - dz(i,j,k)
           enddo ; enddo
 
-          do j=js,je ; do I=Isq,Ieq ; if (do_i_shelf(I,j)) then !{
+          do j=js,je ; do I=Isq,Ieq ; if (do_i_shelf(I,j)) then
             zh(I,j) = zh(I,j) + dz_harm(I,j,k)
 
             hvel_shelf(I,j,k) = hvel(I,j,k)
             dz_vel_shelf(I,j,k) = dz_vel(I,j,k)
 
-            if (u(I,j,k) * h_delta(I,j) > 0) then !{
-              if (zh(I,j) * I_HTbl(I,j) < CS%harm_BL_val) then !{
+            if (u(I,j,k) * h_delta(I,j) > 0) then
+              if (zh(I,j) * I_HTbl(I,j) < CS%harm_BL_val) then
                 hvel_shelf(I,j,k) = min(hvel(I,j,k), h_harm(I,j))
                 dz_vel_shelf(I,j,k) = min(dz_vel(I,j,k), dz_harm(I,j,k))
-              else !}{
+              else
                 z2_wt = 1.
                 if (zh(I,j) * I_HTbl(I,j) < 2. * CS%harm_BL_val) &
                   z2_wt = max(0., min(1., zh(I,j) * I_HTbl(I,j) * I_valBL - 1.))
@@ -1918,10 +1841,10 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
 
                 hvel_shelf(I,j,k) = min(hvel(I,j,k), (1. - topfn) * h_arith(I,j) + topfn * h_harm(I,j))
                 dz_vel_shelf(I,j,k) = min(dz_vel(I,j,k), (1. - topfn) * dz_arith(I,j) + topfn * dz_harm(I,j,k))
-              endif !}
-            endif !}
-          endif ; enddo ; enddo !}
-        endif !}
+              endif
+            endif
+          endif ; enddo ; enddo
+        endif
       enddo
       call find_coupling_coef(a_shelf, dz_vel_shelf, do_i_shelf, dz_harm, &
           bbl_thick, kv_bbl, z_i, h_ml, dt, G, GV, US, CS, visc, Ustar_2d, &
@@ -1930,11 +1853,11 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
       do j=js,je ; do I=Isq,Ieq ; if (do_i_shelf(I,j)) then
         CS%a1_shelf_u(I,j) = a_shelf(I,j,1)
       endif ; enddo ; enddo
-    endif !}
-  endif !}
+    endif
+  endif
 
-  if (do_any_shelf) then !{
-    if (CS%use_GL90_in_SSW) then !{
+  if (do_any_shelf) then
+    if (CS%use_GL90_in_SSW) then
       do K=1,nz+1
         do j=js,je ; do I=Isq,Ieq
           if (do_i_shelf(I,j)) then
@@ -1951,7 +1874,7 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
           endif
         enddo ; enddo
       enddo
-    else !}{
+    else
       do K=1,nz+1
         do j=js,je ; do I=Isq,Ieq
           if (do_i_shelf(I,j)) then
@@ -1966,7 +1889,7 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
           endif
         enddo ; enddo
       enddo
-    endif !}
+    endif
 
     do k=1,nz
       do j=js,je ; do I=Isq,Ieq
@@ -1979,8 +1902,8 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
         endif
       enddo ; enddo
     enddo
-  else !}{
-    if (CS%use_GL90_in_SSW) then !{
+  else
+    if (CS%use_GL90_in_SSW) then
       do K=1,nz+1
         do j=js,je ; do I=Isq,Ieq ; if (do_i(I,j)) then
           a_cpl(I,j,K) = a_cpl(I,j,K) + a_cpl_gl90(I,j,K)
@@ -1992,7 +1915,7 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
           CS%a_u_gl90(I,j,K) = min(a_cpl_max, a_cpl_gl90(I,j,K))
         endif ; enddo ; enddo
       enddo
-    endif !}
+    endif
 
     do K=1,nz+1
       do concurrent (j=js:je, i=isq:ieq, do_i(i,j))
@@ -2005,7 +1928,7 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
         CS%h_u(I,j,k) = hvel(I,j,k) + h_neglect
       enddo
     enddo
-  endif !}
+  endif
 
   ! Diagnose total Kv at u-points
   if (CS%id_Kv_u > 0) then
@@ -2084,13 +2007,11 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
     enddo
   endif
 
-
   if (CS%use_GL90_in_SSW) then
     do j=Jsq,Jeq ; do i=is,ie
       z_i_gl90(i,J,nz+1) = 0.
     enddo ; enddo
   endif
-  
 
   do k=nz,1,-1
     do concurrent (J=Jsq:Jeq, i=is:ie, do_i(i,j))
@@ -2102,7 +2023,6 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
     enddo
 
     ! Project thickness outward across OBCs using a zero-gradient condition.
-    ! not need to port
     if (associated(OBC)) then
       if (OBC%v_N_OBCs_on_PE) then
         do J=Js_N_OBC,Je_N_OBC ; do i=is_N_OBC,ie_N_OBC
@@ -2130,7 +2050,6 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
     endif
 
     if (CS%harmonic_visc) then
-    !JORGE TODO: PORT
       ! The following block calculates the thicknesses at velocity grid points
       ! for the vertical viscosity (hvel and dz_vel).  Near the bottom an
       ! upwind biased thickness is used to control the effect of spurious
@@ -2203,16 +2122,10 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
         z_i_gl90(i,J,k) = z_i_gl90(i,J,k+1) + dz_harm(i,J,k) * I_Hbbl_gl90(i,J)
       endif ; enddo ; enddo
     endif
-  enddo ! big k loop above
-  
+  enddo
 
   call find_coupling_coef(a_cpl, dz_vel, do_i, dz_harm, bbl_thick, kv_bbl, z_i, &
       h_ml, dt, G, GV, US, CS, visc, Ustar_2d, tv, work_on_u=.false., OBC=OBC)
-  
-
-
-
-  !JORGE TODO: PORT
 
   if ( allocated(hML_v)) then
     !$omp target update from(h_ml)
@@ -2375,7 +2288,6 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
       enddo ; enddo
     enddo
   else
-  !else (do_any_shelf == .false.) then
     if (CS%use_GL90_in_SSW) then
       do K=1,nz+1
         do J=Jsq,Jeq ; do i=is,ie ; if (do_i(i,J)) then
@@ -2389,7 +2301,6 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
         endif ; enddo ; enddo
       enddo
     endif
-    !JORGE TODO: PORT
 
     do K=1,nz+1
       do concurrent (J=Jsq:Jeq, i=is:ie, do_i(i,j))
@@ -2438,10 +2349,9 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
     !$omp target update from(CS%a_u, CS%a_v)
     call uvchksum("vertvisc_coef a_[uv]", CS%a_u, CS%a_v, G%HI, haloshift=0, &
                   unscale=GV%H_to_m*US%s_to_T, scalar_pair=.true.)
-    if (allocated(hML_u) .and. allocated(hML_v)) then
+    if (allocated(hML_u) .and. allocated(hML_v)) &
       call uvchksum("vertvisc_coef hML_[uv]", hML_u, hML_v, G%HI, &
                     haloshift=0, unscale=US%Z_to_m, scalar_pair=.true.)
-    endif
   endif
 
 ! Offer diagnostic fields for averaging.
@@ -2464,11 +2374,8 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
 
   if (allocated(hML_u)) deallocate(hML_u)
   if (allocated(hML_v)) deallocate(hML_v)
-  
 
 end subroutine vertvisc_coef
-
-
 
 
 !> Calculate the 'coupling coefficient' (a_cpl) at the interfaces.
@@ -2592,13 +2499,6 @@ subroutine find_coupling_coef(a_cpl, hvel, do_i, h_harm, bbl_thick, kv_bbl, z_i,
       Js_S_OBC = max(G%JscB, OBC%Js_v_S_obc) ; Je_S_OBC = min(G%JecB, OBC%Je_v_S_obc)
     endif
   endif
-  ! TODO: this shoul dbe alloc, not to
-  do concurrent (k=1:nz, j=js:je,i=is:ie)
-    a_cpl(i,j,k) = 0.0
-  end do
-  do concurrent (j=js:je, i=is:ie)
-    h_ml(i,j) = 0.0
-  end do
 
   ! TODO: Fix bounds
   do concurrent (k=1:nz, j=js:je,i=is:ie)
@@ -2619,7 +2519,6 @@ subroutine find_coupling_coef(a_cpl, hvel, do_i, h_harm, bbl_thick, kv_bbl, z_i,
       z_t(i,j) = h_neglect * I_Hmix
     enddo
   endif
-  
 
   do K=2,nz
     do concurrent (j=js:je, i=is:ie)
@@ -2765,8 +2664,6 @@ subroutine find_coupling_coef(a_cpl, hvel, do_i, h_harm, bbl_thick, kv_bbl, z_i,
       endif ; enddo ; enddo ! i & k loops
     endif
   enddo
-  
-
 
 
 
@@ -2786,7 +2683,6 @@ subroutine find_coupling_coef(a_cpl, hvel, do_i, h_harm, bbl_thick, kv_bbl, z_i,
       a_cpl(i,j,nz+1) = CS%Kv / ((0.5 * hvel(i,j,nz) + h_neglect) + I_amax * CS%Kv)
     endif ; enddo ; enddo
   endif
-  
 
 
   ! Add surface intensified viscous coupling, either as a no-slip boundary condition under a
@@ -2830,7 +2726,6 @@ subroutine find_coupling_coef(a_cpl, hvel, do_i, h_harm, bbl_thick, kv_bbl, z_i,
       endif ; enddo ; enddo
     enddo
   elseif (CS%dynamic_viscous_ML .or. (GV%nkml>0) .or. CS%fixed_LOTW_ML .or. CS%apply_LOTW_floor) then
-  ! JORGE TODO: PORT TO GPU
 
     ! Find the friction velocity and the absolute value of the Coriolis parameter at this point.
     ! NOTE: why was absf(:,:) zerored?
@@ -2901,7 +2796,6 @@ subroutine find_coupling_coef(a_cpl, hvel, do_i, h_harm, bbl_thick, kv_bbl, z_i,
         tau_mag(I,J) = GV%RZ_to_H * rho_av1(i,j) * u_star(I,J)**2
       enddo ; enddo
     else ! (.not.allocated(tv%SpV_avg))
-    ! JORGE TODO: PORT TO GPU
       if (work_on_u) then
         do concurrent (j=js:je, I=Is:Ie, do_i(i,j))
           u_star(I,j) = 0.5 * (Ustar_2d(i,j) + Ustar_2d(i+1,j))
@@ -2954,7 +2848,6 @@ subroutine find_coupling_coef(a_cpl, hvel, do_i, h_harm, bbl_thick, kv_bbl, z_i,
         tau_mag(I,J) = GV%Z_to_H*u_star(I,J)**2
       enddo
     endif
-
 
     ! Determine the thickness of the surface ocean boundary layer and its extent in index space.
     !$omp target enter data map(alloc: nk_in_ml)
@@ -3106,7 +2999,6 @@ subroutine find_coupling_coef(a_cpl, hvel, do_i, h_harm, bbl_thick, kv_bbl, z_i,
         endif ; enddo ; enddo
       enddo
     else
-      ! JORGE TODO: PORT TO GPU
       do K=2,max_nk
         do concurrent (j=js:je, i=is:ie, k <= nk_in_ml(i,j))
           z_t(i,j) = z_t(i,j) + hvel(i,j,k-1)
