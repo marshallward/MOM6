@@ -443,7 +443,6 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
   !$omp target update from(up, vp, h)
   ! TODO: hp needs accurate +/-2 halos.
   ! For now we need to update the GPU halo here, but this can be phased out.
-  !$omp target update to(hp)
 
   ! Update CFL truncation value as function of time
   call updateCFLtruncationValue(Time_local, CS%vertvisc_CSp, US)
