@@ -625,11 +625,11 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
   do concurrent (k = 1:nz)
     do concurrent (j=js:je, i=isq:ieq)
       up(I,j,k) = G%mask2dCu(I,j) * (u_inst(I,j,k) + dt * u_bc_accel(I,j,k))
-    end do 
+    end do
     do concurrent (j=jsq:jeq, i=is:ie)
       vp(i,J,k) = G%mask2dCv(i,J) * (v_inst(i,J,k) + dt * v_bc_accel(i,J,k))
     end do
-  end do 
+  end do
 
   !$omp target update from(up, vp, u_inst, v_inst)
   !$omp target update from (u_bc_accel, v_bc_accel)
@@ -638,21 +638,21 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
   call set_viscous_ML(u_inst, v_inst, h, tv, forces, visc, dt, G, GV, US, CS%set_visc_CSp)
   call disable_averaging(CS%diag)
 
-  
+
   if (CS%debug) then
     call uvchksum("before vertvisc: up", up, vp, G%HI, haloshift=0, symmetric=sym, unscale=US%L_T_to_m_s)
   endif
   !$omp target update to(dz,h, tv%SpV_avg)
   call thickness_to_dz(h, tv, dz, G, GV, US, halo_size=1, do_offload=.true.)
   !$omp target update from(dz,h, tv%SpV_avg)
-  
+
   !$omp target update to(up, vp, h, dz)
   call vertvisc_coef(up, vp, h, dz, forces, visc, tv, dt, G, GV, US, CS%vertvisc_CSp, CS%OBC, VarMix)
-  
+
   !$omp target update to(CS%visc_rem_u, CS%visc_rem_v)
   call vertvisc_remnant(visc, CS%visc_rem_u, CS%visc_rem_v, dt, G, GV, US, CS%vertvisc_CSp)
   !$omp target update from(CS%visc_rem_u, CS%visc_rem_v)
-  
+
   call cpu_clock_end(id_clock_vertvisc)
   if (showCallTree) call callTree_wayPoint("done with vertvisc_coef (step_MOM_dyn_split_RK2)")
 
@@ -693,13 +693,13 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
     !$omp target update to(CS%visc_rem_u, CS%visc_rem_v)
     call continuity(u_inst, v_inst, h, hp, uh_in, vh_in, dt, G, GV, US, CS%continuity_CSp, CS%OBC, pbv, &
                     visc_rem_u=CS%visc_rem_u, visc_rem_v=CS%visc_rem_v, BT_cont=CS%BT_cont)
-    
+
     call cpu_clock_end(id_clock_continuity)
     if (BT_cont_BT_thick) then
 
       call btcalc(h, G, GV, CS%barotropic_CSp, CS%BT_cont%h_u, CS%BT_cont%h_v, &
                   OBC=CS%OBC)
-                  
+
     endif
     if (showCallTree) call callTree_wayPoint("done with continuity[BT_cont] (step_MOM_dyn_split_RK2)")
   endif
@@ -718,7 +718,7 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
       call set_dtbt(G, GV, US, CS%barotropic_CSp, CS%pbce, eta=eta)
     endif
   endif
-  
+
   if (showCallTree) call callTree_enter("btstep(), MOM_barotropic.F90")
   ! This is the predictor step call to btstep.
   ! The CS%ADp argument here stores the weights for certain integrated diagnostics.
@@ -728,7 +728,7 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
               CS%barotropic_CSp, CS%visc_rem_u, CS%visc_rem_v, SpV_avg, CS%ADp, CS%OBC, CS%BT_cont, &
               eta_PF_start, taux_bot, tauy_bot, uh_ptr, vh_ptr, u_ptr, v_ptr)
   !$omp target update from(CS%u_accel_bt, CS%v_accel_bt, u_bc_accel, v_bc_accel)
-  
+
   if (showCallTree) call callTree_leave("btstep()")
   call cpu_clock_end(id_clock_btstep)
 
@@ -794,11 +794,11 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
   endif
 
   call thickness_to_dz(h, tv, dz, G, GV, US, halo_size=1, do_offload=.true.)
-  
+
   !$omp target update to (up, vp, h)
   call vertvisc_coef(up, vp, h, dz, forces, visc, tv, dt_pred, G, GV, US, CS%vertvisc_CSp, &
                      CS%OBC, VarMix)
-  
+
 
   if (CS%fpmix) then
     hbl(:,:) = 0.0
@@ -818,7 +818,7 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
   else
     call vertvisc(up, vp, h, forces, visc, dt_pred, CS%OBC, CS%AD_pred, CS%CDp, G, &
                   GV, US, CS%vertvisc_CSp, CS%taux_bot, CS%tauy_bot, waves=waves)
-    
+
   endif
   !$omp target update from(up, vp)
   !$omp target update from(CS%taux_bot, CS%tauy_bot)
@@ -832,7 +832,7 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
   !$omp target update to(CS%visc_rem_u, CS%visc_rem_v)
   if (CS%visc_rem_dt_bug) then
     call vertvisc_remnant(visc, CS%visc_rem_u, CS%visc_rem_v, dt_pred, G, GV, US, CS%vertvisc_CSp)
-    
+
   else
     call vertvisc_remnant(visc, CS%visc_rem_u, CS%visc_rem_v, dt, G, GV, US, CS%vertvisc_CSp)
   endif
@@ -855,7 +855,7 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
                   u_cor=u_av, v_cor=v_av, BT_cont=CS%BT_cont)
   !$omp target update from(u_av, v_av, hp, uh, vh)
   call cpu_clock_end(id_clock_continuity)
-  
+
   if (showCallTree) call callTree_wayPoint("done with continuity (step_MOM_dyn_split_RK2)")
 
   call do_group_pass(CS%pass_hp_uv, G%Domain, clock=id_clock_pass)
@@ -964,7 +964,7 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
   endif
 
   ! TODO: Cleanup BT_cont%h_[uv] handling
-  
+
   !$omp target update to(u_av, v_av, h_av, uh, vh)
 
 ! diffu = horizontal viscosity terms (u_av)
@@ -973,7 +973,7 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
                             MEKE, Varmix, G, GV, US, CS%hor_visc, tv, dt, &
                             OBC=CS%OBC, BT=CS%barotropic_CSp, TD=thickness_diffuse_CSp, &
                             ADp=CS%ADp, hu_cont=CS%BT_cont%h_u, hv_cont=CS%BT_cont%h_v, STOCH=STOCH)
-  
+
 
   !$omp target update from(CS%diffu, CS%diffv)
 
@@ -1028,7 +1028,7 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
     uh_ptr => uh ; vh_ptr => vh ; u_ptr => u_av ; v_ptr => v_av
   endif
 
-  
+
   if (showCallTree) call callTree_enter("btstep(), MOM_barotropic.F90")
   ! This is the corrector step call to btstep.
   !$omp target update to(u_bc_accel, v_bc_accel)
@@ -1038,7 +1038,7 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
               eta_PF_start, taux_bot, tauy_bot, uh_ptr, vh_ptr, u_ptr, v_ptr, etaav=eta_av)
   !$omp target update from(CS%u_accel_bt, CS%v_accel_bt)
   !$omp target update from(eta_pred)
-  
+
   if (CS%id_deta_dt>0) then
     do j=js,je ; do i=is,ie ; deta_dt(i,j) = (eta_pred(i,j) - eta(i,j))*Idt_bc ; enddo ; enddo
   endif
@@ -1057,7 +1057,7 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
 
   ! u = u + dt*( u_bc_accel + u_accel_bt )
   call cpu_clock_begin(id_clock_mom_update)
-  !$omp taget update to(u_inst, v_inst, v_bc_accel, u_bc_accel)
+  !$omp target update to(u_inst, v_inst, v_bc_accel, u_bc_accel)
   do concurrent (k=1:nz)
     do concurrent (j=js:je, I=Isq:Ieq)
       u_inst(I,j,k) = G%mask2dCu(I,j) * (u_inst(I,j,k) + dt * &
@@ -1104,10 +1104,10 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
   endif
 
   call thickness_to_dz(h, tv, dz, G, GV, US, halo_size=1, do_offload=.true.)
-  
+
   !$omp target update to(u_inst, v_inst, h, dz)
   call vertvisc_coef(u_inst, v_inst, h, dz, forces, visc, tv, dt, G, GV, US, CS%vertvisc_CSp, CS%OBC, VarMix)
-  
+
 
   if (CS%fpmix) then
     lFPpost = .true.
@@ -1122,7 +1122,7 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
   else
     call vertvisc(u_inst, v_inst, h, forces, visc, dt, CS%OBC, CS%ADp, CS%CDp, G, GV, US, &
                   CS%vertvisc_CSp, CS%taux_bot, CS%tauy_bot, waves=waves)
-    
+
   endif
   !$omp target update from(u_inst, v_inst)
   !$omp target update from(CS%taux_bot, CS%tauy_bot)
@@ -1166,7 +1166,7 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
                   u_cor=u_av, v_cor=v_av)
   !$omp target update from(h, u_av, v_av, uh, vh)
   call cpu_clock_end(id_clock_continuity)
-  
+
   call do_group_pass(CS%pass_h, G%Domain, clock=id_clock_pass)
   ! Whenever thickness changes let the diag manager know, target grids
   ! for vertical remapping may need to be regenerated.
@@ -1226,7 +1226,7 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
   else
     CS%CAu_pred_stored = .false.
   endif
-  
+
 
 
   ! The time-averaged free surface height has already been set by the last call to btstep.
@@ -1333,11 +1333,11 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
     call hchksum(h_av, "Corrector avg h", G%HI, haloshift=1, unscale=GV%H_to_MKS)
  !  call MOM_state_chksum("Corrector avg ", u_av, v_av, h_av, uh, vh, G, GV, US)
   endif
-  
+
 
 
   if (showCallTree) call callTree_leave("step_MOM_dyn_split_RK2()")
-  
+
 end subroutine step_MOM_dyn_split_RK2
 
 !> This subroutine sets up any auxiliary restart variables that are specific
