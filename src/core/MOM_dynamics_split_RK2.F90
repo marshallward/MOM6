@@ -428,21 +428,17 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
   !$omp target enter data map(alloc: up, vp, hp, dz, h_tmp)
   !$omp target update to(eta, pbv, pbv%por_face_areaU, pbv%por_face_areaV)
 
-  !$omp target update to(h)
-  do concurrent (k=1:nz)
-    do concurrent (j=G%jsd:G%jed, i=G%isdB:G%iedB)
-      up(i,j,k) = 0.0
-    end do
-    do concurrent (j=G%jsdB:G%jedB, i=G%isd:G%ied)
-      vp(i,j,k) = 0.0
-    end do
-    do concurrent (j=G%jsd:G%jed, i=G%isd:G%ied)
-      hp(i,j,k) = h(i,j,k)
-    end do
+  do concurrent (k=1:nz, j=G%jsd:G%jed, I=G%IsdB:G%IedB)
+    up(I,j,k) = 0.0
+  enddo
+  do concurrent (k=1:nz, J=G%JsdB:G%JedB, i=G%isd:G%ied)
+    vp(i,J,k) = 0.0
+  enddo
+  do concurrent (k=1:nz, j=G%jsd:G%jed, i=G%isd:G%ied)
+    hp(i,j,k) = h(i,j,k)
   enddo
   !$omp target update from(up, vp, h)
   ! TODO: hp needs accurate +/-2 halos.
-  ! For now we need to update the GPU halo here, but this can be phased out.
 
   ! Update CFL truncation value as function of time
   call updateCFLtruncationValue(Time_local, CS%vertvisc_CSp, US)
@@ -523,7 +519,6 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
   !$omp target update to(h)
   call PressureForce(h, tv, CS%PFu, CS%PFv, G, GV, US, CS%PressureForce_CSp, &
                      CS%ALE_CSp, CS%ADp, p_surf, CS%pbce, CS%eta_PF)
-
   !$omp target update from(CS%PFu, CS%PFv, CS%pbce)
 
   if (dyn_p_surf) then
@@ -606,6 +601,10 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
   call cpu_clock_end(id_clock_btforce)
 
   if (CS%debug) then
+    !$omp target update from(CS%CAu_pred, CS%CAv_pred)
+    !$omp target update from(CS%PFu, CS%PFv)
+    !$omp target update from(CS%diffu, CS%diffv)
+    !$omp target update from(u_bc_accel, v_bc_accel)
     call MOM_accel_chksum("pre-btstep accel", CS%CAu_pred, CS%CAv_pred, CS%PFu, CS%PFv, &
                           CS%diffu, CS%diffv, G, GV, US, CS%pbce, u_bc_accel, v_bc_accel, &
                           symmetric=sym)
@@ -621,14 +620,12 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
   !$omp target update to(u_bc_accel, v_bc_accel, u_inst, v_inst)
   !$omp target update to(up, vp)
 
-  do concurrent (k = 1:nz)
-    do concurrent (j=js:je, i=isq:ieq)
-      up(I,j,k) = G%mask2dCu(I,j) * (u_inst(I,j,k) + dt * u_bc_accel(I,j,k))
-    end do
-    do concurrent (j=jsq:jeq, i=is:ie)
-      vp(i,J,k) = G%mask2dCv(i,J) * (v_inst(i,J,k) + dt * v_bc_accel(i,J,k))
-    end do
-  end do
+  do concurrent (k=1:nz, j=js:je, I=Isq:Ieq)
+    up(I,j,k) = G%mask2dCu(I,j) * (u_inst(I,j,k) + dt * u_bc_accel(I,j,k))
+  enddo
+  do concurrent (k=1:nz, J=Jsq:Jeq, i=is:ie)
+    vp(i,J,k) = G%mask2dCv(i,J) * (v_inst(i,J,k) + dt * v_bc_accel(i,J,k))
+  enddo
 
   !$omp target update from(up, vp, u_inst, v_inst)
   !$omp target update from (u_bc_accel, v_bc_accel)
@@ -636,7 +633,6 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
   call enable_averages(dt, Time_local, CS%diag)
   call set_viscous_ML(u_inst, v_inst, h, tv, forces, visc, dt, G, GV, US, CS%set_visc_CSp)
   call disable_averaging(CS%diag)
-
 
   if (CS%debug) then
     call uvchksum("before vertvisc: up", up, vp, G%HI, haloshift=0, symmetric=sym, unscale=US%L_T_to_m_s)
@@ -654,7 +650,6 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
 
   call cpu_clock_end(id_clock_vertvisc)
   if (showCallTree) call callTree_wayPoint("done with vertvisc_coef (step_MOM_dyn_split_RK2)")
-
 
   call cpu_clock_begin(id_clock_pass)
   if (G%nonblocking_updates) then
@@ -798,7 +793,6 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
   call vertvisc_coef(up, vp, h, dz, forces, visc, tv, dt_pred, G, GV, US, CS%vertvisc_CSp, &
                      CS%OBC, VarMix)
 
-
   if (CS%fpmix) then
     hbl(:,:) = 0.0
     if (ASSOCIATED(CS%KPP_CSp)) call KPP_get_BLD(CS%KPP_CSp, hbl, G, US, m_to_BLD_units=GV%m_to_H)
@@ -831,7 +825,6 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
   !$omp target update to(CS%visc_rem_u, CS%visc_rem_v)
   if (CS%visc_rem_dt_bug) then
     call vertvisc_remnant(visc, CS%visc_rem_u, CS%visc_rem_v, dt_pred, G, GV, US, CS%vertvisc_CSp)
-
   else
     call vertvisc_remnant(visc, CS%visc_rem_u, CS%visc_rem_v, dt, G, GV, US, CS%vertvisc_CSp)
   endif
@@ -879,9 +872,9 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
 
   ! h_av = (h + hp)/2
   !$omp target update to(h_av, hp)
-  do concurrent (k=1:nz, j=js-2:je+2,i=is-2:ie+2)
+  do concurrent (k=1:nz, j=js-2:je+2, i=is-2:ie+2)
     h_av(i,j,k) = 0.5*(h(i,j,k) + hp(i,j,k))
-  end do
+  enddo
   !$omp target update from(h_av, hp)
 
   ! The correction phase of the time step starts here.
@@ -901,9 +894,9 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
     ! begw*dt.  hp is not used again until recalculated by continuity.
     !!$OMP parallel do default(shared)
     !$omp target update to(hp)
-    do concurrent (k=1:nz, j=js-2:je+2,i=is-2:ie+2)
+    do concurrent (k=1:nz, j=js-2:je+2, i=is-2:ie+2)
       hp(i,j,k) = (1.0-CS%begw)*h(i,j,k) + CS%begw*hp(i,j,k)
-    end do
+    enddo
     !$omp target update from(hp)
 
     ! PFu = d/dx M(hp,T,S)
@@ -952,6 +945,7 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
   endif
 
   if (CS%debug) then
+    !$omp target update from(up, vp, hp, uh, vh)
     call MOM_state_chksum("Predictor ", up, vp, hp, uh, vh, G, GV, US, symmetric=sym)
     call uvchksum("Predictor avg [uv]", u_av, v_av, G%HI, haloshift=1, symmetric=sym, unscale=US%L_T_to_m_s)
     call hchksum(h_av, "Predictor avg h", G%HI, haloshift=2, unscale=GV%H_to_MKS)
@@ -972,8 +966,6 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
                             MEKE, Varmix, G, GV, US, CS%hor_visc, tv, dt, &
                             OBC=CS%OBC, BT=CS%barotropic_CSp, TD=thickness_diffuse_CSp, &
                             ADp=CS%ADp, hu_cont=CS%BT_cont%h_u, hv_cont=CS%BT_cont%h_v, STOCH=STOCH)
-
-
   !$omp target update from(CS%diffu, CS%diffv)
 
   call cpu_clock_end(id_clock_horvisc)
@@ -1027,7 +1019,6 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
     uh_ptr => uh ; vh_ptr => vh ; u_ptr => u_av ; v_ptr => v_av
   endif
 
-
   if (showCallTree) call callTree_enter("btstep(), MOM_barotropic.F90")
   ! This is the corrector step call to btstep.
   !$omp target update to(u_bc_accel, v_bc_accel)
@@ -1044,7 +1035,7 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
   !$omp target update to(eta, eta_pred)
   do concurrent (j=js:je, i=is:ie)
     eta(i,j) = eta_pred(i,j)
-  end do
+  enddo
   !$omp target update from (eta, eta_pred)
 
   call cpu_clock_end(id_clock_btstep)
@@ -1061,11 +1052,11 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
     do concurrent (j=js:je, I=Isq:Ieq)
       u_inst(I,j,k) = G%mask2dCu(I,j) * (u_inst(I,j,k) + dt * &
                       (u_bc_accel(I,j,k) + CS%u_accel_bt(I,j,k)))
-    end do
+    enddo
     do concurrent (j=jsq:jeq, I=Is:Ie)
       v_inst(i,J,k) = G%mask2dCv(i,J) * (v_inst(i,J,k) + dt * &
                       (v_bc_accel(i,J,k) + CS%v_accel_bt(i,J,k)))
-    end do
+    enddo
   enddo
   !$omp target update from(u_inst, v_inst, v_bc_accel, u_bc_accel)
   call cpu_clock_end(id_clock_mom_update)
@@ -1140,9 +1131,9 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
 
 ! Later, h_av = (h_in + h_out)/2, but for now use h_av to store h_in.
   !$omp target update to(h_av, h)
-  do concurrent (k=1:nz, j=js-2:je+2,i=is-2:ie+2)
+  do concurrent (k=1:nz, j=js-2:je+2, i=is-2:ie+2)
     h_av(i,j,k) = h(i,j,k)
-  end do
+  enddo
   !$omp target update from(h_av,h)
 
   call do_group_pass(CS%pass_visc_rem, G%Domain, clock=id_clock_pass)
@@ -1186,22 +1177,20 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
 
 ! h_av = (h_in + h_out)/2 . Going in to this line, h_av = h_in.
   !$omp target update to(h_av, h)
-  do concurrent (k=1:nz, j=js-2:je+2,i=is-2:ie+2)
+  do concurrent (k=1:nz, j=js-2:je+2, i=is-2:ie+2)
     h_av(i,j,k) = 0.5*(h_av(i,j,k) + h(i,j,k))
-  end do
+  enddo
   !$omp target update from(h_av, h)
 
   if (G%nonblocking_updates) &
     call complete_group_pass(CS%pass_av_uvh, G%Domain, clock=id_clock_pass)
 
   !$omp target update to(uhtr, uh, vhtr, vh)
-  do concurrent (k=1:nz)
-    do concurrent (j=js-2:je+2, i=isq-2:ieq+2)
-      uhtr(I,j,k) = uhtr(I,j,k) + uh(I,j,k)*dt
-    end do
-    do concurrent (j=jsq-2:jeq+2, i=is-2:ie+2)
-      vhtr(i,J,k) = vhtr(i,J,k) + vh(i,J,k)*dt
-    end do
+  do concurrent (k=1:nz, j=js-2:je+2, I=Isq-2:Ieq+2)
+    uhtr(I,j,k) = uhtr(I,j,k) + uh(I,j,k)*dt
+  enddo
+  do concurrent (k=1:nz, J=Jsq-2:Jeq+2, i=is-2:ie+2)
+    vhtr(i,J,k) = vhtr(i,J,k) + vh(i,J,k)*dt
   enddo
   !$omp target update from(uhtr, uh, vhtr, vh)
 
@@ -1225,8 +1214,6 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
   else
     CS%CAu_pred_stored = .false.
   endif
-
-
 
   ! The time-averaged free surface height has already been set by the last call to btstep.
 
@@ -1332,8 +1319,6 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
     call hchksum(h_av, "Corrector avg h", G%HI, haloshift=1, unscale=GV%H_to_MKS)
  !  call MOM_state_chksum("Corrector avg ", u_av, v_av, h_av, uh, vh, G, GV, US)
   endif
-
-
 
   if (showCallTree) call callTree_leave("step_MOM_dyn_split_RK2()")
 
