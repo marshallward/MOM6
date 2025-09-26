@@ -423,7 +423,6 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
   showCallTree = callTree_showQuery()
   if (showCallTree) call callTree_enter("step_MOM_dyn_split_RK2(), MOM_dynamics_split_RK2.F90")
 
-  ! allocate internal variables on GPU
   !$omp target enter data map(alloc: u_bc_accel, v_bc_accel, eta_pred, uh_in, vh_in)
   !$omp target enter data map(alloc: up, vp, hp, dz, h_tmp)
   !$omp target update to(eta, pbv, pbv%por_face_areaU, pbv%por_face_areaV)
@@ -437,7 +436,6 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
   do concurrent (k=1:nz, j=G%jsd:G%jed, i=G%isd:G%ied)
     hp(i,j,k) = h(i,j,k)
   enddo
-  !$omp target update from(up, vp, h)
   ! TODO: hp needs accurate +/-2 halos.
 
   ! Update CFL truncation value as function of time
@@ -516,10 +514,8 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
   if (CS%begw == 0.0) call enable_averages(dt, Time_local, CS%diag)
   call cpu_clock_begin(id_clock_pres)
 
-  !$omp target update to(h)
   call PressureForce(h, tv, CS%PFu, CS%PFv, G, GV, US, CS%PressureForce_CSp, &
                      CS%ALE_CSp, CS%ADp, p_surf, CS%pbce, CS%eta_PF)
-  !$omp target update from(CS%PFu, CS%PFv, CS%pbce)
 
   if (dyn_p_surf) then
     !$omp target update from(CS%eta_PF)
@@ -535,6 +531,7 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
     Use_Stokes_PGF = associated(Waves)
     if (Use_Stokes_PGF) Use_Stokes_PGF = Waves%Stokes_PGF
     if (Use_Stokes_PGF) then
+      !$omp target update from(h, u_inst, v_inst, CS%PFu, CS%PFv)
       call thickness_to_dz(h, tv, dz, G, GV, US, halo_size=1)
       call Stokes_PGF(G, GV, US, dz, u_inst, v_inst, CS%PFu_Stokes, CS%PFv_Stokes, Waves)
 
@@ -562,8 +559,11 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
   if (associated(CS%OBC)) then ; if (CS%OBC%update_OBC) then
     call update_OBC_data(CS%OBC, G, GV, US, tv, h, CS%update_OBC_CSp, Time_local)
   endif ; endif
-  if (associated(CS%OBC) .and. CS%debug_OBC) &
+
+  if (associated(CS%OBC) .and. CS%debug_OBC) then
+    !$omp target update from (CS%PFu, CS%PFv)
     call open_boundary_zero_normal_flow(CS%OBC, G, GV, CS%PFu, CS%PFv)
+  endif
 
   if (G%nonblocking_updates) &
     call start_group_pass(CS%pass_eta, G%Domain, clock=id_clock_pass)
@@ -602,7 +602,7 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
 
   if (CS%debug) then
     !$omp target update from(CS%CAu_pred, CS%CAv_pred)
-    !$omp target update from(CS%PFu, CS%PFv)
+    !$omp target update from(CS%PFu, CS%PFv, CS%pbce)
     !$omp target update from(CS%diffu, CS%diffv)
     !$omp target update from(u_bc_accel, v_bc_accel)
     call MOM_accel_chksum("pre-btstep accel", CS%CAu_pred, CS%CAv_pred, CS%PFu, CS%PFv, &
@@ -618,7 +618,6 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
 
   call cpu_clock_begin(id_clock_vertvisc)
   !$omp target update to(u_bc_accel, v_bc_accel, u_inst, v_inst)
-  !$omp target update to(up, vp)
 
   do concurrent (k=1:nz, j=js:je, I=Isq:Ieq)
     up(I,j,k) = G%mask2dCu(I,j) * (u_inst(I,j,k) + dt * u_bc_accel(I,j,k))
@@ -752,6 +751,7 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
     call uvchksum("Predictor 1 [uv]h", uh, vh, G%HI,haloshift=2, &
                   symmetric=sym, unscale=GV%H_to_MKS*US%L_to_m**2*US%s_to_T)
 !   call MOM_state_chksum("Predictor 1", up, vp, h, uh, vh, G, GV, US, haloshift=1)
+    !$omp target update from(CS%PFu, CS%PFv, CS%pbce)
     call MOM_accel_chksum("Predictor accel", CS%CAu_pred, CS%CAv_pred, CS%PFu, CS%PFv, &
              CS%diffu, CS%diffv, G, GV, US, CS%pbce, CS%u_accel_bt, CS%v_accel_bt, symmetric=sym)
     call MOM_state_chksum("Predictor 1 init", u_inst, v_inst, h, uh, vh, G, GV, US, haloshift=1, &
@@ -905,7 +905,7 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
     ! XXX: GPU error?? why no hp upload?
     call PressureForce(hp, tv, CS%PFu, CS%PFv, G, GV, US, CS%PressureForce_CSp, &
                        CS%ALE_CSp, CS%ADp, p_surf, CS%pbce, CS%eta_PF)
-    !$omp target exit data map(from: CS%PFu, CS%PFv)
+    !$omp target exit data map(from: CS%PFu, CS%PFv, CS%pbce)
     ! Stokes shear force contribution to pressure gradient
     Use_Stokes_PGF = present(Waves)
     if (Use_Stokes_PGF) then
