@@ -584,19 +584,17 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
 ! u_bc_accel = CAu + PFu + diffu(u[n-1])
   call cpu_clock_begin(id_clock_btforce)
 
-  do concurrent (k=1:nz)
-    do concurrent (j=js:je, I=Isq:Ieq)
-      u_bc_accel(I,j,k) = (CS%CAu_pred(I,j,k) + CS%PFu(I,j,k)) + CS%diffu(I,j,k)
-    enddo
-    do concurrent (J=Jsq:Jeq, i=is:ie)
-      v_bc_accel(i,J,k) = (CS%CAv_pred(i,J,k) + CS%PFv(i,J,k)) + CS%diffv(i,J,k)
-    enddo
+  do concurrent (k=1:nz, j=js:je, I=Isq:Ieq)
+    u_bc_accel(I,j,k) = (CS%CAu_pred(I,j,k) + CS%PFu(I,j,k)) + CS%diffu(I,j,k)
   enddo
-  ! TODO: Keep on GPU, don't copy back
-  !$omp target update from (u_bc_accel, v_bc_accel)
+  do concurrent (k=1:nz, J=Jsq:Jeq, i=is:ie)
+    v_bc_accel(i,J,k) = (CS%CAv_pred(i,J,k) + CS%PFv(i,J,k)) + CS%diffv(i,J,k)
+  enddo
 
   if (associated(CS%OBC)) then
+    !$omp target update from(u_bc_accel, v_bc_accel)
     call open_boundary_zero_normal_flow(CS%OBC, G, GV, u_bc_accel, v_bc_accel)
+    !$omp target update to(u_bc_accel, v_bc_accel)
   endif
   call cpu_clock_end(id_clock_btforce)
 
@@ -617,7 +615,6 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
   endif
 
   call cpu_clock_begin(id_clock_vertvisc)
-  !$omp target update to(u_bc_accel, v_bc_accel, u_inst, v_inst)
 
   do concurrent (k=1:nz, j=js:je, I=Isq:Ieq)
     up(I,j,k) = G%mask2dCu(I,j) * (u_inst(I,j,k) + dt * u_bc_accel(I,j,k))
@@ -627,7 +624,7 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
   enddo
 
   !$omp target update from(up, vp, u_inst, v_inst)
-  !$omp target update from (u_bc_accel, v_bc_accel)
+  !$omp target update from(u_bc_accel, v_bc_accel)
 
   call enable_averages(dt, Time_local, CS%diag)
   call set_viscous_ML(u_inst, v_inst, h, tv, forces, visc, dt, G, GV, US, CS%set_visc_CSp)
