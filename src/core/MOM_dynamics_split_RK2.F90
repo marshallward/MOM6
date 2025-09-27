@@ -733,16 +733,18 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
                     (u_bc_accel(I,j,k) + CS%u_accel_bt(I,j,k)))
   enddo
   !$omp target update from(CS%u_accel_bt, CS%v_accel_bt, u_bc_accel, v_bc_accel)
-  !$omp target update from(vp,up)
   call cpu_clock_end(id_clock_mom_update)
 
   if (CS%debug) then
+    !$omp target update from(up, vp, h, uh, vh)
     call uvchksum("Predictor 1 [uv]", up, vp, G%HI, haloshift=0, symmetric=sym, unscale=US%L_T_to_m_s)
     call hchksum(h, "Predictor 1 h", G%HI, haloshift=1, unscale=GV%H_to_MKS)
     call uvchksum("Predictor 1 [uv]h", uh, vh, G%HI,haloshift=2, &
                   symmetric=sym, unscale=GV%H_to_MKS*US%L_to_m**2*US%s_to_T)
 !   call MOM_state_chksum("Predictor 1", up, vp, h, uh, vh, G, GV, US, haloshift=1)
-    !$omp target update from(CS%PFu, CS%PFv, CS%pbce)
+    !$omp target update from(CS%CAu_pred, CS%CAv_pred, CS%PFu, CS%PFv)
+    !$omp target update from(CS%diffu, CS%diffv, CS%pbce)
+    !$omp target update from(CS%u_accel_bt, CS%v_accel_bt)
     call MOM_accel_chksum("Predictor accel", CS%CAu_pred, CS%CAv_pred, CS%PFu, CS%PFv, &
              CS%diffu, CS%diffv, G, GV, US, CS%pbce, CS%u_accel_bt, CS%v_accel_bt, symmetric=sym)
     !$omp target update from(u_inst, v_inst)
@@ -762,7 +764,7 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
   endif
 
   if (CS%fpmix) then
-  ! not needed!
+    !$omp target update from(up, vp)
     uold(:,:,:) = 0.0
     vold(:,:,:) = 0.0
     do k = 1, nz
@@ -781,7 +783,6 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
 
   call thickness_to_dz(h, tv, dz, G, GV, US, halo_size=1, do_offload=.true.)
 
-  !$omp target update to (up, vp, h)
   call vertvisc_coef(up, vp, h, dz, forces, visc, tv, dt_pred, G, GV, US, CS%vertvisc_CSp, &
                      CS%OBC, VarMix)
 
@@ -1054,7 +1055,7 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
   call cpu_clock_end(id_clock_mom_update)
 
   if (CS%debug) then
-    !$omp target update from(u_inst, v_inst)
+    !$omp target update from(u_inst, v_inst, h, uh, vh)
     call uvchksum("Corrector 1 [uv]", u_inst, v_inst, G%HI, haloshift=0, symmetric=sym, unscale=US%L_T_to_m_s)
     call hchksum(h, "Corrector 1 h", G%HI, haloshift=1, unscale=GV%H_to_MKS)
     call uvchksum("Corrector 1 [uv]h", uh, vh, G%HI, haloshift=2, &
