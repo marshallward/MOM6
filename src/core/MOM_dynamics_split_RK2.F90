@@ -425,7 +425,6 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
 
   !$omp target enter data map(alloc: u_bc_accel, v_bc_accel, eta_pred, uh_in, vh_in)
   !$omp target enter data map(alloc: up, vp, hp, dz, h_tmp)
-  !$omp target update to(pbv, pbv%por_face_areaU, pbv%por_face_areaV)
 
   do concurrent (k=1:nz, j=G%jsd:G%jed, I=G%IsdB:G%IedB)
     up(I,j,k) = 0.0
