@@ -716,7 +716,6 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
               CS%u_accel_bt, CS%v_accel_bt, eta_pred, CS%uhbt, CS%vhbt, G, GV, US, &
               CS%barotropic_CSp, CS%visc_rem_u, CS%visc_rem_v, SpV_avg, CS%ADp, CS%OBC, CS%BT_cont, &
               eta_PF_start, taux_bot, tauy_bot, uh_ptr, vh_ptr, u_ptr, v_ptr)
-  !$omp target update from(CS%u_accel_bt, CS%v_accel_bt, u_bc_accel, v_bc_accel)
 
   if (showCallTree) call callTree_leave("btstep()")
   call cpu_clock_end(id_clock_btstep)
@@ -725,16 +724,13 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
   dt_pred = dt * CS%be
   call cpu_clock_begin(id_clock_mom_update)
 
-  !$omp target update to (CS%u_accel_bt, CS%v_accel_bt, u_bc_accel, v_bc_accel)
-  do concurrent (k=1:nz)
-    do concurrent (J=Jsq:Jeq,i=is:ie)
-      vp(i,J,k) = G%mask2dCv(i,J) * (v_inst(i,J,k) + dt_pred * &
-                      (v_bc_accel(i,J,k) + CS%v_accel_bt(i,J,k)))
-    enddo
-    do concurrent (j=js:je, I=Isq:Ieq)
-      up(I,j,k) = G%mask2dCu(I,j) * (u_inst(I,j,k) + dt_pred * &
-                      (u_bc_accel(I,j,k) + CS%u_accel_bt(I,j,k)))
-    enddo
+  do concurrent (k=1:nz, J=Jsq:Jeq,i=is:ie)
+    vp(i,J,k) = G%mask2dCv(i,J) * (v_inst(i,J,k) + dt_pred * &
+                    (v_bc_accel(i,J,k) + CS%v_accel_bt(i,J,k)))
+  enddo
+  do concurrent (k=1:nz, j=js:je, I=Isq:Ieq)
+    up(I,j,k) = G%mask2dCu(I,j) * (u_inst(I,j,k) + dt_pred * &
+                    (u_bc_accel(I,j,k) + CS%u_accel_bt(I,j,k)))
   enddo
   !$omp target update from(CS%u_accel_bt, CS%v_accel_bt, u_bc_accel, v_bc_accel)
   !$omp target update from(vp,up)
@@ -898,7 +894,6 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
     ! PFu = d/dx M(hp,T,S)
     ! pbce = dM/deta
     call cpu_clock_begin(id_clock_pres)
-    ! XXX: GPU error?? why no hp upload?
     call PressureForce(hp, tv, CS%PFu, CS%PFv, G, GV, US, CS%PressureForce_CSp, &
                        CS%ALE_CSp, CS%ADp, p_surf, CS%pbce, CS%eta_PF)
     !$omp target exit data map(from: CS%PFu, CS%PFv, CS%pbce)
