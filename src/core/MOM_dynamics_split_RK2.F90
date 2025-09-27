@@ -565,8 +565,10 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
     call open_boundary_zero_normal_flow(CS%OBC, G, GV, CS%PFu, CS%PFv)
   endif
 
-  if (G%nonblocking_updates) &
+  if (G%nonblocking_updates) then
+    !$omp target update from(eta)
     call start_group_pass(CS%pass_eta, G%Domain, clock=id_clock_pass)
+  endif
 
 ! CAu = -(f+zeta_av)/h_av vh + d/dx KE_av
   if (.not.CS%CAu_pred_stored) then
@@ -576,7 +578,6 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
     !$omp target update to(u_av, v_av, h_av, uh, vh)
     call CorAdCalc(u_av, v_av, h_av, uh, vh, CS%CAu_pred, CS%CAv_pred, CS%OBC, CS%AD_pred, &
                    G, GV, US, CS%CoriolisAdv, pbv, Waves=Waves)
-    !$omp target update from(CS%CAu_pred, CS%CAv_pred)
     call cpu_clock_end(id_clock_Cor)
     if (showCallTree) call callTree_wayPoint("done with CorAdCalc (step_MOM_dyn_split_RK2)")
   endif
@@ -633,16 +634,14 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
     !$omp target update from(up, vp)
     call uvchksum("before vertvisc: up", up, vp, G%HI, haloshift=0, symmetric=sym, unscale=US%L_T_to_m_s)
   endif
+
   !$omp target update to(dz, h, tv%SpV_avg)
   call thickness_to_dz(h, tv, dz, G, GV, US, halo_size=1, do_offload=.true.)
   !$omp target update from(dz, h, tv%SpV_avg)
 
   !$omp target update to(h, dz)
   call vertvisc_coef(up, vp, h, dz, forces, visc, tv, dt, G, GV, US, CS%vertvisc_CSp, CS%OBC, VarMix)
-
-  !$omp target update to(CS%visc_rem_u, CS%visc_rem_v)
   call vertvisc_remnant(visc, CS%visc_rem_u, CS%visc_rem_v, dt, G, GV, US, CS%vertvisc_CSp)
-  !$omp target update from(CS%visc_rem_u, CS%visc_rem_v)
 
   call cpu_clock_end(id_clock_vertvisc)
   if (showCallTree) call callTree_wayPoint("done with vertvisc_coef (step_MOM_dyn_split_RK2)")
@@ -650,10 +649,16 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
   call cpu_clock_begin(id_clock_pass)
   if (G%nonblocking_updates) then
     call complete_group_pass(CS%pass_eta, G%Domain)
+    !$omp target update to(eta)
+    !$omp target update from(CS%visc_rem_u, CS%visc_rem_v)
     call start_group_pass(CS%pass_visc_rem, G%Domain)
   else
+    !$omp target update from(eta)
     call do_group_pass(CS%pass_eta, G%Domain)
+    !$omp target update to(eta)
+    !$omp target update from(CS%visc_rem_u, CS%visc_rem_v)
     call do_group_pass(CS%pass_visc_rem, G%Domain)
+    !$omp target update to(CS%visc_rem_u, CS%visc_rem_v)
   endif
   call cpu_clock_end(id_clock_pass)
 
@@ -673,14 +678,15 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
   endif
   call cpu_clock_end(id_clock_btcalc)
 
-  if (G%nonblocking_updates) &
+  if (G%nonblocking_updates) then
     call complete_group_pass(CS%pass_visc_rem, G%Domain, clock=id_clock_pass)
+    !$omp target update to(CS%visc_rem_u, CS%visc_rem_v)
+  endif
 
 ! u_accel_bt = layer accelerations due to barotropic solver
   !$omp target update to(u_inst, v_inst)
   if (associated(CS%BT_cont) .or. CS%BT_use_layer_fluxes) then
     call cpu_clock_begin(id_clock_continuity)
-    !$omp target update to(CS%visc_rem_u, CS%visc_rem_v)
     call continuity(u_inst, v_inst, h, hp, uh_in, vh_in, dt, G, GV, US, CS%continuity_CSp, CS%OBC, pbv, &
                     visc_rem_u=CS%visc_rem_u, visc_rem_v=CS%visc_rem_v, BT_cont=CS%BT_cont)
 
