@@ -885,7 +885,6 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
     ! hp <- (1-begw)*h_in + begw*hp
     ! Back up hp to the value it would have had after a time-step of
     ! begw*dt.  hp is not used again until recalculated by continuity.
-    !!$OMP parallel do default(shared)
     !$omp target update to(hp)
     do concurrent (k=1:nz, j=js-2:je+2, i=is-2:ie+2)
       hp(i,j,k) = (1.0-CS%begw)*h(i,j,k) + CS%begw*hp(i,j,k)
@@ -1038,15 +1037,13 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
   ! u = u + dt*( u_bc_accel + u_accel_bt )
   call cpu_clock_begin(id_clock_mom_update)
   !$omp target update to(v_bc_accel, u_bc_accel)
-  do concurrent (k=1:nz)
-    do concurrent (j=js:je, I=Isq:Ieq)
-      u_inst(I,j,k) = G%mask2dCu(I,j) * (u_inst(I,j,k) + dt * &
-                      (u_bc_accel(I,j,k) + CS%u_accel_bt(I,j,k)))
-    enddo
-    do concurrent (j=jsq:jeq, I=Is:Ie)
-      v_inst(i,J,k) = G%mask2dCv(i,J) * (v_inst(i,J,k) + dt * &
-                      (v_bc_accel(i,J,k) + CS%v_accel_bt(i,J,k)))
-    enddo
+  do concurrent (k=1:nz, j=js:je, I=Isq:Ieq)
+    u_inst(I,j,k) = G%mask2dCu(I,j) * (u_inst(I,j,k) + dt * &
+                    (u_bc_accel(I,j,k) + CS%u_accel_bt(I,j,k)))
+  enddo
+  do concurrent (k=1:nz, J=Jsq:Jeq, i=is:ie)
+    v_inst(i,J,k) = G%mask2dCv(i,J) * (v_inst(i,J,k) + dt * &
+                    (v_bc_accel(i,J,k) + CS%v_accel_bt(i,J,k)))
   enddo
   !$omp target update from(v_bc_accel, u_bc_accel)
   call cpu_clock_end(id_clock_mom_update)
@@ -1102,7 +1099,6 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
     call vertvisc(u_inst, v_inst, h, forces, visc, dt, CS%OBC, CS%ADp, CS%CDp, G, GV, US, &
                   CS%vertvisc_CSp, CS%taux_bot, CS%tauy_bot, waves=waves)
   endif
-  !$omp target update from(u_inst, v_inst)
 
   if (G%nonblocking_updates) then
     call cpu_clock_end(id_clock_vertvisc)
@@ -1137,7 +1133,7 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
   do concurrent (k=1:nz, j=G%jsd:G%jed, i=G%isd:G%ied)
     h_tmp(i,j,k) = h(i,j,k)
   enddo
-  !$omp target update to(CS%visc_rem_u, CS%visc_rem_v, u_inst, v_inst)
+  !$omp target update to(CS%visc_rem_u, CS%visc_rem_v)
   call continuity(u_inst, v_inst, h_tmp, h, uh, vh, dt, G, GV, US, CS%continuity_CSp, CS%OBC, pbv, &
                   uhbt=CS%uhbt, vhbt=CS%vhbt, visc_rem_u=CS%visc_rem_u, visc_rem_v=CS%visc_rem_v, &
                   u_cor=u_av, v_cor=v_av)
@@ -1159,6 +1155,7 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
   if (associated(CS%OBC)) then
     !### I suspect that there is a bug here when u_inst is compared with a previous value of u_av
     ! to estimate the dominant outward group velocity, but a fix is not available yet.
+    !$omp target update from(u_inst, v_inst)
     call radiation_open_bdry_conds(CS%OBC, u_inst, u_old_rad_OBC, v_inst, v_old_rad_OBC, G, GV, US, dt)
   endif
 
