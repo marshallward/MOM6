@@ -625,7 +625,6 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
   enddo
 
   call enable_averages(dt, Time_local, CS%diag)
-  !$omp target update from(u_inst, v_inst, h)
   call set_viscous_ML(u_inst, v_inst, h, tv, forces, visc, dt, G, GV, US, CS%set_visc_CSp)
   ! TODO: !$omp target update to(visc%...)
   call disable_averaging(CS%diag)
@@ -681,7 +680,6 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
   endif
 
 ! u_accel_bt = layer accelerations due to barotropic solver
-  !$omp target update to(u_inst, v_inst)
   if (associated(CS%BT_cont) .or. CS%BT_use_layer_fluxes) then
     call cpu_clock_begin(id_clock_continuity)
     call continuity(u_inst, v_inst, h, hp, uh_in, vh_in, dt, G, GV, US, CS%continuity_CSp, CS%OBC, pbv, &
@@ -752,6 +750,7 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
     !$omp target update from(CS%PFu, CS%PFv, CS%pbce)
     call MOM_accel_chksum("Predictor accel", CS%CAu_pred, CS%CAv_pred, CS%PFu, CS%PFv, &
              CS%diffu, CS%diffv, G, GV, US, CS%pbce, CS%u_accel_bt, CS%v_accel_bt, symmetric=sym)
+    !$omp target update from(u_inst, v_inst)
     call MOM_state_chksum("Predictor 1 init", u_inst, v_inst, h, uh, vh, G, GV, US, haloshift=1, &
                           symmetric=sym)
     if (debug_redundant) then
@@ -1045,7 +1044,7 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
 
   ! u = u + dt*( u_bc_accel + u_accel_bt )
   call cpu_clock_begin(id_clock_mom_update)
-  !$omp target update to(u_inst, v_inst, v_bc_accel, u_bc_accel)
+  !$omp target update to(v_bc_accel, u_bc_accel)
   do concurrent (k=1:nz)
     do concurrent (j=js:je, I=Isq:Ieq)
       u_inst(I,j,k) = G%mask2dCu(I,j) * (u_inst(I,j,k) + dt * &
@@ -1056,10 +1055,11 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
                       (v_bc_accel(i,J,k) + CS%v_accel_bt(i,J,k)))
     enddo
   enddo
-  !$omp target update from(u_inst, v_inst, v_bc_accel, u_bc_accel)
+  !$omp target update from(v_bc_accel, u_bc_accel)
   call cpu_clock_end(id_clock_mom_update)
 
   if (CS%debug) then
+    !$omp target update from(u_inst, v_inst)
     call uvchksum("Corrector 1 [uv]", u_inst, v_inst, G%HI, haloshift=0, symmetric=sym, unscale=US%L_T_to_m_s)
     call hchksum(h, "Corrector 1 h", G%HI, haloshift=1, unscale=GV%H_to_MKS)
     call uvchksum("Corrector 1 [uv]h", uh, vh, G%HI, haloshift=2, &
@@ -1075,6 +1075,7 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
   call cpu_clock_begin(id_clock_vertvisc)
 
   if (CS%fpmix) then
+    !$omp target update from(u_inst, v_inst)
     uold(:,:,:) = 0.0
     vold(:,:,:) = 0.0
     do k = 1, nz
@@ -1093,7 +1094,6 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
 
   call thickness_to_dz(h, tv, dz, G, GV, US, halo_size=1, do_offload=.true.)
 
-  !$omp target update to(u_inst, v_inst)
   call vertvisc_coef(u_inst, v_inst, h, dz, forces, visc, tv, dt, G, GV, US, CS%vertvisc_CSp, CS%OBC, VarMix)
 
   if (CS%fpmix) then
