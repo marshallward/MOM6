@@ -425,7 +425,7 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
 
   !$omp target enter data map(alloc: u_bc_accel, v_bc_accel, eta_pred, uh_in, vh_in)
   !$omp target enter data map(alloc: up, vp, hp, dz, h_tmp)
-  !$omp target update to(eta, pbv, pbv%por_face_areaU, pbv%por_face_areaV)
+  !$omp target update to(pbv, pbv%por_face_areaU, pbv%por_face_areaV)
 
   do concurrent (k=1:nz, j=G%jsd:G%jed, I=G%IsdB:G%IedB)
     up(I,j,k) = 0.0
@@ -1027,13 +1027,14 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
   !$omp target update from(eta_pred)
 
   if (CS%id_deta_dt>0) then
+    !$omp target update from(eta)
     do j=js,je ; do i=is,ie ; deta_dt(i,j) = (eta_pred(i,j) - eta(i,j))*Idt_bc ; enddo ; enddo
   endif
-  !$omp target update to(eta, eta_pred)
+
+  !$omp target update to(eta_pred)
   do concurrent (j=js:je, i=is:ie)
     eta(i,j) = eta_pred(i,j)
   enddo
-  !$omp target update from (eta, eta_pred)
 
   call cpu_clock_end(id_clock_btstep)
   if (showCallTree) call callTree_leave("btstep()")
@@ -1713,6 +1714,7 @@ subroutine initialize_dyn_split_RK2(u, v, h, tv, uh, vh, eta, Time, G, GV, US, p
       CS%eta(i,j) = CS%eta(i,j) + h(i,j,k)
     enddo ; enddo ; enddo
     call set_initialized(CS%eta, trim(eta_rest_name), restart_CS)
+    !$omp target update to(CS%eta)
   endif
   ! Copy eta into an output array.
   do j=js,je ; do i=is,ie ; eta(i,j) = CS%eta(i,j) ; enddo ; enddo
@@ -2044,7 +2046,7 @@ subroutine end_dyn_split_RK2(CS)
   DEALLOC_(CS%visc_rem_u) ; DEALLOC_(CS%visc_rem_v)
 
   DEALLOC_(CS%eta) ; DEALLOC_(CS%eta_PF) ; DEALLOC_(CS%pbce)
-  !$omp target exit data map(delete: CS%pbce, CS%eta_PF)
+  !$omp target exit data map(delete: CS%eta, CS%eta_PF, CS%pbce)
   DEALLOC_(CS%h_av) ; DEALLOC_(CS%u_av) ; DEALLOC_(CS%v_av)
   !$omp target exit data map(delete: CS%u_av, CS%v_av, CS%h_av)
 
