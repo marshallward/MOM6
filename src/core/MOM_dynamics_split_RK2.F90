@@ -808,7 +808,6 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
 
   endif
   !$omp target update from(up, vp)
-  !$omp target update from(CS%taux_bot, CS%tauy_bot)
 
   if (showCallTree) call callTree_wayPoint("done with vertvisc (step_MOM_dyn_split_RK2)")
   if (G%nonblocking_updates) then
@@ -1104,7 +1103,6 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
                   CS%vertvisc_CSp, CS%taux_bot, CS%tauy_bot, waves=waves)
   endif
   !$omp target update from(u_inst, v_inst)
-  !$omp target update from(CS%taux_bot, CS%tauy_bot)
 
   if (G%nonblocking_updates) then
     call cpu_clock_end(id_clock_vertvisc)
