@@ -623,21 +623,23 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
     vp(i,J,k) = G%mask2dCv(i,J) * (v_inst(i,J,k) + dt * v_bc_accel(i,J,k))
   enddo
 
-  !$omp target update from(up, vp, u_inst, v_inst)
   !$omp target update from(u_bc_accel, v_bc_accel)
 
   call enable_averages(dt, Time_local, CS%diag)
+  !$omp target update from(u_inst, v_inst, h)
   call set_viscous_ML(u_inst, v_inst, h, tv, forces, visc, dt, G, GV, US, CS%set_visc_CSp)
+  ! TODO: !$omp target update to(visc%...)
   call disable_averaging(CS%diag)
 
   if (CS%debug) then
+    !$omp target update from(up, vp)
     call uvchksum("before vertvisc: up", up, vp, G%HI, haloshift=0, symmetric=sym, unscale=US%L_T_to_m_s)
   endif
-  !$omp target update to(dz,h, tv%SpV_avg)
+  !$omp target update to(dz, h, tv%SpV_avg)
   call thickness_to_dz(h, tv, dz, G, GV, US, halo_size=1, do_offload=.true.)
-  !$omp target update from(dz,h, tv%SpV_avg)
+  !$omp target update from(dz, h, tv%SpV_avg)
 
-  !$omp target update to(up, vp, h, dz)
+  !$omp target update to(h, dz)
   call vertvisc_coef(up, vp, h, dz, forces, visc, tv, dt, G, GV, US, CS%vertvisc_CSp, CS%OBC, VarMix)
 
   !$omp target update to(CS%visc_rem_u, CS%visc_rem_v)
@@ -727,7 +729,6 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
   call cpu_clock_begin(id_clock_mom_update)
 
   !$omp target update to (CS%u_accel_bt, CS%v_accel_bt, u_bc_accel, v_bc_accel)
-  !$omp target update to(vp, up)
   do concurrent (k=1:nz)
     do concurrent (J=Jsq:Jeq,i=is:ie)
       vp(i,J,k) = G%mask2dCv(i,J) * (v_inst(i,J,k) + dt_pred * &
