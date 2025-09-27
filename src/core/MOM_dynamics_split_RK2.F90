@@ -635,11 +635,8 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
     call uvchksum("before vertvisc: up", up, vp, G%HI, haloshift=0, symmetric=sym, unscale=US%L_T_to_m_s)
   endif
 
-  !$omp target update to(dz, h, tv%SpV_avg)
   call thickness_to_dz(h, tv, dz, G, GV, US, halo_size=1, do_offload=.true.)
-  !$omp target update from(dz, h, tv%SpV_avg)
 
-  !$omp target update to(h, dz)
   call vertvisc_coef(up, vp, h, dz, forces, visc, tv, dt, G, GV, US, CS%vertvisc_CSp, CS%OBC, VarMix)
   call vertvisc_remnant(visc, CS%visc_rem_u, CS%visc_rem_v, dt, G, GV, US, CS%vertvisc_CSp)
 
@@ -1096,9 +1093,8 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
 
   call thickness_to_dz(h, tv, dz, G, GV, US, halo_size=1, do_offload=.true.)
 
-  !$omp target update to(u_inst, v_inst, h, dz)
+  !$omp target update to(u_inst, v_inst)
   call vertvisc_coef(u_inst, v_inst, h, dz, forces, visc, tv, dt, G, GV, US, CS%vertvisc_CSp, CS%OBC, VarMix)
-
 
   if (CS%fpmix) then
     lFPpost = .true.
@@ -1109,11 +1105,9 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
 
     call vertvisc(u_inst, v_inst, h, forces, visc, dt, CS%OBC, CS%ADp, CS%CDp, G, GV, US, &
          CS%vertvisc_CSp, CS%taux_bot, CS%tauy_bot, fpmix=CS%fpmix, waves=waves)
-
   else
     call vertvisc(u_inst, v_inst, h, forces, visc, dt, CS%OBC, CS%ADp, CS%CDp, G, GV, US, &
                   CS%vertvisc_CSp, CS%taux_bot, CS%tauy_bot, waves=waves)
-
   endif
   !$omp target update from(u_inst, v_inst)
   !$omp target update from(CS%taux_bot, CS%tauy_bot)
