@@ -728,11 +728,12 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
     vp(i,J,k) = G%mask2dCv(i,J) * (v_inst(i,J,k) + dt_pred * &
                     (v_bc_accel(i,J,k) + CS%v_accel_bt(i,J,k)))
   enddo
+
   do concurrent (k=1:nz, j=js:je, I=Isq:Ieq)
     up(I,j,k) = G%mask2dCu(I,j) * (u_inst(I,j,k) + dt_pred * &
                     (u_bc_accel(I,j,k) + CS%u_accel_bt(I,j,k)))
   enddo
-  !$omp target update from(CS%u_accel_bt, CS%v_accel_bt, u_bc_accel, v_bc_accel)
+
   call cpu_clock_end(id_clock_mom_update)
 
   if (CS%debug) then
@@ -977,14 +978,11 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
 
 ! u_bc_accel = CAu + PFu + diffu(u[n-1])
   call cpu_clock_begin(id_clock_btforce)
-  !$omp target update to(u_bc_accel, v_bc_accel)
-  do concurrent (k=1:nz)
-    do concurrent (j=js:je, I=Isq:Ieq)
-      u_bc_accel(I,j,k) = (CS%Cau(I,j,k) + CS%PFu(I,j,k)) + CS%diffu(I,j,k)
-    enddo
-    do concurrent (J=Jsq:Jeq,i=is:ie)
-      v_bc_accel(i,J,k) = (CS%Cav(i,J,k) + CS%PFv(i,J,k)) + CS%diffv(i,J,k)
-    enddo
+  do concurrent (k=1:nz, j=js:je, I=Isq:Ieq)
+    u_bc_accel(I,j,k) = (CS%Cau(I,j,k) + CS%PFu(I,j,k)) + CS%diffu(I,j,k)
+  enddo
+  do concurrent (k=1:nz, J=Jsq:Jeq,i=is:ie)
+    v_bc_accel(i,J,k) = (CS%Cav(i,J,k) + CS%PFv(i,J,k)) + CS%diffv(i,J,k)
   enddo
   !$omp target update from(u_bc_accel, v_bc_accel)
   if (associated(CS%OBC)) then
