@@ -843,14 +843,16 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
   call continuity(up, vp, h, hp, uh, vh, dt, G, GV, US, CS%continuity_CSp, CS%OBC, pbv, &
                   uhbt=CS%uhbt, vhbt=CS%vhbt, visc_rem_u=CS%visc_rem_u, visc_rem_v=CS%visc_rem_v, &
                   u_cor=u_av, v_cor=v_av, BT_cont=CS%BT_cont)
-  !$omp target update from(u_av, v_av, hp, uh, vh)
   call cpu_clock_end(id_clock_continuity)
 
   if (showCallTree) call callTree_wayPoint("done with continuity (step_MOM_dyn_split_RK2)")
 
+  !$omp target update from(u_av, v_av, hp, uh, vh)
   call do_group_pass(CS%pass_hp_uv, G%Domain, clock=id_clock_pass)
+  !$omp target update to(u_av, v_av, hp, uh, vh)
 
   if (associated(CS%OBC)) then
+    !$omp target update from(u_av, v_av)
 
     if (CS%debug) &
       call uvchksum("Pre OBC avg [uv]", u_av, v_av, G%HI, haloshift=1, symmetric=sym, unscale=US%L_T_to_m_s)
@@ -860,20 +862,21 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
     if (CS%debug) &
       call uvchksum("Post OBC avg [uv]", u_av, v_av, G%HI, haloshift=1, symmetric=sym, unscale=US%L_T_to_m_s)
 
+    !$omp target update to(u_av, v_av)
+
     ! These should be done with a pass that excludes uh & vh.
 !   call do_group_pass(CS%pass_hp_uv, G%Domain, clock=id_clock_pass)
   endif
 
   if (G%nonblocking_updates) then
+    !$omp target update from(u_av, v_av, uh, vh)
     call start_group_pass(CS%pass_av_uvh, G%Domain, clock=id_clock_pass)
   endif
 
   ! h_av = (h + hp)/2
-  !$omp target update to(h_av, hp)
   do concurrent (k=1:nz, j=js-2:je+2, i=is-2:ie+2)
     h_av(i,j,k) = 0.5*(h(i,j,k) + hp(i,j,k))
   enddo
-  !$omp target update from(h_av, hp)
 
   ! The correction phase of the time step starts here.
   call enable_averages(dt, Time_local, CS%diag)
@@ -943,6 +946,7 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
   if (CS%debug) then
     !$omp target update from(up, vp, hp, uh, vh)
     call MOM_state_chksum("Predictor ", up, vp, hp, uh, vh, G, GV, US, symmetric=sym)
+    !$omp target update from(u_av, v_av, h_av)
     call uvchksum("Predictor avg [uv]", u_av, v_av, G%HI, haloshift=1, symmetric=sym, unscale=US%L_T_to_m_s)
     call hchksum(h_av, "Predictor avg h", G%HI, haloshift=2, unscale=GV%H_to_MKS)
   ! call MOM_state_chksum("Predictor avg ", u_av, v_av, h_av, uh, vh, G, GV, US)
@@ -953,8 +957,6 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
   endif
 
   ! TODO: Cleanup BT_cont%h_[uv] handling
-
-  !$omp target update to(u_av, v_av, h_av, uh, vh)
 
 ! diffu = horizontal viscosity terms (u_av)
   call cpu_clock_begin(id_clock_horvisc)
