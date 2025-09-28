@@ -1023,15 +1023,12 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
               CS%u_accel_bt, CS%v_accel_bt, eta_pred, CS%uhbt, CS%vhbt, G, GV, US, &
               CS%barotropic_CSp, CS%visc_rem_u, CS%visc_rem_v, SpV_avg, CS%ADp, CS%OBC, CS%BT_cont, &
               eta_PF_start, taux_bot, tauy_bot, uh_ptr, vh_ptr, u_ptr, v_ptr, etaav=eta_av)
-  !$omp target update from(CS%u_accel_bt, CS%v_accel_bt)
-  !$omp target update from(eta_pred)
 
   if (CS%id_deta_dt>0) then
-    !$omp target update from(eta)
+    !$omp target update from(eta, eta_pred)
     do j=js,je ; do i=is,ie ; deta_dt(i,j) = (eta_pred(i,j) - eta(i,j))*Idt_bc ; enddo ; enddo
   endif
 
-  !$omp target update to(eta_pred)
   do concurrent (j=js:je, i=is:ie)
     eta(i,j) = eta_pred(i,j)
   enddo
@@ -1040,6 +1037,7 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
   if (showCallTree) call callTree_leave("btstep()")
 
   if (CS%debug .and. debug_redundant) then
+    !$omp target update from(CS%u_accel_bt, CS%v_accel_bt)
     call check_redundant("u_accel_bt ", CS%u_accel_bt, CS%v_accel_bt, G, unscale=US%L_T2_to_m_s2)
   endif
 
@@ -1062,6 +1060,10 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
     call uvchksum("Corrector 1 [uv]h", uh, vh, G%HI, haloshift=2, &
                   symmetric=sym, unscale=GV%H_to_MKS*US%L_to_m**2*US%s_to_T)
   ! call MOM_state_chksum("Corrector 1", u_inst, v_inst, h, uh, vh, G, GV, US, haloshift=1)
+    !$omp target update from(CS%CAu, CS%CAv)
+    !$omp target update from(CS%PFu, CS%PFv, CS%pbce)
+    !$omp target update from(CS%diffu, CS%diffv)
+    !$omp target update from(CS%u_accel_bt, CS%v_accel_bt)
     call MOM_accel_chksum("Corrector accel", CS%CAu, CS%CAv, CS%PFu, CS%PFv, &
                           CS%diffu, CS%diffv, G, GV, US, CS%pbce, CS%u_accel_bt, CS%v_accel_bt, &
                           symmetric=sym)
