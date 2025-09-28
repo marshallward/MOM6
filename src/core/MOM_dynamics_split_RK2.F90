@@ -1114,9 +1114,7 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
     call start_group_pass(CS%pass_uv, G%Domain, clock=id_clock_pass)
     call cpu_clock_begin(id_clock_vertvisc)
   endif
-  !$omp target update to(CS%visc_rem_u, CS%visc_rem_v)
   call vertvisc_remnant(visc, CS%visc_rem_u, CS%visc_rem_v, dt, G, GV, US, CS%vertvisc_CSp)
-  !$omp target update from(CS%visc_rem_u, CS%visc_rem_v)
 
   call cpu_clock_end(id_clock_vertvisc)
   if (showCallTree) call callTree_wayPoint("done with vertvisc (step_MOM_dyn_split_RK2)")
@@ -1128,7 +1126,10 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
   enddo
   !$omp target update from(h_av,h)
 
+  !$omp target update from(CS%visc_rem_u, CS%visc_rem_v)
   call do_group_pass(CS%pass_visc_rem, G%Domain, clock=id_clock_pass)
+  !$omp target update to(CS%visc_rem_u, CS%visc_rem_v)
+
   if (G%nonblocking_updates) then
     call complete_group_pass(CS%pass_uv, G%Domain, clock=id_clock_pass)
   else
@@ -1142,7 +1143,7 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
   do concurrent (k=1:nz, j=G%jsd:G%jed, i=G%isd:G%ied)
     h_tmp(i,j,k) = h(i,j,k)
   enddo
-  !$omp target update to(CS%visc_rem_u, CS%visc_rem_v)
+
   call continuity(u_inst, v_inst, h_tmp, h, uh, vh, dt, G, GV, US, CS%continuity_CSp, CS%OBC, pbv, &
                   uhbt=CS%uhbt, vhbt=CS%vhbt, visc_rem_u=CS%visc_rem_u, visc_rem_v=CS%visc_rem_v, &
                   u_cor=u_av, v_cor=v_av)
