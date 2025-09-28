@@ -807,34 +807,39 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
                   GV, US, CS%vertvisc_CSp, CS%taux_bot, CS%tauy_bot, waves=waves)
 
   endif
-  !$omp target update from(up, vp)
 
   if (showCallTree) call callTree_wayPoint("done with vertvisc (step_MOM_dyn_split_RK2)")
   if (G%nonblocking_updates) then
     call cpu_clock_end(id_clock_vertvisc)
+    !$omp target update from(up, vp)
     call start_group_pass(CS%pass_uvp, G%Domain, clock=id_clock_pass)
     call cpu_clock_begin(id_clock_vertvisc)
   endif
-  !$omp target update to(CS%visc_rem_u, CS%visc_rem_v)
+
   if (CS%visc_rem_dt_bug) then
     call vertvisc_remnant(visc, CS%visc_rem_u, CS%visc_rem_v, dt_pred, G, GV, US, CS%vertvisc_CSp)
   else
     call vertvisc_remnant(visc, CS%visc_rem_u, CS%visc_rem_v, dt, G, GV, US, CS%vertvisc_CSp)
   endif
-  !$omp target update from(CS%visc_rem_u, CS%visc_rem_v)
+
   call cpu_clock_end(id_clock_vertvisc)
 
+  !$omp target update from(CS%visc_rem_u, CS%visc_rem_v)
   call do_group_pass(CS%pass_visc_rem, G%Domain, clock=id_clock_pass)
+  !$omp target update to(CS%visc_rem_u, CS%visc_rem_v)
+
   if (G%nonblocking_updates) then
     call complete_group_pass(CS%pass_uvp, G%Domain, clock=id_clock_pass)
+    !$omp target update to(up, vp)
   else
+    !$omp target update from(up, vp)
     call do_group_pass(CS%pass_uvp, G%Domain, clock=id_clock_pass)
+    !$omp target update to(up, vp)
   endif
 
   ! uh = u_av * h
   ! hp = h + dt * div . uh
   call cpu_clock_begin(id_clock_continuity)
-  !$omp target update to(CS%visc_rem_u, CS%visc_rem_v, up, vp)
   call continuity(up, vp, h, hp, uh, vh, dt, G, GV, US, CS%continuity_CSp, CS%OBC, pbv, &
                   uhbt=CS%uhbt, vhbt=CS%vhbt, visc_rem_u=CS%visc_rem_u, visc_rem_v=CS%visc_rem_v, &
                   u_cor=u_av, v_cor=v_av, BT_cont=CS%BT_cont)
