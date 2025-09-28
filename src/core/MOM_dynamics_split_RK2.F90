@@ -893,24 +893,22 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
     ! hp <- (1-begw)*h_in + begw*hp
     ! Back up hp to the value it would have had after a time-step of
     ! begw*dt.  hp is not used again until recalculated by continuity.
-    !$omp target update to(hp)
     do concurrent (k=1:nz, j=js-2:je+2, i=is-2:ie+2)
       hp(i,j,k) = (1.0-CS%begw)*h(i,j,k) + CS%begw*hp(i,j,k)
     enddo
-    !$omp target update from(hp)
 
     ! PFu = d/dx M(hp,T,S)
     ! pbce = dM/deta
     call cpu_clock_begin(id_clock_pres)
     call PressureForce(hp, tv, CS%PFu, CS%PFv, G, GV, US, CS%PressureForce_CSp, &
                        CS%ALE_CSp, CS%ADp, p_surf, CS%pbce, CS%eta_PF)
-    !$omp target exit data map(from: CS%PFu, CS%PFv, CS%pbce)
     ! Stokes shear force contribution to pressure gradient
     Use_Stokes_PGF = present(Waves)
     if (Use_Stokes_PGF) then
       Use_Stokes_PGF = associated(Waves)
       if (Use_Stokes_PGF) Use_Stokes_PGF = Waves%Stokes_PGF
       if (Use_Stokes_PGF) then
+        !$omp target update from(CS%PFu, CS%PFv, h)
         call thickness_to_dz(h, tv, dz, G, GV, US, halo_size=1)
         call Stokes_PGF(G, GV, US, dz, u_inst, v_inst, CS%PFu_Stokes, CS%PFv_Stokes, Waves)
         if (.not.Waves%Passive_Stokes_PGF) then
@@ -934,8 +932,10 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
   ! TODO: Move p_surf handling outside of this function
   !$omp target exit data map(delete: p_surf) if (associated(p_surf))
 
-  if (G%nonblocking_updates) &
+  if (G%nonblocking_updates) then
     call complete_group_pass(CS%pass_av_uvh, G%Domain, clock=id_clock_pass)
+    !$omp target update from(u_av, v_av, uh, vh)
+  endif
 
   if (BT_cont_BT_thick) then
     call btcalc(h, G, GV, CS%barotropic_CSp, CS%BT_cont%h_u, CS%BT_cont%h_v, &
@@ -964,7 +964,6 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
                             MEKE, Varmix, G, GV, US, CS%hor_visc, tv, dt, &
                             OBC=CS%OBC, BT=CS%barotropic_CSp, TD=thickness_diffuse_CSp, &
                             ADp=CS%ADp, hu_cont=CS%BT_cont%h_u, hv_cont=CS%BT_cont%h_v, STOCH=STOCH)
-  !$omp target update from(CS%diffu, CS%diffv)
 
   call cpu_clock_end(id_clock_horvisc)
   if (showCallTree) call callTree_wayPoint("done with horizontal_viscosity (step_MOM_dyn_split_RK2)")
@@ -975,20 +974,21 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
                  G, GV, US, CS%CoriolisAdv, pbv, Waves=Waves)
   call cpu_clock_end(id_clock_Cor)
 
-  !$omp target update from(CS%CAu, CS%CAv)
-
   if (showCallTree) call callTree_wayPoint("done with CorAdCalc (step_MOM_dyn_split_RK2)")
 
 ! Calculate the momentum forcing terms for the barotropic equations.
 
 ! u_bc_accel = CAu + PFu + diffu(u[n-1])
   call cpu_clock_begin(id_clock_btforce)
+
   do concurrent (k=1:nz, j=js:je, I=Isq:Ieq)
     u_bc_accel(I,j,k) = (CS%Cau(I,j,k) + CS%PFu(I,j,k)) + CS%diffu(I,j,k)
   enddo
+
   do concurrent (k=1:nz, J=Jsq:Jeq,i=is:ie)
     v_bc_accel(i,J,k) = (CS%Cav(i,J,k) + CS%PFv(i,J,k)) + CS%diffv(i,J,k)
   enddo
+
   !$omp target update from(u_bc_accel, v_bc_accel)
   if (associated(CS%OBC)) then
     call open_boundary_zero_normal_flow(CS%OBC, G, GV, u_bc_accel, v_bc_accel)
@@ -996,6 +996,10 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
   call cpu_clock_end(id_clock_btforce)
 
   if (CS%debug) then
+    !$omp target update from(CS%CAu, CS%CAv)
+    !$omp target update from(CS%PFu, CS%PFv, CS%pbce)
+    !$omp target update from(CS%diffu, CS%diffv)
+    !$omp target update from(u_bc_accel, v_bc_accel)
     call MOM_accel_chksum("corr pre-btstep accel", CS%CAu, CS%CAv, CS%PFu, CS%PFv, &
                           CS%diffu, CS%diffv, G, GV, US, CS%pbce, u_bc_accel, v_bc_accel, &
                           symmetric=sym)
