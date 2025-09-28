@@ -956,8 +956,6 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
     endif
   endif
 
-  ! TODO: Cleanup BT_cont%h_[uv] handling
-
 ! diffu = horizontal viscosity terms (u_av)
   call cpu_clock_begin(id_clock_horvisc)
   call horizontal_viscosity(u_av, v_av, h_av, uh, vh, CS%diffu, CS%diffv, &
@@ -989,9 +987,10 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
     v_bc_accel(i,J,k) = (CS%Cav(i,J,k) + CS%PFv(i,J,k)) + CS%diffv(i,J,k)
   enddo
 
-  !$omp target update from(u_bc_accel, v_bc_accel)
   if (associated(CS%OBC)) then
+    !$omp target update from(u_bc_accel, v_bc_accel)
     call open_boundary_zero_normal_flow(CS%OBC, G, GV, u_bc_accel, v_bc_accel)
+    !$omp target update to(u_bc_accel, v_bc_accel)
   endif
   call cpu_clock_end(id_clock_btforce)
 
@@ -1020,7 +1019,6 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
 
   if (showCallTree) call callTree_enter("btstep(), MOM_barotropic.F90")
   ! This is the corrector step call to btstep.
-  !$omp target update to(u_bc_accel, v_bc_accel)
   call btstep(u_inst, v_inst, eta, dt, u_bc_accel, v_bc_accel, forces, CS%pbce, CS%eta_PF, u_av, v_av, &
               CS%u_accel_bt, CS%v_accel_bt, eta_pred, CS%uhbt, CS%vhbt, G, GV, US, &
               CS%barotropic_CSp, CS%visc_rem_u, CS%visc_rem_v, SpV_avg, CS%ADp, CS%OBC, CS%BT_cont, &
@@ -1047,7 +1045,6 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
 
   ! u = u + dt*( u_bc_accel + u_accel_bt )
   call cpu_clock_begin(id_clock_mom_update)
-  !$omp target update to(v_bc_accel, u_bc_accel)
   do concurrent (k=1:nz, j=js:je, I=Isq:Ieq)
     u_inst(I,j,k) = G%mask2dCu(I,j) * (u_inst(I,j,k) + dt * &
                     (u_bc_accel(I,j,k) + CS%u_accel_bt(I,j,k)))
@@ -1056,7 +1053,6 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
     v_inst(i,J,k) = G%mask2dCv(i,J) * (v_inst(i,J,k) + dt * &
                     (v_bc_accel(i,J,k) + CS%v_accel_bt(i,J,k)))
   enddo
-  !$omp target update from(v_bc_accel, u_bc_accel)
   call cpu_clock_end(id_clock_mom_update)
 
   if (CS%debug) then
