@@ -1187,6 +1187,10 @@ subroutine vertvisc_remnant(visc, visc_rem_u, visc_rem_v, dt, G, GV, US, CS)
   if (.not.CS%initialized) call MOM_error(FATAL,"MOM_vert_friction(remnant): "// &
          "Module must be initialized before it is used.")
 
+  ! testing mask init
+  visc_rem_u(:,:,:) = 0.
+  visc_rem_v(:,:,:) = 0.
+
   ! Find the zonal viscous remnant using a modification of a standard tridagonal solver.
 
   do j=G%jsc,G%jec ; do I=Isq,Ieq ; if (G%mask2dCu(I,j) > 0.) then
