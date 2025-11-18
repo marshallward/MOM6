@@ -112,8 +112,12 @@ subroutine advect_tracer(h_end, uhtr, vhtr, OBC, dt, G, GV, US, CS, Reg, x_first
   integer :: stencil_local          ! Stencil for the local adection scheme
   integer :: local_advect_scheme(Reg%ntr) ! contains the list of the advection for each tracer
 
-  domore_u(:,:) = .false.
-  domore_v(:,:) = .false.
+  !$omp target update to(uhtr, vhtr, h_end)
+
+  !$omp target enter data map(to: Reg, Reg%Tr(:), CS, OBC) map(alloc: domore_u, domore_v, uhr, vhr, uh_neglect, vh_neglect, hprev)
+
+  do concurrent (k=1:GV%ke, j=G%jsd:G%jed) ; domore_u(j,k) = .false.; enddo
+  do concurrent (k=1:GV%ke, j=G%jsdB:G%jedB) ; domore_v(j,k) = .false. ; enddo
   is  = G%isc ; ie  = G%iec ; js  = G%jsc ; je  = G%jec ; nz = GV%ke
   isd = G%isd ; ied = G%ied ; jsd = G%jsd ; jed = G%jed
   IsdB = G%IsdB ; IedB = G%IedB ; JsdB = G%JsdB ; JedB = G%JedB
@@ -132,7 +136,7 @@ subroutine advect_tracer(h_end, uhtr, vhtr, OBC, dt, G, GV, US, CS, Reg, x_first
   x_first = (MOD(G%first_direction,2) == 0)
 
   ! Choose the maximum stencil from all the local advection scheme
-  do m = 1,ntr
+  do concurrent (m = 1:ntr) reduce(max:stencil)
 
      local_advect_scheme(m) = Reg%Tr(m)%advect_scheme
      if(local_advect_scheme(m) < 0) local_advect_scheme(m) = CS%default_advect_scheme
@@ -165,27 +169,27 @@ subroutine advect_tracer(h_end, uhtr, vhtr, OBC, dt, G, GV, US, CS, Reg, x_first
   call create_group_pass(CS%pass_uhr_vhr_t_hprev, hprev, G%Domain)
   do m=1,ntr
     call create_group_pass(CS%pass_uhr_vhr_t_hprev, Reg%Tr(m)%t, G%Domain)
+    !$omp target enter data map(to: Reg%Tr(m)%t) map(alloc: Reg%Tr(m)%ad_x, Reg%Tr(m)%ad_y, Reg%Tr(m)%ad2d_y, Reg%Tr(m)%advection_xy)
   enddo
   call cpu_clock_end(id_clock_pass)
 
-  !$OMP parallel default(shared)
+  !$omp target enter data map(to: local_advect_scheme)
 
   ! This initializes the halos of uhr and vhr because pass_vector might do
   ! calculations on them, even though they are never used.
-  !$OMP do
-  do k=1,nz
-    do j=jsd,jed ; do I=IsdB,IedB ; uhr(I,j,k) = 0.0 ; enddo ; enddo
-    do J=jsdB,jedB ; do i=Isd,Ied ; vhr(i,J,k) = 0.0 ; enddo ; enddo
-    do j=jsd,jed ; do i=Isd,Ied ; hprev(i,j,k) = 0.0 ; enddo ; enddo
+  do concurrent (k=1:nz)
+    do concurrent (j=jsd:jed, I=IsdB:IedB) ; uhr(I,j,k) = 0.0 ; enddo
+    do concurrent (J=jsdB:jedB, i=Isd:Ied) ; vhr(i,J,k) = 0.0 ; enddo
+    do concurrent (j=jsd:jed, i=Isd:Ied) ; hprev(i,j,k) = 0.0 ; enddo
     domore_k(k)=1
     !  Put the remaining (total) thickness fluxes into uhr and vhr.
-    do j=js,je ; do I=is-1,ie ; uhr(I,j,k) = uhtr(I,j,k) ; enddo ; enddo
-    do J=js-1,je ; do i=is,ie ; vhr(i,J,k) = vhtr(i,J,k) ; enddo ; enddo
+    do concurrent (j=js:je, I=is-1:ie) ; uhr(I,j,k) = uhtr(I,j,k) ; enddo
+    do concurrent (J=js-1:je, i=is:ie) ; vhr(i,J,k) = vhtr(i,J,k) ; enddo
     if (.not. present(vol_prev)) then
     !   This loop reconstructs the thickness field the last time that the
     ! tracers were updated, probably just after the diabatic forcing.  A useful
     ! diagnostic could be to compare this reconstruction with that older value.
-      do j=js,je ; do i=is,ie
+      do concurrent (j=js:je, i=is:ie)
         hprev(i,j,k) = max(0.0, G%areaT(i,j)*h_end(i,j,k) + &
              ((uhr(I,j,k) - uhr(I-1,j,k)) + (vhr(i,J,k) - vhr(i,J-1,k))))
     ! In the case that the layer is now dramatically thinner than it was previously,
@@ -193,41 +197,36 @@ subroutine advect_tracer(h_end, uhtr, vhtr, OBC, dt, G, GV, US, CS, Reg, x_first
     ! non-conservation of tracers
         hprev(i,j,k) = hprev(i,j,k) + &
                        max(0.0, 1.0e-13*hprev(i,j,k) - G%areaT(i,j)*h_end(i,j,k))
-      enddo ; enddo
+      enddo
     else
-      do j=js,je ; do i=is,ie
+      do concurrent (j=js:je, i=is:ie)
         hprev(i,j,k) = vol_prev(i,j,k)
-      enddo ; enddo
+      enddo
     endif
   enddo
 
-
-  !$OMP do
-  do j=jsd,jed ; do I=isd,ied-1
+  do concurrent (j=jsd:jed, I=isd:ied-1)
     uh_neglect(I,j) = GV%H_subroundoff * MIN(G%areaT(i,j), G%areaT(i+1,j))
-  enddo ; enddo
-  !$OMP do
-  do J=jsd,jed-1 ; do i=isd,ied
+  enddo
+  do concurrent (J=jsd:jed-1, i=isd:ied)
     vh_neglect(i,J) = GV%H_subroundoff * MIN(G%areaT(i,j), G%areaT(i,j+1))
-  enddo ; enddo
+  enddo
 
   ! initialize diagnostic fluxes and tendencies
-  !$OMP do
-  do m=1,ntr
-    if (associated(Reg%Tr(m)%ad_x)) Reg%Tr(m)%ad_x(:,:,:) = 0.0
-    if (associated(Reg%Tr(m)%ad_y)) Reg%Tr(m)%ad_y(:,:,:) = 0.0
-    if (associated(Reg%Tr(m)%advection_xy)) Reg%Tr(m)%advection_xy(:,:,:) = 0.0
-    if (associated(Reg%Tr(m)%ad2d_x)) Reg%Tr(m)%ad2d_x(:,:) = 0.0
-    if (associated(Reg%Tr(m)%ad2d_y)) Reg%Tr(m)%ad2d_y(:,:) = 0.0
+  do concurrent (m=1:ntr)
+    if (associated(Reg%Tr(m)%ad_x)) then ; do concurrent (k=1:nz, j=jsd:jed, I=IsdB:IedB) ; Reg%Tr(m)%ad_x(i,j,k) = 0.0 ; enddo ; endif
+    if (associated(Reg%Tr(m)%ad_y)) then ; do concurrent (k=1:nz, j=JsdB:jedB, i=isd:ied) ; Reg%Tr(m)%ad_y(i,j,k) = 0.0 ; enddo ; endif
+    if (associated(Reg%Tr(m)%advection_xy)) then ; do concurrent (k=1:nz, j=jsd:jed, i=isd:ied) ; Reg%Tr(m)%advection_xy(i,j,k) = 0.0 ; enddo ; endif
+    if (associated(Reg%Tr(m)%ad2d_x)) then ; do concurrent (j=jsd:jed, I=IsdB:IedB) ; Reg%Tr(m)%ad2d_x(i,j) = 0.0 ; enddo ; endif
+    if (associated(Reg%Tr(m)%ad2d_y)) then ; do concurrent (J=JsdB:JedB, i=isd:ied) ; Reg%Tr(m)%ad2d_y(i,j) = 0.0 ; enddo ; endif
   enddo
-  !$OMP end parallel
 
   isv = is ; iev = ie ; jsv = js ; jev = je
 
   do itt=1,max_iter
 
     if (isv > is-stencil) then
-      call do_group_pass(CS%pass_uhr_vhr_t_hprev, G%Domain, clock=id_clock_pass)
+      call do_group_pass(CS%pass_uhr_vhr_t_hprev, G%Domain, clock=id_clock_pass, omp_offload=.true.)
 
       nsten_halo = min(is-isd,ied-ie,js-jsd,jed-je)/stencil
       isv = is-nsten_halo*stencil ; jsv = js-nsten_halo*stencil
@@ -235,26 +234,26 @@ subroutine advect_tracer(h_end, uhtr, vhtr, OBC, dt, G, GV, US, CS, Reg, x_first
       ! Reevaluate domore_u & domore_v unless the valid range is the same size as
       ! before.  Also, do this if there is Strang splitting.
       if ((nsten_halo > 1) .or. (itt==1)) then
-        !$OMP parallel do default(shared)
-        do k=1,nz ; if (domore_k(k) > 0) then
-          do j=jsv,jev ; if (.not.domore_u(j,k)) then
+        !!$OMP parallel do default(shared)
+        do concurrent (k=1:nz, domore_k(k) > 0)
+          do concurrent (j=jsv:jev, .not.domore_u(j,k))
             do i=isv+stencil-1,iev-stencil ; if (uhr(I,j,k) /= 0.0) then
               domore_u(j,k) = .true. ; exit
             endif ; enddo ! i-loop
-          endif ; enddo
-          do J=jsv+stencil-1,jev-stencil ; if (.not.domore_v(J,k)) then
+          enddo
+          do concurrent (J=jsv+stencil-1:jev-stencil, .not.domore_v(J,k))
             do i=isv+stencil,iev-stencil ; if (vhr(i,J,k) /= 0.0) then
               domore_v(J,k) = .true. ; exit
             endif ; enddo ! i-loop
-          endif ; enddo
+          enddo
 
           !   At this point, domore_k is global.  Change it so that it indicates
           ! whether any work is needed on a layer on this processor.
           domore_k(k) = 0
-          do j=jsv,jev ; if (domore_u(j,k)) domore_k(k) = 1 ; enddo
-          do J=jsv+stencil-1,jev-stencil ; if (domore_v(J,k)) domore_k(k) = 1 ; enddo
+          do concurrent (j=jsv:jev, domore_u(j,k)) ; domore_k(k) = 1 ; enddo
+          do concurrent (J=jsv+stencil-1:jev-stencil, domore_v(J,k)) ; domore_k(k) = 1 ; enddo
 
-        endif ; enddo ! k-loop
+        enddo ! k-loop
       endif
     endif
 
@@ -269,12 +268,6 @@ subroutine advect_tracer(h_end, uhtr, vhtr, OBC, dt, G, GV, US, CS, Reg, x_first
     !  synchronized.  This may not be very efficient, but it should be reliable.
 
     !!$OMP parallel default(shared)
-    !$omp target enter data map(to: hprev, uhr, vhr, uh_neglect, vh_neglect, domore_u, domore_v, local_advect_scheme, Reg%Tr(:), OBC)
-
-    !$ do m = 1, ntr
-      !$omp target enter data map(to: Reg%Tr(m)%t, Reg%Tr(m)%ad_x, Reg%Tr(m)%ad_y, Reg%Tr(m)%ad2d_y, Reg%Tr(m)%advection_xy)
-    !$ enddo
-
     if (x_first) then
 
       !$OMP do ordered
@@ -321,13 +314,6 @@ subroutine advect_tracer(h_end, uhtr, vhtr, OBC, dt, G, GV, US, CS, Reg, x_first
       endif ; enddo
 
     endif ! x_first
-
-    ! transfer Tr(m) members before releasing Tr array
-    !$ do m = 1, ntr
-      !$omp target exit data map(from: Reg%Tr(m)%t, Reg%Tr(m)%ad_x, Reg%Tr(m)%ad_y, Reg%Tr(m)%ad2d_y, Reg%Tr(m)%advection_xy)
-    !$ enddo
-
-    !$omp target exit data map(from: uhr, vhr, hprev) map(release: uh_neglect, vh_neglect, domore_u, domore_v, local_advect_scheme, Reg%tr(:), OBC)
     !!$OMP end parallel
 
     ! If the advection just isn't finishing after max_iter, move on.
@@ -350,10 +336,17 @@ subroutine advect_tracer(h_end, uhtr, vhtr, OBC, dt, G, GV, US, CS, Reg, x_first
 
   enddo ! Iterations loop
 
-  if (present(uhr_out)) uhr_out(:,:,:) = uhr(:,:,:)
-  if (present(vhr_out)) vhr_out(:,:,:) = vhr(:,:,:)
+  ! transfer Tr(m) members before releasing Tr array
+  !$ do m = 1, ntr
+    !$omp target exit data map(from: Reg%Tr(m)%t, Reg%Tr(m)%ad_x, Reg%Tr(m)%ad_y, Reg%Tr(m)%ad2d_y, Reg%Tr(m)%advection_xy)
+  !$ enddo
+
+  !$omp target exit data map(from: uhr, vhr, hprev) map(release: CS, uh_neglect, vh_neglect, domore_u, domore_v, local_advect_scheme, Reg, Reg%tr(:), OBC)
+
+  if (present(uhr_out)) then ; do concurrent (k=1:nz, j=jsd:jed, i=isdB:iedB) ; uhr_out(i,j,k) = uhr(i,j,k) ; enddo ; endif
+  if (present(vhr_out)) then ; do concurrent (k=1:nz, j=jsdB:jedB, i=isd:ied) ; vhr_out(i,j,k) = vhr(i,j,k) ; enddo ; endif
   if (present(vol_prev) .and. present(update_vol_prev)) then
-    if (update_vol_prev) vol_prev(:,:,:) = hprev(:,:,:)
+    if (update_vol_prev) then ; do concurrent (k=1:nz, j=jsd:jed, i=isd:ied) ; vol_prev(i,j,k) = hprev(i,j,k) ; enddo ; endif
   endif
 
   call cpu_clock_end(id_clock_advect)
