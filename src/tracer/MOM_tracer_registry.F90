@@ -256,6 +256,8 @@ subroutine register_tracer(tr_ptr, Reg, param_file, HI, GV, name, longname, unit
     if (associated(advection_xy)) Tr%advection_xy => advection_xy
   endif
 
+  !$omp target enter data map(to: Tr, Tr%t, Tr%ad_x, Tr%ad_y, Tr%ad2d_x, Tr%ad2d_y, Tr%advection_xy)
+
   if (present(restart_CS)) then
     ! Register this tracer to be read from and written to restart files.
     mand = .true. ; if (present(mandatory)) mand = mandatory
@@ -973,6 +975,7 @@ subroutine tracer_registry_init(param_file, Reg)
   character(len=256) :: mesg    ! Message for error messages.
 
   if (.not.associated(Reg)) then ; allocate(Reg)
+    !$omp target enter data map(alloc: Reg)
   else ; return ; endif
 
   ! Read all relevant parameters and write them to the model log.
