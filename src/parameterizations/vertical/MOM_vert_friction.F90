@@ -1209,7 +1209,7 @@ subroutine vertvisc_remnant(visc, visc_rem_u, visc_rem_v, dt, G, GV, US, CS)
       b_denom_1 = CS%h_u(I,j,k) + (dt * (Ray + (CS%a_u(I,j,K) * d1)))
       b1 = 1.0 / (b_denom_1 + dt * CS%a_u(I,j,K+1))
       d1 = b_denom_1 * b1
-      visc_rem_u(I,j,k) = (CS%h_u(I,j,k) + dt * CS%a_u(I,j,K) * visc_rem_u(I,j,k-1)) * b1
+      visc_rem_u(I,j,k) = (CS%h_u(I,j,k) + (dt * CS%a_u(I,j,K)) * visc_rem_u(I,j,k-1)) * b1
     enddo
 
     do k=nz-1,1,-1
@@ -1235,7 +1235,7 @@ subroutine vertvisc_remnant(visc, visc_rem_u, visc_rem_v, dt, G, GV, US, CS)
       b_denom_1 = CS%h_v(i,J,k) + (dt * (Ray + (CS%a_v(i,J,K) * d1)))
       b1 = 1.0 / (b_denom_1 + dt * CS%a_v(i,J,K+1))
       d1 = b_denom_1 * b1
-      visc_rem_v(i,J,k) = (CS%h_v(i,J,k) + dt * CS%a_v(i,J,K) * visc_rem_v(i,J,k-1)) * b1
+      visc_rem_v(i,J,k) = (CS%h_v(i,J,k) + (dt * CS%a_v(i,J,K)) * visc_rem_v(i,J,k-1)) * b1
     enddo
 
     do k=nz-1,1,-1
