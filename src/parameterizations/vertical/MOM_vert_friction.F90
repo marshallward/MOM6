@@ -1197,7 +1197,7 @@ subroutine vertvisc_remnant(visc, visc_rem_u, visc_rem_v, dt, G, GV, US, CS)
     Ray = 0.
     if (allocated(visc%Ray_u)) Ray = visc%Ray_u(I,j,1)
 
-    b_denom_1 = CS%h_u(I,j,1) + dt * (Ray + CS%a_u(I,j,1))
+    b_denom_1 = CS%h_u(I,j,1) + (dt * (Ray + CS%a_u(I,j,1)))
     b1 = 1.0 / (b_denom_1 + dt * CS%a_u(I,j,2))
     d1 = b_denom_1 * b1
     visc_rem_u(I,j,1) = b1 * CS%h_u(I,j,1)
@@ -1206,7 +1206,7 @@ subroutine vertvisc_remnant(visc, visc_rem_u, visc_rem_v, dt, G, GV, US, CS)
       if (allocated(visc%Ray_u)) Ray = visc%Ray_u(I,j,k)
 
       c1(k) = dt * CS%a_u(I,j,K) * b1
-      b_denom_1 = CS%h_u(I,j,k) + dt * (Ray + CS%a_u(I,j,K) * d1)
+      b_denom_1 = CS%h_u(I,j,k) + (dt * (Ray + (CS%a_u(I,j,K) * d1)))
       b1 = 1.0 / (b_denom_1 + dt * CS%a_u(I,j,K+1))
       d1 = b_denom_1 * b1
       visc_rem_u(I,j,k) = (CS%h_u(I,j,k) + dt * CS%a_u(I,j,K) * visc_rem_u(I,j,k-1)) * b1
@@ -1223,7 +1223,7 @@ subroutine vertvisc_remnant(visc, visc_rem_u, visc_rem_v, dt, G, GV, US, CS)
     Ray = 0.
     if (allocated(visc%Ray_v)) Ray = visc%Ray_v(i,J,1)
 
-    b_denom_1 = CS%h_v(i,J,1) + dt * (Ray + CS%a_v(i,J,1))
+    b_denom_1 = CS%h_v(i,J,1) + (dt * (Ray + CS%a_v(i,J,1)))
     b1 = 1.0 / (b_denom_1 + dt*CS%a_v(i,J,2))
     d1 = b_denom_1 * b1
     visc_rem_v(i,J,1) = b1 * CS%h_v(i,J,1)
@@ -1232,7 +1232,7 @@ subroutine vertvisc_remnant(visc, visc_rem_u, visc_rem_v, dt, G, GV, US, CS)
       if (allocated(visc%Ray_v)) Ray = visc%Ray_v(i,J,k)
 
       c1(k) = dt * CS%a_v(i,J,K) * b1
-      b_denom_1 = CS%h_v(i,J,k) + dt * (Ray + CS%a_v(i,J,K) * d1)
+      b_denom_1 = CS%h_v(i,J,k) + (dt * (Ray + (CS%a_v(i,J,K) * d1)))
       b1 = 1.0 / (b_denom_1 + dt * CS%a_v(i,J,K+1))
       d1 = b_denom_1 * b1
       visc_rem_v(i,J,k) = (CS%h_v(i,J,k) + dt * CS%a_v(i,J,K) * visc_rem_v(i,J,k-1)) * b1
