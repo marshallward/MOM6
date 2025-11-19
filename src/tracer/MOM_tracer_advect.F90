@@ -116,7 +116,8 @@ subroutine advect_tracer(h_end, uhtr, vhtr, OBC, dt, G, GV, US, CS, Reg, x_first
 
   !$omp target update to(uhtr, vhtr, h_end)
 
-  !$omp target enter data map(to: Reg, Reg%Tr(:), CS, OBC) map(alloc: domore_u, domore_v, uhr, vhr, uh_neglect, vh_neglect, hprev)
+  !$omp target enter data map(to: OBC) map(alloc: domore_u, domore_v, uhr, vhr, uh_neglect, &
+  !$omp   vh_neglect, hprev, domore_k, local_advect_scheme, Reg, Reg%Tr(:))
 
   do concurrent (k=1:GV%ke, j=G%jsd:G%jed)
     domore_u(j,k) = .false.
@@ -161,6 +162,8 @@ subroutine advect_tracer(h_end, uhtr, vhtr, OBC, dt, G, GV, US, CS, Reg, x_first
      stencil = max(stencil, stencil_local)
   enddo
 
+  !$omp target update from(local_advect_scheme)
+
   if (min(is-isd,ied-ie,js-jsd,jed-je) < stencil) then
     call MOM_error(FATAL, "MOM_tracer_advect: "//&
       "stencil is wider than the halo.")
@@ -175,11 +178,10 @@ subroutine advect_tracer(h_end, uhtr, vhtr, OBC, dt, G, GV, US, CS, Reg, x_first
   call create_group_pass(CS%pass_uhr_vhr_t_hprev, hprev, G%Domain)
   do m=1,ntr
     call create_group_pass(CS%pass_uhr_vhr_t_hprev, Reg%Tr(m)%t, G%Domain)
-    !$omp target enter data map(to: Reg%Tr(m)%t) map(alloc: Reg%Tr(m)%ad_x, Reg%Tr(m)%ad_y, Reg%Tr(m)%ad2d_y, Reg%Tr(m)%advection_xy)
   enddo
   call cpu_clock_end(id_clock_pass)
 
-  !$omp target enter data map(to: local_advect_scheme)
+  !!$omp target enter data map(to: local_advect_scheme)
 
   ! This initializes the halos of uhr and vhr because pass_vector might do
   ! calculations on them, even though they are never used.
@@ -227,6 +229,14 @@ subroutine advect_tracer(h_end, uhtr, vhtr, OBC, dt, G, GV, US, CS, Reg, x_first
   do concurrent (J=jsd:jed-1, i=isd:ied)
     vh_neglect(i,J) = GV%H_subroundoff * MIN(G%areaT(i,j), G%areaT(i,j+1))
   enddo
+
+  ! update GPU copy of Tr(:)%t
+  ! only update t because other members are zeroed
+  !$ do m=1,ntr
+    !$omp target enter data map(to: Reg%Tr(m)%t) &
+    !$omp   map(alloc: Reg%Tr(m)%ad_x, Reg%Tr(m)%ad_y, Reg%Tr(m)%ad2d_x, Reg%Tr(m)%ad2d_y, &
+    !$omp     Reg%Tr(m)%advection_xy)
+  !$ enddo
 
   ! initialize diagnostic fluxes and tendencies
   do concurrent (m=1:ntr)
@@ -368,6 +378,7 @@ subroutine advect_tracer(h_end, uhtr, vhtr, OBC, dt, G, GV, US, CS, Reg, x_first
 
     ! Exit if there are no layers that need more iterations.
     if (isv > is-stencil) then
+      !$omp target update from(domore_k)
       do_any = 0
       call cpu_clock_begin(id_clock_sync)
       call sum_across_PEs(domore_k(:), nz)
@@ -381,12 +392,10 @@ subroutine advect_tracer(h_end, uhtr, vhtr, OBC, dt, G, GV, US, CS, Reg, x_first
 
   enddo ! Iterations loop
 
-  ! transfer Tr(m) members before releasing Tr array
   !$ do m = 1, ntr
-    !$omp target exit data map(from: Reg%Tr(m)%t, Reg%Tr(m)%ad_x, Reg%Tr(m)%ad_y, Reg%Tr(m)%ad2d_y, Reg%Tr(m)%advection_xy)
+    !$omp target exit data map(from: Reg%Tr(m)%t, Reg%Tr(m)%ad_x, Reg%Tr(m)%ad_y, Reg%Tr(m)%ad2d_x, &
+    !$omp   Reg%Tr(m)%ad2d_y, Reg%Tr(m)%advection_xy)
   !$ enddo
-
-  !$omp target exit data map(from: uhr, vhr, hprev) map(release: CS, uh_neglect, vh_neglect, domore_u, domore_v, local_advect_scheme, Reg, Reg%tr(:), OBC)
 
   if (present(uhr_out)) then
     do concurrent (k=1:nz, j=jsd:jed, i=isdB:iedB)
@@ -405,6 +414,9 @@ subroutine advect_tracer(h_end, uhtr, vhtr, OBC, dt, G, GV, US, CS, Reg, x_first
       enddo
     endif
   endif
+
+  !$omp target exit data map(from: hprev) map(release: uhr, vhr, uh_neglect, vh_neglect, domore_u, &
+  !$omp   domore_v, local_advect_scheme, OBC, domore_k, Reg, Reg%Tr(:))
 
   call cpu_clock_end(id_clock_advect)
 
@@ -1279,6 +1291,8 @@ subroutine tracer_advect_init(Time, G, US, param_file, diag, CS)
         default=.false.)
   endif
 
+  !$omp target enter data map(to: CS)
+
   id_clock_advect = cpu_clock_id('(Ocean advect tracer)', grain=CLOCK_MODULE)
   id_clock_pass = cpu_clock_id('(Ocean tracer halo updates)', grain=CLOCK_ROUTINE)
   id_clock_sync = cpu_clock_id('(Ocean tracer global synch)', grain=CLOCK_ROUTINE)
@@ -1289,6 +1303,7 @@ end subroutine tracer_advect_init
 subroutine tracer_advect_end(CS)
   type(tracer_advect_CS), pointer :: CS  !< module control structure
 
+  !$omp target exit data map(delete: CS)
   if (associated(CS)) deallocate(CS)
 
 end subroutine tracer_advect_end
