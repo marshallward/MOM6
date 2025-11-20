@@ -1290,15 +1290,16 @@ subroutine vertvisc_remnant(visc, visc_rem_u, visc_rem_v, dt, G, GV, US, CS)
 
   ! Local variables
 
-  real :: b1(SZIB_(G),SZJB_(G))
+  real :: b1
     ! A variable used by the tridiagonal solver [H-1 ~> m-1 or m2 kg-1].
-  real :: c1(SZIB_(G),SZJB_(G),SZK_(GV))
+  real :: c1(SZK_(GV))
     ! A variable used by the tridiagonal solver [nondim].
-  real :: d1(SZIB_(G),SZJB_(G))
+  real :: d1
     ! d1=1-c1 is used by the tridiagonal solver [nondim].
-  real :: Ray(SZIB_(G),SZJB_(G))
+  real :: Ray
     ! Ray is the Rayleigh-drag velocity [H T-1 ~> m s-1 or Pa s m-1]
-  real :: b_denom_1   ! The first term in the denominator of b1 [H ~> m or kg m-2].
+  real :: b_denom_1
+    ! The first term in the denominator of b1 [H ~> m or kg m-2].
 
   integer :: i, j, k, is, ie, Isq, Ieq, Jsq, Jeq, nz
   is = G%isc ; ie = G%iec
@@ -1307,95 +1308,71 @@ subroutine vertvisc_remnant(visc, visc_rem_u, visc_rem_v, dt, G, GV, US, CS)
   if (.not.associated(CS)) call MOM_error(FATAL,"MOM_vert_friction(visc): "// &
          "Module must be initialized before it is used.")
 
-  if (.not.CS%initialized) call MOM_error(FATAL,"MOM_vert_friction(remant): "// &
+  if (.not.CS%initialized) call MOM_error(FATAL,"MOM_vert_friction(remnant): "// &
          "Module must be initialized before it is used.")
 
   ! Find the zonal viscous remnant using a modification of a standard tridagonal solver.
 
+  ! NVFORTRAN has issues with private arrays and do concurrents - trying to use
+  ! do concurrents in either of the loops below will lead to seg faults. I think
+  ! this is because of the c1 array that every thread gets, but still unclear.
+
+  ! Need teams loop collapse(2) to parallelize both the j and the i loops
+
   !$omp target enter data map(alloc: b1, c1, d1, Ray, b_denom_1)
 
-  do concurrent (j=G%jsc:G%jec)
-    if (allocated(visc%Ray_u)) then
-      do concurrent (I=Isq:Ieq)
-        Ray(I,j) = visc%Ray_u(I,j,1)
-      enddo
-    else
-      do concurrent (I=Isq:Ieq)
-        Ray(I,j) = 0.
-      enddo
-    endif
+  !$omp target teams loop collapse(2) &
+  !$omp   private( b1 , c1 , d1, Ray, b_denom_1 )
+  do j=G%jsc,G%jec ; do I=Isq,Ieq ; if (G%mask2dCu(I,j) > 0. ) then
+    Ray = 0.
+    if (allocated(visc%Ray_u)) Ray = visc%Ray_u(I,j,1)
 
-    do concurrent (I=Isq:Ieq, G%mask2dCu(i,j) > 0.)
-      b_denom_1 = CS%h_u(I,j,1) + dt * (Ray(I,j) + CS%a_u(I,j,1))
-      b1(I,j) = 1.0 / (b_denom_1 + dt * CS%a_u(I,j,2))
-      d1(I,j) = b_denom_1 * b1(I,j)
-      visc_rem_u(I,j,1) = b1(I,j) * CS%h_u(I,j,1)
-    enddo
+    b_denom_1 = CS%h_u(I,j,1) + dt * (Ray + CS%a_u(I,j,1))
+    b1 = 1.0 / (b_denom_1 + dt * CS%a_u(I,j,2))
+    d1 = b_denom_1 * b1
+    visc_rem_u(I,j,1) = b1 * CS%h_u(I,j,1)
 
     do k=2,nz
-      if (allocated(visc%Ray_u)) then
-        do concurrent (I=Isq:Ieq)
-          Ray(I,j) = visc%Ray_u(I,j,k)
-        enddo
-      endif
+      if (allocated(visc%Ray_u)) Ray = visc%Ray_u(I,j,k)
 
-      do concurrent (I=Isq:Ieq, G%mask2dCu(I,j) > 0.)
-        c1(I,j,k) = dt * CS%a_u(I,j,K)*b1(I,j)
-        b_denom_1 = CS%h_u(I,j,k) + dt * (Ray(I,j) + CS%a_u(I,j,K) * d1(I,j))
-        b1(I,j) = 1.0 / (b_denom_1 + dt * CS%a_u(I,j,K+1))
-        d1(I,j) = b_denom_1 * b1(I,j)
-        visc_rem_u(I,j,k) = (CS%h_u(I,j,k) + dt * CS%a_u(I,j,K) * visc_rem_u(I,j,k-1)) * b1(I,j)
-      enddo
+      c1(k) = dt * CS%a_u(I,j,K) * b1
+      b_denom_1 = CS%h_u(I,j,k) + dt * (Ray + CS%a_u(I,j,K) * d1)
+      b1 = 1.0 / (b_denom_1 + dt * CS%a_u(I,j,K+1))
+      d1 = b_denom_1 * b1
+      visc_rem_u(I,j,k) = (CS%h_u(I,j,k) + dt * CS%a_u(I,j,K) * visc_rem_u(I,j,k-1)) * b1
     enddo
 
     do k=nz-1,1,-1
-      do concurrent (I=Isq:Ieq, G%mask2dCu(I,j) > 0.)
-        visc_rem_u(I,j,k) = visc_rem_u(I,j,k) + c1(I,j,k+1) * visc_rem_u(I,j,k+1)
-      enddo
+      visc_rem_u(I,j,k) = visc_rem_u(I,j,k) + c1(k+1) * visc_rem_u(I,j,k+1)
     enddo
-  enddo
-
+  endif ; enddo ; enddo
+  
   ! Now find the meridional viscous remnant using the robust tridiagonal solver.
-  do concurrent (J=Jsq:Jeq)
-    if (allocated(visc%Ray_v)) then
-      do concurrent (i=is:ie)
-        Ray(i,J) = visc%Ray_v(i,J,1)
-      enddo
-    else
-      do concurrent (i=is:ie)
-        Ray(i,J) = 0.
-      enddo
-    endif
+  !$omp target teams loop collapse(2) &
+  !$omp   private( b1 , c1 , d1, Ray, b_denom_1 )
+  do J=Jsq,Jeq ; do i=is,ie ; if (G%mask2dCv(i,J) > 0. )  then
+    Ray = 0.
+    if (allocated(visc%Ray_v)) Ray = visc%Ray_v(i,J,1)
 
-    do concurrent (i=is:ie, G%mask2dCv(i,j) > 0.)
-      b_denom_1 = CS%h_v(i,J,1) + dt * (Ray(i,J) + CS%a_v(i,J,1))
-      b1(i,J) = 1.0 / (b_denom_1 + dt*CS%a_v(i,J,2))
-      d1(i,J) = b_denom_1 * b1(i,J)
-      visc_rem_v(i,J,1) = b1(i,J) * CS%h_v(i,J,1)
-    enddo
+    b_denom_1 = CS%h_v(i,J,1) + dt * (Ray + CS%a_v(i,J,1))
+    b1 = 1.0 / (b_denom_1 + dt*CS%a_v(i,J,2))
+    d1 = b_denom_1 * b1
+    visc_rem_v(i,J,1) = b1 * CS%h_v(i,J,1)
 
     do k=2,nz
-      if (allocated(visc%Ray_v)) then
-        do concurrent (i=is:ie)
-          Ray(i,J) = visc%Ray_v(i,J,k)
-        enddo
-      endif
+      if (allocated(visc%Ray_v)) Ray = visc%Ray_v(i,J,k)
 
-      do concurrent (i=is:ie, G%mask2dCv(i,j) > 0.)
-        c1(i,J,k) = dt * CS%a_v(i,J,K) * b1(i,J)
-        b_denom_1 = CS%h_v(i,J,k) + dt * (Ray(i,J) + CS%a_v(i,J,K) * d1(i,J))
-        b1(i,J) = 1.0 / (b_denom_1 + dt * CS%a_v(i,J,K+1))
-        d1(i,J) = b_denom_1 * b1(i,J)
-        visc_rem_v(i,J,k) = (CS%h_v(i,J,k) + dt * CS%a_v(i,J,K) * visc_rem_v(i,J,k-1)) * b1(i,J)
-      enddo
+      c1(k) = dt * CS%a_v(i,J,K) * b1
+      b_denom_1 = CS%h_v(i,J,k) + dt * (Ray + CS%a_v(i,J,K) * d1)
+      b1 = 1.0 / (b_denom_1 + dt * CS%a_v(i,J,K+1))
+      d1 = b_denom_1 * b1
+      visc_rem_v(i,J,k) = (CS%h_v(i,J,k) + dt * CS%a_v(i,J,K) * visc_rem_v(i,J,k-1)) * b1
     enddo
 
     do k=nz-1,1,-1
-      do concurrent (i=is:ie, G%mask2dCv(i,j) > 0.)
-        visc_rem_v(i,J,k) = visc_rem_v(i,J,k) + c1(i,J,k+1) * visc_rem_v(i,J,k+1)
-      enddo
+      visc_rem_v(i,J,k) = visc_rem_v(i,J,k) + c1(k+1) * visc_rem_v(i,J,k+1)
     enddo
-  enddo
+  endif ; enddo ; enddo
 
   !$omp target exit data map(delete: b1, c1, d1, Ray, b_denom_1)
 
