@@ -591,15 +591,16 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
 
   ! Local variables
 
-  real :: b1(SZIB_(G), SZJB_(G))
-    ! A variable used by the tridiagonal solver [H-1 ~> m-1 or m2 kg-1].
-  real :: c1(SZIB_(G), SZJB_(G), SZK_(GV))
+  real :: b1
+  ! A variable used by the tridiagonal solver [H-1 ~> m-1 or m2 kg-1].
+  real :: c1(SZK_(GV))
     ! A variable used by the tridiagonal solver [nondim].
-  real :: d1(SZIB_(G), SZJB_(G))
+  real :: d1
     ! d1=1-c1 is used by the tridiagonal solver [nondim].
-  real :: Ray(SZIB_(G), SZJB_(G))
+  real :: Ray
     ! Ray is the Rayleigh-drag velocity [H T-1 ~> m s-1 or Pa s m-1]
-  real :: b_denom_1              ! The first term in the denominator of b1 [H ~> m or kg m-2].
+  real :: b_denom_1
+    ! The first term in the denominator of b1 [H ~> m or kg m-2].
 
   real :: Hmix             ! The mixed layer thickness over which stress
                            ! is applied with direct_stress [H ~> m or kg m-2].
@@ -756,84 +757,56 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
   ! this is done so that d1 = b1 * b_denom_1 = 1 - c'_(k-1)
   ! c1(k) is -c'_(k - 1)
   ! and the right-hand-side is destructively updated to be d'_k
-  !$omp target enter data map(alloc: Ray)
 
-  if (allocated(visc%Ray_u)) then
-    !$omp target enter data map(to: visc%Ray_u)
-    do concurrent (j=G%jsc:G%jec, I=Isq:Ieq)
-      Ray(I,j) = visc%Ray_u(I,j,1)
-    enddo
-  else
-    do concurrent (j=G%jsc:G%jec, I=Isq:Ieq)
-      Ray(I,j) = 0.
-    enddo
-  endif
+  !$omp target enter data map(alloc: b1, c1, d1, Ray, b_denom_1)
+  !$omp target enter data map(to: visc%Ray_u) if (allocated(visc%Ray_u))
 
-  !$omp target enter data map(alloc: b1, c1, d1)
-  do concurrent (j=G%jsc:G%jec, I=Isq:Ieq, G%mask2dCu(I,j) > 0.)
-    b_denom_1 = CS%h_u(I,j,1) + dt * (Ray(I,j) + CS%a_u(I,j,1))
-    b1(I,j) = 1.0 / (b_denom_1 + dt*CS%a_u(I,j,2))
-    d1(I,j) = b_denom_1 * b1(I,j)
-    u(I,j,1) = b1(I,j) * (CS%h_u(I,j,1) * u(I,j,1) + surface_stress(I,j))
-  enddo
+  !$omp target teams loop collapse(2) &
+  !$omp   private( b1 , c1 , d1, Ray, b_denom_1 )
+  do j=G%jsc,G%jec ; do I=Isq,Ieq ; if (G%mask2dCu(I,j) > 0. ) then
+    Ray = 0.
+    if (allocated(visc%Ray_u)) Ray = visc%Ray_u(I,j,1)
 
-  if (associated(ADp%du_dt_str)) then
-    do concurrent (j=G%jsc:G%jec, I=Isq:Ieq, G%mask2dCu(I,j) > 0.)
-      ADp%du_dt_str(I,j,1) = b1(I,j) * (CS%h_u(I,j,1) * ADp%du_dt_str(I,j,1) + surface_stress(I,j) * Idt)
-    enddo
-  endif
+    b_denom_1 = CS%h_u(I,j,1) + dt * (Ray + CS%a_u(I,j,1))
+    b1 = 1. / (b_denom_1 + dt * CS%a_u(I,j,2))
+    d1 = b_denom_1 * b1
+    u(I,j,1) = b1 * (CS%h_u(I,j,1) * u(I,j,1) + surface_stress(I,j))
 
-  do concurrent (j=G%jsc:G%jec)
+    if (associated(ADp%du_dt_str)) then
+      ADp%du_dt_str(I,j,1) = b1 * (CS%h_u(I,j,1) * ADp%du_dt_str(I,j,1) + surface_stress(I,j) * Idt)
+    endif
+
     do k=2,nz
-      if (allocated(visc%Ray_u)) then
-        do concurrent (I=Isq:Ieq)
-          Ray(I,j) = visc%Ray_u(I,j,k)
-        enddo
-      endif
+      if (allocated(visc%Ray_u)) Ray = visc%Ray_u(I,j,k)
 
-      do concurrent (I=Isq:Ieq, G%mask2dCu(I,j) > 0.)
-        c1(I,j,k) = dt * CS%a_u(I,j,K) * b1(I,j)
-        b_denom_1 = CS%h_u(I,j,k) + dt * (Ray(I,j) + CS%a_u(I,j,K)*d1(I,j))
-        b1(I,j) = 1.0 / (b_denom_1 + dt * CS%a_u(I,j,K+1))
-        d1(I,j) = b_denom_1 * b1(I,j)
-        u(I,j,k) = (CS%h_u(I,j,k) * u(I,j,k) + &
-                    dt * CS%a_u(I,j,K) * u(I,j,k-1)) * b1(I,j)
-      enddo
+      c1(k) = dt * CS%a_u(I,j,K) * b1
+      b_denom_1 = CS%h_u(I,j,k) + dt * (Ray + CS%a_u(I,j,K) * d1)
+      b1 = 1. / (b_denom_1 + dt * CS%a_u(I,j,K+1))
+      d1 = b_denom_1 * b1
+      u(I,j,k) = (CS%h_u(I,j,k) * u(I,j,k) + dt * CS%a_u(I,j,K) * u(I,j,k-1)) * b1
 
       if (associated(ADp%du_dt_str)) then
-        do concurrent (I=Isq:Ieq, G%mask2dCu(I,j) > 0.)
-          ADp%du_dt_str(I,j,k) = (CS%h_u(I,j,k) * ADp%du_dt_str(I,j,k) &
-              + dt * CS%a_u(I,j,K) * ADp%du_dt_str(I,j,k-1)) * b1(I,j)
-        enddo
+        ADp%du_dt_str(I,j,k) = (CS%h_u(I,j,k) * ADp%du_dt_str(I,j,k) &
+            + dt * CS%a_u(I,j,K) * ADp%du_dt_str(I,j,k-1)) * b1
       endif
     enddo
-  enddo
 
-  ! back substitute to solve for the new velocities
-  ! u_k = d'_k - c'_k x_(k+1)
-  do concurrent (j=G%jsc:G%jec)
-    do k=nz-1,1,-1
-      do concurrent (I=Isq:Ieq, G%mask2dCu(I,j) > 0.0)
-        u(I,j,k) = u(I,j,k) + c1(I,j,k+1) * u(I,j,k+1)
-      enddo
-    enddo
-  enddo
-
-  if (associated(ADp%du_dt_str)) then
-    do concurrent (j=G%jsc:G%jec, I=Isq:Ieq, abs(ADp%du_dt_str(I,j,nz)) < accel_underflow)
-      ADp%du_dt_str(I,j,nz) = 0.0
-    enddo
+    if (associated(ADp%du_dt_str)) then
+      if (abs(ADp%du_dt_str(I,j,nz)) < accel_underflow) &
+        ADp%du_dt_str(I,j,nz) = 0.
+    endif
 
     do k=nz-1,1,-1
-      do concurrent (j=G%jsc:G%jec, I=Isq:Ieq, G%mask2dCu(i,j) > 0.0)
-        ADp%du_dt_str(I,j,k) = &
-            ADp%du_dt_str(I,j,k) + c1(I,j,k+1) * ADp%du_dt_str(I,j,k+1)
+      u(I,j,k) = u(I,j,k) + c1(k+1) * u(I,j,k+1)
+
+      if (associated(ADp%du_dt_str)) then
+        ADp%du_dt_str(I,j,k) = ADp%du_dt_str(I,j,k) + c1(k+1) * ADp%du_dt_str(I,j,k+1)
 
         if (abs(ADp%du_dt_str(I,j,k)) < accel_underflow) &
           ADp%du_dt_str(I,j,k) = 0.0
-      enddo
+      endif
     enddo
-  endif
+  endif ; enddo ; enddo
 
   ! compute vertical velocity tendency that arises from GL90 viscosity;
   ! follow tridiagonal solve method as above; to avoid corrupting u,
@@ -842,34 +815,28 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
     if (associated(ADp%du_dt_visc_gl90)) then
       do j=G%jsc,G%jec ; do I=Isq,Ieq ; if (G%mask2dCu(I,j) > 0.) then
         b_denom_1 = CS%h_u(I,j,1)  ! CS%a_u_gl90(I,j,1) is zero
-        b1(I,j) = 1.0 / (b_denom_1 + dt*CS%a_u_gl90(I,j,2))
-        d1(I,j) = b_denom_1 * b1(I,j)
+        b1 = 1.0 / (b_denom_1 + dt * CS%a_u_gl90(I,j,2))
+        d1 = b_denom_1 * b1
 
-        ADp%du_dt_visc_gl90(I,j,1) = b1(I,j) * (CS%h_u(I,j,1) * ADp%du_dt_visc_gl90(I,j,1))
-      endif ; enddo ; enddo
+        ADp%du_dt_visc_gl90(I,j,1) = b1 * (CS%h_u(I,j,1) * ADp%du_dt_visc_gl90(I,j,1))
 
-      do k=2,nz
-        do j=G%jsc,G%jec ; do I=Isq,Ieq ; if (G%mask2dCu(I,j) > 0.) then
-          c1(I,j,k) = dt * CS%a_u_gl90(I,j,K) * b1(I,j)
-          b_denom_1 = CS%h_u(I,j,k) + dt * (CS%a_u_gl90(I,j,K)*d1(I,j))
-          b1(I,j) = 1.0 / (b_denom_1 + dt * CS%a_u_gl90(I,j,K+1))
-          d1(I,j) = b_denom_1 * b1(I,j)
+        do k=2,nz
+          c1(k) = dt * CS%a_u_gl90(I,j,K) * b1
+          b_denom_1 = CS%h_u(I,j,k) + dt * (CS%a_u_gl90(I,j,K)*d1)
+          b1 = 1.0 / (b_denom_1 + dt * CS%a_u_gl90(I,j,K+1))
+          d1 = b_denom_1 * b1
 
           ADp%du_dt_visc_gl90(I,j,k) = (CS%h_u(I,j,k) * ADp%du_dt_visc_gl90(I,j,k) &
-              + dt * CS%a_u_gl90(I,j,K) * ADp%du_dt_visc_gl90(I,j,k-1)) * b1(I,j)
-        endif ; enddo ; enddo
-      enddo
+              + dt * CS%a_u_gl90(I,j,K) * ADp%du_dt_visc_gl90(I,j,k-1)) * b1
+        enddo
 
-      ! back substitute to solve for new velocities, held by ADp%du_dt_visc_gl90
-      do k=nz-1,1,-1
-        do j=G%jsc,G%jec ; do I=Isq,Ieq ; if (G%mask2dCu(I,j) > 0.) then
-          ADp%du_dt_visc_gl90(I,j,k) = ADp%du_dt_visc_gl90(I,j,k) &
-              + c1(I,j,k+1) * ADp%du_dt_visc_gl90(I,j,k+1)
-        endif ; enddo ; enddo
-      enddo
+        ! back substitute to solve for new velocities, held by ADp%du_dt_visc_gl90
+        do k=nz-1,1,-1
+          ADp%du_dt_visc_gl90(I,j,k) = &
+              ADp%du_dt_visc_gl90(I,j,k) + c1(k+1) * ADp%du_dt_visc_gl90(I,j,k+1)
+        enddo
 
-      do k=1,nz
-        do j=G%jsc,G%jec ; do I=Isq,Ieq ; if (G%mask2dCu(I,j) > 0.) then
+        do k=1,nz
           ! now fill ADp%du_dt_visc_gl90(I,j,k) with actual velocity tendency due to GL90;
           ! note that on RHS: ADp%du_dt_visc(I,j,k) holds the original velocity value u(I,j,k)
           ! and ADp%du_dt_visc_gl90(I,j,k) the updated velocity due to GL90
@@ -879,24 +846,22 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
           if (abs(ADp%du_dt_visc_gl90(I,j,k)) < accel_underflow) then
             ADp%du_dt_visc_gl90(I,j,k) = 0.0
           endif
-        endif ; enddo ; enddo
-      enddo
-
-      ! to compute energetics, we need to multiply by u*h, where u is original velocity before
-      ! velocity update; note that ADp%du_dt_visc(I,j,k) holds the original velocity value u(I,j,k)
-      if (CS%id_GLwork > 0) then
-        do k=1,nz
-          do j=G%jsc,G%jec ; do I=Isq,Ieq ; if (G%mask2dCu(I,j) > 0.) then
-            KE_u(I,j,k) = ADp%du_dt_visc(I,j,k) * CS%h_u(I,j,k) * G%areaCu(I,j) * ADp%du_dt_visc_gl90(I,j,k)
-          endif ; enddo ; enddo
         enddo
-      endif
+
+        ! to compute energetics, we need to multiply by u*h, where u is original velocity before
+        ! velocity update; note that ADp%du_dt_visc(I,j,k) holds the original velocity value u(I,j,k)
+        if (CS%id_GLwork > 0) then
+          do k=1,nz
+            KE_u(I,j,k) = ADp%du_dt_visc(I,j,k) * CS%h_u(I,j,k) * G%areaCu(I,j) * ADp%du_dt_visc_gl90(I,j,k)
+          enddo
+        endif
+      endif ; enddo ; enddo
     endif
   endif
 
   if (associated(ADp%du_dt_visc)) then
-    do k=1,nz
-      do concurrent (j=G%jsc:G%jec, I=Isq:Ieq)
+    do concurrent (j=G%jsc:G%jec, I=Isq:Ieq)
+      do k=1,nz
         ADp%du_dt_visc(I,j,k) = (u(I,j,k) - ADp%du_dt_visc(I,j,k)) * Idt
 
         if (abs(ADp%du_dt_visc(I,j,k)) < accel_underflow) &
@@ -917,8 +882,8 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
     enddo
 
     if (allocated(visc%Ray_u)) then
-      do k=1,nz
-        do concurrent (j=G%jsc:G%jec, I=Isq:Ieq)
+      do concurrent (j=G%jsc:G%jec, I=Isq:Ieq)
+        do k=1,nz
           taux_bot(I,j) = taux_bot(I,j) + GV%H_to_RZ * (visc%Ray_u(I,j,k) * u(I,j,k))
         enddo
       enddo
@@ -968,11 +933,9 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
   endif
 
   if (associated(ADp%dv_dt_visc_gl90)) then
-    do k=1,nz
-      do J=Jsq,Jeq ; do i=is,ie
-        ADp%dv_dt_visc_gl90(i,J,k) = v(i,J,k)
-      enddo ; enddo
-    enddo
+    do k=1,nz ; do J=Jsq,Jeq ; do i=is,ie
+      ADp%dv_dt_visc_gl90(i,J,k) = v(i,J,k)
+    enddo ; enddo ; enddo
   endif
 
   if (associated(ADp%dv_dt_str)) then
@@ -1003,111 +966,91 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
     enddo
   endif
 
-  if (allocated(visc%Ray_v)) then
-    !$omp target enter data map(to: visc%Ray_v)
-    do concurrent (J=Jsq:Jeq, i=is:ie)
-      Ray(i,J) = visc%Ray_v(i,J,1)
-    enddo
-  else
-    do concurrent (j=jsq:jeq, i=is:ie)
-      Ray(i,J) = 0.
-    enddo
-  endif
+  !$omp target enter data map(alloc: b1, c1, d1, Ray, b_denom_1)
+  !$omp target enter data map(to: visc%Ray_v) if (allocated(visc%Ray_v))
 
-  do concurrent (J=Jsq:Jeq, i=is:ie, G%mask2dCv(i,j) > 0.0)
-    b_denom_1 = CS%h_v(i,J,1) + dt * (Ray(i,J) + CS%a_v(i,J,1))
-    b1(i,J) = 1.0 / (b_denom_1 + dt*CS%a_v(i,J,2))
-    d1(i,J) = b_denom_1 * b1(i,J)
-    v(i,J,1) = b1(i,J) * (CS%h_v(i,J,1) * v(i,J,1) + surface_stress(i,J))
-  enddo
+  !$omp target teams loop collapse(2) &
+  !$omp   private( b1 , c1 , d1, Ray, b_denom_1 )
+  do J=Jsq,Jeq ; do i=is,ie ; if (G%mask2dCv(i,J) > 0.) then
+    Ray = 0.
+    if (allocated(visc%Ray_v)) Ray = visc%Ray_v(i,J,1)
 
-  if (associated(ADp%dv_dt_str)) then
-    do concurrent (J=Jsq:Jeq, i=is:ie, G%mask2dCv(i,j) > 0.0)
-      ADp%dv_dt_str(i,J,1) = b1(i,J) * (CS%h_v(i,J,1) * ADp%dv_dt_str(i,J,1) + surface_stress(i,J) * Idt)
-    enddo
-  endif
+    b_denom_1 = CS%h_v(i,J,1) + dt * (Ray + CS%a_v(i,J,1))
+    b1 = 1.0 / (b_denom_1 + dt*CS%a_v(i,J,2))
+    d1 = b_denom_1 * b1
+    v(i,J,1) = b1 * (CS%h_v(i,J,1) * v(i,J,1) + surface_stress(i,J))
 
-  do concurrent (j=Jsq:Jeq)
+    if (associated(ADp%dv_dt_str)) then
+      ADp%dv_dt_str(i,J,1) = b1 * (CS%h_v(i,J,1) * ADp%dv_dt_str(i,J,1) + surface_stress(i,J) * Idt)
+    endif
+
     do k=2,nz
-      if (allocated(visc%Ray_v)) then
-        do concurrent (i=is:ie)
-          Ray(i,J) = visc%Ray_v(i,J,k)
-        enddo
-      endif
+      if (allocated(visc%Ray_v)) Ray = visc%Ray_v(i,J,k)
 
-      do concurrent (i=is:ie, G%mask2dCv(i,j) > 0.0)
-        c1(i,J,k) = dt * CS%a_v(i,J,K) * b1(i,J)
-        b_denom_1 = CS%h_v(i,J,k) + dt * (Ray(i,J) + CS%a_v(i,J,K)*d1(i,J))
-        b1(i,J) = 1.0 / (b_denom_1 + dt * CS%a_v(i,J,K+1))
-        d1(i,J) = b_denom_1 * b1(i,J)
-        v(i,J,k) = (CS%h_v(i,J,k) * v(i,J,k) + dt * CS%a_v(i,J,K) * v(i,J,k-1)) * b1(i,J)
-      enddo
+      c1(k) = dt * CS%a_v(i,J,K) * b1
+      b_denom_1 = CS%h_v(i,J,k) + dt * (Ray + CS%a_v(i,J,K) * d1)
+      b1 = 1. / (b_denom_1 + dt * CS%a_v(i,J,K+1))
+      d1 = b_denom_1 * b1
+      v(i,J,k) = (CS%h_v(i,J,k) * v(i,J,k) + dt * CS%a_v(i,J,K) * v(i,J,k-1)) * b1
 
       if (associated(ADp%dv_dt_str)) then
-        do concurrent (i=is:ie, G%mask2dCv(i,j) > 0.0)
-          ADp%dv_dt_str(i,J,k) = (CS%h_v(i,J,k) * ADp%dv_dt_str(i,J,k) &
-              + dt * CS%a_v(i,J,K) * ADp%dv_dt_str(i,J,k-1)) * b1(i,J)
-        enddo
+        ADp%dv_dt_str(i,J,k) = (CS%h_v(i,J,k) * ADp%dv_dt_str(i,J,k) &
+            + dt * CS%a_v(i,J,K) * ADp%dv_dt_str(i,J,k-1)) * b1
       endif
     enddo
 
-    do k=nz-1,1,-1
-      do concurrent (i=is:ie, G%mask2dCv(i,j) > 0.0)
-        v(i,J,k) = v(i,J,k) + c1(i,J,k+1) * v(i,J,k+1)
-      enddo
-    enddo
-  enddo
-
-  if (associated(ADp%dv_dt_str)) then
-    do concurrent (j=jsq:jeq, i=is:ie)
-      if (abs(ADp%dv_dt_str(i,J,nz)) < accel_underflow) ADp%dv_dt_str(i,J,nz) = 0.0
-    enddo
+    if (associated(ADp%dv_dt_str)) then
+      if (abs(ADp%dv_dt_str(i,J,nz)) < accel_underflow) &
+        ADp%dv_dt_str(i,J,nz) = 0.0
+    endif
 
     do k=nz-1,1,-1
-      do concurrent (j=jsq:jeq, i=is:ie, G%mask2dCv(i,j) > 0.0)
-        ADp%dv_dt_str(i,J,k) = ADp%dv_dt_str(i,J,k) + c1(i,J,k+1) * ADp%dv_dt_str(i,J,k+1)
-        if (abs(ADp%dv_dt_str(i,J,k)) < accel_underflow) ADp%dv_dt_str(i,J,k) = 0.0
-      enddo
+      v(i,J,k) = v(i,J,k) + c1(k+1) * v(i,J,k+1)
+
+      if (associated(ADp%dv_dt_str)) then
+        ADp%dv_dt_str(i,J,k) = ADp%dv_dt_str(i,J,k) + c1(k+1) * ADp%dv_dt_str(i,J,k+1)
+
+        if (abs(ADp%dv_dt_str(i,J,k)) < accel_underflow) &
+          ADp%dv_dt_str(i,J,k) = 0.0
+      endif
     enddo
-  endif
+  endif ; enddo ; enddo
 
   ! compute vertical velocity tendency that arises from GL90 viscosity;
   ! follow tridiagonal solve method as above; to avoid corrupting v,
-  ! use ADp%dv_dt_visc_gl90 as a placeholder for updated u (due to GL90) until last do loop
+  ! use ADp%dv_dt_visc_gl90 as a placeholder for updated v (due to GL90) until last do loop
   if ((CS%id_dv_dt_visc_gl90 > 0) .or. (CS%id_GLwork > 0)) then
     if (associated(ADp%dv_dt_visc_gl90)) then
       do J=Jsq,Jeq ; do i=is,ie ; if (G%mask2dCv(i,J) > 0.) then
         b_denom_1 = CS%h_v(i,J,1)  ! CS%a_v_gl90(i,J,1) is zero
-        b1(i,J) = 1.0 / (b_denom_1 + dt*CS%a_v_gl90(i,J,2))
-        d1(i,J) = b_denom_1 * b1(i,J)
-        ADp%dv_dt_visc_gl90(I,J,1) = b1(i,J) * (CS%h_v(i,J,1) * ADp%dv_dt_visc_gl90(i,J,1))
+        b1 = 1.0 / (b_denom_1 + dt*CS%a_v_gl90(i,J,2))
+        d1 = b_denom_1 * b1
+        ADp%dv_dt_visc_gl90(I,J,1) = b1 * (CS%h_v(i,J,1) * ADp%dv_dt_visc_gl90(i,J,1))
+
+        do k=2,nz
+          c1(k) = dt * CS%a_v_gl90(i,J,K) * b1
+          b_denom_1 = CS%h_v(i,J,k) + dt * (CS%a_v_gl90(i,J,K) * d1)
+          b1 = 1.0 / (b_denom_1 + dt * CS%a_v_gl90(i,J,K+1))
+          d1 = b_denom_1 * b1
+          ADp%dv_dt_visc_gl90(i,J,k) = (CS%h_v(i,J,k) * ADp%dv_dt_visc_gl90(i,J,k) &
+              + dt * CS%a_v_gl90(i,J,K) * ADp%dv_dt_visc_gl90(i,J,k-1)) * b1
+        enddo
+
+        ! back substitute to solve for new velocities, held by ADp%dv_dt_visc_gl90
+        do k=nz-1,1,-1
+          ADp%dv_dt_visc_gl90(i,J,k) = ADp%dv_dt_visc_gl90(i,J,k) + c1(k+1) * ADp%dv_dt_visc_gl90(i,J,k+1)
+        enddo
       endif ; enddo ; enddo
-
-      do k=2,nz
-        do J=Jsq,Jeq ; do i=is,ie ; if (G%mask2dCv(i,J) > 0.) then
-          c1(i,J,k) = dt * CS%a_v_gl90(i,J,K) * b1(i,J)
-          b_denom_1 = CS%h_v(i,J,k) + dt * (CS%a_v_gl90(i,J,K)*d1(i,J))
-          b1(i,J) = 1.0 / (b_denom_1 + dt * CS%a_v_gl90(i,J,K+1))
-          d1(i,J) = b_denom_1 * b1(i,J)
-          ADp%dv_dt_visc_gl90(i,J,k) = (CS%h_v(i,J,k) * ADp%dv_dt_visc_gl90(i,J,k) + &
-                      dt * CS%a_v_gl90(i,J,K) * ADp%dv_dt_visc_gl90(i,J,k-1)) * b1(i,J)
-        endif ; enddo ; enddo
-      enddo
-
-      ! back substitute to solve for new velocities, held by ADp%dv_dt_visc_gl90
-      do k=nz-1,1,-1
-        do J=Jsq,Jeq ; do i=is,ie ; if (G%mask2dCv(i,J) > 0.) then
-          ADp%dv_dt_visc_gl90(i,J,k) = ADp%dv_dt_visc_gl90(i,J,k) + c1(i,J,k+1) * ADp%dv_dt_visc_gl90(i,J,k+1)
-        endif ; enddo ; enddo
-      enddo
 
       do k=1,nz
         do J=Jsq,Jeq ; do i=is,ie ; if (G%mask2dCv(i,J) > 0.) then
           ! now fill ADp%dv_dt_visc_gl90(i,J,k) with actual velocity tendency due to GL90;
           ! note that on RHS: ADp%dv_dt_visc(i,J,k) holds the original velocity value v(i,J,k)
           ! and ADp%dv_dt_visc_gl90(i,J,k) the updated velocity due to GL90
-          ADp%dv_dt_visc_gl90(i,J,k) = (ADp%dv_dt_visc_gl90(i,J,k) - ADp%dv_dt_visc(i,J,k))*Idt
-          if (abs(ADp%dv_dt_visc_gl90(i,J,k)) < accel_underflow) ADp%dv_dt_visc_gl90(i,J,k) = 0.0
+          ADp%dv_dt_visc_gl90(i,J,k) = (ADp%dv_dt_visc_gl90(i,J,k) - ADp%dv_dt_visc(i,J,k)) * Idt
+
+          if (abs(ADp%dv_dt_visc_gl90(i,J,k)) < accel_underflow) &
+            ADp%dv_dt_visc_gl90(i,J,k) = 0.0
         endif ; enddo ; enddo
       enddo
 
@@ -1125,8 +1068,8 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
   endif
 
   if (associated(ADp%dv_dt_visc)) then
-    do k=1,nz
-      do concurrent (J=Jsq:Jeq, i=is:ie)
+    do concurrent (J=Jsq:Jeq, i=is:ie)
+      do k=1,nz
         ADp%dv_dt_visc(i,J,k) = (v(i,J,k) - ADp%dv_dt_visc(i,J,k))*Idt
         if (abs(ADp%dv_dt_visc(i,J,k)) < accel_underflow) ADp%dv_dt_visc(i,J,k) = 0.0
       enddo
@@ -1146,8 +1089,8 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
     enddo
 
     if (allocated(visc%Ray_v)) then
-      do k=1,nz
-        do concurrent (J=Jsq:Jeq, i=is:ie)
+      do concurrent (J=Jsq:Jeq, i=is:ie)
+        do k=1,nz
           tauy_bot(i,J) = tauy_bot(i,J) + GV%H_to_RZ * (visc%Ray_v(i,J,k)*v(i,J,k))
         enddo
       enddo
