@@ -15,9 +15,10 @@ use MOM_ensemble_manager, only : get_ensemble_id, get_ensemble_size
 use MOM_ensemble_manager, only : get_ensemble_pelist, get_ensemble_filter_pelist
 use MOM_error_handler, only : stdout, stdlog, MOM_error
 use MOM_io, only : SINGLE_FILE
-use MOM_interp_infra, only : init_extern_field, get_external_field_info
+use MOM_interp_infra, only : init_extern_field
 use MOM_interp_infra, only : time_interp_extern
 use MOM_interpolate, only : external_field
+use MOM_interpolate, only : get_external_field_info
 use MOM_remapping,    only : remappingSchemesDoc
 use MOM_time_manager, only : time_type, real_to_time, get_date
 use MOM_time_manager, only : operator(+), operator(>=), operator(/=)
