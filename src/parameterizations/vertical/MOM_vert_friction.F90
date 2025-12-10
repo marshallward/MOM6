@@ -447,6 +447,7 @@ end function touch_ij
 !! a_cpl_gl90 = nu / h = f^2 * alpha / h
 
 subroutine find_coupling_coef_gl90(a_cpl_gl90, hvel, i, j, z_i, G, GV, CS, VarMix, work_on_u)
+  !$omp declare target
   type(ocean_grid_type), intent(in) :: G        !< Grid structure.
   type(verticalGrid_type), intent(in) :: GV     !< Vertical grid structure.
   real, dimension(SZK_(GV)), intent(in) :: hvel !< Distance between interfaces
@@ -1474,18 +1475,13 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
 
   !! First do u-points
 
-  !!**** NEW ***!
-  !!$omp target update to(u, v, h)
+  !$omp target enter data map(alloc: z_i, z_i_gl90, dz_harm, hvel, dz_vel, a_cpl, a_cpl_gl90, &
+  !$omp& tv, varmix, hvel_shelf, dz_vel_shelf, a_shelf)
 
-  !!$omp target enter data map(to: visc)
-  !!$omp target enter data map(to: visc%Kv_shear, visc%Kv_shear_Bu, visc%nkml_visc_u)
+  ! These are used in diagnostics, so they need to be mapped back and forth
+  !$omp target enter data map(to: hML_u, kv_u, kv_gl90_u )
+  !$omp target enter data map(to: hML_v, kv_v, kv_gl90_v)
 
-  !!$omp target enter data map(to: CS)
-  !!$omp target enter data map(to: CS%a_u, CS%h_u, CS%a_u_gl90)
-  !!$omp target enter data map(to: CS%a_v, CS%h_v, CS%a_v_gl90)
-
-  !$omp target enter data map(to: hML_u ) if (allocated( hML_u))
-  !$omp target enter data map(to: hML_v ) if (allocated( hML_v))
 
   !$omp target teams distribute parallel do collapse(2) &
   !$omp   private(z_i, z_i_gl90, dz_harm, hvel, dz_vel, a_cpl, a_cpl_gl90, &
@@ -2100,12 +2096,12 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
   !!$omp target exit data map(delete: visc)
   !!$omp target exit data map(delete: visc%Kv_shear, visc%Kv_shear_Bu, visc%nkml_visc_u)
 
-  !!$omp target exit data map(delete: CS)
-  !!$omp target exit data map(from: CS%a_u, CS%h_u, CS%a_u_gl90)
-  !!$omp target exit data map(from: CS%a_v, CS%h_v, CS%a_v_gl90)
+  !$omp target exit data map(delete: z_i, z_i_gl90, dz_harm, hvel, dz_vel, a_cpl, a_cpl_gl90, &
+  !$omp& tv, varmix, hvel_shelf, dz_vel_shelf, a_shelf, hml_u, kv_u, kv_gl90_u)
 
-  !$omp target exit data map(from: hML_u ) if (allocated( hML_u))
-  !$omp target exit data map(from: hML_v ) if (allocated( hML_v))
+  ! These are used in diagnostics, so they need to be mapped back and forth
+  !$omp target exit data map(from: hML_u, kv_u, kv_gl90_u )
+  !$omp target exit data map(from: hML_v, kv_v, kv_gl90_v)
 
   !$omp target exit data map(delete: Ustar_2d)
 
@@ -2657,6 +2653,7 @@ end subroutine find_coupling_coef_k
 !! layer thicknesses are used to calculate a_cpl near the bottom.
 subroutine find_coupling_coef(a_cpl, hvel, i, j, h_harm, bbl_thick, kv_bbl, z_i, h_ml, &
                               dt, G, GV, US, CS, visc, Ustar_2d, tv, work_on_u, OBC, shelf)
+  !$omp declare target
   type(ocean_grid_type),     intent(in)  :: G  !< Ocean grid structure
   type(verticalGrid_type),   intent(in)  :: GV !< Ocean vertical grid structure
   type(unit_scale_type),     intent(in)  :: US !< A dimensional unit scaling type
