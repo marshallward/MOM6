@@ -414,19 +414,6 @@ subroutine vertFPmix(ui, vi, uold, vold, hbl_h, h, forces, dt, lpost, Cemp_NL, G
 end subroutine vertFPmix
 
 
-!> Expose loop indices to IPO for alias analysis and loop transformation.
-function touch_ij(i,j) result(ij)
-  integer, intent(in) :: i
-    !< Inner loop index
-  integer, intent(in) :: j
-    !< Outer loop index
-  integer:: ij
-    !< Trivial operation to prevent removal during optimization
-
-  ij = i * j
-end function touch_ij
-
-
 !> Compute coupling coefficient associated with vertical viscosity parameterization as in Greatbatch and Lamb
 !! (1990), hereafter referred to as the GL90 vertical viscosity parameterization. This vertical viscosity scheme
 !! redistributes momentum in the vertical, and is the equivalent of the Gent & McWilliams (1990) parameterization,
@@ -584,7 +571,7 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
   ! Local variables
 
   real :: b1
-  ! A variable used by the tridiagonal solver [H-1 ~> m-1 or m2 kg-1].
+    ! A variable used by the tridiagonal solver [H-1 ~> m-1 or m2 kg-1].
   real :: c1(SZK_(GV))
     ! A variable used by the tridiagonal solver [nondim].
   real :: d1
@@ -661,7 +648,7 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
   if ( present(fpmix) ) lfpmix = fpmix
 
   !   Update the zonal velocity component using a modification of a standard
-  ! tridagonal solver.
+  ! tridiagonal solver.
 
   ! WGL: Brandon Reichl says the following is obsolete. u(I,j,k) already
   ! includes Stokes.
@@ -685,7 +672,6 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
   endif
 
   !$omp target enter data map(to: ADp)
-  !!$omp target update to(u, h,v)
   !$omp target enter data map(alloc: surface_stress)
   !$omp target enter data map(alloc: ADp%dv_dt_str)
   !$omp target enter data map(alloc: ADp%du_dt_str)
@@ -754,8 +740,8 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
   !$omp target enter data map(to: visc%Ray_u) if (allocated(visc%Ray_u))
 
   !$omp target teams loop collapse(2) &
-  !$omp   private( b1 , c1 , d1, Ray, b_denom_1 )
-  do j=G%jsc,G%jec ; do I=Isq,Ieq ; if (G%mask2dCu(I,j) > 0. ) then
+  !$omp   private(b1, c1, d1, Ray, b_denom_1)
+  do j=G%jsc,G%jec ; do I=Isq,Ieq ; if (G%mask2dCu(I,j) > 0.) then
     Ray = 0.
     if (allocated(visc%Ray_u)) Ray = visc%Ray_u(I,j,1)
 
@@ -884,38 +870,30 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
 
   ! When mixing down Eulerian current + Stokes drift subtract after calling solver
   if (DoStokesMixing) then
-    do k=1,nz
-      do j=G%jsc,G%jec ; do I=Isq,Ieq ; if (G%mask2dCu(I,j) > 0.) then
-        u(I,j,k) = u(I,j,k) - Waves%Us_x(I,j,k)
-      endif ; enddo ; enddo
-    enddo
+    do k=1,nz ; do j=G%jsc,G%jec ; do I=Isq,Ieq ; if (G%mask2dCu(I,j) > 0.) then
+      u(I,j,k) = u(I,j,k) - Waves%Us_x(I,j,k)
+    endif ; enddo ; enddo ; enddo
   endif
 
   if (lfpmix) then
-    do k=1,nz
-      do j=G%jsc,G%jec ; do I=Isq,Ieq ; if (G%mask2dCu(I,j) > 0.) then
-        u(I,j,k) = u(I,j,k) + Waves%Us_x(I,j,k)
-      endif ; enddo ; enddo
-    enddo
+    do k=1,nz ; do j=G%jsc,G%jec ; do I=Isq,Ieq ; if (G%mask2dCu(I,j) > 0.) then
+      u(I,j,k) = u(I,j,k) + Waves%Us_x(I,j,k)
+    endif ; enddo ; enddo ; enddo
   endif
 
   ! == Now work on the meridional velocity component.
 
   ! When mixing down Eulerian current + Stokes drift add before calling solver
   if (DoStokesMixing) then
-    do k=1,nz
-      do J=Jsq,Jeq ; do i=is,ie ; if (G%mask2dCv(i,J) > 0.) then
-        v(i,j,k) = v(i,j,k) + Waves%Us_y(i,j,k)
-      endif ; enddo ; enddo
-    enddo
+    do k=1,nz ; do J=Jsq,Jeq ; do i=is,ie ; if (G%mask2dCv(i,J) > 0.) then
+      v(i,j,k) = v(i,j,k) + Waves%Us_y(i,j,k)
+    endif ; enddo ; enddo ; enddo
   endif
 
   if (lfpmix) then
-    do k=1,nz
-      do J=Jsq,Jeq ; do i=is,ie ; if (G%mask2dCv(i,J) > 0.) then
-        v(i,j,k) = v(i,j,k) - Waves%Us_y(i,j,k)
-      endif ; enddo ; enddo
-    enddo
+    do k=1,nz ; do J=Jsq,Jeq ; do i=is,ie ; if (G%mask2dCv(i,J) > 0.) then
+      v(i,j,k) = v(i,j,k) - Waves%Us_y(i,j,k)
+    endif ; enddo ; enddo ; enddo
   endif
 
   if (associated(ADp%dv_dt_visc)) then
@@ -962,7 +940,7 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
   !$omp target enter data map(to: visc%Ray_v) if (allocated(visc%Ray_v))
 
   !$omp target teams loop collapse(2) &
-  !$omp   private( b1 , c1 , d1, Ray, b_denom_1 )
+  !$omp   private(b1, c1, d1, Ray, b_denom_1)
   do J=Jsq,Jeq ; do i=is,ie ; if (G%mask2dCv(i,J) > 0.) then
     Ray = 0.
     if (allocated(visc%Ray_v)) Ray = visc%Ray_v(i,J,1)
@@ -1123,7 +1101,6 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
 
   !$omp target exit data map(delete: b1, c1, d1, Ray)
 
-  !!$omp target update from(u,v)
   !$omp target exit data map(from: ADp%du_dt_str, ADp%dv_dt_str)
   !$omp target exit data map(delete: ADp)
   !$omp target exit data map(delete: surface_stress)
@@ -1168,7 +1145,7 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
     if (CS%id_dv_dt_str > 0) &
       call post_data(CS%id_dv_dt_str, ADp%dv_dt_str, CS%diag)
 
-    if (associated(ADp%du_dt_visc) .and. associated(ADp%du_dt_visc)) then
+    if (associated(ADp%du_dt_visc) .and. associated(ADp%dv_dt_visc)) then
       ! Diagnostics of the fractional thicknesses times momentum budget terms
       ! 3D diagnostics of hf_du(dv)_dt_visc are commented because there is no clarity on proper remapping grid option.
       ! The code is retained for debugging purposes in the future.
@@ -1248,17 +1225,11 @@ subroutine vertvisc_remnant(visc, visc_rem_u, visc_rem_v, dt, G, GV, US, CS)
 
   ! Find the zonal viscous remnant using a modification of a standard tridagonal solver.
 
-  ! NVFORTRAN has issues with private arrays and do concurrents - trying to use
-  ! do concurrents in either of the loops below will lead to seg faults. I think
-  ! this is because of the c1 array that every thread gets, but still unclear.
-
-  ! Need teams loop collapse(2) to parallelize both the j and the i loops
-
   !$omp target enter data map(alloc: b1, c1, d1, Ray, b_denom_1)
 
   !$omp target teams loop collapse(2) &
-  !$omp   private( b1 , c1 , d1, Ray, b_denom_1 )
-  do j=G%jsc,G%jec ; do I=Isq,Ieq ; if (G%mask2dCu(I,j) > 0. ) then
+  !$omp   private(b1, c1, d1, Ray, b_denom_1)
+  do j=G%jsc,G%jec ; do I=Isq,Ieq ; if (G%mask2dCu(I,j) > 0.) then
     Ray = 0.
     if (allocated(visc%Ray_u)) Ray = visc%Ray_u(I,j,1)
 
@@ -1285,8 +1256,8 @@ subroutine vertvisc_remnant(visc, visc_rem_u, visc_rem_v, dt, G, GV, US, CS)
   ! Now find the meridional viscous remnant using the robust tridiagonal solver.
 
   !$omp target teams loop collapse(2) &
-  !$omp   private( b1 , c1 , d1, Ray, b_denom_1 )
-  do J=Jsq,Jeq ; do i=is,ie ; if (G%mask2dCv(i,J) > 0. )  then
+  !$omp   private(b1, c1, d1, Ray, b_denom_1)
+  do J=Jsq,Jeq ; do i=is,ie ; if (G%mask2dCv(i,J) > 0.) then
     Ray = 0.
     if (allocated(visc%Ray_v)) Ray = visc%Ray_v(i,J,1)
 
@@ -1473,7 +1444,7 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
   !$omp target enter data map(alloc: Ustar_2d)
   call find_ustar(forces, tv, Ustar_2d, G, GV, US, halo=1)
 
-  !! First do u-points
+  ! First do u-points
 
   !$omp target enter data map(alloc: z_i, z_i_gl90, dz_harm, hvel, dz_vel, a_cpl, a_cpl_gl90, &
   !$omp& tv, varmix, hvel_shelf, dz_vel_shelf, a_shelf)
@@ -2093,9 +2064,6 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
     endif
   endif ; enddo ; enddo
 
-  !!$omp target exit data map(delete: visc)
-  !!$omp target exit data map(delete: visc%Kv_shear, visc%Kv_shear_Bu, visc%nkml_visc_u)
-
   !$omp target exit data map(delete: z_i, z_i_gl90, dz_harm, hvel, dz_vel, a_cpl, a_cpl_gl90, &
   !$omp& tv, varmix, hvel_shelf, dz_vel_shelf, a_shelf, hml_u, kv_u, kv_gl90_u)
 
@@ -2382,7 +2350,7 @@ pure subroutine find_coupling_coef_k(a_cpl, hvel, i, j, h_harm, bbl_thick, kv_bb
     endif
     z_t = 0.0
 
-    ! If a_cpl(i,1) were not already 0, it would be added here.
+    ! If a_cpl(1) were not already 0, it would be added here.
     if (0.5 * hvel(1) > tbl_thick) then
       a_cpl(1) = kv_TBL / (tbl_thick + I_amax * kv_TBL)
     else
