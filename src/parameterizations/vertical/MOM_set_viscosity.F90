@@ -252,7 +252,7 @@ subroutine set_viscous_BBL(u, v, h, tv, visc, G, GV, US, CS, pbv)
                            ! The 400 is a constant proposed by Killworth and Edwards, 1999.
   real, dimension(SZI_(G),SZJ_(G),max(GV%nk_rho_varies,1)) :: &
     Rml                    ! The mixed layer coordinate density [R ~> kg m-3].
-  real :: p_ref(SZI_(G))   !   The pressure used to calculate the coordinate
+  real :: p_ref(SZI_(G),SZJ_(G))   !   The pressure used to calculate the coordinate
                            ! density [R L2 T-2 ~> Pa] (usually set to 2e7 Pa = 2000 dbar).
 
   real :: D_vel            ! The bottom depth at a velocity point [Z ~> m].
@@ -304,7 +304,7 @@ subroutine set_viscous_BBL(u, v, h, tv, visc, G, GV, US, CS, pbv)
   real, parameter :: C1_3 = 1.0/3.0, C1_6 = 1.0/6.0, C1_12 = 1.0/12.0 ! Rational constants [nondim]
   real :: tmp              ! A temporary variable, sometimes in [Z ~> m]
   logical :: use_BBL_EOS, do_i(SZIB_(G))
-  integer, dimension(2) :: EOSdom ! The computational domain for the equation of state
+  integer, dimension(2,2) :: EOSdom ! The computational domain for the equation of state
   integer :: i, j, k, is, ie, js, je, Isq, Ieq, Jsq, Jeq, nz, m, n, K2, nkmb, nkml
   integer :: is_OBC, ie_OBC, js_OBC, je_OBC
   type(ocean_OBC_type), pointer :: OBC => NULL()
@@ -355,25 +355,24 @@ subroutine set_viscous_BBL(u, v, h, tv, visc, G, GV, US, CS, pbv)
 !  if (CS%linear_drag) ustar(:) = cdrag_sqrt_H*CS%drag_bg_vel
 
   if ((nkml>0) .and. .not.use_BBL_EOS) then
-    EOSdom(1) = Isq - (G%isd-1) ;  EOSdom(2) = G%iec+1 - (G%isd-1)
-    do i=Isq,Ieq+1 ; p_ref(i) = tv%P_Ref ; enddo
-    !$OMP parallel do default(shared)
-    do k=1,nkmb ; do j=Jsq,Jeq+1
-      call calculate_density(tv%T(:,j,k), tv%S(:,j,k), p_ref, Rml(:,j,k), tv%eqn_of_state, &
-                             EOSdom)
-    enddo ; enddo
+    EOSdom(1,1) = Isq - (G%isd-1) ;  EOSdom(1,2) = G%iec+1 - (G%isd-1)
+    EOSdom(2,1) = Jsq - (G%jsd-1) ;  EOSdom(2,2) = G%jec+1 - (G%jsd-1)
+    do concurrent (j=Jsq:Jeq+1, i=Isq:Ieq+1)
+      p_ref(i,j) = tv%P_Ref
+    enddo
+    do k=1,nkmb
+      call calculate_density(tv%T(:,:,k), tv%S(:,:,k), p_ref, Rml(:,:,k), tv%eqn_of_state, EOSdom)
+    enddo
   endif
 
-  !$OMP parallel do default(shared)
-  do J=js-1,je ; do i=is-1,ie+1
+  do concurrent (J=js-1:je, i=is-1:ie+1)
     D_v(i,J) = 0.5*(G%bathyT(i,j) + G%bathyT(i,j+1)) + G%Z_ref
     mask_v(i,J) = G%mask2dCv(i,J)
-  enddo ; enddo
-  !$OMP parallel do default(shared)
-  do j=js-1,je+1 ; do I=is-1,ie
+  enddo
+  do concurrent (j=js-1:je+1, I=is-1:ie)
     D_u(I,j) = 0.5*(G%bathyT(i,j) + G%bathyT(i+1,j)) + G%Z_ref
     mask_u(I,j) = G%mask2dCu(I,j)
-  enddo ; enddo
+  enddo
 
   if (associated(OBC)) then
     ! Use a one-sided projection of bottom depths at OBC points.
@@ -439,8 +438,16 @@ subroutine set_viscous_BBL(u, v, h, tv, visc, G, GV, US, CS, pbv)
   if (.not.use_BBL_EOS) Rml_vel(:,:) = 0.0
 
   ! Resetting Ray_[uv] is required by body force drag.
-  if (allocated(visc%Ray_u)) visc%Ray_u(:,:,:) = 0.0
-  if (allocated(visc%Ray_v)) visc%Ray_v(:,:,:) = 0.0
+  if (allocated(visc%Ray_u)) then
+    do concurrent (k=1:nz, j=G%jsd:G%jed, i=G%isdB:G%iedB)
+      visc%Ray_u(i,j,k) = 0.0
+    enddo
+  endif
+  if (allocated(visc%Ray_v)) then
+    do concurrent (k=1:nz, j=G%jsdB:G%jedB, i=G%isd:G%ied)
+      visc%Ray_v(i,j,k) = 0.0
+    enddo
+  endif
 
   !$OMP parallel do default(private) shared(u,v,h,dz,tv,visc,G,GV,US,CS,Rml,nz,nkmb,nkml,K2, &
   !$OMP                                     Isq,Ieq,Jsq,Jeq,h_neglect,dz_neglect,Rho0x400_G, &
