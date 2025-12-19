@@ -356,6 +356,10 @@ subroutine set_viscous_BBL(u, v, h, tv, visc, G, GV, US, CS, pbv)
 !  With a linear drag law, the friction velocity is already known.
 !  if (CS%linear_drag) ustar(:) = cdrag_sqrt_H*CS%drag_bg_vel
 
+  !$omp target enter data map(to: tv, tv%T, tv%S, tv%p_surf, CS) map(alloc: Rml, p_ref, ustar, &
+  !$omp   umag_avg, u2_bg, mask_u, mask_v, h_bbl_drag, dz_bbl_drag, do_i, dR_dS, dR_dT, D_u, D_v, &
+  !$omp   press, S_EOS, T_EOS, Rml_vel)
+
   if ((nkml>0) .and. .not.use_BBL_EOS) then
     EOSdom(1,1) = Isq - (G%isd-1) ;  EOSdom(1,2) = G%iec+1 - (G%isd-1)
     EOSdom(2,1) = Jsq - (G%jsd-1) ;  EOSdom(2,2) = G%jec+1 - (G%jsd-1)
@@ -376,6 +380,7 @@ subroutine set_viscous_BBL(u, v, h, tv, visc, G, GV, US, CS, pbv)
     mask_u(I,j) = G%mask2dCu(I,j)
   enddo
 
+  !$omp target update from(mask_u, mask_v, D_u, D_v) if(associated(OBC))
   if (associated(OBC)) then
     ! Use a one-sided projection of bottom depths at OBC points.
     if (OBC%v_N_OBCs_on_PE) then
@@ -387,20 +392,24 @@ subroutine set_viscous_BBL(u, v, h, tv, visc, G, GV, US, CS, pbv)
       enddo ; enddo
     endif
     if (OBC%v_S_OBCs_on_PE) then
+      !$omp target update from(D_v)
       Js_OBC = max(js-1, OBC%Js_v_S_obc) ; Je_OBC = min(je, OBC%Je_v_S_obc)
       is_OBC = max(is-1, OBC%is_v_S_obc) ; ie_OBC = min(ie+1, OBC%ie_v_S_obc)
       !$OMP parallel do default(shared)
       do J=Js_OBC,Je_OBC ; do i=is_OBC,ie_OBC
         if (OBC%segnum_v(i,J) < 0) D_v(i,J) = G%bathyT(i,j+1) + G%Z_ref !  OBC_DIRECTION_S
       enddo ; enddo
+      !$omp target update to(D_v)
     endif
     if (OBC%u_E_OBCs_on_PE) then
+      !$omp target update from(D_u)
       js_OBC = max(js-1, OBC%js_u_E_obc) ; je_OBC = min(je+1, OBC%je_u_E_obc)
       Is_OBC = max(is-1, OBC%Is_u_E_obc) ; Ie_OBC = min(ie, OBC%Ie_u_E_obc)
       !$OMP parallel do default(shared)
       do j=js_OBC,je_OBC ; do I=Is_OBC,Ie_OBC
         if (OBC%segnum_u(I,j) > 0) D_u(I,j) = G%bathyT(i,j) + G%Z_ref !  OBC_DIRECTION_E
       enddo ; enddo
+      !$omp target update to(D_u)
     endif
     if (OBC%u_W_OBCs_on_PE) then
       js_OBC = max(js-1, OBC%js_u_W_obc) ; je_OBC = min(je+1, OBC%je_u_W_obc)
@@ -412,7 +421,8 @@ subroutine set_viscous_BBL(u, v, h, tv, visc, G, GV, US, CS, pbv)
     endif
   endif
 
-  if (associated(OBC)) then ; do n=1,OBC%number_of_segments
+  if (associated(OBC)) then
+    do n=1,OBC%number_of_segments
     ! Now project bottom depths across cell-corner points in the OBCs.  The two
     ! projections have to occur in sequence and can not be combined easily.
     if (.not. OBC%segment(n)%on_pe) cycle
@@ -435,9 +445,15 @@ subroutine set_viscous_BBL(u, v, h, tv, visc, G, GV, US, CS, pbv)
         endif
       enddo
     endif
-  enddo ; endif
+    enddo
+  endif
+  !$omp target update to(mask_u, mask_v, D_u, D_v) if(associated(OBC))
 
-  if (.not.use_BBL_EOS) Rml_vel(:,:,:) = 0.0
+  if (.not.use_BBL_EOS) then
+    do concurrent (k=1:nz, j=G%jsdB:G%Jedb, i=G%isdB:G%iedB)
+      Rml_vel(i,j,k) = 0.0
+    enddo
+  endif
 
   ! Resetting Ray_[uv] is required by body force drag.
   if (allocated(visc%Ray_u)) then
@@ -450,6 +466,9 @@ subroutine set_viscous_BBL(u, v, h, tv, visc, G, GV, US, CS, pbv)
       visc%Ray_v(i,j,k) = 0.0
     enddo
   endif
+
+  !$omp target enter data map(to: dz) map(alloc: S_vel, T_vel, SpV_vel, h_vel, h_at_vel, &
+  !$omp   dz_vel, dz_at_vel)
 
   !$omp target update to(u, v, h)
   do m=1,2
@@ -1105,6 +1124,10 @@ subroutine set_viscous_BBL(u, v, h, tv, visc, G, GV, US, CS, pbv)
   enddo ! end of m loop
   !$omp target update from(visc%bbl_thick_u, visc%bbl_thick_v)
   !$omp target update from(visc%kv_bbl_u, visc%kv_bbl_v)
+
+  !$omp target exit data map(release: dz, tv, tv%T, tv%S, S_vel, T_vel, SpV_vel, h_vel, h_at_vel, &
+  !$omp   dz_vel, dz_at_vel, Rml, Rml_vel, p_ref, ustar, umag_avg, u2_bg, mask_u, mask_v, &
+  !$omp   h_bbl_drag, dz_bbl_drag, do_i, dR_dS, dR_dT, D_u, D_v, press, S_EOS, T_EOS, tv%p_surf, CS)
 
 ! Offer diagnostics for averaging
   if (CS%id_bbl_thick_u > 0) &
