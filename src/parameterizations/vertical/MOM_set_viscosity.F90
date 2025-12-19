@@ -305,7 +305,7 @@ subroutine set_viscous_BBL(u, v, h, tv, visc, G, GV, US, CS, pbv)
   real :: tmp              ! A temporary variable, sometimes in [Z ~> m]
   logical :: use_BBL_EOS, do_i(SZIB_(G),SZJB_(G))
   integer, dimension(2,2) :: EOSdom ! The computational domain for the equation of state
-  integer :: i, j, k, is, ie, js, je, Isq, Ieq, Jsq, Jeq, nz, m, n, K2, nkmb, nkml
+  integer :: i, j, k, is, ie, js, je, Isq, Ieq, Jsq, Jeq, nz, m, n, K2, nkmb, nkml, jstart
   integer :: is_OBC, ie_OBC, js_OBC, je_OBC
   type(ocean_OBC_type), pointer :: OBC => NULL()
 
@@ -449,26 +449,23 @@ subroutine set_viscous_BBL(u, v, h, tv, visc, G, GV, US, CS, pbv)
     enddo
   endif
 
-  !$OMP parallel do default(private) shared(u,v,h,dz,tv,visc,G,GV,US,CS,Rml,nz,nkmb,nkml,K2, &
-  !$OMP                                     Isq,Ieq,Jsq,Jeq,h_neglect,dz_neglect,Rho0x400_G, &
-  !$OMP                                     cdrag_sqrt,cdrag_sqrt_H,cdrag_sqrt_H_RL, &
-  !$OMP                                     cdrag_L_to_H,cdrag_RL_to_H,use_BBL_EOS,BBL_thick_max, &
-  !$OMP                                     OBC,D_u,D_v,mask_u,mask_v,pbv,do_i,h_at_vel,h_vel,&
-  !$OMP                                     dz_at_vel,dz_vel,T_vel,S_vel,SpV_vel,Rml_vel,ustar,&
-  !$OMP                                     T_EOS,S_EOS,dR_dT,dR_dS,press,umag_avg,h_bbl_drag,&
-  !$OMP                                     dz_bbl_drag,u2_bg)
-  do j=Jsq,Jeq ; do m=1,2
-
+  do m=1,2
     if (m==1) then
       ! m=1 refers to u-points
-      if (j<G%Jsc) cycle
       is = Isq ; ie = Ieq
+      jstart = G%Jsc
+    else
+      ! m=2 refers to v-points
+      is = G%isc ; ie = G%iec
+      jstart = Jsq
+    endif
+  do j=jstart,Jeq
+
+    if (m==1) then
       do i=is,ie
         do_i(i,j) = (G%mask2dCu(I,j) > 0.0)
       enddo
     else
-      ! m=2 refers to v-points
-      is = G%isc ; ie = G%iec
       do i=is,ie
         do_i(i,j) = (G%mask2dCv(i,J) > 0.0)
       enddo
@@ -716,8 +713,12 @@ subroutine set_viscous_BBL(u, v, h, tv, visc, G, GV, US, CS, pbv)
       do k=1,nz ; do i=is,ie
         press(i,j) = press(i,j) + (GV%H_to_RZ*GV%g_Earth) * h_vel(i,j,k)
       enddo ; enddo
-      call calculate_density_derivs(T_EOS(:,j), S_EOS(:,j), press(:,j), dR_dT(:,j), dR_dS(:,j), &
-                                    tv%eqn_of_state, (/is-G%IsdB+1,ie-G%IsdB+1/) )
+    endif; enddo
+
+    if (use_BBL_EOS) then
+      EOSdom(1,1) = is-G%IsdB+1 ; EOSdom(1,2) = ie-G%IsdB+1
+      EOSdom(2,1) = jstart-G%JsdB+1 ; EOSdom(2,2) = Jeq-G%JsdB+1
+      call calculate_density_derivs(T_EOS, S_EOS, press, dR_dT, dR_dS, tv%eqn_of_state, EOSdom)
     endif
 
     ! Find a BBL thickness given by equation 2.20 of Killworth and Edwards, 1999:
@@ -727,7 +728,7 @@ subroutine set_viscous_BBL(u, v, h, tv, visc, G, GV, US, CS, pbv)
     ! rotation (h_f) and stratification (h_N):
     !    ( h / h_f )^2 + ( h / h_N ) = 1
     ! When stratification dominates h_N<<h_f, and vice versa.
-    do i=is,ie ; if (do_i(i,j)) then
+    do j=jstart,jeq ; do i=is,ie ; if (do_i(i,j)) then
       ! The 400.0 in this expression is the square of a Ci introduced in KW99, eq. 2.22.
       ustarsq = Rho0x400_G * ustar(i,j)**2 ! Note not in units of u*^2 but [H R ~> kg m-2 or kg2 m-5]
       htot = 0.0
