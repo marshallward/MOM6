@@ -350,8 +350,11 @@ subroutine set_viscous_BBL(u, v, h, tv, visc, G, GV, US, CS, pbv)
   BBL_thick_max = G%Rad_Earth_L * US%L_to_Z
   K2 = max(nkmb+1, 2)
 
+  !$omp target update to(u, v, h)
+  !$omp target enter data map(alloc: dz)
+
   ! Find the vertical distances across layers.
-  call thickness_to_dz(h, tv, dz, G, GV, US, halo_size=1)
+  call thickness_to_dz(h, tv, dz, G, GV, US, halo_size=1, do_offload=.true.)
 
 !  With a linear drag law, the friction velocity is already known.
 !  if (CS%linear_drag) ustar(:) = cdrag_sqrt_H*CS%drag_bg_vel
@@ -467,10 +470,9 @@ subroutine set_viscous_BBL(u, v, h, tv, visc, G, GV, US, CS, pbv)
     enddo
   endif
 
-  !$omp target enter data map(to: dz) map(alloc: S_vel, T_vel, SpV_vel, h_vel, h_at_vel, &
-  !$omp   dz_vel, dz_at_vel)
+  !$omp target enter data map(alloc: S_vel, T_vel, SpV_vel, h_vel, h_at_vel, dz_vel, &
+  !$omp   dz_at_vel)
 
-  !$omp target update to(u, v, h)
   do m=1,2
     if (m==1) then
       ! m=1 refers to u-points
