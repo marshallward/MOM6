@@ -350,7 +350,6 @@ subroutine set_viscous_BBL(u, v, h, tv, visc, G, GV, US, CS, pbv)
   BBL_thick_max = G%Rad_Earth_L * US%L_to_Z
   K2 = max(nkmb+1, 2)
 
-  !$omp target update to(u, v, h)
   !$omp target enter data map(alloc: dz)
 
   ! Find the vertical distances across layers.
