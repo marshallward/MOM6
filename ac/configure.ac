@@ -231,7 +231,18 @@ AX_FC_CHECK_MODULE([fms2_io_mod], [
 ])
 
 
-# Python interpreter test
+## GSW configuration
+
+AX_FC_CHECK_MODULE([gsw_mod_toolbox])
+# how do I handle funcitons??
+
+#AX_FC_CHECK_LIB([gsw], [gsw_gibbs], [gsw_mod_toolbox])
+# TODO: This is a very obscure test, but it doesn't require arguments.
+#   Consider it a placeholder.
+AX_FC_CHECK_LIB([gsw], [gsw_saar_init], [gsw_mod_toolbox])
+
+
+## Python configuration
 
 # Declare the Python interpreter variable
 AC_ARG_VAR([PYTHON], [Python interpreter command])
