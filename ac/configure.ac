@@ -80,6 +80,20 @@ AS_IF([test "x$with_driver" != "x"],
 #AC_CONFIG_HEADERS(["$MEM_LAYOUT/MOM_memory.h"])
 
 
+# Add a flag to force warnings as error
+AC_ARG_ENABLE([werror], [
+  AS_HELP_STRING(
+    [--enable-werror],
+    [Force compile-time warnings to become errors.]
+  ),
+])
+# TODO: Verify compiler flag
+AS_IF([test "$enable_werror" = "yes"], [
+  WERROR_FCFLAGS="-Werror"
+])
+AC_SUBST([WERROR_FCFLAGS])
+
+
 # Explicitly assume free-form Fortran
 AC_LANG([Fortran])
 AC_FC_SRCEXT([f90])
