@@ -51,7 +51,7 @@ AS_VAR_IF([MOM_MEMORY], [],
 )
 
 # Confirm that MOM_MEMORY is named 'MOM_memory.h'
-AS_IF([test $(basename "${MOM_MEMORY}") == "MOM_memory.h"], [],
+AS_IF([test $(basename "${MOM_MEMORY}") = "MOM_memory.h"], [],
  [AC_MSG_ERROR([MOM_MEMORY header ${MOM_MEMORY} must be named 'MOM_memory.h'])]
 )
 
@@ -266,14 +266,33 @@ AC_PATH_PROG([MAKEDEP], [makedep], [${srcdir}/ac/makedep])
 AC_SUBST([MAKEDEP])
 
 
-# Generate source list and configure dependency command
-AC_SUBST([SRC_DIRS], ["\\
+# Generate Makedep source list and configure dependency command
+MAKEDEP_FLAGS=""
+
+SRC_DIRS="-e \\
   ${srcdir}/src \\
   ${MODEL_FRAMEWORK} \\
   ${srcdir}/config_src/external \\
   ${DRIVER_DIR} \\
-  ${MOM_MEMORY_DIR}"]
-)
+  ${MOM_MEMORY_DIR}"
+MAKEDEP_FLAGS="${MAKEDEP_FLAGS} ${SRC_DIRS}"
+
+# NOTE: Some pattern rules for this multiline flag constructor.
+#   - Previous args have no line continuation, so the next arg leads with `\\`.
+#   - Flag lines precede with a space ` -s` for syntax clarity.
+EXCLUDE_DIRS="\\
+ -s \\
+  ${srcdir}/src/equation_of_state/TEOS10"
+
+# TODO: This may be optional in the future, so we use AS_IF.
+AS_IF([test -n "${EXCLUDE_DIRS}"], [
+  MAKEDEP_FLAGS="${MAKEDEP_FLAGS} ${EXCLUDE_DIRS}"
+])
+
+MAKEDEP_FLAGS="${MAKEDEP_FLAGS# }"
+AC_SUBST([MAKEDEP_FLAGS])
+
+# Add makedep to config.status
 AC_CONFIG_COMMANDS(Makefile.dep, [make depend])
 
 
