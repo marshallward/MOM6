@@ -51,7 +51,7 @@ AX_FC_CHECK_C_LIB([netcdf], [nc_create], [], [
 #   - We test nf_create, rather than nf90_create, since AX_FC_CHECK_LIB can
 #     not currently probe the Fortran 90 interfaces.
 #   - nf-config does not have --libdir, so we parse the --flibs output.
-AX_FC_CHECK_LIB([netcdff], [nf_create], [], [], [
+MOM6_FC_CHECK_LIB([netcdff], [nf_create], [], [], [], [], [
   AS_UNSET([ax_fc_cv_lib_netcdff_nf_create])
   AC_PATH_PROG([NF_CONFIG], [nf-config])
   AS_IF([test -n "$NF_CONFIG"], [
@@ -61,7 +61,7 @@ AX_FC_CHECK_LIB([netcdff], [nf_create], [], [], [
   ], [
     AC_MSG_ERROR([Could not find nf-config.])
   ])
-  AX_FC_CHECK_LIB([netcdff], [nf_create], [], [], [
+  MOM6_FC_CHECK_LIB([netcdff], [nf_create], [], [], [], [], [
     AC_MSG_ERROR([Could not find netCDF Fortran library.])
   ])
 ])
