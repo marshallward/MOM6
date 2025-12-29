@@ -231,14 +231,15 @@ AX_FC_CHECK_MODULE([fms2_io_mod], [
 ])
 
 
-## GSW configuration
+# GSW configuration
 
 AX_FC_CHECK_MODULE([gsw_mod_toolbox])
-# how do I handle funcitons??
 
+# TODO: This test would be ideal, but our macro currently does not support
+#   functions with arguments.
 #AX_FC_CHECK_LIB([gsw], [gsw_gibbs], [gsw_mod_toolbox])
-# TODO: This is a very obscure test, but it doesn't require arguments.
-#   Consider it a placeholder.
+
+# This test works, but is fairly obscure.  Consider it a placeholder.
 AX_FC_CHECK_LIB([gsw], [gsw_saar_init], [gsw_mod_toolbox])
 
 
@@ -267,27 +268,26 @@ AC_SUBST([MAKEDEP])
 
 
 # Generate Makedep source list and configure dependency command
-MAKEDEP_FLAGS=""
+MAKEDEP_FLAGS="-e"
 
-SRC_DIRS="-e \\
+# NOTE: Some pattern rules for this multiline flag constructor.
+#   - Previous args have no line continuation, so the next arg leads with `\\`.
+#   - Flag lines precede with a space ` -s` for syntax clarity.
+EXCLUDE_DIRS="\\
+  -s ${srcdir}/src/equation_of_state/TEOS10"
+
+# TODO: This may be optional in the future, so we use AS_IF.
+AS_IF([test -n "${EXCLUDE_DIRS}"], [
+  MAKEDEP_FLAGS="${MAKEDEP_FLAGS} ${EXCLUDE_DIRS}"
+])
+
+SRC_DIRS="\\
   ${srcdir}/src \\
   ${MODEL_FRAMEWORK} \\
   ${srcdir}/config_src/external \\
   ${DRIVER_DIR} \\
   ${MOM_MEMORY_DIR}"
 MAKEDEP_FLAGS="${MAKEDEP_FLAGS} ${SRC_DIRS}"
-
-# NOTE: Some pattern rules for this multiline flag constructor.
-#   - Previous args have no line continuation, so the next arg leads with `\\`.
-#   - Flag lines precede with a space ` -s` for syntax clarity.
-EXCLUDE_DIRS="\\
- -s \\
-  ${srcdir}/src/equation_of_state/TEOS10"
-
-# TODO: This may be optional in the future, so we use AS_IF.
-AS_IF([test -n "${EXCLUDE_DIRS}"], [
-  MAKEDEP_FLAGS="${MAKEDEP_FLAGS} ${EXCLUDE_DIRS}"
-])
 
 MAKEDEP_FLAGS="${MAKEDEP_FLAGS# }"
 AC_SUBST([MAKEDEP_FLAGS])
