@@ -142,8 +142,8 @@ AX_FC_CHECK_C_LIB([netcdf], [nc_create], [], [
 #   - We test nf_create, rather than nf90_create, since AX_FC_CHECK_LIB can
 #     not currently probe the Fortran 90 interfaces.
 #   - nf-config does not have --libdir, so we parse the --flibs output.
-AX_FC_CHECK_LIB([netcdff], [nf_create], [], [], [
-  AS_UNSET([ax_fc_cv_lib_netcdff_nf_create])
+MOM6_FC_CHECK_LIB([netcdff], [nf_create], [], [], [], [], [
+  AS_UNSET([mom6_fc_cv_lib_netcdff_nf_create])
   AC_PATH_PROG([NF_CONFIG], [nf-config])
   AS_IF([test -n "$NF_CONFIG"], [
     AC_SUBST([LDFLAGS],
@@ -152,7 +152,7 @@ AX_FC_CHECK_LIB([netcdff], [nf_create], [], [], [
   ], [
     AC_MSG_ERROR([Could not find nf-config.])
   ])
-  AX_FC_CHECK_LIB([netcdff], [nf_create], [], [], [
+  MOM6_FC_CHECK_LIB([netcdff], [nf_create], [], [], [], [], [
     AC_MSG_ERROR([Could not find netCDF Fortran library.])
   ])
 ])
@@ -160,9 +160,9 @@ AX_FC_CHECK_LIB([netcdff], [nf_create], [], [], [
 
 # Force 8-byte reals
 AX_FC_REAL8
-AS_IF(
-  [test "$enable_real8" != no],
-  [FCFLAGS="$FCFLAGS $REAL8_FCFLAGS"])
+AS_IF([test "$enable_real8" != no],
+  [FCFLAGS="$FCFLAGS $REAL8_FCFLAGS"]
+)
 
 
 # OpenMP configuration
@@ -177,8 +177,7 @@ m4_version_prereq([2.69], [AC_OPENMP], [
 ])
 
 # NOTE: Only apply OpenMP flags if explicitly enabled.
-AS_IF(
-  [test "$enable_openmp" = yes], [
+AS_IF([test "$enable_openmp" = yes], [
   FCFLAGS="$FCFLAGS $OPENMP_FCFLAGS"
   LDFLAGS="$LDFLAGS $OPENMP_FCFLAGS"
 ])
@@ -196,10 +195,10 @@ AX_FC_CHECK_MODULE([fms_mod], [], [
 ])
 
 # Test for fms_init to verify FMS library linking
-AX_FC_CHECK_LIB([FMS], [fms_init], [fms_mod],
+MOM6_FC_CHECK_LIB([FMS], [fms_init], [fms_mod], [], [],
   [], [
-    AS_UNSET([ax_fc_cv_lib_FMS_fms_init])
-    AX_FC_CHECK_LIB([FMS], [fms_init], [fms_mod], [
+    AS_UNSET([mom6_fc_cv_lib_FMS_fms_init])
+    MOM6_FC_CHECK_LIB([FMS], [fms_init], [fms_mod], [], [], [
       AC_SUBST([LDFLAGS], ["-L${srcdir}/ac/deps/lib $LDFLAGS"])
       AC_SUBST([LIBS], ["-lFMS $LIBS"])
     ],
@@ -232,15 +231,25 @@ AX_FC_CHECK_MODULE([fms2_io_mod], [
 
 
 # GSW configuration
+AX_FC_CHECK_MODULE([gsw_mod_toolbox], [], [
+  AC_MSG_ERROR([Could not find module gsw_mod_toolbox.])
+])
+MOM6_FC_CHECK_LIB([gsw], [gsw_gibbs], [gsw_mod_toolbox],
+  [ns,nt,np,s,t,p], [x], [], [
+    AC_MSG_ERROR([Could not find gsw_gibbs in gsw_mod_toolbox.])
+  ]
+)
 
-AX_FC_CHECK_MODULE([gsw_mod_toolbox])
 
-# TODO: This test would be ideal, but our macro currently does not support
-#   functions with arguments.
-#AX_FC_CHECK_LIB([gsw], [gsw_gibbs], [gsw_mod_toolbox])
-
-# This test works, but is fairly obscure.  Consider it a placeholder.
-AX_FC_CHECK_LIB([gsw], [gsw_saar_init], [gsw_mod_toolbox])
+# CVMix configuration
+AX_FC_CHECK_MODULE([cvmix_utils], [], [
+  AC_MSG_ERROR([Could not find module cvmix_utils.])
+])
+MOM6_FC_CHECK_LIB([cvmix], [cvmix_update_wrap], [cvmix_utils], [i,nlev], [],
+  [], [
+    AC_MSG_ERROR([Could not find cvmix_update_wrap in cvmix_utils.])
+  ]
+)
 
 
 ## Python configuration
@@ -274,7 +283,8 @@ MAKEDEP_FLAGS="-e"
 #   - Previous args have no line continuation, so the next arg leads with `\\`.
 #   - Flag lines precede with a space ` -s` for syntax clarity.
 EXCLUDE_DIRS="\\
-  -s ${srcdir}/src/equation_of_state/TEOS10"
+  -s ${srcdir}/src/equation_of_state/TEOS10 \\
+  -s ${srcdir}/src/parameterizations/CVmix"
 
 # TODO: This may be optional in the future, so we use AS_IF.
 AS_IF([test -n "${EXCLUDE_DIRS}"], [

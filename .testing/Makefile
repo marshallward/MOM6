@@ -311,7 +311,7 @@ $(BUILD)/opt_target: | $(TARGET_CODEBASE)
 $(BUILD)/%/Makefile: $(BUILD)/%/Makefile.in $(BUILD)/%/config.status
 	cd $(@D) && ./config.status
 
-$(BUILD)/%/config.status: $(BUILD)/%/configure $(DEPS)/lib/libFMS.a $(DEPS)/lib/libgsw.a
+$(BUILD)/%/config.status: $(BUILD)/%/configure $(DEPS)/lib/libFMS.a $(DEPS)/lib/libgsw.a $(DEPS)/lib/libcvmix.a
 	cd $(@D) && $(MOM_ENV) ./configure -n --srcdir=$(AC_SRCDIR) $(MOM_ACFLAGS) \
 	 || (cat config.log && false)
 
@@ -343,7 +343,7 @@ endif
 ## Dependencies
 
 # Set up the FMS build environment variables
-FMS_ENV = \
+DEPS_ENV = \
   PATH="${PATH}:$(realpath ../ac)" \
   FCFLAGS="$(FCFLAGS_FMS)" \
   REPORT_ERROR_LOGS="$(REPORT_ERROR_LOGS)"
@@ -351,10 +351,7 @@ FMS_ENV = \
 # FMS
 
 $(DEPS)/lib/libFMS.a: $(DEPS)/Makefile $(DEPS)/Makefile.fms.in $(DEPS)/configure.fms.ac $(DEPS)/m4
-	$(FMS_ENV) $(MAKE) -C $(DEPS) lib/libFMS.a
-
-$(DEPS)/Makefile: ../ac/deps/Makefile | $(DEPS)
-	cp ../ac/deps/Makefile $(DEPS)/Makefile
+	$(DEPS_ENV) $(MAKE) -C $(DEPS) lib/libFMS.a
 
 $(DEPS)/Makefile.fms.in: ../ac/deps/Makefile.fms.in | $(DEPS)
 	cp ../ac/deps/Makefile.fms.in $(DEPS)/Makefile.fms.in
@@ -364,12 +361,8 @@ $(DEPS)/configure.fms.ac: ../ac/deps/configure.fms.ac | $(DEPS)
 
 # GSW
 
-# FMS_ENV is more like DEPS_ENV...
 $(DEPS)/lib/libgsw.a: $(DEPS)/Makefile $(DEPS)/Makefile.gsw.in $(DEPS)/configure.gsw.ac $(DEPS)/m4
-	$(FMS_ENV) $(MAKE) -C $(DEPS) lib/libgsw.a
-
-$(DEPS)/Makefile: ../ac/deps/Makefile | $(DEPS)
-	cp ../ac/deps/Makefile $(DEPS)/Makefile
+	$(DEPS_ENV) $(MAKE) -C $(DEPS) lib/libgsw.a
 
 $(DEPS)/Makefile.gsw.in: ../ac/deps/Makefile.gsw.in | $(DEPS)
 	cp ../ac/deps/Makefile.gsw.in $(DEPS)/Makefile.gsw.in
@@ -377,7 +370,21 @@ $(DEPS)/Makefile.gsw.in: ../ac/deps/Makefile.gsw.in | $(DEPS)
 $(DEPS)/configure.gsw.ac: ../ac/deps/configure.gsw.ac | $(DEPS)
 	cp ../ac/deps/configure.gsw.ac $(DEPS)/configure.gsw.ac
 
+# GSW
+
+$(DEPS)/lib/libcvmix.a: $(DEPS)/Makefile $(DEPS)/Makefile.cvmix.in $(DEPS)/configure.cvmix.ac $(DEPS)/m4
+	$(DEPS_ENV) $(MAKE) -C $(DEPS) lib/libcvmix.a
+
+$(DEPS)/Makefile.cvmix.in: ../ac/deps/Makefile.cvmix.in | $(DEPS)
+	cp ../ac/deps/Makefile.cvmix.in $(DEPS)/Makefile.cvmix.in
+
+$(DEPS)/configure.cvmix.ac: ../ac/deps/configure.cvmix.ac | $(DEPS)
+	cp ../ac/deps/configure.cvmix.ac $(DEPS)/configure.cvmix.ac
+
 # Generic dependency content
+
+$(DEPS)/Makefile: ../ac/deps/Makefile | $(DEPS)
+	cp ../ac/deps/Makefile $(DEPS)/Makefile
 
 $(DEPS)/m4: ../ac/deps/m4 | $(DEPS)
 	cp -r ../ac/deps/m4 $(DEPS)/

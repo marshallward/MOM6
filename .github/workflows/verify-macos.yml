@@ -21,8 +21,11 @@ jobs:
 
       - uses: ./.github/actions/macos-setup/
 
-      - name: Compile FMS
-        run: make -C .testing -j build/deps/lib/libFMS.a
+      - name: Compile dependencies
+        run: |
+          make -C .testing -j build/deps/lib/libFMS.a
+          make -C .testing -j build/deps/lib/libgsw.a
+          make -C .testing -j build/deps/lib/libcvmix.a
 
       - name: Compile MOM6 with symmetric indexing
         run: make -C .testing -j build/symmetric/MOM6
@@ -46,8 +49,11 @@ jobs:
 
       - uses: ./.github/actions/macos-setup/
 
-      - name: Compile FMS
-        run: make -C .testing -j build/deps/lib/libFMS.a
+      - name: Compile dependencies
+        run: |
+          make -C .testing -j build/deps/lib/libFMS.a
+          make -C .testing -j build/deps/lib/libgsw.a
+          make -C .testing -j build/deps/lib/libcvmix.a
 
       - name: Compile MOM6 with asymmetric indexing
         run: make -C .testing -j build/asymmetric/MOM6
@@ -71,8 +77,11 @@ jobs:
 
       - uses: ./.github/actions/macos-setup/
 
-      - name: Compile FMS
-        run: make -C .testing -j build/deps/lib/libFMS.a
+      - name: Compile dependencies
+        run: |
+          make -C .testing -j build/deps/lib/libFMS.a
+          make -C .testing -j build/deps/lib/libgsw.a
+          make -C .testing -j build/deps/lib/libcvmix.a
 
       - name: Compile MOM6 with bit-reproducible optimization
         run: make -C .testing -j build/repro/MOM6
@@ -96,8 +105,11 @@ jobs:
 
       - uses: ./.github/actions/macos-setup/
 
-      - name: Compile FMS
-        run: make -C .testing -j build/deps/lib/libFMS.a
+      - name: Compile dependencies
+        run: |
+          make -C .testing -j build/deps/lib/libFMS.a
+          make -C .testing -j build/deps/lib/libgsw.a
+          make -C .testing -j build/deps/lib/libcvmix.a
 
       - name: Compile MOM6 supporting OpenMP
         run: make -C .testing -j build/openmp/MOM6
