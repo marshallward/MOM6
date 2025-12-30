@@ -55,8 +55,11 @@ jobs:
 
       - uses: ./.github/actions/ubuntu-setup/
 
-      - name: Compile FMS
-        run: make -C .testing -j build/deps/lib/libFMS.a
+      - name: Compile dependencies
+        run: |
+          make -C .testing -j build/deps/lib/libFMS.a
+          make -C .testing -j build/deps/lib/libgsw.a
+          make -C .testing -j build/deps/lib/libcvmix.a
 
       - name: Compile MOM6 with symmetric indexing
         run: make -C .testing -j build/symmetric/MOM6

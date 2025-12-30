@@ -47,6 +47,7 @@ AC_DEFUN([MOM6_FC_CHECK_LIB],[
       AS_IF([test -n "$4"],
         [mom6_fc_proc="${mom6_fc_proc}($4)"]
       )
+      AC_LANG_PUSH([Fortran])
       AC_LINK_IFELSE([dnl
 dnl Begin 7-column code block
 AC_LANG_PROGRAM([], [dnl
@@ -57,6 +58,7 @@ dnl End code block
         [AS_VAR_SET([mom6_fc_Lib], [yes])],
         [AS_VAR_SET([mom6_fc_Lib], [no])]
       )
+      AC_LANG_POP([Fortran])
       LIBS=$mom6_fc_check_lib_save_LIBS
       LDFLAGS=$mom6_fc_check_lib_save_LDFLAGS
     ]

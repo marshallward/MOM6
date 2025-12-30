@@ -143,7 +143,7 @@ AX_FC_CHECK_C_LIB([netcdf], [nc_create], [], [
 #     not currently probe the Fortran 90 interfaces.
 #   - nf-config does not have --libdir, so we parse the --flibs output.
 MOM6_FC_CHECK_LIB([netcdff], [nf_create], [], [], [], [], [
-  AS_UNSET([ax_fc_cv_lib_netcdff_nf_create])
+  AS_UNSET([mom6_fc_cv_lib_netcdff_nf_create])
   AC_PATH_PROG([NF_CONFIG], [nf-config])
   AS_IF([test -n "$NF_CONFIG"], [
     AC_SUBST([LDFLAGS],
@@ -152,11 +152,9 @@ MOM6_FC_CHECK_LIB([netcdff], [nf_create], [], [], [], [], [
   ], [
     AC_MSG_ERROR([Could not find nf-config.])
   ])
-  #MOM6_FC_CHECK_LIB([netcdff], [nf_create], [], [], [], [], [
-  #  AC_MSG_ERROR([Could not find netCDF Fortran library.])
-  #])
   MOM6_FC_CHECK_LIB([netcdff], [nf_create], [], [], [], [], [
-    echo "huh?"])
+    AC_MSG_ERROR([Could not find netCDF Fortran library.])
+  ])
 ])
 
 
@@ -199,7 +197,7 @@ AX_FC_CHECK_MODULE([fms_mod], [], [
 # Test for fms_init to verify FMS library linking
 MOM6_FC_CHECK_LIB([FMS], [fms_init], [fms_mod], [], [],
   [], [
-    AS_UNSET([ax_fc_cv_lib_FMS_fms_init])
+    AS_UNSET([mom6_fc_cv_lib_FMS_fms_init])
     MOM6_FC_CHECK_LIB([FMS], [fms_init], [fms_mod], [], [], [
       AC_SUBST([LDFLAGS], ["-L${srcdir}/ac/deps/lib $LDFLAGS"])
       AC_SUBST([LIBS], ["-lFMS $LIBS"])
