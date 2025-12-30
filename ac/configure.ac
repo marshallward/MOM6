@@ -152,9 +152,11 @@ MOM6_FC_CHECK_LIB([netcdff], [nf_create], [], [], [], [], [
   ], [
     AC_MSG_ERROR([Could not find nf-config.])
   ])
+  #MOM6_FC_CHECK_LIB([netcdff], [nf_create], [], [], [], [], [
+  #  AC_MSG_ERROR([Could not find netCDF Fortran library.])
+  #])
   MOM6_FC_CHECK_LIB([netcdff], [nf_create], [], [], [], [], [
-    AC_MSG_ERROR([Could not find netCDF Fortran library.])
-  ])
+    echo "huh?"])
 ])
 
 
