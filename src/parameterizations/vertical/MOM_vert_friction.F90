@@ -3164,45 +3164,54 @@ subroutine vertvisc_limit_vel(u, v, h, ADp, CDp, forces, visc, dt, G, GV, US, CS
 
   maxvel = CS%maxvel
   truncvel = 0.9*maxvel
-  H_report = 6.0 * GV%Angstrom_H
+  H_report = 3.0 * GV%Angstrom_H
 
   !$omp target enter data map(alloc: dowrite, vel_report, trunc_any_array)
   !$omp target enter data map(alloc: u_old, v_old)
 
   if (len_trim(CS%u_trunc_file) > 0) then
     !!$OMP parallel do default(shared) private(trunc_any,CFL)
-    ! optimize memory
-    !do concurrent (j=js:je)
     do concurrent (j=js:je, k=1:nz, I=Isq:Ieq)
       trunc_any_array(I,j,k) = .false.
     enddo
 
-    if(CS%CFL_based_trunc) then
+    do concurrent (j=js:je, I=Isq:Ieq)
+      dowrite(I,j) = .false.
+      vel_report(I,j) = 3.0e8 * US%m_s_to_L_T
+    enddo
+
+    do concurrent (j=js:je, k=1:nz, I=Isq:Ieq)
+      if (abs(u(I,j,k)) < CS%vel_underflow) u(I,j,k) = 0.0
+      if (u(i,j,k) < 0.0) then
+        CFL = (-u(I,j,k) * dt) * (G%dy_Cu(I,j) * G%IareaT(i+1,j))
+      else
+        CFL = (u(I,j,k) * dt) * (G%dy_Cu(I,j) * G%IareaT(i,j))
+      endif
+      if (CFL > CS%CFL_trunc) trunc_any_array(i,j,k) = .true.
+      if (CFL > CS%CFL_report) then
+        dowrite(i,j) = .true.
+        vel_report(i,j) = min(vel_report(i,j), abs(u(i,j,k)))
+      endif
+    enddo
+
+    do concurrent (j=js:je, I=Isq:Ieq, dowrite(I,j))
+      u_old(I,j,:) = u(I,j,:)
+    enddo
+
+    do concurrent (j=js:je, k=1:nz, I=Isq:Ieq, trunc_any_array(I,j,k))
+      if ((u(I,j,k) * (dt * G%dy_Cu(I,j))) * G%IareaT(i+1,j) < -CS%CFL_trunc) then
+        u(I,j,k) = (-0.9*CS%CFL_trunc) * (G%areaT(i+1,j) / (dt * G%dy_Cu(I,j)))
+        if (h(i,j,k) + h(i+1,j,k) > H_report) CS%ntrunc = CS%ntrunc + 1
+      elseif ((u(I,j,k) * (dt * G%dy_Cu(I,j))) * G%IareaT(i,j) > CS%CFL_trunc) then
+        u(I,j,k) = (0.9*CS%CFL_trunc) * (G%areaT(i,j) / (dt * G%dy_Cu(I,j)))
+        if (h(i,j,k) + h(i+1,j,k) > H_report) CS%ntrunc = CS%ntrunc + 1
+      endif
+    enddo
+  else  ! Do not report accelerations leading to large velocities.
+    do k=1,nz
       do concurrent (j=js:je, I=Isq:Ieq)
-        dowrite(I,j) = .false.
-        vel_report(I,j) = 3.0e8*US%m_s_to_L_T
-      enddo
-
-      do concurrent (j=js:je, k=1:nz, I=Isq:Ieq)
-        if (abs(u(I,j,k)) < CS%vel_underflow) u(I,j,k) = 0.0
-        if (u(i,j,k) < 0.0) then
-          CFL = (-u(I,j,k) * dt) * (G%dy_Cu(I,j) * G%IareaT(i+1,j))
-        else
-          CFL = (u(I,j,k) * dt) * (G%dy_Cu(I,j) * G%IareaT(i,j))
-        endif
-        if (CFL > CS%CFL_trunc) trunc_any_array(i,j,k) = .true.
-        if (CFL > CS%CFL_report) then
-          dowrite(i,j) = .true.
-          vel_report(i,j) = min(vel_report(i,j), abs(u(i,j,k)))
-        endif
-      enddo
-
-      do concurrent (j = js:je, i=isq:ieq, dowrite(i,j))
-        u_old(I,j,:) = u(I,j,:)
-      enddo
-
-      do concurrent (j=js:je, k=1:nz, I=Isq:Ieq, trunc_any_array(I,j,k))
-        if ((u(I,j,k) * (dt * G%dy_Cu(I,j))) * G%IareaT(i+1,j) < -CS%CFL_trunc) then
+        if (abs(u(I,j,k)) < CS%vel_underflow) then ; u(I,j,k) = 0.0
+        elseif ((u(I,j,k) * (dt * G%dy_Cu(I,j))) * G%IareaT(i+1,j) < -CS%CFL_trunc) then
           u(I,j,k) = (-0.9*CS%CFL_trunc) * (G%areaT(i+1,j) / (dt * G%dy_Cu(I,j)))
           if (h(i,j,k) + h(i+1,j,k) > H_report) CS%ntrunc = CS%ntrunc + 1
         elseif ((u(I,j,k) * (dt * G%dy_Cu(I,j))) * G%IareaT(i,j) > CS%CFL_trunc) then
@@ -3210,157 +3219,64 @@ subroutine vertvisc_limit_vel(u, v, h, ADp, CDp, forces, visc, dt, G, GV, US, CS
           if (h(i,j,k) + h(i+1,j,k) > H_report) CS%ntrunc = CS%ntrunc + 1
         endif
       enddo
-    else
-      do j=js,je
-        do I=Isq,Ieq
-          dowrite(I,j) = .false.
-          vel_report(I,j) = maxvel
-        enddo
-      enddo
-
-      do j=js,je
-        do k=1,nz ; do I=Isq,Ieq
-          if (abs(u(I,j,k)) < CS%vel_underflow) then ; u(I,j,k) = 0.0
-          elseif (abs(u(I,j,k)) > maxvel) then
-            dowrite(I,j) = .true. ; trunc_any_array(i,j,k) = .true.
-          endif
-        enddo ; enddo
-      enddo
-
-      do j=js,je; do I=Isq,Ieq ; if (dowrite(I,j)) then
-        u_old(I,j,:) = u(I,j,:)
-      endif ; enddo ; enddo
-
-      do j=js,je
-        do k=1,nz ; do I=Isq,Ieq ; if(trunc_any_array(i,j,k)) then
-          if (abs(u(I,j,k)) > maxvel) then
-            u(I,j,k) = SIGN(truncvel,u(I,j,k))
-            if (h(i,j,k) + h(i+1,j,k) > H_report) CS%ntrunc = CS%ntrunc + 1
-          end if
-        endif ; enddo ; enddo
-      enddo
-    endif
-  else  ! Do not report accelerations leading to large velocities.
-    if (CS%CFL_based_trunc) then
-  ! JORGE TODO: PORT
-      do k=1,nz
-        do concurrent (j=js:je, I=Isq:Ieq)
-          if (abs(u(I,j,k)) < CS%vel_underflow) then ; u(I,j,k) = 0.0
-          elseif ((u(I,j,k) * (dt * G%dy_Cu(I,j))) * G%IareaT(i+1,j) < -CS%CFL_trunc) then
-            u(I,j,k) = (-0.9*CS%CFL_trunc) * (G%areaT(i+1,j) / (dt * G%dy_Cu(I,j)))
-            if (h(i,j,k) + h(i+1,j,k) > H_report) CS%ntrunc = CS%ntrunc + 1
-          elseif ((u(I,j,k) * (dt * G%dy_Cu(I,j))) * G%IareaT(i,j) > CS%CFL_trunc) then
-            u(I,j,k) = (0.9*CS%CFL_trunc) * (G%areaT(i,j) / (dt * G%dy_Cu(I,j)))
-            if (h(i,j,k) + h(i+1,j,k) > H_report) CS%ntrunc = CS%ntrunc + 1
-          endif
-        enddo
-      enddo
-    else
-      !$OMP parallel do default(shared)
-      do k=1,nz ; do j=js,je ; do I=Isq,Ieq
-        if (abs(u(I,j,k)) < CS%vel_underflow) then ; u(I,j,k) = 0.0
-        elseif (abs(u(I,j,k)) > maxvel) then
-          u(I,j,k) = SIGN(truncvel, u(I,j,k))
-          if (h(i,j,k) + h(i+1,j,k) > H_report) CS%ntrunc = CS%ntrunc + 1
-        endif
-      enddo ; enddo ; enddo
-    endif
+    enddo
   endif
 
   if (len_trim(CS%v_trunc_file) > 0) then
     do concurrent (J=Jsq:Jeq, k=1:nz, i=is:ie)
       trunc_any_array(i,j,k) = .false.
     enddo
-    if(CS%CFL_based_trunc) then
-      do concurrent (J=Jsq:Jeq, i=is:ie)
-        dowrite(i,j) = .false.
-        vel_report(i,j) = 3.0e8*US%m_s_to_L_T
-      enddo
 
-      do concurrent (J=Jsq:Jeq, k=1:nz, i=is:ie)
-        if (abs(v(i,j,k)) < CS%vel_underflow) v(i,j,k) = 0.0
-        if (v(i,j,k) < 0.0) then
-          CFL = (-v(I,j,k) * dt) * (G%dx_Cv(I,j) * G%IareaT(i+1,j))
-        else
-          CFL = (v(I,j,k) * dt) * (G%dx_Cv(I,j) * G%IareaT(i,j))
-        end if
-        if (CFL > CS%CFL_trunc) trunc_any_array(i,j,k) = .true.
-        if (CFL > CS%CFL_report) then
-          dowrite(i,j) = .true.
-          vel_report(i,j) = min(vel_report(i,j), abs(v(i,j,k)))
-        end if
-      enddo
+    do concurrent (J=Jsq:Jeq, i=is:ie)
+      dowrite(i,j) = .false.
+      vel_report(i,j) = 3.0e8 * US%m_s_to_L_T
+    enddo
 
-      do concurrent (j = jsq:jeq, i=is:ie, dowrite(i,j))
-        v_old(I,j,:) = v(I,j,:)
-      enddo
+    do concurrent (J=Jsq:Jeq, k=1:nz, i=is:ie)
+      if (abs(v(i,j,k)) < CS%vel_underflow) v(i,j,k) = 0.0
+      if (v(i,j,k) < 0.0) then
+        CFL = (-v(I,j,k) * dt) * (G%dx_Cv(I,j) * G%IareaT(i+1,j))
+      else
+        CFL = (v(I,j,k) * dt) * (G%dx_Cv(I,j) * G%IareaT(i,j))
+      end if
+      if (CFL > CS%CFL_trunc) trunc_any_array(i,j,k) = .true.
+      if (CFL > CS%CFL_report) then
+        dowrite(i,j) = .true.
+        vel_report(i,j) = min(vel_report(i,j), abs(v(i,j,k)))
+      end if
+    enddo
 
-      do concurrent (J=Jsq:Jeq, k=1:nz, i=is:ie, trunc_any_array(i,j,k))
-        if ((v(I,j,k) * (dt * G%dx_Cv(I,j))) * G%IareaT(i+1,j) < -CS%CFL_trunc) then
-          v(I,j,k) = (-0.9*CS%CFL_trunc) * (G%areaT(i+1,j) / (dt * G%dx_Cv(I,j)))
-          if (h(i,j,k) + h(i+1,j,k) > H_report) CS%ntrunc = CS%ntrunc + 1
-        elseif ((v(I,j,k) * (dt * G%dx_Cv(I,j))) * G%IareaT(i,j) > CS%CFL_trunc) then
-          v(I,j,k) = (0.9*CS%CFL_trunc) * (G%areaT(i,j) / (dt * G%dx_Cv(I,j)))
-          if (h(i,j,k) + h(i+1,j,k) > H_report) CS%ntrunc = CS%ntrunc + 1
-        endif
-      enddo
-    else
-      do J=Jsq,Jeq ; do i=is,ie
-        dowrite(i,j) = .false.
-        vel_report(i,j) = maxvel
-      enddo ; enddo
+    do concurrent (J=Jsq:Jeq, i=is:ie, dowrite(i,J))
+      v_old(i,J,:) = v(i,J,:)
+    enddo
 
-      do J=Jsq,Jeq ; do k=1,nz ; do I=Is,Ie
-        if (abs(v(I,j,k)) < CS%vel_underflow) then ; v(I,j,k) = 0.0
-        elseif (abs(v(I,j,k)) > maxvel) then
-          dowrite(I,j) = .true. ; trunc_any_array(i,j,k) = .true.
-        endif
-      enddo ; enddo ; enddo
-
-      do J=Jsq,Jeq; do I=Is,Ie ; if (dowrite(I,j)) then
-        v_old(I,j,:) = v(I,j,:)
-      endif ; enddo ; enddo
-
-      do J=Jsq,Jeq ; do k=1,nz ; do I=Is,Ie
-        if(trunc_any_array(i,j,k)) then
-          if (abs(v(I,j,k)) > maxvel) then
-            v(I,j,k) = SIGN(truncvel,v(I,j,k))
-            if (h(i,j,k) + h(i+1,j,k) > H_report) CS%ntrunc = CS%ntrunc + 1
-          endif
-        endif
-      enddo ; enddo ; enddo
-    end if
-
+    do concurrent (J=Jsq:Jeq, k=1:nz, i=is:ie, trunc_any_array(i,j,k))
+      if ((v(I,j,k) * (dt * G%dx_Cv(I,j))) * G%IareaT(i+1,j) < -CS%CFL_trunc) then
+        v(I,j,k) = (-0.9*CS%CFL_trunc) * (G%areaT(i+1,j) / (dt * G%dx_Cv(I,j)))
+        if (h(i,j,k) + h(i+1,j,k) > H_report) CS%ntrunc = CS%ntrunc + 1
+      elseif ((v(I,j,k) * (dt * G%dx_Cv(I,j))) * G%IareaT(i,j) > CS%CFL_trunc) then
+        v(I,j,k) = (0.9*CS%CFL_trunc) * (G%areaT(i,j) / (dt * G%dx_Cv(I,j)))
+        if (h(i,j,k) + h(i+1,j,k) > H_report) CS%ntrunc = CS%ntrunc + 1
+      endif
+    enddo
   else  ! Do not report accelerations leading to large velocities.
-    if (CS%CFL_based_trunc) then
-      do k=1,nz
-        do concurrent (J=Jsq:Jeq, i=is:ie)
-          if (abs(v(i,J,k)) < CS%vel_underflow) then ; v(i,J,k) = 0.0
-          elseif ((v(i,J,k) * (dt * G%dx_Cv(i,J))) * G%IareaT(i,j+1) < -CS%CFL_trunc) then
-            v(i,J,k) = (-0.9*CS%CFL_trunc) * (G%areaT(i,j+1) / (dt * G%dx_Cv(i,J)))
-            if (h(i,j,k) + h(i,j+1,k) > H_report) CS%ntrunc = CS%ntrunc + 1
-          elseif ((v(i,J,k) * (dt * G%dx_Cv(i,J))) * G%IareaT(i,j) > CS%CFL_trunc) then
-            v(i,J,k) = (0.9*CS%CFL_trunc) * (G%areaT(i,j) / (dt * G%dx_Cv(i,J)))
-            if (h(i,j,k) + h(i,j+1,k) > H_report) CS%ntrunc = CS%ntrunc + 1
-          endif
-        enddo
-      enddo
-    else
-      !$OMP parallel do default(shared)
-      do k=1,nz ; do J=Jsq,Jeq ; do i=is,ie
+    do k=1,nz
+      do concurrent (J=Jsq:Jeq, i=is:ie)
         if (abs(v(i,J,k)) < CS%vel_underflow) then ; v(i,J,k) = 0.0
-        elseif (abs(v(i,J,k)) > maxvel) then
-          v(i,J,k) = SIGN(truncvel, v(i,J,k))
+        elseif ((v(i,J,k) * (dt * G%dx_Cv(i,J))) * G%IareaT(i,j+1) < -CS%CFL_trunc) then
+          v(i,J,k) = (-0.9*CS%CFL_trunc) * (G%areaT(i,j+1) / (dt * G%dx_Cv(i,J)))
+          if (h(i,j,k) + h(i,j+1,k) > H_report) CS%ntrunc = CS%ntrunc + 1
+        elseif ((v(i,J,k) * (dt * G%dx_Cv(i,J))) * G%IareaT(i,j) > CS%CFL_trunc) then
+          v(i,J,k) = (0.9*CS%CFL_trunc) * (G%areaT(i,j) / (dt * G%dx_Cv(i,J)))
           if (h(i,j,k) + h(i,j+1,k) > H_report) CS%ntrunc = CS%ntrunc + 1
         endif
-      enddo ; enddo ; enddo
-    endif
+      enddo
+    enddo
   endif
   !$omp target exit data map(release: dowrite, vel_report, trunc_any_array)
 
   if (len_trim(CS%u_trunc_file) > 0) then
     !$omp target update from(u_old)
-    !I need to port this
     do j=js,je ; do I=Isq,Ieq ; if (dowrite(I,j)) then
       ! Call a diagnostic reporting subroutines are called if unphysically large values are found.
       call write_u_accel(I, j, u_old, h, ADp, CDp, dt, G, GV, US, CS%PointAccel_CSp, &
