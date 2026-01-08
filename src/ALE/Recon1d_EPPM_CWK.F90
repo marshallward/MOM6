@@ -50,15 +50,15 @@ subroutine reconstruct(this, h, u)
   real,            intent(in)    :: h(*) !< Grid spacing (thickness) [typically H]
   real,            intent(in)    :: u(*) !< Cell mean values [A]
   ! Local variables
-  real :: dul, dur ! Left and right cell PLM slopes [A]
-  real :: u0, u1, u2 ! Far left, left, and right cell values [A]
-  real :: edge ! Edge value between cell k-1 and k [A]
-  real :: u_min, u_max ! Minimum and maximum value across edge [A]
-  real :: a6 ! Colella and Woodward curvature [A]
-  real :: du ! Difference between edges across cell [A]
-  real :: slp(this%n) ! PLM slope [A]
-  real, parameter :: one_sixth = 1. / 6. ! 1/6 [nondim]
-  integer :: k, n
+  !real :: dul, dur ! Left and right cell PLM slopes [A]
+  !real :: u0, u1, u2 ! Far left, left, and right cell values [A]
+  !real :: edge ! Edge value between cell k-1 and k [A]
+  !real :: u_min, u_max ! Minimum and maximum value across edge [A]
+  !real :: a6 ! Colella and Woodward curvature [A]
+  !real :: du ! Difference between edges across cell [A]
+  !real :: slp(this%n) ! PLM slope [A]
+  !real, parameter :: one_sixth = 1. / 6. ! 1/6 [nondim]
+  integer :: n
 
   n = this%n
 

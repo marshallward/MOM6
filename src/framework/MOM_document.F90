@@ -9,7 +9,8 @@ use MOM_error_handler, only : MOM_error, FATAL, WARNING, is_root_pe
 
 implicit none ; private
 
-public doc_param, doc_subroutine, doc_function, doc_module, doc_init, doc_end
+!*! public doc_param, doc_subroutine, doc_function, doc_module, doc_init, doc_end
+public doc_param, doc_module, doc_init, doc_end
 public doc_openBlock, doc_closeBlock
 
 !> Document parameter values
@@ -893,31 +894,31 @@ subroutine doc_module(doc, modname, desc, log_to_all, all_default, layoutMod, de
   endif
 end subroutine doc_module
 
-!> This subroutine handles the subroutine documentation
-subroutine doc_subroutine(doc, modname, subname, desc)
-  type(doc_type),   pointer    :: doc     !< A pointer to a structure that controls where the
-                                          !! documentation occurs and its formatting
-  character(len=*), intent(in) :: modname !< The name of the module being documented
-  character(len=*), intent(in) :: subname !< The name of the subroutine being documented
-  character(len=*), intent(in) :: desc    !< A description of the subroutine being documented
-! This subroutine handles the subroutine documentation
-  if (.not. (is_root_pe() .and. associated(doc))) return
-  call open_doc_file(doc)
-
-end subroutine doc_subroutine
-
-!> This subroutine handles the function documentation
-subroutine doc_function(doc, modname, fnname, desc)
-  type(doc_type),   pointer    :: doc     !< A pointer to a structure that controls where the
-                                          !! documentation occurs and its formatting
-  character(len=*), intent(in) :: modname !< The name of the module being documented
-  character(len=*), intent(in) :: fnname  !< The name of the function being documented
-  character(len=*), intent(in) :: desc    !< A description of the function being documented
-! This subroutine handles the function documentation
-  if (.not. (is_root_pe() .and. associated(doc))) return
-  call open_doc_file(doc)
-
-end subroutine doc_function
+!*! !> This subroutine handles the subroutine documentation
+!*! subroutine doc_subroutine(doc, modname, subname, desc)
+!*!   type(doc_type),   pointer    :: doc     !< A pointer to a structure that controls where the
+!*!                                           !! documentation occurs and its formatting
+!*!   character(len=*), intent(in) :: modname !< The name of the module being documented
+!*!   character(len=*), intent(in) :: subname !< The name of the subroutine being documented
+!*!   character(len=*), intent(in) :: desc    !< A description of the subroutine being documented
+!*! ! This subroutine handles the subroutine documentation
+!*!   if (.not. (is_root_pe() .and. associated(doc))) return
+!*!   call open_doc_file(doc)
+!*! 
+!*! end subroutine doc_subroutine
+!*! 
+!*! !> This subroutine handles the function documentation
+!*! subroutine doc_function(doc, modname, fnname, desc)
+!*!   type(doc_type),   pointer    :: doc     !< A pointer to a structure that controls where the
+!*!                                           !! documentation occurs and its formatting
+!*!   character(len=*), intent(in) :: modname !< The name of the module being documented
+!*!   character(len=*), intent(in) :: fnname  !< The name of the function being documented
+!*!   character(len=*), intent(in) :: desc    !< A description of the function being documented
+!*! ! This subroutine handles the function documentation
+!*!   if (.not. (is_root_pe() .and. associated(doc))) return
+!*!   call open_doc_file(doc)
+!*! 
+!*! end subroutine doc_function
 
 ! ----------------------------------------------------------------------
 

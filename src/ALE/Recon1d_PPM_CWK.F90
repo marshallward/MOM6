@@ -1,3 +1,5 @@
+#include "unused.h"
+
 !> Piecewise Parabolic Method 1D reconstruction in model index space
 !!
 !! This implementation of PPM follows Colella and Woodward, 1984, using uniform thickness
@@ -221,10 +223,11 @@ real function average(this, k, xa, xb)
   integer,        intent(in) :: k    !< Cell number
   real,           intent(in) :: xa   !< Start of averaging interval on element (0 to 1)
   real,           intent(in) :: xb   !< End of averaging interval on element (0 to 1)
-  real :: xapxb                      ! A sum of fracional positions [nondim]
+  !real :: xapxb                      ! A sum of fracional positions [nondim]
   real :: mx, Ya, Yb, my             ! Various fractional positions [nondim]
-  real :: u_a, u_b                   ! Values at xa and xb [A]
-  real :: xa2pxb2,  xa2b2ab, Ya2b2ab ! Sums of squared fractional positions [nondim]
+  !real :: u_a, u_b                   ! Values at xa and xb [A]
+  !real :: xa2pxb2,  xa2b2ab, Ya2b2ab ! Sums of squared fractional positions [nondim]
+  real :: xa2b2ab, Ya2b2ab ! Sums of squared fractional positions [nondim]
   real :: a_L, a_R, u_c, a_c         ! Values of the polynomial at various locations [A]
 
   mx = 0.5 * ( xa + xb )
@@ -264,6 +267,8 @@ logical function check_reconstruction(this, h, u)
   real,           intent(in) :: u(*) !< Cell mean values [A]
   ! Local variables
   integer :: k
+
+  UNUSED(h(1))
 
   check_reconstruction = .false.
 

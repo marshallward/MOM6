@@ -247,7 +247,7 @@ integer function extract_integer(string, separators, n, missing_value)
   integer,            intent(in) :: n          !< Number of word to extract
   integer, optional,  intent(in) :: missing_value !< Value to assign if word is missing
   ! Local variables
-  character(len=20) :: word
+  character(len=:), allocatable :: word
 
   word = extract_word(string, separators, n)
 
@@ -260,7 +260,6 @@ integer function extract_integer(string, separators, n, missing_value)
       extract_integer = 0
     endif
   endif
-
 end function extract_integer
 
 !> Returns the real corresponding to the nth word in the argument, in arbitrary units [A].
@@ -270,7 +269,7 @@ real function extract_real(string, separators, n, missing_value)
   integer,          intent(in) :: n          !< Number of word to extract
   real, optional,   intent(in) :: missing_value !< Value to assign if word is missing, in arbitrary units [A]
   ! Local variables
-  character(len=20) :: word
+  character(len=:), allocatable :: word
 
   word = extract_word(string, separators, n)
 
@@ -283,7 +282,6 @@ real function extract_real(string, separators, n, missing_value)
       extract_real = 0
     endif
   endif
-
 end function extract_real
 
 !> Returns string with all spaces removed.

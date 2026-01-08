@@ -1,3 +1,5 @@
+#include "unused.h"
+
 !> Contains routines necessary to initialize communication with a database
 module MOM_database_comms
 ! This file is part of MOM6. See LICENSE.md for the license.
@@ -27,6 +29,10 @@ subroutine database_comms_init(param_file, CS, client_in)
   type(dbcomms_CS_type),    intent(inout) :: CS         !< Control structure for Database
   type(dbclient_type), optional, intent(in   ) :: client_in !< If present, use a previously initialized
                                                           !! Database client
+
+  UNUSED(param_file)
+  UNUSED(client_in)
+  UNUSED(CS)
 
   call MOM_error(WARNING,"dbcomms_init was compiled using the dummy module. If this was\n"//&
                        "a mistake, please follow the instructions in:\n"//&

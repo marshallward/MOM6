@@ -1,3 +1,5 @@
+#include "unused.h"
+
 !> Edge value estimation for high-order reconstruction
 module regrid_edge_values
 
@@ -1256,6 +1258,8 @@ subroutine edge_values_implicit_h6( N, h, u, edge_val, h_neglect, answer_date )
                            tri_b, &     ! trid. system (rhs) [A]
                            tri_x        ! trid. system (unknowns vector) [A]
   integer :: i, k   ! loop indexes
+
+  UNUSED(answer_date)
 
   ! Loop on interior cells
   do k = 2,N-2

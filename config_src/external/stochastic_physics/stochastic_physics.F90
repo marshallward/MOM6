@@ -1,3 +1,5 @@
+#include "unused.h"
+
 ! The are stubs for ocean stochastic physics
 ! the fully functional code is available at
 ! http://github.com/noaa-psd/stochastic_physics
@@ -36,6 +38,15 @@ subroutine init_stochastic_physics_ocn(delt, geoLonT, geoLatT, nxT, nyT, nz, &
   integer, intent(in)    :: mpicomm !< mpi communicator
   integer, intent(out)   :: iret    !< return code
 
+  UNUSED(delt)
+  UNUSED(nz)
+  UNUSED(geolatb)
+  UNUSED(geolatt)
+  UNUSED(geolonb)
+  UNUSED(geolont)
+  UNUSED(mpiroot)
+  UNUSED(mpicomm)
+
   iret=0
   if (pert_epbl_in) then
     call MOM_error(WARNING, 'init_stochastic_physics_ocn: pert_epbl needs to be false if using the stub')
@@ -63,6 +74,11 @@ subroutine run_stochastic_physics_ocn(sppt_wts, skeb_wts, t_rp1, t_rp2)
                                        !! perturbations (KE generation) range [0,2]
   real, intent(inout) :: t_rp2(:,:)    !< array containing random weights for ePBL
                                        !! perturbations (KE dissipation) range [0,2]
+
+  UNUSED(sppt_wts)
+  UNUSED(skeb_wts)
+  UNUSED(t_rp1)
+  UNUSED(t_rp2)
 
   ! This stub function does not actually do anything.
   return

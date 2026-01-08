@@ -1,3 +1,5 @@
+#include "unused.h"
+
 !> 1D reconstructions using the Piecewise Constant Method (PCM)
 module Recon1d_PCM
 
@@ -60,12 +62,14 @@ subroutine init(this, n, h_neglect, check)
                                               !! Not used by PCM.
   logical, optional, intent(in)  :: check     !< If true, enable some consistency checking
 
-  if (present(h_neglect)) this%n = n ! no-op to avoid compiler warning about unused dummy argument
-  if (present(check)) this%check = check
+  !if (present(h_neglect)) this%n = n ! no-op to avoid compiler warning about unused dummy argument
+  !if (present(check)) this%check = check
+  UNUSED(h_neglect)
+  UNUSED(check)
 
   this%n = n
 
-  allocate( this%u_mean(n) )
+  allocate(this%u_mean(n))
 
 end subroutine init
 
@@ -77,7 +81,8 @@ subroutine reconstruct(this, h, u)
   ! Local variables
   integer :: k
 
-  this%u_mean(1) = h(1) ! no-op to avoid compiler warning about unused dummy argument
+  !this%u_mean(1) = h(1) ! no-op to avoid compiler warning about unused dummy argument
+  UNUSED(h(1))
 
   do k = 1, this%n
     this%u_mean(k) = u(k)
@@ -91,8 +96,9 @@ real function f(this, k, x)
   integer,    intent(in) :: k    !< Cell number
   real,       intent(in) :: x    !< Non-dimensional position within element [nondim]
 
-  f = this%u_mean(k)
+  UNUSED(x)
 
+  f = this%u_mean(k)
 end function f
 
 !> Derivative of PCM reconstruction at a point in cell k [A]
@@ -101,8 +107,10 @@ real function dfdx(this, k, x)
   integer,    intent(in) :: k    !< Cell number
   real,       intent(in) :: x    !< Non-dimensional position within element [nondim]
 
-  dfdx = 0.
+  UNUSED(k)
+  UNUSED(x)
 
+  dfdx = 0.
 end function dfdx
 
 !> Average between xa and xb for cell k of a 1D PCM reconstruction [A]
@@ -112,9 +120,11 @@ real function average(this, k, xa, xb)
   real,       intent(in) :: xa   !< Start of averaging interval on element (0 to 1)
   real,       intent(in) :: xb   !< End of averaging interval on element (0 to 1)
 
-  average = xb + xa ! no-op to avoid compiler warnings about unused dummy argument
-  average = this%u_mean(k)
+  !average = xb + xa ! no-op to avoid compiler warnings about unused dummy argument
+  UNUSED(xa)
+  UNUSED(xb)
 
+  average = this%u_mean(k)
 end function average
 
 !> Deallocate the PCM reconstruction
@@ -132,6 +142,8 @@ logical function check_reconstruction(this, h, u)
   real,       intent(in) :: u(*) !< Cell mean values [A]
   ! Local variables
   integer :: k
+
+  UNUSED(h(1))
 
   check_reconstruction = .false.
 

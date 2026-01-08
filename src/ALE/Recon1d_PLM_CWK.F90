@@ -1,3 +1,5 @@
+#include "unused.h"
+
 !> Piecewise Linear Method 1D reconstruction
 !!
 !! This implementation of PLM follows Colella and Woodward, 1984, except for assuming
@@ -57,6 +59,8 @@ subroutine reconstruct(this, h, u)
   real :: u_min, u_max ! Minimum and maximum value across cell [A]
   real :: u_l, u_r, u_c ! Left, right, and center values [A]
   integer :: k, n
+
+  UNUSED(h(1))
 
   n = this%n
 

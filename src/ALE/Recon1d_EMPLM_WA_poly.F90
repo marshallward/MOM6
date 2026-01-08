@@ -1,3 +1,5 @@
+#include "unused.h"
+
 !> Extrapolated-Monotonized Piecewise Linear Method 1D reconstruction
 !!
 !! This extends MPLM_poly, following White and Adcroft, 2008 \cite white2008, by extraplating for the slopes of the
@@ -104,6 +106,8 @@ logical function check_reconstruction(this, h, u)
   real,                 intent(in) :: u(*) !< Cell mean values [A]
   ! Local variables
   integer :: k
+
+  UNUSED(h(1))
 
   check_reconstruction = .false.
 

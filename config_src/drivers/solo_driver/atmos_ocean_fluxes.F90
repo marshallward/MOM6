@@ -1,3 +1,5 @@
+#include "unused.h"
+
 !> A dummy version of atmos_ocean_fluxes_mod module for
 !! use when the vastly larger FMS package is not needed.
 module atmos_ocean_fluxes_mod
@@ -35,8 +37,21 @@ function aof_set_coupler_flux(name, flux_type, implementation, atm_tr_index,    
   ! None of these arguments are used for anything.
 
   integer :: coupler_index
-  coupler_index = -1
 
+  UNUSED(name)
+  UNUSED(flux_type)
+  UNUSED(implementation)
+  UNUSED(atm_tr_index)
+  UNUSED(param)
+  UNUSED(flag)
+  UNUSED(mol_wt)
+  UNUSED(ice_restart_file)
+  UNUSED(ocean_restart_file)
+  UNUSED(units)
+  UNUSED(caller)
+  UNUSED(verbosity)
+
+  coupler_index = -1
 end function aof_set_coupler_flux
 
 end module atmos_ocean_fluxes_mod

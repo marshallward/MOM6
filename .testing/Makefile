@@ -258,6 +258,7 @@ $(BUILD)/unit/Makefile: MOM_ENV += $(COV_FCFLAGS) $(COV_LDFLAGS)
 $(BUILD)/timing/Makefile: MOM_ENV += $(OPT_FCFLAGS) $(MOM_LDFLAGS)
 
 # Configure script flags
+$(BUILD)/symmetric/Makefile: MOM_ACFLAGS += --enable-werror
 $(BUILD)/openmp/Makefile: MOM_ACFLAGS += --enable-openmp
 $(BUILD)/coupled/Makefile: MOM_ACFLAGS += --with-driver=FMS_cap
 $(BUILD)/nuopc/Makefile: MOM_ACFLAGS += --with-driver=nuopc_cap
@@ -353,9 +354,6 @@ FMS_ENV = \
 $(DEPS)/lib/libFMS.a: $(DEPS)/Makefile $(DEPS)/Makefile.fms.in $(DEPS)/configure.fms.ac $(DEPS)/m4
 	$(FMS_ENV) $(MAKE) -C $(DEPS) lib/libFMS.a
 
-$(DEPS)/Makefile: ../ac/deps/Makefile | $(DEPS)
-	cp ../ac/deps/Makefile $(DEPS)/Makefile
-
 $(DEPS)/Makefile.fms.in: ../ac/deps/Makefile.fms.in | $(DEPS)
 	cp ../ac/deps/Makefile.fms.in $(DEPS)/Makefile.fms.in
 
@@ -368,9 +366,6 @@ $(DEPS)/configure.fms.ac: ../ac/deps/configure.fms.ac | $(DEPS)
 $(DEPS)/lib/libgsw.a: $(DEPS)/Makefile $(DEPS)/Makefile.gsw.in $(DEPS)/configure.gsw.ac $(DEPS)/m4
 	$(FMS_ENV) $(MAKE) -C $(DEPS) lib/libgsw.a
 
-$(DEPS)/Makefile: ../ac/deps/Makefile | $(DEPS)
-	cp ../ac/deps/Makefile $(DEPS)/Makefile
-
 $(DEPS)/Makefile.gsw.in: ../ac/deps/Makefile.gsw.in | $(DEPS)
 	cp ../ac/deps/Makefile.gsw.in $(DEPS)/Makefile.gsw.in
 
@@ -378,6 +373,9 @@ $(DEPS)/configure.gsw.ac: ../ac/deps/configure.gsw.ac | $(DEPS)
 	cp ../ac/deps/configure.gsw.ac $(DEPS)/configure.gsw.ac
 
 # Generic dependency content
+
+$(DEPS)/Makefile: ../ac/deps/Makefile | $(DEPS)
+	cp ../ac/deps/Makefile $(DEPS)/Makefile
 
 $(DEPS)/m4: ../ac/deps/m4 | $(DEPS)
 	cp -r ../ac/deps/m4 $(DEPS)/

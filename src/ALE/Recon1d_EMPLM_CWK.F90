@@ -50,13 +50,13 @@ subroutine reconstruct(this, h, u)
   real,             intent(in)    :: h(*) !< Grid spacing (thickness) [typically H]
   real,             intent(in)    :: u(*) !< Cell mean values [A]
   ! Local variables
-  real :: slp ! The PLM slopes (difference across cell) [A]
-  real :: sigma_l, sigma_c, sigma_r ! Left, central and right slope estimates as
-                                    ! differences across the cell [A]
-  real :: u_min, u_max ! Minimum and maximum value across cell [A]
-  real :: u_l, u_r, u_c ! Left, right, and center values [A]
-  real :: u_e(this%n+1) ! Average of edge values [A]
-  integer :: k, n
+  !real :: slp ! The PLM slopes (difference across cell) [A]
+  !real :: sigma_l, sigma_c, sigma_r ! Left, central and right slope estimates as
+  !                                  ! differences across the cell [A]
+  !real :: u_min, u_max ! Minimum and maximum value across cell [A]
+  !real :: u_l, u_r, u_c ! Left, right, and center values [A]
+  !real :: u_e(this%n+1) ! Average of edge values [A]
+  integer :: n
 
   n = this%n
 

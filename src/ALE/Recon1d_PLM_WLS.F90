@@ -1,3 +1,5 @@
+#include "unused.h"
+
 !> Piecewise Linear Method using Weighted Conservative Least Squares 1D reconstruction
 module Recon1d_PLM_WLS
 
@@ -157,6 +159,8 @@ real function dfdx(this, k, x)
   integer,        intent(in) :: k    !< Cell number
   real,           intent(in) :: x    !< Non-dimensional position within element [nondim]
 
+  UNUSED(x)
+
   dfdx = this%ur(k) - this%ul(k)
 
 end function dfdx
@@ -197,20 +201,21 @@ logical function check_reconstruction(this, h, u)
   class(PLM_WLS), intent(in) :: this !< This reconstruction
   real,           intent(in) :: h(*) !< Grid spacing (thickness) [typically H]
   real,           intent(in) :: u(*) !< Cell mean values [A]
+
   ! Local variables
   integer :: k
   real :: slp ! Cell slope [A]
   type(PLM_WLS) :: perturbed !< A perturbed reconstruction
-  real :: u_l, u_r, u_c ! Left, right, and center values [A]
-  real :: h_l, h_c, h_r ! Thickness of left, center and right cells [H]
-  real :: h_l0, h_r0, h_c0 ! Thickness of left, right, center cells with h_neglect added [H]
-  real :: x_l, x_r ! Positions of left and right cells [H]
-  real :: hx2l, hx2r ! Contributions to denominator, <h x^2> [H3]
-  real :: hxyl, hxyr ! Contributions to numerator, <h x y> [H2 A]
-  real :: hy2l, hy2r ! Contributions to error, <h y^2> [H3]
-  real :: y_l, y_r ! Left, right, value differencess [A]
-  real :: b_h, bp_h ! slp / h_c [A H-1]
-  integer :: km1, kp1
+  !real :: u_l, u_r, u_c ! Left, right, and center values [A]
+  !real :: h_l, h_c, h_r ! Thickness of left, center and right cells [H]
+  !real :: h_l0, h_r0, h_c0 ! Thickness of left, right, center cells with h_neglect added [H]
+  !real :: x_l, x_r ! Positions of left and right cells [H]
+  !real :: hx2l, hx2r ! Contributions to denominator, <h x^2> [H3]
+  !real :: hxyl, hxyr ! Contributions to numerator, <h x y> [H2 A]
+  !real :: hy2l, hy2r ! Contributions to error, <h y^2> [H3]
+  !real :: y_l, y_r ! Left, right, value differencess [A]
+  !real :: b_h, bp_h ! slp / h_c [A H-1]
+  !integer :: km1, kp1
 
   check_reconstruction = .false.
 

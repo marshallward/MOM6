@@ -1,3 +1,5 @@
+#include "unused.h"
+
 !> A non-functioning template of the MARBL logging module
 module marbl_logging
 
@@ -28,6 +30,10 @@ contains
         class(marbl_log_type), intent(inout) :: self
         character(len=*),      intent(in)    :: RoutineName, CodeLoc
         integer, optional,     intent(in)    :: ElemInd
+
+        UNUSED(RoutineName)
+        UNUSED(CodeLoc)
+        UNUSED(ElemInd)
     end subroutine log_error_trace
 
     !> dummy erase routine

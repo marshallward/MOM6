@@ -1,3 +1,5 @@
+#include "unused.h"
+
 !> Monotonized Piecewise Linear Method 1D reconstruction
 !!
 !! This implementation of PLM follows White and Adcroft, 2008 \cite white2008.
@@ -186,6 +188,8 @@ logical function check_reconstruction(this, h, u)
   real,           intent(in) :: u(*) !< Cell mean values [A]
   ! Local variables
   integer :: k
+
+  UNUSED(h(1))
 
   check_reconstruction = .false.
 

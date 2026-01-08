@@ -1,3 +1,5 @@
+#include "unused.h"
+
 module database_client_interface
 
 ! This file is part of MOM6. See LICENSE.md for the license.
@@ -150,6 +152,8 @@ module database_client_interface
     integer, intent(in) :: response_code !< The response code to decode
     logical                              :: is_error      !< Indicates whether this is an error response
 
+    UNUSED(response_code)
+
     is_error = .true.
   end function SR_error_parser
 
@@ -158,6 +162,8 @@ module database_client_interface
     integer           :: initialize_client
     class(dbclient_type), intent(inout) :: self    !< Receives the initialized client
     logical, optional,  intent(in   ) :: cluster !< If true, client uses a database cluster (Default: .false.)
+
+    UNUSED(cluster)
 
     initialize_client = -1
   end function initialize_client
@@ -184,6 +190,10 @@ module database_client_interface
     integer, dimension(:),           intent(in) :: dims !< The length of each dimension
     integer                           :: code
 
+    UNUSED(data)
+    UNUSED(name)
+    UNUSED(dims)
+
     code = -1
   end function put_tensor_float_1d
 
@@ -194,6 +204,10 @@ module database_client_interface
     character(len=*),                  intent(in) :: name !< The unique name used to store in the database
     integer, dimension(:),             intent(in) :: dims !< The length of each dimension
     integer                           :: code
+
+    UNUSED(data)
+    UNUSED(name)
+    UNUSED(dims)
 
     code = -1
   end function put_tensor_float_2d
@@ -206,6 +220,10 @@ module database_client_interface
     integer, dimension(:),               intent(in) :: dims !< The length of each dimension
     integer                           :: code
 
+    UNUSED(data)
+    UNUSED(name)
+    UNUSED(dims)
+
     code = -1
   end function put_tensor_float_3d
 
@@ -216,6 +234,10 @@ module database_client_interface
     character(len=*),                    intent(in) :: name !< The unique name used to store in the database
     integer, dimension(:),               intent(in) :: dims !< The length of each dimension
     integer                           :: code
+
+    UNUSED(data)
+    UNUSED(name)
+    UNUSED(dims)
 
     code = -1
   end function put_tensor_float_4d
@@ -228,6 +250,10 @@ module database_client_interface
     integer, dimension(:),           intent(in) :: dims !< The length of each dimension
     integer                           :: code
 
+    UNUSED(data)
+    UNUSED(name)
+    UNUSED(dims)
+
     code = -1
   end function put_tensor_double_1d
 
@@ -238,6 +264,10 @@ module database_client_interface
     character(len=*),                  intent(in) :: name !< The unique name used to store in the database
     integer, dimension(:),             intent(in) :: dims !< The length of each dimension
     integer                           :: code
+
+    UNUSED(data)
+    UNUSED(name)
+    UNUSED(dims)
 
     code = -1
   end function put_tensor_double_2d
@@ -250,6 +280,10 @@ module database_client_interface
     integer, dimension(:),               intent(in) :: dims !< The length of each dimension
     integer                           :: code
 
+    UNUSED(data)
+    UNUSED(name)
+    UNUSED(dims)
+
     code = -1
   end function put_tensor_double_3d
 
@@ -260,6 +294,10 @@ module database_client_interface
     character(len=*),                    intent(in) :: name !< The unique name used to store in the database
     integer, dimension(:),               intent(in) :: dims !< The length of each dimension
     integer                           :: code
+
+    UNUSED(data)
+    UNUSED(name)
+    UNUSED(dims)
 
     code = -1
   end function put_tensor_double_4d
@@ -272,6 +310,10 @@ module database_client_interface
     integer, dimension(:),           intent(in) :: dims !< The length of each dimension
     integer                           :: code
 
+    UNUSED(data)
+    UNUSED(name)
+    UNUSED(dims)
+
     code = -1
   end function put_tensor_int32_1d
 
@@ -282,6 +324,10 @@ module database_client_interface
     character(len=*),                  intent(in) :: name !< The unique name used to store in the database
     integer, dimension(:),             intent(in) :: dims !< The length of each dimension
     integer                           :: code
+
+    UNUSED(data)
+    UNUSED(name)
+    UNUSED(dims)
 
     code = -1
   end function put_tensor_int32_2d
@@ -294,6 +340,10 @@ module database_client_interface
     integer, dimension(:),               intent(in) :: dims !< The length of each dimension
     integer                           :: code
 
+    UNUSED(data)
+    UNUSED(name)
+    UNUSED(dims)
+
     code = -1
   end function put_tensor_int32_3d
 
@@ -305,6 +355,10 @@ module database_client_interface
     integer, dimension(:),               intent(in) :: dims !< The length of each dimension
     integer                           :: code
 
+    UNUSED(data)
+    UNUSED(name)
+    UNUSED(dims)
+
     code = -1
   end function put_tensor_int32_4d
 
@@ -315,6 +369,9 @@ module database_client_interface
     character(len=*),                intent(in) :: name !< The unique name used to store in the database
     integer, dimension(:),           intent(in) :: dims !< The length of each dimension
     integer                           :: code
+
+    UNUSED(name)
+    UNUSED(dims)
 
     code = -1
     data(:) = -1.
@@ -328,6 +385,9 @@ module database_client_interface
     integer, dimension(:),             intent(in) :: dims !< The length of each dimension
     integer                           :: code
 
+    UNUSED(name)
+    UNUSED(dims)
+
     code = -1
     data(:,:) = -1.
   end function unpack_tensor_float_2d
@@ -339,6 +399,9 @@ module database_client_interface
     character(len=*),                    intent(in) :: name !< The unique name used to store in the database
     integer, dimension(:),               intent(in) :: dims !< The length of each dimension
     integer                           :: code
+
+    UNUSED(name)
+    UNUSED(dims)
 
     code = -1
     data(:,:,:) = -1.
@@ -352,6 +415,9 @@ module database_client_interface
     integer, dimension(:),               intent(in) :: dims !< The length of each dimension
     integer                           :: code
 
+    UNUSED(name)
+    UNUSED(dims)
+
     code = -1
     data(:,:,:,:) = -1.
   end function unpack_tensor_float_4d
@@ -363,6 +429,9 @@ module database_client_interface
     character(len=*),                intent(in) :: name !< The unique name used to store in the database
     integer, dimension(:),           intent(in) :: dims !< The length of each dimension
     integer                           :: code
+
+    UNUSED(name)
+    UNUSED(dims)
 
     code = -1
     data(:) = -1.
@@ -376,6 +445,9 @@ module database_client_interface
     integer, dimension(:),             intent(in) :: dims !< The length of each dimension
     integer                           :: code
 
+    UNUSED(name)
+    UNUSED(dims)
+
     code = -1
     data(:,:) = -1.
   end function unpack_tensor_double_2d
@@ -387,6 +459,9 @@ module database_client_interface
     character(len=*),                    intent(in) :: name !< The unique name used to store in the database
     integer, dimension(:),               intent(in) :: dims !< The length of each dimension
     integer                           :: code
+
+    UNUSED(name)
+    UNUSED(dims)
 
     code = -1
     data(:,:,:) = -1.
@@ -400,6 +475,9 @@ module database_client_interface
     integer, dimension(:),               intent(in) :: dims !< The length of each dimension
     integer                           :: code
 
+    UNUSED(name)
+    UNUSED(dims)
+
     code = -1
     data(:,:,:,:) = -1.
   end function unpack_tensor_double_4d
@@ -411,6 +489,9 @@ module database_client_interface
     character(len=*),                intent(in) :: name !< The unique name used to store in the database
     integer, dimension(:),           intent(in) :: dims !< The length of each dimension
     integer                           :: code
+
+    UNUSED(name)
+    UNUSED(dims)
 
     code = -1
     data(:) = -1_int32
@@ -424,6 +505,9 @@ module database_client_interface
     integer, dimension(:),             intent(in) :: dims !< The length of each dimension
     integer                           :: code
 
+    UNUSED(name)
+    UNUSED(dims)
+
     code = -1
     data(:,:) = -1_int32
   end function unpack_tensor_int32_2d
@@ -435,6 +519,9 @@ module database_client_interface
     character(len=*),                    intent(in) :: name !< The unique name used to store in the database
     integer, dimension(:),               intent(in) :: dims !< The length of each dimension
     integer                           :: code
+
+    UNUSED(name)
+    UNUSED(dims)
 
     code = -1
     data(:,:,:) = -1_int32
@@ -448,6 +535,9 @@ module database_client_interface
     integer, dimension(:),               intent(in) :: dims !< The length of each dimension
     integer                           :: code
 
+    UNUSED(name)
+    UNUSED(dims)
+
     code = -1
     data(:,:,:,:) = -1_int32
   end function unpack_tensor_int32_4d
@@ -460,6 +550,9 @@ module database_client_interface
     character(len=*),   intent(in) :: new_name !< The new tensor name
     integer        :: code
 
+    UNUSED(old_name)
+    UNUSED(new_name)
+
     code = -1
   end function rename_tensor
 
@@ -468,6 +561,8 @@ module database_client_interface
     class(dbclient_type), intent(in) :: self !< The initialized Fortran communication client
     character(len=*),   intent(in) :: name !< The name associated with the tensor
     integer        :: code
+
+    UNUSED(name)
 
     code = -1
   end function delete_tensor
@@ -480,6 +575,9 @@ module database_client_interface
     character(len=*),   intent(in) :: dest_name !< The new tensor name
     integer        :: code
 
+    UNUSED(src_name)
+    UNUSED(dest_name)
+
     code = -1
   end function copy_tensor
 
@@ -489,6 +587,8 @@ module database_client_interface
     character(len=*),                 intent(in  ) :: name  !< The name associated with the model
     character(len=*),                 intent( out) :: model !< The model as a continuous buffer
     integer                        :: code
+
+    UNUSED(name)
 
     code = -1
     model = ""
@@ -514,6 +614,16 @@ module database_client_interface
                                                                            !! output nodes (TF models)
     integer                              :: code
 
+    UNUSED(name)
+    UNUSED(model_file)
+    UNUSED(backend)
+    UNUSED(device)
+    UNUSED(batch_size)
+    UNUSED(min_batch_size)
+    UNUSED(tag)
+    UNUSED(inputs)
+    UNUSED(outputs)
+
     code = -1
   end function set_model_from_file
 
@@ -538,6 +648,17 @@ module database_client_interface
                                                                            !! output nodes (TF models)
     integer                              :: code
 
+    UNUSED(name)
+    UNUSED(model_file)
+    UNUSED(backend)
+    UNUSED(first_gpu)
+    UNUSED(num_gpus)
+    UNUSED(batch_size)
+    UNUSED(min_batch_size)
+    UNUSED(tag)
+    UNUSED(inputs)
+    UNUSED(outputs)
+
     code = -1
   end function set_model_from_file_multigpu
 
@@ -556,6 +677,16 @@ module database_client_interface
     character(len=*), dimension(:), intent(in) :: inputs         !< One or more names of model input nodes (TF models)
     character(len=*), dimension(:), intent(in) :: outputs        !< One or more names of model output nodes (TF models)
     integer                    :: code
+
+    UNUSED(name)
+    UNUSED(model)
+    UNUSED(backend)
+    UNUSED(device)
+    UNUSED(batch_size)
+    UNUSED(min_batch_size)
+    UNUSED(tag)
+    UNUSED(inputs)
+    UNUSED(outputs)
 
     code = -1
   end function set_model
@@ -577,6 +708,17 @@ module database_client_interface
     character(len=*), dimension(:), intent(in) :: outputs        !< One or more names of model output nodes (TF models)
     integer                    :: code
 
+    UNUSED(name)
+    UNUSED(model)
+    UNUSED(backend)
+    UNUSED(first_gpu)
+    UNUSED(num_gpus)
+    UNUSED(batch_size)
+    UNUSED(min_batch_size)
+    UNUSED(tag)
+    UNUSED(inputs)
+    UNUSED(outputs)
+
     code = -1
   end function set_model_multigpu
 
@@ -587,6 +729,10 @@ module database_client_interface
     character(len=*), dimension(:), intent(in) :: inputs  !< One or more names of model input nodes (TF models)
     character(len=*), dimension(:), intent(in) :: outputs !< One or more names of model output nodes (TF models)
     integer                    :: code
+
+    UNUSED(name)
+    UNUSED(inputs)
+    UNUSED(outputs)
 
     code = -1
   end function run_model
@@ -603,6 +749,13 @@ module database_client_interface
     integer,                        intent(in) :: num_gpus  !< The number of GPUs to use with the model
     integer                    :: code
 
+    UNUSED(name)
+    UNUSED(inputs)
+    UNUSED(outputs)
+    UNUSED(offset)
+    UNUSED(first_gpu)
+    UNUSED(num_gpus)
+
     code = -1
   end function run_model_multigpu
 
@@ -611,6 +764,8 @@ module database_client_interface
     class(dbclient_type),             intent(in) :: self    !< An initialized communication client
     character(len=*),               intent(in) :: name    !< The name to use to remove the model
     integer                    :: code
+
+    UNUSED(name)
 
     code = -1
   end function delete_model
@@ -623,6 +778,10 @@ module database_client_interface
     integer,                        intent(in) :: num_gpus !< The number of GPUs to use with the model
     integer                    :: code
 
+    UNUSED(name)
+    UNUSED(first_gpu)
+    UNUSED(num_gpus)
+
     code = -1
   end function delete_model_multigpu
 
@@ -632,6 +791,8 @@ module database_client_interface
     character(len=*),   intent(in  ) :: name   !< The name to use to place the script
     character(len=*),   intent( out) :: script !< The script as a continuous buffer
     integer          :: code
+
+    UNUSED(name)
 
     code = -1
     script = ""
@@ -645,6 +806,10 @@ module database_client_interface
     character(len=*),   intent(in) :: script_file !< The file storing the script
     integer        :: code
 
+    UNUSED(name)
+    UNUSED(device)
+    UNUSED(script_file)
+
     code = -1
   end function set_script_from_file
 
@@ -657,6 +822,11 @@ module database_client_interface
     integer,            intent(in) :: num_gpus    !< The number of GPUs to use with the model
     integer        :: code
 
+    UNUSED(name)
+    UNUSED(script_file)
+    UNUSED(first_gpu)
+    UNUSED(num_gpus)
+
     code = -1
   end function set_script_from_file_multigpu
 
@@ -667,6 +837,10 @@ module database_client_interface
     character(len=*),   intent(in) :: device !< The name of the device (CPU, GPU, GPU:0, GPU:1...)
     character(len=*),   intent(in) :: script !< The file storing the script
     integer        :: code
+
+    UNUSED(name)
+    UNUSED(device)
+    UNUSED(script)
 
     code = -1
   end function set_script
@@ -680,6 +854,11 @@ module database_client_interface
     integer,            intent(in) :: num_gpus  !< The number of GPUs to use with the model
     integer        :: code
 
+    UNUSED(name)
+    UNUSED(script)
+    UNUSED(first_gpu)
+    UNUSED(num_gpus)
+
     code = -1
   end function set_script_multigpu
 
@@ -692,6 +871,11 @@ module database_client_interface
     character(len=*), dimension(:), intent(in) :: outputs        !< One or more names of script
                                                                  !! output nodes (TF scripts)
     integer                    :: code
+
+    UNUSED(name)
+    UNUSED(func)
+    UNUSED(inputs)
+    UNUSED(outputs)
 
     code = -1
   end function run_script
@@ -710,6 +894,14 @@ module database_client_interface
     integer,                        intent(in) :: num_gpus  !< The number of GPUs to use with the model
     integer                    :: code
 
+    UNUSED(name)
+    UNUSED(func)
+    UNUSED(inputs)
+    UNUSED(outputs)
+    UNUSED(offset)
+    UNUSED(first_gpu)
+    UNUSED(num_gpus)
+
     code = -1
   end function run_script_multigpu
 
@@ -718,6 +910,8 @@ module database_client_interface
     class(dbclient_type),             intent(in) :: self    !< An initialized communication client
     character(len=*),               intent(in) :: name    !< The name to use to delete the script
     integer                    :: code
+
+    UNUSED(name)
 
     code = -1
   end function delete_script
@@ -730,6 +924,10 @@ module database_client_interface
     integer,                        intent(in) :: num_gpus !< The number of GPUs to use with the model
     integer                    :: code
 
+    UNUSED(name)
+    UNUSED(first_gpu)
+    UNUSED(num_gpus)
+
     code = -1
   end function delete_script_multigpu
 
@@ -738,6 +936,8 @@ module database_client_interface
     class(dbclient_type), intent(in) :: self    !< An initialized communication client
     type(dataset_type), intent(in) :: dataset !< Dataset to store in the dataset
     integer        :: code
+
+    UNUSED(dataset)
 
     code = -1
   end function put_dataset
@@ -753,6 +953,8 @@ module database_client_interface
       ! Placeholder dataset to prevent compiler warnings
       ! Since dataset_type contains no data, any declared instance should work.
 
+    UNUSED(name)
+
     code = -1
     dataset = dataset_out
   end function get_dataset
@@ -764,6 +966,9 @@ module database_client_interface
     character(len=*),   intent(in) :: new_name !< New name of the dataset
     integer        :: code
 
+    UNUSED(name)
+    UNUSED(new_name)
+
     code = -1
   end function rename_dataset
 
@@ -774,6 +979,9 @@ module database_client_interface
     character(len=*),   intent(in) :: new_name !< Name of the new dataset
     integer        :: code
 
+    UNUSED(name)
+    UNUSED(new_name)
+
     code = -1
   end function copy_dataset
 
@@ -783,51 +991,64 @@ module database_client_interface
     character(len=*),   intent(in) :: name !< Name of the dataset to delete
     integer        :: code
 
+    UNUSED(name)
+
     code = -1
   end function delete_dataset
 
-  !> Appends a dataset to the aggregation list When appending a dataset to an aggregation list, the list will
-  !! automatically be created if it does not exist (i.e. this is the first entry in the list). Aggregation
-  !! lists work by referencing the dataset by storing its key, so appending a dataset to an aggregation list
-  !! does not create a copy of the dataset.  Also, for this reason, the dataset must have been previously
-  !! placed into the database with a separate call to put_dataset().
-  function append_to_list(self, list_name, dataset) result(code)
-    class(dbclient_type), intent(in) :: self       !< An initialized communication client
-    character(len=*),   intent(in) :: list_name  !< Name of the dataset to get
-    type(dataset_type), intent(in) :: dataset    !< Dataset to append to the list
-    integer        :: code
+!*!  !> Appends a dataset to the aggregation list When appending a dataset to an aggregation list, the list will
+!*!  !! automatically be created if it does not exist (i.e. this is the first entry in the list). Aggregation
+!*!  !! lists work by referencing the dataset by storing its key, so appending a dataset to an aggregation list
+!*!  !! does not create a copy of the dataset.  Also, for this reason, the dataset must have been previously
+!*!  !! placed into the database with a separate call to put_dataset().
+!*!  function append_to_list(self, list_name, dataset) result(code)
+!*!    class(dbclient_type), intent(in) :: self       !< An initialized communication client
+!*!    character(len=*),   intent(in) :: list_name  !< Name of the dataset to get
+!*!    type(dataset_type), intent(in) :: dataset    !< Dataset to append to the list
+!*!    integer        :: code
+!*!
+!*!    UNUSED(list_name)
+!*!    UNUSED(dataset)
+!*!
+!*!    code = -1
+!*!  end function append_to_list
 
-    code = -1
-  end function append_to_list
-
-  !> Delete an aggregation list
-  function delete_list(self, list_name) result(code)
-    class(dbclient_type),   intent(in) :: self       !< An initialized communication client
-    character(len=*),     intent(in) :: list_name  !< Name of the aggregated dataset list to delete
-    integer          :: code
-
-    code = -1
-  end function delete_list
-
-  !> Copy an aggregation list
-  function copy_list(self, src_name, dest_name) result(code)
-    class(dbclient_type),   intent(in) :: self      !< An initialized communication client
-    character(len=*),     intent(in) :: src_name  !< Name of the dataset to copy
-    character(len=*),     intent(in) :: dest_name !< The new list name
-    integer          :: code
-
-    code = -1
-  end function copy_list
-
-  !> Rename an aggregation list
-  function rename_list(self, src_name, dest_name) result(code)
-    class(dbclient_type),   intent(in) :: self      !< An initialized communication client
-    character(len=*),     intent(in) :: src_name  !< Name of the dataset to rename
-    character(len=*),     intent(in) :: dest_name !< The new list name
-    integer          :: code
-
-    code = -1
-  end function rename_list
+!*!  !> Delete an aggregation list
+!*!  function delete_list(self, list_name) result(code)
+!*!    class(dbclient_type),   intent(in) :: self       !< An initialized communication client
+!*!    character(len=*),     intent(in) :: list_name  !< Name of the aggregated dataset list to delete
+!*!    integer          :: code
+!*!
+!*!    UNUSED(list_name)
+!*!
+!*!    code = -1
+!*!  end function delete_list
+!*!
+!*!  !> Copy an aggregation list
+!*!  function copy_list(self, src_name, dest_name) result(code)
+!*!    class(dbclient_type),   intent(in) :: self      !< An initialized communication client
+!*!    character(len=*),     intent(in) :: src_name  !< Name of the dataset to copy
+!*!    character(len=*),     intent(in) :: dest_name !< The new list name
+!*!    integer          :: code
+!*!
+!*!    UNUSED(src_name)
+!*!    UNUSED(dest_name)
+!*!
+!*!    code = -1
+!*!  end function copy_list
+!*!
+!*!  !> Rename an aggregation list
+!*!  function rename_list(self, src_name, dest_name) result(code)
+!*!    class(dbclient_type),   intent(in) :: self      !< An initialized communication client
+!*!    character(len=*),     intent(in) :: src_name  !< Name of the dataset to rename
+!*!    character(len=*),     intent(in) :: dest_name !< The new list name
+!*!    integer          :: code
+!*!
+!*!    UNUSED(src_name)
+!*!    UNUSED(dest_name)
+!*!
+!*!    code = -1
+!*!  end function rename_list
 
   end module database_client_interface
 

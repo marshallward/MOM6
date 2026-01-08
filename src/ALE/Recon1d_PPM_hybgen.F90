@@ -1,3 +1,5 @@
+#include "unused.h"
+
 !> Piecewise Parabolic Method 1D reconstruction following Colella and Woodward, 1984
 !!
 !! This implementation of PPM follows Colella and Woodward, 1984 \cite colella1984, with
@@ -63,9 +65,10 @@ subroutine reconstruct(this, h, u)
   real :: dul, dur ! Left and right cell PLM slopes [A]
   real :: u0, u1, u2 ! Far left, left, and right cell values [A]
   real :: edge ! Edge value between cell k-1 and k [A]
-  real :: u_min, u_max ! Minimum and maximum value across edge [A]
+  !real :: u_min, u_max ! Minimum and maximum value across edge [A]
   real :: a6 ! Colella and Woodward curvature [A]
-  real :: du, duc ! Difference between edges across cell [A]
+  !real :: du, duc ! Difference between edges across cell [A]
+  real :: du ! Difference between edges across cell [A]
   real :: slp(this%n) ! PLM slope [A]
   real :: sigma_l, sigma_c, sigma_r ! Left, central and right slope estimates as
                                     ! differences across the cell [A]
@@ -262,6 +265,8 @@ logical function check_reconstruction(this, h, u)
   real,              intent(in) :: u(*) !< Cell mean values [A]
   ! Local variables
   integer :: k
+
+  UNUSED(h(1))
 
   check_reconstruction = .false.
 

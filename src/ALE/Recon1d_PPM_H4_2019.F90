@@ -1,3 +1,5 @@
+#include "unused.h"
+
 !> Piecewise Parabolic Method 1D reconstruction with h4 interpolation for edges
 !!
 !! This implementation of PPM follows White and Adcroft 2008 \cite white2008, with cells
@@ -88,36 +90,36 @@ subroutine reconstruct(this, h, u)
   real,          intent(in)    :: h(*) !< Grid spacing (thickness) [typically H]
   real,          intent(in)    :: u(*) !< Cell mean values [A]
   ! Local variables
-  real :: slp ! The PLM slopes (difference across cell) [A]
+  !real :: slp ! The PLM slopes (difference across cell) [A]
   real :: sigma_l, sigma_c, sigma_r ! Left, central and right slope estimates as
                                     ! differences across the cell [A]
-  real :: u_min, u_max ! Minimum and maximum value across cell [A]
+  !real :: u_min, u_max ! Minimum and maximum value across cell [A]
   real :: u_l, u_r, u_c ! Left, right, and center values [A]
-  real :: h_l, h_c, h_r ! Thickness of left, center and right cells [H]
-  real :: h_c0 ! Thickness of center with h_neglect added [H]
+  !real :: h_l, h_c, h_r ! Thickness of left, center and right cells [H]
+  !real :: h_c0 ! Thickness of center with h_neglect added [H]
   real :: h0, h1, h2, h3        ! temporary thicknesses [H]
   real :: h_min                 ! A minimal cell width [H]
-  real :: f1                    ! An auxiliary variable [H]
-  real :: f2                    ! An auxiliary variable [A H]
-  real :: f3                    ! An auxiliary variable [H-1]
+  !real :: f1                    ! An auxiliary variable [H]
+  !real :: f2                    ! An auxiliary variable [A H]
+  !real :: f3                    ! An auxiliary variable [H-1]
   real :: et1, et2, et3         ! terms the expression for edge values [A H]
   real :: I_h12                 ! The inverse of the sum of the two central thicknesses [H-1]
   real :: I_h012, I_h123        ! Inverses of sums of three successive thicknesses [H-1]
   real :: I_den_et2, I_den_et3  ! Inverses of denominators in edge value terms [H-2]
-  real :: dx                    ! Difference of successive values of x [H]
-  real :: f                     ! value of polynomial at x in arbitrary units [A]
+  !real :: dx                    ! Difference of successive values of x [H]
+  !real :: f                     ! value of polynomial at x in arbitrary units [A]
   real :: edge_l, edge_r        ! Edge values (left and right) [A]
   real :: expr1, expr2          ! Temporary expressions [A2]
   real :: slope_x_h             ! retained PLM slope times  half grid step [A]
   real :: u0_avg                ! avg value at given edge [A]
   real, parameter :: hMinFrac = 1.e-5  !< A minimum fraction for min(h)/sum(h) [nondim]
   real :: edge_values(this%n,2) ! Edge values [A]
-  real :: ppoly_coef(this%n,3)  ! Polynomial coefficients [A]
+  !real :: ppoly_coef(this%n,3)  ! Polynomial coefficients [A]
   real :: dz(4)                 ! A temporary array of limited layer thicknesses [H]
   real :: u_tmp(4)              ! A temporary array of cell average properties [A]
-  real :: A(4,4)     ! Differences in successive positions raised to various powers,
-                     ! in units that vary with the second (j) index as [H^j]
-  real :: B(4)       ! The right hand side of the system to solve for C [A H]
+  !real :: A(4,4)     ! Differences in successive positions raised to various powers,
+  !                   ! in units that vary with the second (j) index as [H^j]
+  !real :: B(4)       ! The right hand side of the system to solve for C [A H]
   real :: C(4)       ! The coefficients of a fit polynomial in units that vary
                      ! with the index (j) as [A H^(j-1)]
   integer :: k, n, km1, kp1
@@ -297,7 +299,8 @@ subroutine end_value_h4(dz, u, Csys)
   real :: I_denom         ! The inverse of the denominator some expressions [H-3]
   real :: I_denB3         ! The inverse of the product of three sums of thicknesses [H-3]
   real :: min_frac = 1.0e-6  ! The square of min_frac should be much larger than roundoff [nondim]
-  real, parameter :: C1_3 = 1.0 / 3.0   ! A rational parameter [nondim]
+  ! NOTE: keep this one
+  ! real, parameter :: C1_3 = 1.0 / 3.0   ! A rational parameter [nondim]
 
  ! if ((dz(1) == dz(2)) .and. (dz(1) == dz(3)) .and. (dz(1) == dz(4))) then
  !   ! There are simple closed-form expressions in this case
@@ -423,10 +426,11 @@ real function average(this, k, xa, xb)
   integer,       intent(in) :: k    !< Cell number
   real,          intent(in) :: xa   !< Start of averaging interval on element (0 to 1)
   real,          intent(in) :: xb   !< End of averaging interval on element (0 to 1)
-  real :: xapxb                 ! A sum of fracional positions [nondim]
+  !real :: xapxb                 ! A sum of fracional positions [nondim]
   real :: mx, Ya, Yb, my        ! Various fractional positions [nondim]
-  real :: u_a, u_b ! Values at xa and xb [A]
-  real :: xa2pxb2,  xa2b2ab, Ya2b2ab  ! Sums of squared fractional positions [nondim]
+  !real :: u_a, u_b ! Values at xa and xb [A]
+  !real :: xa2pxb2,  xa2b2ab, Ya2b2ab  ! Sums of squared fractional positions [nondim]
+  real :: xa2b2ab, Ya2b2ab  ! Sums of squared fractional positions [nondim]
   real :: a_L, a_R, u_c, a_c    ! Values of the polynomial at various locations [A]
 
   mx = 0.5 * ( xa + xb )
@@ -466,6 +470,8 @@ logical function check_reconstruction(this, h, u)
   real,          intent(in) :: u(*) !< Cell mean values [A]
   ! Local variables
   integer :: k
+
+  UNUSED(h(1))
 
   check_reconstruction = .false.
 

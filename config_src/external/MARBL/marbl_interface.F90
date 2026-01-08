@@ -1,3 +1,5 @@
+#include "unused.h"
+
 !> A non-functioning template of the MARBL interface
 module marbl_interface
 
@@ -54,6 +56,8 @@ contains
         class(marbl_interface_class), intent(in) :: self
         character(len=*),             intent(in) :: str_in
 
+        UNUSED(str_in)
+
         call MOM_error(FATAL, error_msg)
     end subroutine put_setting
 
@@ -62,6 +66,8 @@ contains
       class(marbl_interface_class), intent(in)  :: self
       character(len=*),             intent(in)  :: str_in
       logical,                      intent(out) :: log_out
+
+      UNUSED(str_in)
 
       log_out = .false.
       call MOM_error(FATAL, error_msg)
@@ -87,6 +93,14 @@ contains
         real,                         intent(in)    :: gcm_zt(gcm_num_levels)
         character(len=*),             intent(in)    :: unit_system_opt
         logical,                      intent(in)    :: lgcm_has_global_ops
+
+        UNUSED(gcm_num_PAR_subcols)
+        UNUSED(gcm_num_elements_surface_flux)
+        UNUSED(gcm_delta_z)
+        UNUSED(gcm_zw)
+        UNUSED(gcm_zt)
+        UNUSED(unit_system_opt)
+        UNUSED(lgcm_has_global_ops)
 
         call MOM_error(FATAL, error_msg)
     end subroutine init
@@ -127,6 +141,10 @@ contains
         integer,                       intent(out)   :: output_id
         character(len=*),              intent(out)   :: field_source
         integer,             optional, intent(in) :: num_levels
+
+        UNUSED(num_elements)
+        UNUSED(field_name)
+        UNUSED(num_levels)
 
         output_id = 0
         field_source = ""

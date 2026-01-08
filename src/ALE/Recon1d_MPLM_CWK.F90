@@ -1,3 +1,5 @@
+#include "unused.h"
+
 !> Piecewise Linear Method 1D reconstruction in index space
 !!
 !! This implementation of PLM follows Colella and Woodward, 1984 \cite colella1984, except for assuming
@@ -60,6 +62,8 @@ subroutine reconstruct(this, h, u)
   real :: u_l, u_r, u_c ! Left, right, and center values [A]
   real :: u_e(this%n+1) ! Average of edge values [A]
   integer :: k, n
+
+  UNUSED(h(1))
 
   n = this%n
 
@@ -174,6 +178,8 @@ logical function check_reconstruction(this, h, u)
   real,            intent(in) :: u(*) !< Cell mean values [A]
   ! Local variables
   integer :: k
+
+  UNUSED(h(1))
 
   check_reconstruction = .false.
 

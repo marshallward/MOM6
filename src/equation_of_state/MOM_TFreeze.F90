@@ -164,7 +164,6 @@ subroutine calculate_TFreeze_TEOS_poly_array(S, pres, T_Fr, start, npts)
   integer,            intent(in)  :: npts  !< The number of values to calculate
 
   ! Local variables
-  real :: Sa    ! Absolute salinity [g kg-1] = [ppt]
   real :: rS    ! Square root of salinity [ppt1/2]
   ! The coefficients here use the notation TFab for contributions proportional to S**a/2 * P**b.
   real, parameter :: TF00 =  0.017947064327968736  ! Freezing point coefficient [degC]

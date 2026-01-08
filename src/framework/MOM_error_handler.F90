@@ -1,3 +1,5 @@
+#include "unused.h"
+
 !> Routines for error handling and I/O management
 module MOM_error_handler
 
@@ -301,6 +303,8 @@ end subroutine assert
 subroutine err_handler(sig)
   integer, intent(in) :: sig
     !< Signal passed to the handler (unused)
+  UNUSED(sig)
+
   call siglongjmp(prior_env, 1)
 end subroutine
 

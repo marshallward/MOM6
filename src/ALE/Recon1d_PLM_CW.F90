@@ -1,3 +1,5 @@
+#include "unused.h"
+
 !> Piecewise Linear Method 1D reconstruction
 !!
 !! This implementation of PLM follows Colella and Woodward, 1984 \cite colella1984, with cells
@@ -190,6 +192,8 @@ real function dfdx(this, k, x)
   integer,       intent(in) :: k    !< Cell number
   real,          intent(in) :: x    !< Non-dimensional position within element [nondim]
 
+  UNUSED(x)
+
   dfdx = this%ur(k) - this%ul(k)
 
 end function dfdx
@@ -251,6 +255,8 @@ logical function check_reconstruction(this, h, u)
   real,          intent(in) :: u(*) !< Cell mean values [A]
   ! Local variables
   integer :: k
+
+  UNUSED(h(1))
 
   check_reconstruction = .false.
 

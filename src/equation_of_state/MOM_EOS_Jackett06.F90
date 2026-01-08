@@ -84,8 +84,8 @@ real elemental function density_elem_Jackett06(this, T, S, pressure)
   real :: num_STP ! State dependent part of the numerator of the rational expresion
                   ! for density [kg m-3]
   real :: den     ! Denominator of the rational expresion for density [nondim]
-  real :: den_STP ! State dependent part of the denominator of the rational expresion
-                  ! for density [nondim]
+  !real :: den_STP ! State dependent part of the denominator of the rational expresion
+  !                ! for density [nondim]
   real :: I_den   ! The inverse of the denominator of the rational expresion for density [nondim]
   real :: T2      ! Temperature squared [degC2]
   real :: S1_2    ! Limited square root of salinity [PSU1/2]
@@ -119,8 +119,8 @@ real elemental function density_anomaly_elem_Jackett06(this, T, S, pressure, rho
   real :: num_STP ! State dependent part of the numerator of the rational expresion
                   ! for density [kg m-3]
   real :: den     ! Denominator of the rational expresion for density [nondim]
-  real :: den_STP ! State dependent part of the denominator of the rational expresion
-                  ! for density [nondim]
+  !real :: den_STP ! State dependent part of the denominator of the rational expresion
+  !                ! for density [nondim]
   real :: I_den   ! The inverse of the denominator of the rational expresion for density [nondim]
   real :: T2      ! Temperature squared [degC2]
   real :: S1_2    ! Limited square root of salinity [PSU1/2]
@@ -281,8 +281,8 @@ elemental subroutine calculate_density_second_derivs_elem_Jackett06(this, T, S, 
   ! Local variables
   real :: num         ! Numerator of the rational expresion for density [kg m-3]
   real :: den         ! Denominator of the rational expresion for density [nondim]
-  real :: I_num2      ! The inverse of the square of the numerator of the rational expression
-                      ! for density [nondim]
+  !real :: I_num2      ! The inverse of the square of the numerator of the rational expression
+  !                    ! for density [nondim]
   real :: dnum_dT     ! The derivative of num with potential temperature [kg m-3 degC-1]
   real :: dnum_dS     ! The derivative of num with salinity [kg m-3 PSU-1]
   real :: dden_dT     ! The derivative of den with potential temperature [degC-1]
@@ -305,8 +305,8 @@ elemental subroutine calculate_density_second_derivs_elem_Jackett06(this, T, S, 
   real :: T2          ! Temperature squared [degC2]
   real :: S1_2        ! Limited square root of salinity [PSU1/2]
   real :: I_s12       ! The inverse of the square root of salinity [PSU-1/2]
-  real :: I_denom2    ! The inverse of the square of the denominator of the rational expression
-                      ! for density [nondim]
+  !real :: I_denom2    ! The inverse of the square of the denominator of the rational expression
+  !                    ! for density [nondim]
   real :: I_denom3    ! The inverse of the cube of the denominator of the rational expression
                       ! for density [nondim]
 
@@ -437,7 +437,6 @@ elemental subroutine calculate_compress_elem_Jackett06(this, T, S, pressure, rho
   real :: dden_dp ! The derivative of den with pressure [dbar-1]
   real :: T2      ! Temperature squared [degC2]
   real :: S1_2    ! Limited square root of salinity [PSU1/2]
-  integer :: j
 
   S1_2 = sqrt(max(0.0,s))
   T2 = T*T
