@@ -1123,8 +1123,8 @@ subroutine set_viscous_BBL(u, v, h, tv, visc, G, GV, US, CS, pbv)
       endif
     endif ; enddo ; enddo ! end of i & j loops
   enddo ! end of m loop
-  !$omp target update from(visc%bbl_thick_u, visc%bbl_thick_v)
-  !$omp target update from(visc%kv_bbl_u, visc%kv_bbl_v)
+  !!$omp target update from(visc%bbl_thick_u, visc%bbl_thick_v)
+  !!$omp target update from(visc%kv_bbl_u, visc%kv_bbl_v)
 
   !$omp target exit data map(release: dz, tv, tv%T, tv%S, S_vel, T_vel, SpV_vel, h_vel, h_at_vel, &
   !$omp   dz_vel, dz_at_vel, Rml, Rml_vel, p_ref, ustar, umag_avg, u2_bg, mask_u, mask_v, &
