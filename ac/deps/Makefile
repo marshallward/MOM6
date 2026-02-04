@@ -32,6 +32,10 @@ CVMIX_SOURCE = $(call SOURCE,CVMix-src/src/shared)
 REPORT_ERROR_LOGS ?=
 
 
+# If set, use the submodule repositories in pkg/
+PKG ?= $(abspath ../../pkg)
+MAKEDEP ?= $(abspath ../makedep)
+
 #---
 # Rules
 
@@ -46,8 +50,6 @@ all: lib/libcvmix.a
 # $(1): target library
 # $(2): dependency label
 # $(3): library source files
-# $(4): library source URL
-# $(5): library source commit
 
 define LIB_RULES
 lib/$(1): $(2)/build/$(1)
@@ -60,6 +62,7 @@ $(2)/build/$(1): $(2)/build/Makefile
 
 $(2)/build/Makefile: $(2)/build/Makefile.in $(2)/build/configure
 	cd $$(@D) && { \
+	  MAKEDEP=$$(MAKEDEP) \
 	  ./configure --srcdir=../src \
 	  || { \
 	    if [ "$${REPORT_ERROR_LOGS}" = true ]; then cat config.log ; fi ; \
@@ -79,16 +82,36 @@ $(2)/build/configure.ac: configure.$(2).ac m4 | $(2)/build
 
 $(2)/build:
 	mkdir -p $$@
-
-$(2)/src:
-	git clone $(4) $$@
-	git -C $$@ checkout $(5)
-
 endef
 
-$(eval $(call LIB_RULES,libFMS.a,fms,$(FMS_SOURCE),$(FMS_URL),$(FMS_COMMIT)))
-$(eval $(call LIB_RULES,libgsw.a,gsw,$(GSW_SOURCE),$(GSW_URL),$(GSW_COMMIT)))
-$(eval $(call LIB_RULES,libcvmix.a,cvmix,$(CVMIX_SOURCE),$(CVMIX_URL),$(CVMIX_COMMIT)))
+$(eval $(call LIB_RULES,libFMS.a,fms,$(FMS_SOURCE)))
+$(eval $(call LIB_RULES,libgsw.a,gsw,$(GSW_SOURCE)))
+$(eval $(call LIB_RULES,libcvmix.a,cvmix,$(CVMIX_SOURCE)))
+
+
+# Dependency source
+
+fms/src:
+	git clone $(FMS_URL) $@
+	git -C $@ checkout $(FMS_COMMIT)
+
+
+ifdef PKG
+gsw/src: | gsw/build
+	ln -s $(PKG)/GSW-Fortran gsw/src
+
+cvmix/src: | cvmix/build
+	ln -s $(PKG)/CVMix-src cvmix/src
+
+else
+gsw/src:
+	git clone $(GSW_URL) $@
+	git -C $@ checkout $(GSW_COMMIT)
+
+cvmix/src:
+	git clone $(CVMIX_URL) $@
+	git -C $@ checkout $(CVMIX_COMMIT)
+endif
 
 
 # Cleanup
