@@ -250,8 +250,8 @@ MOM6_FC_CHECK_LIB([gsw], [gsw_rho], [gsw_mod_toolbox], [sa,ct,p], [rho], [],
 
 
 # CVMix configuration
-AX_FC_CHECK_MODULE([cvmix_utils], [], [
-  AC_MSG_ERROR([Could not find module cvmix_utils.])
+AX_FC_CHECK_MODULE([cvmix_kpp], [], [
+  AC_MSG_ERROR([Could not find module cvmix_kpp.])
 ])
 MOM6_FC_CHECK_LIB([cvmix], [cvmix_init_kpp], [cvmix_kpp], [], [], [],
   [], [

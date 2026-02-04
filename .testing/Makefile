@@ -71,7 +71,8 @@ MAKEFLAGS += --no-builtin-variables
 .SUFFIXES:
 
 # Determine the MOM6 autoconf srcdir
-AC_SRCDIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))../ac
+CODEBASE := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))..
+AC_SRCDIR := $(CODEBASE)/ac
 
 # User-defined configuration
 -include config.mk
@@ -143,6 +144,10 @@ WORKSPACE ?= .
 BUILD ?= $(WORKSPACE)/build
 DEPS ?= $(BUILD)/deps
 WORK ?= $(WORKSPACE)/work
+
+# External tools
+MAKEDEP ?= $(abspath $(AC_SRCDIR)/makedep)
+PKG ?= $(abspath $(CODEBASE)/pkg)
 
 # Experiment configuration
 EXECS ?= symmetric/MOM6 asymmetric/MOM6 openmp/MOM6
@@ -344,8 +349,8 @@ endif
 
 # Set up the FMS build environment variables
 DEPS_ENV = \
-  PATH="${PATH}:$(realpath ../ac)" \
   FCFLAGS="$(FCFLAGS_FMS)" \
+  MAKEDEP=$(MAKEDEP) \
   REPORT_ERROR_LOGS="$(REPORT_ERROR_LOGS)"
 
 # FMS
@@ -362,7 +367,7 @@ $(DEPS)/configure.fms.ac: ../ac/deps/configure.fms.ac | $(DEPS)
 # GSW
 
 $(DEPS)/lib/libgsw.a: $(DEPS)/Makefile $(DEPS)/Makefile.gsw.in $(DEPS)/configure.gsw.ac $(DEPS)/m4
-	$(DEPS_ENV) $(MAKE) -C $(DEPS) lib/libgsw.a
+	$(DEPS_ENV) PKG=$(PKG) $(MAKE) -C $(DEPS) lib/libgsw.a
 
 $(DEPS)/Makefile.gsw.in: ../ac/deps/Makefile.gsw.in | $(DEPS)
 	cp ../ac/deps/Makefile.gsw.in $(DEPS)/Makefile.gsw.in
@@ -373,7 +378,7 @@ $(DEPS)/configure.gsw.ac: ../ac/deps/configure.gsw.ac | $(DEPS)
 # CVMix
 
 $(DEPS)/lib/libcvmix.a: $(DEPS)/Makefile $(DEPS)/Makefile.cvmix.in $(DEPS)/configure.cvmix.ac $(DEPS)/m4
-	$(DEPS_ENV) $(MAKE) -C $(DEPS) lib/libcvmix.a
+	$(DEPS_ENV) PKG=$(PKG) $(MAKE) -C $(DEPS) lib/libcvmix.a
 
 $(DEPS)/Makefile.cvmix.in: ../ac/deps/Makefile.cvmix.in | $(DEPS)
 	cp ../ac/deps/Makefile.cvmix.in $(DEPS)/Makefile.cvmix.in
