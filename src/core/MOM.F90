@@ -1217,6 +1217,8 @@ subroutine step_MOM_dynamics(forces, p_surf_begin, p_surf_end, dt, dt_tr_adv, &
   u => CS%u ; v => CS%v ; h => CS%h
   showCallTree = callTree_showQuery()
 
+  !$omp target update to(u, v, h)
+
   call cpu_clock_begin(id_clock_dynamics)
   call cpu_clock_begin(id_clock_stoch)
   if (CS%use_stochastic_EOS) call MOM_stoch_eos_run(G, u, v, dt, Time_local, CS%stoch_eos_CS)
@@ -1233,6 +1235,7 @@ subroutine step_MOM_dynamics(forces, p_surf_begin, p_surf_end, dt, dt_tr_adv, &
 
     call enable_averages(dt_tr_adv, Time_local+real_to_time(US%T_to_s*(dt_tr_adv-dt)), CS%diag)
     if (CS%thickness_diffuse) then
+      !$omp target update from(h)
       call cpu_clock_begin(id_clock_thick_diff)
       if (CS%VarMix%use_variable_mixing) &
         call calc_slope_functions(h, CS%tv, dt, G, GV, US, CS%VarMix, OBC=CS%OBC)
@@ -1241,10 +1244,12 @@ subroutine step_MOM_dynamics(forces, p_surf_begin, p_surf_end, dt, dt_tr_adv, &
                              CS%stoch_CS)
       call cpu_clock_end(id_clock_thick_diff)
       call pass_var(h, G%Domain, clock=id_clock_pass, halo=max(2,CS%cont_stencil))
+      !$omp target update to(h)
       if (showCallTree) call callTree_waypoint("finished thickness_diffuse_first (step_MOM)")
     endif
 
     if (CS%interface_filter) then
+      !$omp target update from(h)
       if (allocated(CS%tv%SpV_avg)) call pass_var(CS%tv%SpV_avg, G%Domain, clock=id_clock_pass)
       CS%tv%valid_SpV_halo = min(G%Domain%nihalo, G%Domain%njhalo)
       call cpu_clock_begin(id_clock_int_filter)
@@ -1252,6 +1257,7 @@ subroutine step_MOM_dynamics(forces, p_surf_begin, p_surf_end, dt, dt_tr_adv, &
                             CS%CDp, CS%interface_filter_CSp)
       call cpu_clock_end(id_clock_int_filter)
       call pass_var(h, G%Domain, clock=id_clock_pass, halo=max(2,CS%cont_stencil))
+      !$omp target update to(h)
       if (showCallTree) call callTree_waypoint("finished interface_filter_first (step_MOM)")
     endif
 
@@ -1263,12 +1269,13 @@ subroutine step_MOM_dynamics(forces, p_surf_begin, p_surf_end, dt, dt_tr_adv, &
 
   ! Update porous barrier fractional cell metrics
   if (CS%use_porbar) then
+    !$omp target update from(h)
     call enable_averages(dt, Time_local, CS%diag)
     call porous_widths_layer(h, CS%tv, G, GV, US, CS%pbv, CS%por_bar_CS)
     call disable_averaging(CS%diag)
     call pass_vector(CS%pbv%por_face_areaU, CS%pbv%por_face_areaV, &
                      G%Domain, direction=To_All+SCALAR_PAIR, clock=id_clock_pass, halo=CS%cont_stencil)
-    !$omp target update to(CS%pbv%por_face_areaU, CS%pbv%por_face_areaV)
+    !$omp target update to(h, CS%pbv%por_face_areaU, CS%pbv%por_face_areaV)
   endif
 
   ! The bottom boundary layer properties need to be recalculated.
@@ -1276,7 +1283,7 @@ subroutine step_MOM_dynamics(forces, p_surf_begin, p_surf_end, dt, dt_tr_adv, &
     call enable_averages(bbl_time_int, &
               Time_local + real_to_time(US%T_to_s*(bbl_time_int-dt)), CS%diag)
     ! Calculate the BBL properties and store them inside visc (u,h).
-    !$omp target update to(u, v, h)
+    !!$omp target update to(u, v, h)
     call cpu_clock_begin(id_clock_BBL_visc)
     call set_viscous_BBL(CS%u, CS%v, CS%h, CS%tv, CS%visc, G, GV, US, CS%set_visc_CSp, CS%pbv)
     call cpu_clock_end(id_clock_BBL_visc)
@@ -1318,7 +1325,7 @@ subroutine step_MOM_dynamics(forces, p_surf_begin, p_surf_end, dt, dt_tr_adv, &
                   CS%eta_av_bc, G, GV, US, CS%dyn_split_RK2b_CSp, calc_dtbt, CS%VarMix, &
                   CS%MEKE, CS%thickness_diffuse_CSp, CS%pbv, waves=waves)
     else
-      !$omp target update to(u, v, h) if(bbl_time_int<=0.0)
+      !!$omp target update to(u, v, h) if(bbl_time_int<=0.0)
       !$omp target update to(CS%uhtr, CS%vhtr)
       call step_MOM_dyn_split_RK2(u, v, h, CS%tv, CS%visc, Time_local, dt, forces, &
                   p_surf_begin, p_surf_end, CS%uh, CS%vh, CS%uhtr, CS%vhtr, &
