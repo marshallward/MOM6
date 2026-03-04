@@ -1,0 +1,38 @@
+# MOM6 Spack Environment
+#
+# Install dependencies:
+#   spack env create mom6 cmake/mom6_spack_env.yaml
+#   spack env activate mom6
+#   spack install
+#
+# Then build MOM6:
+#   mkdir build && cd build
+#   cmake .. -DCMAKE_PREFIX_PATH=$SPACK_ENV/.spack-env/view
+#   make -j
+#
+# Note: Uncomment openmpi if your system MPI lacks Fortran support
+
+spack:
+  specs:
+  - hdf5@1.14 +fortran +hl
+  - netcdf-c@4.9
+  - netcdf-fortran@4.6
+  - cmake@3.22
+  # Uncomment if system MPI is missing or lacks Fortran support:
+  # - openmpi@5 +fortran
+
+  packages:
+    all:
+      require: ['%gcc@15.1.0']
+    hdf5:
+      require: '+fortran +hl'
+    netcdf-c:
+      require: '~mpi'
+    # Uncomment to use spack-built MPI:
+    # mpi:
+    #   require: openmpi
+
+  concretizer:
+    unify: when_possible
+
+  view: true
