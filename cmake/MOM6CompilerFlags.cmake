@@ -92,16 +92,21 @@ elseif(CMAKE_Fortran_COMPILER_ID STREQUAL "IntelLLVM")
 # NVIDIA HPC Fortran (nvfortran)
 elseif(CMAKE_Fortran_COMPILER_ID STREQUAL "NVHPC")
   set(FLAGS_STANDARD
-    -Mfree
-    -Mnofma 
-    -Mnovect 
+    -O2
+    -Mnovect
     -mp=gpu
-    -acc=gpu 
     -stdpar=gpu
-    -byteswapio
-    -traceback
+    -Mnofma
+    -Minfo=accel
+    -acc=gpu
+    -gpu=mem:separate
+    -Minline=exclude:${CMAKE_SOURCE_DIR}/src/framework
     -r8
-    -Mpreprocess
+  )
+
+  add_compile_definitions(
+    HAVE_MPI=1
+    HAVE_FC_DO_CONCURRENT_LOCAL=1
   )
 
   set(FLAGS_DEBUG

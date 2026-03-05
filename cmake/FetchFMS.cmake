@@ -28,6 +28,14 @@ macro(fetch_fms)
     find_package(FMS REQUIRED CONFIG)
     message(STATUS "Found installed FMS: ${FMS_DIR}")
 
+    # The installed FMS target doesn't export GPU link flags, but the FMS
+    # static library contains GPU device code that requires the GPU runtime
+    # at link time. Append these flags so they propagate to consumers.
+    if(CMAKE_Fortran_COMPILER_ID STREQUAL "NVHPC")
+      set_property(TARGET FMS::fms APPEND PROPERTY
+        INTERFACE_LINK_OPTIONS -mp=gpu -acc=gpu -gpu=mem:separate)
+    endif()
+
     # Create alias if needed (spack may export as FMS::fms)
     if(NOT TARGET FMS::fms_r8)
       if(TARGET FMS::fms)
