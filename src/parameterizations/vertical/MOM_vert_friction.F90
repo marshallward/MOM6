@@ -637,8 +637,7 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
   if (CS%StokesMixing) then
     if (present(Waves)) DoStokesMixing = associated(Waves)
     if (.not. DoStokesMixing) &
-      call MOM_error(FATAL,"Stokes Mixing called without allocated"//&
-                     "Waves Control Structure")
+      call MOM_error(FATAL, "Stokes Mixing called without associated Waves Control Structure")
   endif
   lfpmix = .false.
   if ( present(fpmix) ) lfpmix = fpmix
@@ -2435,7 +2434,7 @@ subroutine find_coupling_coef(a_cpl, hvel, i, j, h_harm, bbl_thick, kv_bbl, z_i,
       enddo
     elseif (CS%fixed_LOTW_ML .or. CS%apply_LOTW_floor) then
       ! Determine which interfaces are within CS%Hmix of the surface, and set the viscous
-      ! boundary layer thickness to the the smaller of CS%Hmix and the depth of the ocean.
+      ! boundary layer thickness to the smaller of CS%Hmix and the depth of the ocean.
       h_ml = 0.0
       do k=1,nz
         can_exit = .true.
@@ -3231,8 +3230,7 @@ subroutine updateCFLtruncationValue(Time, CS, US, activate)
     CS%CFL_trunc = CS%CFL_truncS + wghtA * ( CS%CFL_truncE - CS%CFL_truncS )
   endif
   write(msg(1:12),'(es12.3)') CS%CFL_trunc
-  call MOM_error(NOTE, "MOM_vert_friction: updateCFLtruncationValue set CFL"// &
-                       " limit to "//trim(msg))
+  call MOM_error(NOTE, "MOM_vert_friction: updateCFLtruncationValue set CFL limit to "//trim(msg))
 end subroutine updateCFLtruncationValue
 
 !> Clean up and deallocate the vertical friction module
