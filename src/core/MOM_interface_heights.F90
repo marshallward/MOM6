@@ -88,9 +88,6 @@ subroutine find_eta_3d(h, tv, G, GV, US, eta, eta_bt, halo_size, dZref)
   I_gEarth = 1.0 / GV%g_Earth
   dZ_ref = 0.0 ; if (present(dZref)) dZ_ref = dZref
 
-  !$omp target enter data map(alloc: eta)
-  !$omp target update to(h)
-
   do concurrent (j=jsv:jev, i=isv:iev)
     eta(i,j,nz+1) = -(G%bathyT(i,j) + dZ_ref)
   enddo
@@ -162,8 +159,6 @@ subroutine find_eta_3d(h, tv, G, GV, US, eta, eta_bt, halo_size, dZref)
     endif
     !$omp target update to(eta)
   endif
-  !$omp target exit data map(from: eta)
-
 end subroutine find_eta_3d
 
 !> Calculates the free surface height, using the appropriate form for consistency
@@ -206,10 +201,6 @@ subroutine find_eta_2d(h, tv, G, GV, US, eta, eta_bt, halo_size, dZref)
 
   I_gEarth = 1.0 / GV%g_Earth
   dZ_ref = 0.0 ; if (present(dZref)) dZ_ref = dZref
-
-  !$omp target enter data map(alloc: eta)
-  !$omp target update to(h)
-  !$omp target enter data map(to: eta_bt) if (present(eta_bt))
 
   do concurrent (j=js:je, i=is:ie)
     eta(i,j) = -(G%bathyT(i,j) + dZ_ref)
@@ -273,9 +264,6 @@ subroutine find_eta_2d(h, tv, G, GV, US, eta, eta_bt, halo_size, dZref)
       !$omp target update to(eta)
     endif
   endif
-
-  !$omp target exit data map(from: eta)
-  !$omp target exit data map(delete: eta_bt) if (present(eta_bt))
 end subroutine find_eta_2d
 
 

@@ -1068,7 +1068,12 @@ subroutine step_MOM(forces_in, fluxes_in, sfc_state, Time_start, time_int_in, CS
       ! Determining the time-average sea surface height is part of the algorithm.
       ! This may be eta_av if Boussinesq, or need to be diagnosed if not.
       CS%time_in_cycle = CS%time_in_cycle + dt
-      call find_eta(h, CS%tv, G, GV, US, ssh, CS%eta_av_bc, dZref=G%Z_ref)
+      !$omp target update to(h)
+      !$omp target enter data map(to: CS%eta_av_bc)
+      !$omp target enter data map(alloc: ssh)
+      call find_eta(h, CS%tv, G, GV, US, ssh, eta_bt=CS%eta_av_bc, dZref=G%Z_ref)
+      !$omp target exit data map(from: ssh)
+      !$omp target exit data map(release: CS%eta_av_bc)
       do j=js,je ; do i=is,ie
         CS%ssh_rint(i,j) = CS%ssh_rint(i,j) + dt*ssh(i,j)
       enddo ; enddo
@@ -3837,11 +3842,16 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, &
   endif
 
   if (.not.query_initialized(CS%ave_ssh_ibc, "ave_ssh", restart_CSp)) then
+    !$omp target update to(CS%h)
+    !$omp target enter data map(alloc: CS%ave_ssh_ibc)
     if (CS%split) then
-      call find_eta(CS%h, CS%tv, G, GV, US, CS%ave_ssh_ibc, eta, dZref=G%Z_ref)
+      !$omp target enter data map(to: eta)
+      call find_eta(CS%h, CS%tv, G, GV, US, CS%ave_ssh_ibc, eta_bt=eta, dZref=G%Z_ref)
+      !$omp target exit data map(release: eta)
     else
       call find_eta(CS%h, CS%tv, G, GV, US, CS%ave_ssh_ibc, dZref=G%Z_ref)
     endif
+    !$omp target exit data map(from: CS%ave_ssh_ibc)
     call set_initialized(CS%ave_ssh_ibc, "ave_ssh", restart_CSp)
   endif
   if (CS%split) deallocate(eta)
@@ -3898,7 +3908,10 @@ subroutine finish_MOM_initialization(Time, dirs, CS)
     restart_CSp_tmp = CS%restart_CS
     call restart_registry_lock(restart_CSp_tmp, unlocked=.true.)
     allocate(z_interface(SZI_(G),SZJ_(G),SZK_(GV)+1))
+    !$omp target update to(CS%h)
+    !$omp target enter data map(alloc: z_interface)
     call find_eta(CS%h, CS%tv, G, GV, US, z_interface, dZref=G%Z_ref)
+    !$omp target exit data map(from: z_interface)
     call register_restart_field(z_interface, "eta", .true., restart_CSp_tmp, &
                                 "Interface heights", "meter", z_grid='i', conversion=US%Z_to_m)
     ! NOTE: write_ic=.true. routes routine to fms2 IO write_initial_conditions interface

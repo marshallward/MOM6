@@ -314,6 +314,8 @@ subroutine calculate_diagnostic_fields(u, v, h, uh, vh, tv, ADp, CDp, p_surf, &
   endif
 
   ! Find the interface heights, relative either to a reference height or to the bottom [Z ~> m].
+  !$omp target update to(h)
+  !$omp target enter data map(alloc: eta)
   if (CS%id_e > 0) then
     call find_eta(h, tv, G, GV, US, eta, dZref=G%Z_ref)
     if (CS%id_e > 0) call post_data(CS%id_e, eta, CS%diag)
@@ -330,6 +332,7 @@ subroutine calculate_diagnostic_fields(u, v, h, uh, vh, tv, ADp, CDp, p_surf, &
     enddo ; enddo ; enddo
     call post_data(CS%id_e_D, eta, CS%diag)
   endif
+  !$omp target exit data map(from: eta)
 
   ! mass per area of grid cell (for Boussinesq, use Rho0)
   if (CS%id_masscello > 0) then
@@ -936,7 +939,10 @@ subroutine calculate_vertical_integrals(h, tv, p_surf, G, GV, US, CS)
   endif
 
   if (CS%id_col_ht > 0) then
+    !$omp target update to(h)
+    !$omp target enter data map(alloc: z_top)
     call find_eta(h, tv, G, GV, US, z_top)
+    !$omp target exit data map(from: z_top)
     do j=js,je ; do i=is,ie
       z_bot(i,j) = z_top(i,j) + G%bathyT(i,j)
     enddo ; enddo
