@@ -88,19 +88,25 @@ subroutine find_eta_3d(h, tv, G, GV, US, eta, eta_bt, halo_size, dZref)
   I_gEarth = 1.0 / GV%g_Earth
   dZ_ref = 0.0 ; if (present(dZref)) dZ_ref = dZref
 
-  !$OMP parallel default(shared) private(dilate,htot)
-  !$OMP do
-  do j=jsv,jev ; do i=isv,iev ; eta(i,j,nz+1) = -(G%bathyT(i,j) + dZ_ref) ; enddo ; enddo
+  !$omp target enter data map(alloc: eta)
+  !$omp target update to(h)
+
+  do concurrent (j=jsv:jev, i=isv:iev)
+    eta(i,j,nz+1) = -(G%bathyT(i,j) + dZ_ref)
+  enddo
 
   if (GV%Boussinesq) then
-    !$OMP do
-    do j=jsv,jev ; do k=nz,1,-1 ; do i=isv,iev
-      eta(i,j,K) = eta(i,j,K+1) + h(i,j,k)*GV%H_to_Z
-    enddo ; enddo ; enddo
+    do concurrent (j=jsv:jev, i=isv:iev)
+      do k=nz,1,-1
+        eta(i,j,K) = eta(i,j,K+1) + h(i,j,k)*GV%H_to_Z
+      enddo
+    enddo
+
     if (present(eta_bt)) then
       ! Dilate the water column to agree with the free surface height
       ! that is used for the dynamics.
-      !$OMP do
+      ! TODO: Move to GPU
+      !$omp target update from(eta)
       do j=jsv,jev
         do i=isv,iev
           dilate(i) = (eta_bt(i,j)*GV%H_to_Z + G%bathyT(i,j)) / &
@@ -111,10 +117,12 @@ subroutine find_eta_3d(h, tv, G, GV, US, eta, eta_bt, halo_size, dZref)
                        (G%bathyT(i,j) + dZ_ref)
         enddo ; enddo
       enddo
+      !$omp target update to(eta)
     endif
   else
+    ! TODO: Move to GPU
+    !$omp target update from(eta)
     if (associated(tv%eqn_of_state)) then
-      !$OMP do
       do j=jsv,jev
         if (associated(tv%p_surf)) then
           do i=isv,iev ; p(i,j,1) = tv%p_surf(i,j) ; enddo
@@ -125,19 +133,16 @@ subroutine find_eta_3d(h, tv, G, GV, US, eta, eta_bt, halo_size, dZref)
           p(i,j,K+1) = p(i,j,K) + GV%g_Earth*GV%H_to_RZ*h(i,j,k)
         enddo ; enddo
       enddo
-      !$OMP do
       do k=1,nz
         call int_specific_vol_dp(tv%T(:,:,k), tv%S(:,:,k), p(:,:,K), p(:,:,K+1), &
                                  0.0, G%HI, tv%eqn_of_state, US, dz_geo(:,:,k), halo_size=halo)
       enddo
-      !$OMP do
       do j=jsv,jev
         do k=nz,1,-1 ; do i=isv,iev
           eta(i,j,K) = eta(i,j,K+1) + I_gEarth * dz_geo(i,j,k)
         enddo ; enddo
       enddo
     else
-      !$OMP do
       do j=jsv,jev ;  do k=nz,1,-1 ; do i=isv,iev
         eta(i,j,K) = eta(i,j,K+1) + GV%H_to_RZ*h(i,j,k) / GV%Rlay(k)
       enddo ; enddo ; enddo
@@ -145,7 +150,6 @@ subroutine find_eta_3d(h, tv, G, GV, US, eta, eta_bt, halo_size, dZref)
     if (present(eta_bt)) then
       ! Dilate the water column to agree with the free surface height
       ! from the time-averaged barotropic solution.
-      !$OMP do
       do j=jsv,jev
         do i=isv,iev ; htot(i) = GV%H_subroundoff ; enddo
         do k=1,nz ; do i=isv,iev ; htot(i) = htot(i) + h(i,j,k) ; enddo ; enddo
@@ -156,8 +160,9 @@ subroutine find_eta_3d(h, tv, G, GV, US, eta, eta_bt, halo_size, dZref)
         enddo ; enddo
       enddo
     endif
+    !$omp target update to(eta)
   endif
-  !$OMP end parallel
+  !$omp target exit data map(from: eta)
 
 end subroutine find_eta_3d
 
@@ -202,25 +207,29 @@ subroutine find_eta_2d(h, tv, G, GV, US, eta, eta_bt, halo_size, dZref)
   I_gEarth = 1.0 / GV%g_Earth
   dZ_ref = 0.0 ; if (present(dZref)) dZ_ref = dZref
 
-  !$OMP parallel default(shared) private(htot)
-  !$OMP do
-  do j=js,je ; do i=is,ie ; eta(i,j) = -(G%bathyT(i,j) + dZ_ref) ; enddo ; enddo
+  !$omp target enter data map(alloc: eta)
+  !$omp target update to(h)
+  !$omp target enter data map(to: eta_bt) if (present(eta_bt))
+
+  do concurrent (j=js:je, i=is:ie)
+    eta(i,j) = -(G%bathyT(i,j) + dZ_ref)
+  enddo
 
   if (GV%Boussinesq) then
     if (present(eta_bt)) then
-      !$OMP do
-      do j=js,je ; do i=is,ie
+      do concurrent (j=js:je, i=is:ie)
         eta(i,j) = GV%H_to_Z*eta_bt(i,j) - dZ_ref
-      enddo ; enddo
+      enddo
     else
-      !$OMP do
-      do j=js,je ; do k=1,nz ; do i=is,ie
+      do concurrent (k=1:nz, j=js:je, i=is:ie)
         eta(i,j) = eta(i,j) + h(i,j,k)*GV%H_to_Z
-      enddo ; enddo ; enddo
+      enddo
     endif
   else
     if (associated(tv%eqn_of_state)) then
-      !$OMP do
+      ! TODO: Move to GPU
+      !$omp target update from(eta)
+
       do j=js,je
         if (associated(tv%p_surf)) then
           do i=is,ie ; p(i,j,1) = tv%p_surf(i,j) ; enddo
@@ -232,25 +241,27 @@ subroutine find_eta_2d(h, tv, G, GV, US, eta, eta_bt, halo_size, dZref)
           p(i,j,k+1) = p(i,j,k) + GV%g_Earth*GV%H_to_RZ*h(i,j,k)
         enddo ; enddo
       enddo
-      !$OMP do
       do k = 1, nz
         call int_specific_vol_dp(tv%T(:,:,k), tv%S(:,:,k), p(:,:,k), p(:,:,k+1), 0.0, &
                                  G%HI, tv%eqn_of_state, US, dz_geo(:,:,k), halo_size=halo)
       enddo
-      !$OMP do
       do j=js,je ; do k=1,nz ; do i=is,ie
           eta(i,j) = eta(i,j) + I_gEarth * dz_geo(i,j,k)
       enddo ; enddo ; enddo
+
+      !$omp target update to(eta)
     else
-      !$OMP do
-      do j=js,je ; do k=1,nz ; do i=is,ie
+      do concurrent (k=1:nz, j=js:je, i=is:ie)
         eta(i,j) = eta(i,j) + GV%H_to_RZ*h(i,j,k) / GV%Rlay(k)
-      enddo ; enddo ; enddo
+      enddo
     endif
+
     if (present(eta_bt)) then
       !   Dilate the water column to agree with the time-averaged column
       ! mass from the barotropic solution.
-      !$OMP do
+
+      ! TODO: Move to GPU ; set htot(:) locality
+      !$omp target update from(eta, eta_bt)
       do j=js,je
         do i=is,ie ; htot(i) = GV%H_subroundoff ; enddo
         do k=1,nz ; do i=is,ie ; htot(i) = htot(i) + h(i,j,k) ; enddo ; enddo
@@ -259,10 +270,12 @@ subroutine find_eta_2d(h, tv, G, GV, US, eta, eta_bt, halo_size, dZref)
                      (G%bathyT(i,j) + dZ_ref)
         enddo
       enddo
+      !$omp target update to(eta)
     endif
   endif
-  !$OMP end parallel
 
+  !$omp target exit data map(from: eta)
+  !$omp target exit data map(delete: eta_bt) if (present(eta_bt))
 end subroutine find_eta_2d
 
 
