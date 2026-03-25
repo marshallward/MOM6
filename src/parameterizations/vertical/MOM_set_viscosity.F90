@@ -360,7 +360,7 @@ subroutine set_viscous_BBL(u, v, h, tv, visc, G, GV, US, CS, pbv)
 !  With a linear drag law, the friction velocity is already known.
 !  if (CS%linear_drag) ustar(:) = cdrag_sqrt_H*CS%drag_bg_vel
 
-  !$omp target enter data map(to: tv, tv%T, tv%S, tv%p_surf, CS) map(alloc: Rml, p_ref, ustar, &
+  !$omp target enter data map(to: tv, tv%T, tv%S, tv%p_surf) map(alloc: Rml, p_ref, ustar, &
   !$omp   umag_avg, u2_bg, mask_u, mask_v, h_bbl_drag, dz_bbl_drag, do_i, dR_dS, dR_dT, D_u, D_v, &
   !$omp   press, S_EOS, T_EOS, Rml_vel)
 
@@ -1128,7 +1128,7 @@ subroutine set_viscous_BBL(u, v, h, tv, visc, G, GV, US, CS, pbv)
 
   !$omp target exit data map(release: dz, tv, tv%T, tv%S, S_vel, T_vel, SpV_vel, h_vel, h_at_vel, &
   !$omp   dz_vel, dz_at_vel, Rml, Rml_vel, p_ref, ustar, umag_avg, u2_bg, mask_u, mask_v, &
-  !$omp   h_bbl_drag, dz_bbl_drag, do_i, dR_dS, dR_dT, D_u, D_v, press, S_EOS, T_EOS, tv%p_surf, CS)
+  !$omp   h_bbl_drag, dz_bbl_drag, do_i, dR_dS, dR_dT, D_u, D_v, press, S_EOS, T_EOS, tv%p_surf)
 
 ! Offer diagnostics for averaging
   if (CS%id_bbl_thick_u > 0) &
@@ -2917,7 +2917,6 @@ subroutine set_visc_register_restarts(HI, G, GV, US, param_file, visc, restart_C
     call register_restart_pair(visc%taux_shelf, visc%tauy_shelf, u_desc, v_desc, &
                                .false., restart_CS, conversion=US%RZ_T_to_kg_m2s*US%L_T_to_m_s)
   endif
-
 end subroutine set_visc_register_restarts
 
 !> This subroutine does remapping for the auxiliary restart variables in a vertvisc_type
@@ -3280,6 +3279,8 @@ subroutine set_visc_init(Time, G, GV, US, param_file, diag, visc, CS, restart_CS
 
   call register_restart_field_as_obsolete('Kd_turb','Kd_shear', restart_CS)
   call register_restart_field_as_obsolete('Kv_turb','Kv_shear', restart_CS)
+
+  !$omp target update to(CS)
 
 end subroutine set_visc_init
 

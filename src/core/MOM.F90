@@ -227,7 +227,7 @@ type, public :: MOM_control_struct ; private
   real :: time_in_thermo_cycle !< The running time of the current time-stepping
                     !! cycle in calls that step the thermodynamics [T ~> s].
 
-  type(ocean_grid_type) :: G_in                   !< Input grid metric
+  type(ocean_grid_type), allocatable :: G_in      !< Input grid metric
   type(ocean_grid_type), pointer :: G => NULL()   !< Model grid metric
   logical :: rotate_index = .false.   !< True if index map is rotated
   logical :: homogenize_forcings = .false. !< True if all inputs are homogenized
@@ -254,7 +254,7 @@ type, public :: MOM_control_struct ; private
                     !! have been stored for use in diagnostics.
 
   type(diag_ctrl)     :: diag !< structure to regulate diagnostic output timing
-  type(vertvisc_type) :: visc !< structure containing vertical viscosities,
+  type(vertvisc_type), allocatable :: visc  !< structure containing vertical viscosities,
                     !! bottom drag viscosities, and related fields
   type(MEKE_type) :: MEKE   !< Fields related to the Mesoscale Eddy Kinetic Energy
   logical :: adiabatic !< If true, there are no diapycnal mass fluxes, and no calls
@@ -2950,6 +2950,7 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, &
 #else
   symmetric = .false.
 #endif
+  allocate(CS%G_in)
   G_in => CS%G_in
 #ifdef STATIC_MEMORY_
   call MOM_domains_init(G_in%domain, param_file, symmetric=symmetric, &
@@ -3068,6 +3069,8 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, &
   call callTree_waypoint("grids initialized (initialize_MOM)")
 
   call MOM_timing_init(CS)
+
+  !$omp target update to(CS)
 
   call tracer_registry_init(param_file, CS%tracer_Reg)
 
@@ -3236,8 +3239,10 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, &
 
   call MEKE_alloc_register_restart(HI, US, param_file, CS%MEKE, restart_CSp)
 
+  allocate(CS%visc)
   !$omp target enter data map(alloc: CS%visc)
   call set_visc_register_restarts(HI, G, GV, US, param_file, CS%visc, restart_CSp, use_ice_shelf)
+  !$omp target update to(CS%visc)
   call mixedlayer_restrat_register_restarts(HI, GV, US, param_file, &
            CS%mixedlayer_restrat_CSp, restart_CSp)
 
@@ -3651,6 +3656,7 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, &
                          restart_CSp, CS%MEKE_in_dynamics)
 
   call VarMix_init(Time, G, GV, US, param_file, diag, CS%VarMix)
+  !$omp target enter data map(alloc: CS%set_visc_CSp)
   call set_visc_init(Time, G, GV, US, param_file, diag, CS%visc, CS%set_visc_CSp, restart_CSp, CS%OBC)
   call thickness_diffuse_init(Time, G, GV, US, param_file, diag, CS%CDp, CS%thickness_diffuse_CSp)
   if (CS%interface_filter) &
