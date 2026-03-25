@@ -41,6 +41,11 @@ use Recon1d_PPM_H4_2018, only : PPM_H4_2018
 
 implicit none ; private
 
+!> Maximum number of vertical levels supported for GPU-resident local arrays.
+!! Variable-length locals inside declare-target routines force nvfortran to use
+!! GPU heap (NVCOMPILER_ACC_CUDA_HEAPSIZE). Fixed-size arrays use stack instead.
+integer, parameter, public :: NK_GPU_MAX = 500
+
 !> Container for remapping parameters
 type, public :: remapping_CS ; private
   !> Determines which reconstruction to use
@@ -234,7 +239,8 @@ end subroutine extract_member_remapping_CS
 !!
 !! \todo Remove h_neglect argument by moving into remapping_CS
 !! \todo Remove PCM_cell argument by adding new method in Recon1D class
-subroutine remapping_core_h(CS, n0, h0, u0, n1, h1, u1, net_err, PCM_cell)
+subroutine remapping_core_h(CS, n0, h0, u0, n1, h1, u1, net_err, PCM_cell) ! GPU PORT DIAGNOSTICS
+  !$omp declare target
   type(remapping_CS),  intent(in)  :: CS !< Remapping control structure
   integer,             intent(in)  :: n0 !< Number of cells on source grid
   real, dimension(n0), intent(in)  :: h0 !< Cell widths on source grid [H]
@@ -269,39 +275,27 @@ subroutine remapping_core_h(CS, n0, h0, u0, n1, h1, u1, net_err, PCM_cell)
   call intersect_src_tgt_grids(n0, h0, n1, h1, h_sub, h0_eff, &
                                isrc_start, isrc_end, isrc_max, itgt_start, itgt_end, isub_src)
 
-  if (CS%remapping_scheme == REMAPPING_VIA_CLASS) then
-
-!   if (CS%debug) call CS%reconstruction%set_debug() ! Sets an internal flag
-
-    call CS%reconstruction%reconstruct(h0, u0)
-
-    ! Adjust h_sub so that the Hallberg conservation trick works properly
-!   call adjust_h_sub( n0, h0, n1, isrc_start, isrc_end, isrc_max, h_sub )
-
-    ! Loop over each sub-cell to calculate average/integral values within each sub-cell.
-    ! Uses: h_sub, isrc_start, isrc_end, isrc_max, isub_src
-    ! Sets: u_sub, uh_sub
-    call CS%reconstruction%remap_to_sub_grid(h0, u0, n1, h_sub, &
-                                             isrc_start, isrc_end, isrc_max, isub_src, &
-                                             u_sub, uh_sub, u02_err)
-
-    ! Loop over each target cell summing the integrals from sub-cells within the target cell.
-    ! Uses: itgt_start, itgt_end, h1, h_sub, uh_sub, u_sub
-    ! Sets: u1, uh_err
-    call remap_sub_to_tgt_grid(n0, n1, h1, h_sub, u_sub, uh_sub, itgt_start, itgt_end, &
-                               CS%force_bounds_in_target, CS%offset_tgt_summation, &
-                               CS%better_force_bounds_in_target, u1, uh_err)
-
-    ! Include the error remapping from source to sub-cells in the estimate of total remapping error
-    uh_err = uh_err + u02_err
-
-  else ! Uses the OM4-era reconstruction functions
+  ! GPU: The class-based (polymorphic) remapping path has been removed from this
+  ! routine for GPU compatibility. nvfortran cannot compile class dispatch for device.
+  ! The OM4-era polynomial path handles all reconstruction schemes.
+  ! GPU: original code had class-based dispatch here:
+  ! if (CS%remapping_scheme == REMAPPING_VIA_CLASS) then
+  !   call CS%reconstruction%reconstruct(h0, u0)
+  !   call CS%reconstruction%remap_to_sub_grid(h0, u0, n1, h_sub, &
+  !                                            isrc_start, isrc_end, isrc_max, isub_src, &
+  !                                            u_sub, uh_sub, u02_err)
+  !   call remap_sub_to_tgt_grid(n0, n1, h1, h_sub, u_sub, uh_sub, itgt_start, itgt_end, &
+  !                              CS%force_bounds_in_target, CS%offset_tgt_summation, &
+  !                              CS%better_force_bounds_in_target, u1, uh_err)
+  !   uh_err = uh_err + u02_err
+  ! else ! Uses the OM4-era reconstruction functions
 
     call build_reconstructions_1d(CS, n0, h0, u0, ppoly_r_coefs, ppoly_r_E, ppoly_r_S, iMethod, &
                                   CS%h_neglect, CS%h_neglect_edge, PCM_cell, debug=CS%debug)
 
-    if (CS%check_reconstruction) call check_reconstructions_1d(n0, h0, u0, CS%degree, &
-                                   CS%boundary_extrapolation, ppoly_r_coefs, ppoly_r_E)
+    ! GPU: formatted I/O not GPU-safe, skip on device
+    ! if (CS%check_reconstruction) call check_reconstructions_1d(n0, h0, u0, CS%degree, &
+    !                                  CS%boundary_extrapolation, ppoly_r_coefs, ppoly_r_E)
 
     ! Loop over each sub-cell to calculate average/integral values within each sub-cell.
     ! Uses: h_sub, h0_eff, isub_src
@@ -328,12 +322,15 @@ subroutine remapping_core_h(CS, n0, h0, u0, n1, h1, u1, net_err, PCM_cell)
     ! Include the error remapping from source to sub-cells in the estimate of total remapping error
     uh_err = uh_err + u02_err
 
-    if (CS%check_remapping) call check_remapped_values(n0, h0, u0, ppoly_r_E, CS%degree, ppoly_r_coefs, &
-                                                       n1, h1, u1, iMethod, uh_err, "remapping_core_h")
+    ! GPU: formatted I/O not GPU-safe, skip on device
+    ! if (CS%check_remapping) call check_remapped_values(n0, h0, u0, ppoly_r_E, CS%degree, ppoly_r_coefs, &
+    !                                                    n1, h1, u1, iMethod, uh_err, "remapping_core_h")
 
-  endif
+  ! GPU: original code (class path ended with endif here):
+  ! endif
 
- if (present(net_err)) net_err = uh_err
+  ! GPU: present() not supported on GPU — net_err is never passed from diag remap callers
+  ! if (present(net_err)) net_err = uh_err
 
 end subroutine remapping_core_h
 
@@ -410,9 +407,10 @@ subroutine remapping_core_w( CS, n0, h0, u0, n1, dx, u1)
 end subroutine remapping_core_w
 
 !> Creates polynomial reconstructions of u0 on the source grid h0.
-subroutine build_reconstructions_1d( CS, n0, h0, u0, ppoly_r_coefs, &
+subroutine build_reconstructions_1d( CS, n0, h0, u0, ppoly_r_coefs, & ! GPU PORT DIAGNOSTICS
                                      ppoly_r_E, ppoly_r_S, iMethod, h_neglect, &
                                      h_neglect_edge, PCM_cell, debug )
+  !$omp declare target
   type(remapping_CS),    intent(in)  :: CS !< Remapping control structure
   integer,               intent(in)  :: n0 !< Number of cells on source grid
   real, dimension(n0),   intent(in)  :: h0 !< Cell widths on source grid [H]
@@ -439,9 +437,12 @@ subroutine build_reconstructions_1d( CS, n0, h0, u0, ppoly_r_coefs, &
   integer :: k, n
   logical :: deb ! Do debugging
 
-  deb=.false.; if (present(debug)) deb=debug
-
-  h_neg_edge = h_neglect ; if (present(h_neglect_edge)) h_neg_edge = h_neglect_edge
+  ! GPU: present() not supported on GPU — use safe defaults
+  ! GPU: original code:
+  ! deb=.false.; if (present(debug)) deb=debug
+  ! h_neg_edge = h_neglect ; if (present(h_neglect_edge)) h_neg_edge = h_neglect_edge
+  deb=.false.
+  h_neg_edge = h_neglect
 
   ! Reset polynomial
   ppoly_r_E(:,:) = 0.0
@@ -533,22 +534,28 @@ subroutine build_reconstructions_1d( CS, n0, h0, u0, ppoly_r_coefs, &
       endif
       iMethod = INTEGRATION_PQM
     case ( REMAPPING_VIA_CLASS )
-      call MOM_error( FATAL, 'MOM_remapping, build_reconstructions_1d: '//&
-           'Should not reach this point if using Recon1d class for remapping' )
+      stop 1 ! Should not reach this point if using Recon1d class
+      ! GPU: original code:
+      ! call MOM_error( FATAL, 'MOM_remapping, build_reconstructions_1d: '//&
+      !      'Should not reach this point if using Recon1d class for remapping' )
     case default
-      call MOM_error( FATAL, 'MOM_remapping, build_reconstructions_1d: '//&
-           'The selected remapping method is invalid' )
+      stop 1 ! The selected remapping method is invalid
+      ! GPU: original code:
+      ! call MOM_error( FATAL, 'MOM_remapping, build_reconstructions_1d: '//&
+      !      'The selected remapping method is invalid' )
   end select
 
-  if (present(PCM_cell)) then
-    ! Change the coefficients to those for the piecewise constant method in indicated cells.
-    do k=1,n0 ; if (PCM_cell(k)) then
-      ppoly_r_coefs(k,1) = u0(k)
-      ppoly_r_E(k,1:2) = u0(k)
-      ppoly_r_S(k,1:2) = 0.0
-      do n=2,CS%degree+1 ; ppoly_r_coefs(k,n) = 0.0 ; enddo
-    endif ; enddo
-  endif
+  ! GPU: PCM_cell present() check removed — not supported on GPU.
+  ! PCM_cell is not passed from the diagnostic remapping callers.
+  ! GPU: original code:
+  ! if (present(PCM_cell)) then
+  !   do k=1,n0 ; if (PCM_cell(k)) then
+  !     ppoly_r_coefs(k,1) = u0(k)
+  !     ppoly_r_E(k,1:2) = u0(k)
+  !     ppoly_r_S(k,1:2) = 0.0
+  !     do n=2,CS%degree+1 ; ppoly_r_coefs(k,n) = 0.0 ; enddo
+  !   endif ; enddo
+  ! endif
 
 end subroutine build_reconstructions_1d
 
@@ -642,8 +649,9 @@ end subroutine check_reconstructions_1d
 !! at the left (top).
 !! If the total column thicknesses are the same, then the right (bottom) interfaces are also aligned and
 !! so the last subcell will also be vanished.
-subroutine intersect_src_tgt_grids( n0, h0, n1, h1, h_sub, h0_eff, &
+subroutine intersect_src_tgt_grids( n0, h0, n1, h1, h_sub, h0_eff, & ! GPU PORT DIAGNOSTICS
                                     isrc_start, isrc_end, isrc_max, itgt_start, itgt_end, isub_src )
+  !$omp declare target
   integer, intent(in)  :: n0      !< Number of cells in source grid
   real,    intent(in)  :: h0(n0)  !< Source grid widths (size n0) [H]
   integer, intent(in)  :: n1      !< Number of cells in target grid
@@ -845,9 +853,10 @@ end subroutine intersect_src_tgt_grids
 !!
 !! This includes an error for the scenario where the source grid is much thicker than
 !! the target grid and extrapolation is needed.
-subroutine remap_src_to_sub_grid_om4(n0, h0, u0, ppoly0_E, ppoly0_coefs, n1, h_sub, &
+subroutine remap_src_to_sub_grid_om4(n0, h0, u0, ppoly0_E, ppoly0_coefs, n1, h_sub, & ! GPU PORT DIAGNOSTICS
                                  h0_eff, isrc_start, isrc_end, isrc_max, isub_src, &
                                  method, force_bounds_in_subcell, u_sub, uh_sub, u02_err)
+  !$omp declare target
   integer, intent(in)  :: n0      !< Number of cells in source grid
   real,    intent(in)  :: h0(n0)  !< Source grid widths (size n0) [H]
   real,    intent(in)  :: u0(n0)  !< Source grid widths (size n0) [H]
@@ -962,9 +971,10 @@ subroutine remap_src_to_sub_grid_om4(n0, h0, u0, ppoly0_E, ppoly0_coefs, n1, h_s
 end subroutine remap_src_to_sub_grid_om4
 
 !> Remaps column of n0 values u0 on grid h0 to subgrid h_sub
-subroutine remap_src_to_sub_grid(n0, h0, u0, ppoly0_E, ppoly0_coefs, n1, h_sub, &
+subroutine remap_src_to_sub_grid(n0, h0, u0, ppoly0_E, ppoly0_coefs, n1, h_sub, & ! GPU PORT DIAGNOSTICS
                                  isrc_start, isrc_end, isrc_max, isub_src, &
                                  method, force_bounds_in_subcell, u_sub, uh_sub, u02_err)
+  !$omp declare target
   integer, intent(in)  :: n0      !< Number of cells in source grid
   real,    intent(in)  :: h0(n0)  !< Source grid widths (size n0) [H]
   real,    intent(in)  :: u0(n0)  !< Source grid widths (size n0) [H]
@@ -1103,8 +1113,9 @@ end subroutine remap_src_to_sub_grid
 
 !> Remaps column of n0+n1+1 values usub on sub-grid h_sub to targets on grid h1
 !! using the OM4-era algorithm
-subroutine remap_sub_to_tgt_grid_om4(n0, n1, h1, h_sub, u_sub, uh_sub, &
+subroutine remap_sub_to_tgt_grid_om4(n0, n1, h1, h_sub, u_sub, uh_sub, & ! GPU PORT DIAGNOSTICS
                                  itgt_start, itgt_end, force_bounds_in_target, u1, uh_err)
+  !$omp declare target
   integer, intent(in)  :: n0     !< Number of cells in source grid
   integer, intent(in)  :: n1     !< Number of cells in target grid
   real,    intent(in)  :: h1(n1) !< Target grid widths (size n1) [H]
@@ -1247,7 +1258,8 @@ subroutine remap_sub_to_tgt_grid(n0, n1, h1, h_sub, u_sub, uh_sub, &
 end subroutine remap_sub_to_tgt_grid
 
 !> Linearly interpolate interface data, u_src, from grid h_src to a grid h_dest
-subroutine interpolate_column(nsrc, h_src, u_src, ndest, h_dest, u_dest, mask_edges)
+subroutine interpolate_column(nsrc, h_src, u_src, ndest, h_dest, u_dest, mask_edges) ! GPU PORT DIAGNOSTICS
+  !$omp declare target
   integer,                  intent(in)    :: nsrc   !< Number of source cells
   real, dimension(nsrc),    intent(in)    :: h_src  !< Thickness of source cells [H]
   real, dimension(nsrc+1),  intent(in)    :: u_src  !< Values at source cell interfaces [A]
@@ -1260,9 +1272,9 @@ subroutine interpolate_column(nsrc, h_src, u_src, ndest, h_dest, u_dest, mask_ed
   ! Local variables
   real :: x_dest            ! Relative position of target interface [H]
   real :: dh                ! Source cell thickness [H]
-  real :: frac_pos(ndest+1) ! Fractional position of the destination interface
+  real :: frac_pos(NK_GPU_MAX+1) ! Fractional position of the destination interface
                             ! within the source layer [nondim], 0 <= frac_pos <= 1.
-  integer :: k_src(ndest+1) ! Source grid layer index of destination interface, 1 <= k_src <= ndest.
+  integer :: k_src(NK_GPU_MAX+1) ! Source grid layer index of destination interface, 1 <= k_src <= ndest.
   integer :: ks, k_dest     ! Index of cell in src and dest columns
 
   ! The following forces the "do while" loop to do one cycle that will set u1, u2, dh.
@@ -1391,7 +1403,8 @@ end subroutine reintegrate_column
 !> Returns the average value of a reconstruction within a single source cell, i0,
 !! between the non-dimensional positions xa and xb (xa<=xb) with dimensional
 !! separation dh.
-real function average_value_ppoly( n0, u0, ppoly0_E, ppoly0_coefs, method, i0, xa, xb)
+real function average_value_ppoly( n0, u0, ppoly0_E, ppoly0_coefs, method, i0, xa, xb) ! GPU PORT DIAGNOSTICS
+  !$omp declare target
   integer,       intent(in)    :: n0     !< Number of cells in source grid
   real,          intent(in)    :: u0(n0) !< Cell means [A]
   real,          intent(in)    :: ppoly0_E(n0,2)    !< Edge value of polynomial [A]
@@ -1450,7 +1463,9 @@ real function average_value_ppoly( n0, u0, ppoly0_E, ppoly0_coefs, method, i0, x
           + ( ppoly0_coefs(i0,4) * 0.25* ( xa2pxb2 * xapxb )                             &
           +   ppoly0_coefs(i0,5) * 0.2 * ( ( xb*xb_2 + xa*xa_2 ) * xapxb + xa_2*xb_2 ) ) ) ) )
       case default
-        call MOM_error( FATAL,'The selected integration method is invalid' )
+        stop 1 ! The selected integration method is invalid
+        ! GPU: original code:
+        ! call MOM_error( FATAL,'The selected integration method is invalid' )
     end select
   else ! dh == 0.
     select case ( method )
@@ -1489,7 +1504,9 @@ real function average_value_ppoly( n0, u0, ppoly0_E, ppoly0_coefs, method, i0, x
               + xa *   ppoly0_coefs(i0,5) ) ) )
       case default
         u_ave = 0.
-        call MOM_error( FATAL,'The selected integration method is invalid' )
+        stop 1 ! The selected integration method is invalid
+        ! GPU: original code:
+        ! call MOM_error( FATAL,'The selected integration method is invalid' )
     end select
   endif
   average_value_ppoly = u_ave

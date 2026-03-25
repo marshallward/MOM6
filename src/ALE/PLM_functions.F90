@@ -187,7 +187,8 @@ end function PLM_extrapolate_slope
 !!
 !! It is assumed that the size of the array 'u' is equal to the number of cells
 !! defining 'grid' and 'ppoly'. No consistency check is performed here.
-subroutine PLM_reconstruction( N, h, u, edge_values, ppoly_coef, h_neglect )
+subroutine PLM_reconstruction( N, h, u, edge_values, ppoly_coef, h_neglect ) ! GPU PORT DIAGNOSTICS
+  !$omp declare target
   integer,              intent(in)    :: N !< Number of cells
   real, dimension(:),   intent(in)    :: h !< cell widths (size N) [H]
   real, dimension(:),   intent(in)    :: u !< cell averages (size N) in arbitrary units [A]
@@ -266,7 +267,8 @@ end subroutine PLM_reconstruction
 !!
 !! It is assumed that the size of the array 'u' is equal to the number of cells
 !! defining 'grid' and 'ppoly'. No consistency check is performed here.
-subroutine PLM_boundary_extrapolation( N, h, u, edge_values, ppoly_coef, h_neglect )
+subroutine PLM_boundary_extrapolation( N, h, u, edge_values, ppoly_coef, h_neglect ) ! GPU PORT DIAGNOSTICS
+  !$omp declare target
   integer,              intent(in)    :: N !< Number of cells
   real, dimension(:),   intent(in)    :: h !< cell widths (size N) [H]
   real, dimension(:),   intent(in)    :: u !< cell averages (size N) in arbitrary units [A]

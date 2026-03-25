@@ -18,7 +18,8 @@ contains
 !! where C refers to the array 'coeff'.
 !! The number of coefficients is given by ncoef and x
 !! is the coordinate where the polynomial is to be evaluated.
-real function evaluation_polynomial( coeff, ncoef, x )
+real function evaluation_polynomial( coeff, ncoef, x ) ! GPU PORT DIAGNOSTICS
+  !$omp declare target
   real, dimension(:), intent(in) :: coeff !< The coefficients of the polynomial, in units that
                                           !! vary with the index k as [A H^(k-1)]
   integer,            intent(in) :: ncoef !< The number of polynomial coefficients
@@ -45,7 +46,8 @@ end function evaluation_polynomial
 !! where C refers to the array 'coeff'.
 !! The number of coefficients is given by ncoef and x
 !! is the coordinate where the polynomial's derivative is to be evaluated.
-real function first_derivative_polynomial( coeff, ncoef, x )
+real function first_derivative_polynomial( coeff, ncoef, x ) ! GPU PORT DIAGNOSTICS
+  !$omp declare target
   real, dimension(:), intent(in) :: coeff !< The coefficients of the polynomial, in units that
                                           !! vary with the index k as [A H^(k-1)]
   integer,            intent(in) :: ncoef !< The number of polynomial coefficients
@@ -67,7 +69,8 @@ end function first_derivative_polynomial
 !> Exact integration of polynomial of degree npoly in arbitrary units of [A H]
 !!
 !! The array of coefficients (Coeff) must be of size npoly+1.
-real function integration_polynomial( xi0, xi1, Coeff, npoly )
+real function integration_polynomial( xi0, xi1, Coeff, npoly ) ! GPU PORT DIAGNOSTICS
+  !$omp declare target
   real,               intent(in) :: xi0   !< The lower bound of the integral in arbitrary
                                           !! thickness units [H]
   real,               intent(in) :: xi1   !< The upper bound of the integral in arbitrary

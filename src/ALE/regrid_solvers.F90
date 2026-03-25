@@ -18,7 +18,8 @@ contains
 !! This routine uses Gauss's algorithm to transform the system's original
 !! matrix into an upper triangular matrix. Back substitution yields the answer.
 !! The matrix A must be square, with the first index varing down the column.
-subroutine solve_linear_system( A, R, X, N, answer_date )
+subroutine solve_linear_system( A, R, X, N, answer_date ) ! GPU PORT DIAGNOSTICS
+  !$omp declare target
   integer,              intent(in)    :: N  !< The size of the system
   real, dimension(N,N), intent(inout) :: A  !< The matrix being inverted in arbitrary units [A] on
                                             !! input, but internally modified to become nondimensional
@@ -58,8 +59,10 @@ subroutine solve_linear_system( A, R, X, N, answer_date )
 
     ! If no pivot could be found, the system is singular.
     if ( .NOT. found_pivot ) then
-      write(0,*) ' A=',A
-      call MOM_error( FATAL, 'The linear system is singular !' )
+      stop 1 ! Singular system
+      ! GPU: original code used formatted I/O + MOM_error (not GPU-safe):
+      ! write(0,*) ' A=',A
+      ! call MOM_error( FATAL, 'The linear system is singular !' )
     endif
 
     ! If the pivot is in a row that is different than row i, that is if
@@ -114,7 +117,8 @@ end subroutine solve_linear_system
 !! This routine uses Gauss's algorithm to transform the system's original
 !! matrix into an upper triangular matrix. Back substitution then yields the answer.
 !! The matrix A must be square, with the first index varing along the row.
-subroutine linear_solver( N, A, R, X )
+subroutine linear_solver( N, A, R, X ) ! GPU PORT DIAGNOSTICS
+  !$omp declare target
   integer,              intent(in)    :: N  !< The size of the system
   real, dimension(N,N), intent(inout) :: A  !< The matrix being inverted in arbitrary units [A] on
                                             !! input, but internally modified to become nondimensional
@@ -136,8 +140,10 @@ subroutine linear_solver( N, A, R, X )
     ! pivot is in a row other than i, swap them.  If no valid pivot is found, i = N+1 after this loop.
     do k=i,N ; if ( abs( A(i,k) ) > eps ) exit ; enddo ! end loop to find pivot
     if ( k > N ) then  ! No pivot could be found and the system is singular.
-      write(0,*) ' A=',A
-      call MOM_error( FATAL, 'The linear system is singular !' )
+      stop 1 ! Singular system
+      ! GPU: original code used formatted I/O + MOM_error (not GPU-safe):
+      ! write(0,*) ' A=',A
+      ! call MOM_error( FATAL, 'The linear system is singular !' )
     endif
 
     ! If the pivot is in a row that is different than row i, swap those two rows, noting that both
@@ -164,8 +170,10 @@ subroutine linear_solver( N, A, R, X )
   enddo ! end loop on i
 
   if (A(N,N) == 0.0) then
-    ! no pivot could be found, and the sytem is singular
-    call MOM_error(FATAL, 'The final pivot in linear_solver is zero.')
+    ! no pivot could be found, and the system is singular
+    stop 1 ! Singular system
+    ! GPU: original code:
+    ! call MOM_error(FATAL, 'The final pivot in linear_solver is zero.')
   end if
 
   ! Solve the system by back substituting into what is now an upper-right matrix.
@@ -182,7 +190,8 @@ end subroutine linear_solver
 !!
 !! This routine uses Thomas's algorithm to solve the tridiagonal system AX = R.
 !! (A is made up of lower, middle and upper diagonals)
-subroutine solve_tridiagonal_system( Al, Ad, Au, R, X, N, answer_date )
+subroutine solve_tridiagonal_system( Al, Ad, Au, R, X, N, answer_date ) ! GPU PORT DIAGNOSTICS
+  !$omp declare target
   integer,            intent(in)  :: N   !< The size of the system
   real, dimension(N), intent(in)  :: Ad  !< Matrix center diagonal in arbitrary units [A]
   real, dimension(N), intent(in)  :: Al  !< Matrix lower diagonal [A]
@@ -245,7 +254,8 @@ end subroutine solve_tridiagonal_system
 !! lower (Al) and upper diagonals (Au) and a central diagonal Ad = Ac+Al+Au, where
 !! Al, Au, and Ac are all positive (or negative) definite.  However when Ac is smaller than
 !! roundoff compared with (Al+Au), the answers are prone to inaccuracy.
-subroutine solve_diag_dominant_tridiag( Al, Ac, Au, R, X, N )
+subroutine solve_diag_dominant_tridiag( Al, Ac, Au, R, X, N ) ! GPU PORT DIAGNOSTICS
+  !$omp declare target
   integer,            intent(in)  :: N   !< The size of the system
   real, dimension(N), intent(in)  :: Ac  !< Matrix center diagonal offset from Al + Au in arbitrary units [A]
   real, dimension(N), intent(in)  :: Al  !< Matrix lower diagonal [A]

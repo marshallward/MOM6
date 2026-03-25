@@ -20,7 +20,8 @@ public PPM_reconstruction, PPM_boundary_extrapolation, PPM_monotonicity
 contains
 
 !> Builds quadratic polynomials coefficients from cell mean and edge values.
-subroutine PPM_reconstruction( N, h, u, edge_values, ppoly_coef, h_neglect, answer_date)
+subroutine PPM_reconstruction( N, h, u, edge_values, ppoly_coef, h_neglect, answer_date) ! GPU PORT DIAGNOSTICS
+  !$omp declare target
   integer,              intent(in)    :: N !< Number of cells
   real, dimension(N),   intent(in)    :: h !< Cell widths [H]
   real, dimension(N),   intent(in)    :: u !< Cell averages in arbitrary coordinates [A]
@@ -54,7 +55,8 @@ end subroutine PPM_reconstruction
 !> Adjusts edge values using the standard PPM limiter (Colella & Woodward, JCP 1984)
 !! after first checking that the edge values are bounded by neighbors cell averages
 !! and that the edge values are monotonic between cell averages.
-subroutine PPM_limiter_standard( N, h, u, edge_values, h_neglect, answer_date )
+subroutine PPM_limiter_standard( N, h, u, edge_values, h_neglect, answer_date ) ! GPU PORT DIAGNOSTICS
+  !$omp declare target
   integer,              intent(in)    :: N !< Number of cells
   real, dimension(:),   intent(in)    :: h !< cell widths (size N) [H]
   real, dimension(:),   intent(in)    :: u !< cell average properties (size N) [A]
@@ -124,7 +126,8 @@ end subroutine PPM_limiter_standard
 
 !> Adjusts edge values using the original monotonicity constraint (Colella & Woodward, JCP 1984)
 !! Based on hybgen_ppm_coefs
-subroutine PPM_monotonicity( N, u, edge_values )
+subroutine PPM_monotonicity( N, u, edge_values ) ! GPU PORT DIAGNOSTICS
+  !$omp declare target
   integer,              intent(in)    :: N !< Number of cells
   real, dimension(:),   intent(in)    :: u !< cell average properties (size N) [A]
   real, dimension(:,:), intent(inout) :: edge_values !< Potentially modified edge values [A]
@@ -154,7 +157,7 @@ end subroutine PPM_monotonicity
 
 !------------------------------------------------------------------------------
 !> Reconstruction by parabolas within boundary cells
-subroutine PPM_boundary_extrapolation( N, h, u, edge_values, ppoly_coef, h_neglect)
+subroutine PPM_boundary_extrapolation( N, h, u, edge_values, ppoly_coef, h_neglect) ! GPU PORT DIAGNOSTICS
 !------------------------------------------------------------------------------
 ! Reconstruction by parabolas within boundary cells.
 !
@@ -179,6 +182,7 @@ subroutine PPM_boundary_extrapolation( N, h, u, edge_values, ppoly_coef, h_negle
 ! defining 'grid' and 'ppoly'. No consistency check is performed here.
 !------------------------------------------------------------------------------
 
+  !$omp declare target
   ! Arguments
   integer,              intent(in)    :: N !< Number of cells
   real, dimension(:),   intent(in)    :: h !< cell widths (size N) [H]

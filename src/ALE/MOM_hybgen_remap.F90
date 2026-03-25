@@ -13,7 +13,8 @@ public hybgen_plm_coefs, hybgen_ppm_coefs, hybgen_weno_coefs
 contains
 
 !> Set up the coefficients for PLM remapping of a set of scalars
-subroutine hybgen_plm_coefs(si, dpi, slope, nk, ns, thin, PCM_lay)
+subroutine hybgen_plm_coefs(si, dpi, slope, nk, ns, thin, PCM_lay) ! GPU PORT DIAGNOSTICS
+  !$omp declare target
   integer, intent(in)  :: nk        !< The number of input layers
   integer, intent(in)  :: ns        !< The number of scalar fields to work on
   real,    intent(in)  :: si(nk,ns) !< The cell-averaged input scalar fields [A]
@@ -90,7 +91,8 @@ end subroutine hybgen_plm_coefs
 
 
 !> Set up the coefficients for PPM remapping of a set of scalars
-subroutine hybgen_ppm_coefs(s, h_src, edges, nk, ns, thin, PCM_lay)
+subroutine hybgen_ppm_coefs(s, h_src, edges, nk, ns, thin, PCM_lay) ! GPU PORT DIAGNOSTICS
+  !$omp declare target
   integer, intent(in)  :: nk        !< The number of input layers
   integer, intent(in)  :: ns        !< The scalar fields to work on
   real,    intent(in)  :: s(nk,ns)  !< The input scalar fields [A]
@@ -225,7 +227,8 @@ end subroutine hybgen_ppm_coefs
 
 
 !> Set up the coefficients for PPM remapping of a set of scalars
-subroutine hybgen_weno_coefs(s, h_src, edges, nk, ns, thin, PCM_lay)
+subroutine hybgen_weno_coefs(s, h_src, edges, nk, ns, thin, PCM_lay) ! GPU PORT DIAGNOSTICS
+  !$omp declare target
   integer, intent(in)  :: nk        !< The number of input layers
   integer, intent(in)  :: ns        !< The number of scalar fields to work on
   real,    intent(in)  :: s(nk,ns)  !< The input scalar fields [A]

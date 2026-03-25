@@ -44,6 +44,7 @@ use MOM_verticalGrid,     only : verticalGrid_type
 use MOM_EOS,              only : EOS_type
 use MOM_remapping,        only : remapping_CS, initialize_remapping, remapping_core_h
 use MOM_remapping,        only : interpolate_column, reintegrate_column
+use MOM_remapping,        only : NK_GPU_MAX
 use MOM_regridding,       only : regridding_CS, initialize_regridding, end_regridding
 use MOM_regridding,       only : set_regrid_params, get_regrid_size
 use MOM_regridding,       only : getCoordinateInterfaces, set_h_neglect, set_dz_neglect
@@ -95,12 +96,23 @@ type :: diag_remap_ctrl
   integer :: interface_axes_id = 0 !< Vertical axes id for remapping at interfaces
   integer :: layer_axes_id = 0 !< Vertical axes id for remapping on layers
   logical :: om4_remap_via_sub_cells !< Use the OM4-era ramap_via_sub_cells
+
   integer :: answer_date      !< The vintage of the order of arithmetic and expressions
                               !! to use for remapping.  Values below 20190101 recover
                               !! the answers from 2018, while higher values use more
                               !! robust forms of the same remapping expressions.
 
 end type diag_remap_ctrl
+
+! Module-level persistent GPU work buffers for vertically_interpolate_field.
+! Must be module-level (not type members) because nvfortran can't resolve
+! derived-type component addresses inside omp target regions.
+real, dimension(:,:,:), allocatable :: gpu_h_work    !< Source thickness work buffer [H]
+real, dimension(:,:,:), allocatable :: gpu_htgt_work  !< Target thickness work buffer [H]
+real, dimension(:,:,:), allocatable :: gpu_fld_work   !< Field work buffer [A]
+real, dimension(:,:,:), allocatable :: gpu_out_work   !< Output work buffer [A]
+real, dimension(:,:),   allocatable :: gpu_mask_work  !< Mask work buffer [nondim]
+logical :: gpu_bufs_ready = .false.                   !< Whether module-level GPU buffers are mapped
 
 contains
 
@@ -266,6 +278,7 @@ end function
 !! coordinates then technically we should also regenerate the
 !! target grid whenever T/S change.
 subroutine diag_remap_update(remap_cs, G, GV, US, h, T, S, eqn_of_state, h_target)
+! GPU PORT DIAGNOSTICS
   type(diag_remap_ctrl),   intent(inout) :: remap_cs !< Diagnostic coordinate control structure
   type(ocean_grid_type),   pointer    :: G  !< The ocean's grid type
   type(verticalGrid_type), intent(in) :: GV !< ocean vertical grid structure
@@ -313,6 +326,8 @@ subroutine diag_remap_update(remap_cs, G, GV, US, h, T, S, eqn_of_state, h_targe
 
   if (.not. remap_cs%initialized) then
     ! Initialize remapping and regridding on the first call
+    ! print *, "[DIAG_REMAP_INIT] coord=", trim(remap_cs%diag_coord_name), &
+    !          " scheme=PPM_IH4 om4_subcells=", remap_cs%om4_remap_via_sub_cells
     call initialize_remapping(remap_cs%remap_cs, 'PPM_IH4', boundary_extrapolation=.false., &
                               om4_remap_via_sub_cells=remap_cs%om4_remap_via_sub_cells, &
                               answer_date=remap_cs%answer_date, &
@@ -412,8 +427,9 @@ subroutine diag_remap_do_remap(remap_cs, G, GV, US, h, staggered_in_x, staggered
 end subroutine diag_remap_do_remap
 
 !> The internal routine to remap a diagnostic field to an alternative vertical grid.
-subroutine do_remap(remap_cs, G, GV, US, isdf, jsdf, h, staggered_in_x, staggered_in_y, &
+subroutine do_remap(remap_cs, G, GV, US, isdf, jsdf, h, staggered_in_x, staggered_in_y, & 
                     field, remapped_field, mask)
+                    ! GPU PORT DIAGNOSTICS
   type(diag_remap_ctrl),   intent(in)  :: remap_cs !< Diagnostic coordinate control structure
   type(ocean_grid_type),   intent(in)  :: G  !< Ocean grid structure
   type(verticalGrid_type), intent(in)  :: GV !< ocean vertical grid structure
@@ -433,111 +449,242 @@ subroutine do_remap(remap_cs, G, GV, US, isdf, jsdf, h, staggered_in_x, staggere
                  optional, intent(in)  :: mask !< A mask for the field [nondim]
 
   ! Local variables
-  real, dimension(remap_cs%nz) :: h_dest ! Destination thicknesses [H ~> m or kg m-2] or [Z ~> m]
-  real, dimension(size(h,3)) :: h_src    ! A column of source thicknesses [H ~> m or kg m-2] or [Z ~> m]
+  type(remapping_CS) :: rcs                        ! Local copy of remapping CS for device mapping
+  real :: h_src(NK_GPU_MAX), h_dest(NK_GPU_MAX)    ! Thread-private column thickness arrays
+  real :: fld_loc(NK_GPU_MAX), out_loc(NK_GPU_MAX) ! Thread-private field/output arrays
   integer :: nz_src, nz_dest        ! The number of layers on the native and remapped grids
-  integer :: i, j                   ! Grid index
+  integer :: i, j, k                ! Grid index
+  logical :: have_mask
 
   nz_src = size(field,3)
   nz_dest = remap_cs%nz
-  remapped_field(:,:,:) = 0.
+  have_mask = present(mask)
+
+  ! Local copy of remapping control structure for device mapping
+  rcs = remap_cs%remap_cs
+
+  ! make sure buffers are there 
+  call ensure_gpu_buffers(remap_cs, G, nz_src)
+
+  ! Copy source data into persistent host-side buffers, then sync to device
+  gpu_h_work(G%isd:G%ied, G%jsd:G%jed, :) = h(:,:,:)
+  gpu_htgt_work(G%isd:G%ied, G%jsd:G%jed, :) = remap_cs%h(:,:,:)
+  do k=1,nz_src
+    do j=jsdf,jsdf+size(field,2)-1 ; do i=isdf,isdf+size(field,1)-1
+      gpu_fld_work(i,j,k) = field(i,j,k)
+    enddo ; enddo
+  enddo
+  if (have_mask) then
+    do j=jsdf,jsdf+size(mask,2)-1 ; do i=isdf,isdf+size(mask,1)-1
+      gpu_mask_work(i,j) = mask(i,j)
+    enddo ; enddo
+  endif
+
+  !$omp target update to(gpu_h_work, gpu_htgt_work, gpu_fld_work)
+  if (have_mask) then
+    !$omp target update to(gpu_mask_work)
+  endif
+
+  ! Zero-fill the output on device
+  !$omp target teams distribute parallel do collapse(3)
+  do k=1,nz_dest
+    do j=lbound(gpu_out_work,2),ubound(gpu_out_work,2)
+      do i=lbound(gpu_out_work,1),ubound(gpu_out_work,1)
+        gpu_out_work(i,j,k) = 0.
+      enddo
+    enddo
+  enddo
 
   if (staggered_in_x .and. .not. staggered_in_y) then
     ! U-points
-    if (present(mask)) then
-      do j=G%jsc,G%jec ; do I=G%IscB,G%IecB ; if (mask(I,j) > 0.) then
-        h_src(:) = 0.5 * (h(i,j,:) + h(i+1,j,:))
-        h_dest(:) = 0.5 * (remap_cs%h(i,j,:) + remap_cs%h(i+1,j,:))
-        call remapping_core_h(remap_cs%remap_cs, nz_src, h_src(:), field(I,j,:), &
-                              nz_dest, h_dest(:), remapped_field(I,j,:))
-      endif ; enddo ; enddo
-    else
+    if (have_mask) then
+      !$omp target teams distribute parallel do collapse(2) &
+      !$omp   map(to: rcs) private(h_src, h_dest, fld_loc, out_loc)
       do j=G%jsc,G%jec ; do I=G%IscB,G%IecB
-        h_src(:) = 0.5 * (h(i,j,:) + h(i+1,j,:))
-        h_dest(:) = 0.5 * (remap_cs%h(i,j,:) + remap_cs%h(i+1,j,:))
-        call remapping_core_h(remap_cs%remap_cs, nz_src, h_src(:), field(I,j,:), &
-                              nz_dest, h_dest(:), remapped_field(I,j,:))
+        if (gpu_mask_work(I,j) > 0.0) then
+          do k=1,nz_src
+            h_src(k) = 0.5 * (gpu_h_work(i,j,k) + gpu_h_work(i+1,j,k))
+            fld_loc(k) = gpu_fld_work(I,j,k)
+          enddo
+          do k=1,nz_dest
+            h_dest(k) = 0.5 * (gpu_htgt_work(i,j,k) + gpu_htgt_work(i+1,j,k))
+          enddo
+          call remapping_core_h(rcs, nz_src, h_src, fld_loc, nz_dest, h_dest, out_loc)
+          do k=1,nz_dest
+            gpu_out_work(I,j,k) = out_loc(k)
+          enddo
+        endif
+      enddo ; enddo
+    else
+      !$omp target teams distribute parallel do collapse(2) &
+      !$omp   map(to: rcs) private(h_src, h_dest, fld_loc, out_loc)
+      do j=G%jsc,G%jec ; do I=G%IscB,G%IecB
+        do k=1,nz_src
+          h_src(k) = 0.5 * (gpu_h_work(i,j,k) + gpu_h_work(i+1,j,k))
+          fld_loc(k) = gpu_fld_work(I,j,k)
+        enddo
+        do k=1,nz_dest
+          h_dest(k) = 0.5 * (gpu_htgt_work(i,j,k) + gpu_htgt_work(i+1,j,k))
+        enddo
+        call remapping_core_h(rcs, nz_src, h_src, fld_loc, nz_dest, h_dest, out_loc)
+        do k=1,nz_dest
+          gpu_out_work(I,j,k) = out_loc(k)
+        enddo
       enddo ; enddo
     endif
   elseif (staggered_in_y .and. .not. staggered_in_x) then
     ! V-points
-    if (present(mask)) then
-      do J=G%jscB,G%jecB ; do i=G%isc,G%iec ; if (mask(i,j) > 0.) then
-        h_src(:) = 0.5 * (h(i,j,:) + h(i,j+1,:))
-        h_dest(:) = 0.5 * (remap_cs%h(i,j,:) + remap_cs%h(i,j+1,:))
-        call remapping_core_h(remap_cs%remap_cs, nz_src, h_src(:), field(i,J,:), &
-                              nz_dest, h_dest(:), remapped_field(i,J,:))
-      endif ; enddo ; enddo
-    else
+    if (have_mask) then
+      !$omp target teams distribute parallel do collapse(2) &
+      !$omp   map(to: rcs) private(h_src, h_dest, fld_loc, out_loc)
       do J=G%jscB,G%jecB ; do i=G%isc,G%iec
-        h_src(:) = 0.5 * (h(i,j,:) + h(i,j+1,:))
-        h_dest(:) = 0.5 * (remap_cs%h(i,j,:) + remap_cs%h(i,j+1,:))
-        call remapping_core_h(remap_cs%remap_cs, nz_src, h_src(:), field(i,J,:), &
-                              nz_dest, h_dest(:), remapped_field(i,J,:))
+        if (gpu_mask_work(i,J) > 0.0) then
+          do k=1,nz_src
+            h_src(k) = 0.5 * (gpu_h_work(i,j,k) + gpu_h_work(i,j+1,k))
+            fld_loc(k) = gpu_fld_work(i,J,k)
+          enddo
+          do k=1,nz_dest
+            h_dest(k) = 0.5 * (gpu_htgt_work(i,j,k) + gpu_htgt_work(i,j+1,k))
+          enddo
+          call remapping_core_h(rcs, nz_src, h_src, fld_loc, nz_dest, h_dest, out_loc)
+          do k=1,nz_dest
+            gpu_out_work(i,J,k) = out_loc(k)
+          enddo
+        endif
+      enddo ; enddo
+    else
+      !$omp target teams distribute parallel do collapse(2) &
+      !$omp   map(to: rcs) private(h_src, h_dest, fld_loc, out_loc)
+      do J=G%jscB,G%jecB ; do i=G%isc,G%iec
+        do k=1,nz_src
+          h_src(k) = 0.5 * (gpu_h_work(i,j,k) + gpu_h_work(i,j+1,k))
+          fld_loc(k) = gpu_fld_work(i,J,k)
+        enddo
+        do k=1,nz_dest
+          h_dest(k) = 0.5 * (gpu_htgt_work(i,j,k) + gpu_htgt_work(i,j+1,k))
+        enddo
+        call remapping_core_h(rcs, nz_src, h_src, fld_loc, nz_dest, h_dest, out_loc)
+        do k=1,nz_dest
+          gpu_out_work(i,J,k) = out_loc(k)
+        enddo
       enddo ; enddo
     endif
   elseif ((.not. staggered_in_x) .and. (.not. staggered_in_y)) then
     ! H-points
-    if (present(mask)) then
-      do j=G%jsc,G%jec ; do i=G%isc,G%iec ; if (mask(i,j) > 0.) then
-        call remapping_core_h(remap_cs%remap_cs, nz_src, h(i,j,:), field(i,j,:), &
-                              nz_dest, remap_cs%h(i,j,:), remapped_field(i,j,:))
-      endif ; enddo ; enddo
-    else
+    if (have_mask) then
+      !$omp target teams distribute parallel do collapse(2) &
+      !$omp   map(to: rcs) private(h_src, h_dest, fld_loc, out_loc)
       do j=G%jsc,G%jec ; do i=G%isc,G%iec
-        call remapping_core_h(remap_cs%remap_cs, nz_src, h(i,j,:), field(i,j,:), &
-                              nz_dest, remap_cs%h(i,j,:), remapped_field(i,j,:))
+        if (gpu_mask_work(i,j) > 0.0) then
+          do k=1,nz_src
+            h_src(k) = gpu_h_work(i,j,k)
+            fld_loc(k) = gpu_fld_work(i,j,k)
+          enddo
+          do k=1,nz_dest
+            h_dest(k) = gpu_htgt_work(i,j,k)
+          enddo
+          call remapping_core_h(rcs, nz_src, h_src, fld_loc, nz_dest, h_dest, out_loc)
+          do k=1,nz_dest
+            gpu_out_work(i,j,k) = out_loc(k)
+          enddo
+        endif
+      enddo ; enddo
+    else
+      !$omp target teams distribute parallel do collapse(2) &
+      !$omp   map(to: rcs) private(h_src, h_dest, fld_loc, out_loc)
+      do j=G%jsc,G%jec ; do i=G%isc,G%iec
+        do k=1,nz_src
+          h_src(k) = gpu_h_work(i,j,k)
+          fld_loc(k) = gpu_fld_work(i,j,k)
+        enddo
+        do k=1,nz_dest
+          h_dest(k) = gpu_htgt_work(i,j,k)
+        enddo
+        call remapping_core_h(rcs, nz_src, h_src, fld_loc, nz_dest, h_dest, out_loc)
+        do k=1,nz_dest
+          gpu_out_work(i,j,k) = out_loc(k)
+        enddo
       enddo ; enddo
     endif
   else
     call assert(.false., 'diag_remap_do_remap: Unsupported axis combination')
   endif
 
+  ! Copy result back from device
+  !$omp target update from(gpu_out_work)
+  do k=1,nz_dest
+    do j=jsdf,jsdf+size(remapped_field,2)-1
+      do i=isdf,isdf+size(remapped_field,1)-1
+        remapped_field(i,j,k) = gpu_out_work(i,j,k)
+      enddo
+    enddo
+  enddo
+
 end subroutine do_remap
 
-!> Calculate masks for target grid
-subroutine diag_remap_calc_hmask(remap_cs, G, mask)
+!> Calculate masks for target grid.
+!! Both mask and h must already be present on the device (via prior enter data map).
+!! G%mask2dT must also be device-resident.
+subroutine diag_remap_calc_hmask(remap_cs, G, mask, h)
+! GPU PORT DIAGNOSTICS
   type(diag_remap_ctrl),  intent(in)  :: remap_cs !< Diagnostic coordinate control structure
   type(ocean_grid_type),  intent(in)  :: G    !< Ocean grid structure
   real, dimension(G%isd:,G%jsd:,:), &
                           intent(out) :: mask !< h-point mask for target grid [nondim]
+  real, dimension(G%isd:,G%jsd:,:), &
+                          intent(in)  :: h    !< Remap grid thicknesses [H ~> m or kg m-2] or [Z ~> m]
 
   ! Local variables
-  real, dimension(remap_cs%nz) :: h_dest ! Destination thicknesses [H ~> m or kg m-2] or [Z ~> m]
-  integer :: i, j, k
+  integer :: i, j, k, nz
   logical :: mask_vanished_layers
   real :: h_tot      ! Sum of all thicknesses [H ~> m or kg m-2] or [Z ~> m]
   real :: h_err      ! An estimate of a negligible thickness [H ~> m or kg m-2] or [Z ~> m]
+  real :: h_k        ! Thickness of the current layer [H ~> m or kg m-2] or [Z ~> m]
 
   call assert(remap_cs%initialized, 'diag_remap_calc_hmask: remap_cs not initialized.')
 
   ! Only z*-like diagnostic coordinates should have a 3d mask
   mask_vanished_layers = (remap_cs%vertical_coord == coordinateMode('ZSTAR'))
-  mask(:,:,:) = 0.
+  nz = remap_cs%nz
 
-  do j=G%jsc-1,G%jec+1 ; do i=G%isc-1,G%iec+1
-    if (G%mask2dT(i,j)>0.) then
-      if (mask_vanished_layers) then
-        h_dest(:) = remap_cs%h(i,j,:)
+  ! Zero-fill the mask on device
+  !$omp target teams distribute parallel do collapse(3)
+  do k=1,nz ; do j=G%jsd,G%jed ; do i=G%isd,G%ied
+    mask(i,j,k) = 0.
+  enddo ; enddo ; enddo
+
+  if (mask_vanished_layers) then
+    ! z*-like coordinate: mask out vanished layers.
+    ! The k-accumulation (h_tot, h_err) is sequential per column,
+    ! but columns are independent → collapse(2) over (i,j).
+    !$omp target teams distribute parallel do collapse(2) &
+    !$omp   private(k, h_tot, h_err, h_k)
+    do j=G%jsc-1,G%jec+1 ; do i=G%isc-1,G%iec+1
+      if (G%mask2dT(i,j) > 0.) then
         h_tot = 0.
         h_err = 0.
-        do k=1, remap_cs%nz
-          h_tot = h_tot + h_dest(k)
+        do k=1, nz
+          h_k = h(i,j,k)
+          h_tot = h_tot + h_k
           ! This is an overestimate of how thick a vanished layer might be, that
           ! appears due to round-off.
           h_err = h_err + epsilon(h_tot) * h_tot
           ! Mask out vanished layers
-          if (h_dest(k)<=8.*h_err) then
-            mask(i,j,k) = 0.
-          else
+          if (h_k > 8.*h_err) then
             mask(i,j,k) = 1.
           endif
         enddo
-      else ! all layers might contain data
-        mask(i,j,:) = 1.
       endif
-    endif
-  enddo ; enddo
+    enddo ; enddo
+  else
+    ! rho/sigma coordinates: all layers might contain data
+    !$omp target teams distribute parallel do collapse(3)
+    do k=1,nz ; do j=G%jsc-1,G%jec+1 ; do i=G%isc-1,G%iec+1
+      if (G%mask2dT(i,j) > 0.) then
+        mask(i,j,k) = 1.
+      endif
+    enddo ; enddo ; enddo
+  endif
 
 end subroutine diag_remap_calc_hmask
 
@@ -660,8 +807,9 @@ subroutine vertically_reintegrate_field(remap_cs, G, isdf, jsdf, h, h_target, st
 end subroutine vertically_reintegrate_field
 
 !> Vertically interpolate diagnostic field to alternative vertical grid.
-subroutine vertically_interpolate_diag_field(remap_cs, G, h, staggered_in_x, staggered_in_y, &
+subroutine vertically_interpolate_diag_field(remap_cs, G, h, staggered_in_x, staggered_in_y, & 
                                              mask, field, interpolated_field)
+! GPU PORT DIAGNOSTICS
   type(diag_remap_ctrl),  intent(in) :: remap_cs !< Diagnostic coordinate control structure
   type(ocean_grid_type),  intent(in) :: G   !< Ocean grid structure
   real, dimension(:,:,:), intent(in) :: h   !< The current thicknesses [H ~> m or kg m-2] or [Z ~> m],
@@ -693,86 +841,233 @@ subroutine vertically_interpolate_diag_field(remap_cs, G, h, staggered_in_x, sta
 
 end subroutine vertically_interpolate_diag_field
 
+!> Ensure persistent GPU work buffers are allocated and device-mapped.
+!! Buffers are sized to the full domain so they
+!! work for h-, u-, and v-point fields without reallocation. Will it die for multi MPI?
+subroutine ensure_gpu_buffers(remap_cs, G, nz_src) 
+! GPU PORT DIAGNOSTICS
+  type(diag_remap_ctrl),  intent(in) :: remap_cs !< Diagnostic coordinate control structure
+  type(ocean_grid_type),  intent(in)    :: G    !< Ocean grid structure
+  integer,                intent(in)    :: nz_src !< Number of source vertical levels
+
+  integer :: nz_dest, isd, ied, jsd, jed
+
+  if (gpu_bufs_ready) return
+
+  nz_dest = remap_cs%nz
+
+  ! Use the widest bounds to cover h-, u-, and v-point fields
+  isd = min(G%isd, G%IsdB) ; ied = max(G%ied, G%IedB)
+  jsd = min(G%jsd, G%JsdB) ; jed = max(G%jed, G%JedB)
+
+  allocate(gpu_h_work   (isd:ied, jsd:jed, nz_src))
+  allocate(gpu_htgt_work(isd:ied, jsd:jed, nz_dest))
+  allocate(gpu_fld_work (isd:ied, jsd:jed, nz_src+1))
+  allocate(gpu_out_work (isd:ied, jsd:jed, nz_dest+1))
+  allocate(gpu_mask_work(isd:ied, jsd:jed))
+
+  !$omp target enter data map(alloc: gpu_h_work, gpu_htgt_work)
+  !$omp target enter data map(alloc: gpu_fld_work, gpu_out_work)
+  !$omp target enter data map(alloc: gpu_mask_work)
+
+  gpu_bufs_ready = .true.
+end subroutine ensure_gpu_buffers
+
 !> Internal routine to vertically interpolate a diagnostic field to an alternative vertical grid.
+!! Vertically interpolate a diagnostic field to an alternative vertical grid on GPU.
+!! Uses persistent device-mapped work buffers to avoid per-call alloc/map overhead.
 subroutine vertically_interpolate_field(remap_cs, G, isdf, jsdf, h, staggered_in_x, staggered_in_y, &
                                         field, interpolated_field, mask)
-  type(diag_remap_ctrl),  intent(in)  :: remap_cs !< Diagnostic coordinate control structure
-  type(ocean_grid_type),  intent(in)  :: G    !< Ocean grid structure
-  integer,                intent(in)  :: isdf !< The starting i-index in memory for field
-  integer,                intent(in)  :: jsdf !< The starting j-index in memory for field
+  type(diag_remap_ctrl),  intent(in)    :: remap_cs !< Diagnostic coordinate control structure
+  type(ocean_grid_type),  intent(in)    :: G    !< Ocean grid structure
+  integer,                intent(in)    :: isdf !< The starting i-index in memory for field
+  integer,                intent(in)    :: jsdf !< The starting j-index in memory for field
   real, dimension(G%isd:,G%jsd:,:), &
-                          intent(in)  :: h    !< The current thicknesses [H ~> m or kg m-2] or [Z ~> m],
-                                              !! depending on the value of remap_cs%Z_based_coord
-  logical,                intent(in)  :: staggered_in_x !< True is the x-axis location is at u or q points
-  logical,                intent(in)  :: staggered_in_y !< True is the y-axis location is at v or q points
+                          intent(in)    :: h    !< The current thicknesses [H ~> m or kg m-2] or [Z ~> m],
+                                                !! depending on the value of remap_cs%Z_based_coord
+  logical,                intent(in)    :: staggered_in_x !< True is the x-axis location is at u or q points
+  logical,                intent(in)    :: staggered_in_y !< True is the y-axis location is at v or q points
   real, dimension(isdf:,jsdf:,:), &
-                          intent(in)  :: field !< The diagnostic field to be remapped [A]
+                          intent(in)    :: field !< The diagnostic field to be remapped [A]
   real, dimension(isdf:,jsdf:,:), &
-                          intent(out) :: interpolated_field !< Field argument remapped to alternative coordinate [A]
+                          intent(out)   :: interpolated_field !< Field argument remapped to alternative coordinate [A]
   real, dimension(isdf:,jsdf:), &
-                optional, intent(in)  :: mask !< A mask for the field [nondim]
+                optional, intent(in)    :: mask !< A mask for the field [nondim]
 
   ! Local variables
-  real, dimension(remap_cs%nz) :: h_dest ! Destination thicknesses [H ~> m or kg m-2] or [Z ~> m]
-  real, dimension(size(h,3)) :: h_src    ! A column of source thicknesses [H ~> m or kg m-2] or [Z ~> m]
+  real :: h_src(NK_GPU_MAX), h_dest(NK_GPU_MAX) ! Column thickness work arrays for staggered averaging
+  real :: fld_loc(NK_GPU_MAX+1), out_loc(NK_GPU_MAX+1) ! Thread-private copies to avoid strided-slice heap temps
   integer :: nz_src, nz_dest        ! The number of layers on the native and remapped grids
-  integer :: i, j                   !< Grid index
-
-  interpolated_field(:,:,:) = 0.
+  integer :: i, j, k                !< Grid index
+  logical :: have_mask
 
   nz_src = size(h,3)
   nz_dest = remap_cs%nz
+  have_mask = present(mask)
+
+  call ensure_gpu_buffers(remap_cs, G, nz_src)
+
+  ! Copy source data into persistent host-side buffers, then sync to device.
+  ! This avoids per-call allocate/map/delete overhead — only the data transfer remains.
+  gpu_h_work(G%isd:G%ied, G%jsd:G%jed, :) = h(:,:,:)
+  gpu_htgt_work(G%isd:G%ied, G%jsd:G%jed, :) = remap_cs%h(:,:,:)
+  ! Field and output use isdf:,jsdf: bounds — copy into same region of work buffer
+  do k=1,size(field,3)
+    do j=jsdf,jsdf+size(field,2)-1 ; do i=isdf,isdf+size(field,1)-1
+      gpu_fld_work(i,j,k) = field(i,j,k)
+    enddo ; enddo
+  enddo
+  if (have_mask) then
+    do j=jsdf,jsdf+size(mask,2)-1 ; do i=isdf,isdf+size(mask,1)-1
+      gpu_mask_work(i,j) = mask(i,j)
+    enddo ; enddo
+  endif
+
+  !$omp target update to(gpu_h_work, gpu_htgt_work, gpu_fld_work)
+  if (have_mask) then
+    !$omp target update to(gpu_mask_work)
+  endif
+
+  ! Zero-fill the output on device
+  !$omp target teams distribute parallel do collapse(3)
+  do k=1,nz_dest+1
+    do j=lbound(gpu_out_work,2),ubound(gpu_out_work,2)
+      do i=lbound(gpu_out_work,1),ubound(gpu_out_work,1)
+        gpu_out_work(i,j,k) = 0.
+      enddo
+    enddo
+  enddo
 
   if (staggered_in_x .and. .not. staggered_in_y) then
     ! U-points
-    if (present(mask)) then
-      do j=G%jsc,G%jec ; do I=G%IscB,G%IecB ; if (mask(I,j) > 0.0) then
-        h_src(:) = 0.5 * (h(i,j,:) + h(i+1,j,:))
-        h_dest(:) = 0.5 * (remap_cs%h(i,j,:) + remap_cs%h(i+1,j,:))
-        call interpolate_column(nz_src, h_src, field(I,j,:), &
-                                nz_dest, h_dest, interpolated_field(I,j,:), .true.)
-      endif ; enddo ; enddo
-    else
+    if (have_mask) then
+      !$omp target teams distribute parallel do collapse(2) private(h_src, h_dest, fld_loc, out_loc)
       do j=G%jsc,G%jec ; do I=G%IscB,G%IecB
-        h_src(:) = 0.5 * (h(i,j,:) + h(i+1,j,:))
-        h_dest(:) = 0.5 * (remap_cs%h(i,j,:) + remap_cs%h(i+1,j,:))
-        call interpolate_column(nz_src, h_src, field(I,j,:), &
-                                nz_dest, h_dest, interpolated_field(I,j,:), .true.)
+        if (gpu_mask_work(I,j) > 0.0) then
+          do k=1,nz_src
+            h_src(k) = 0.5 * (gpu_h_work(i,j,k) + gpu_h_work(i+1,j,k))
+          enddo
+          do k=1,nz_dest
+            h_dest(k) = 0.5 * (gpu_htgt_work(i,j,k) + gpu_htgt_work(i+1,j,k))
+          enddo
+          do k=1,nz_src+1
+            fld_loc(k) = gpu_fld_work(I,j,k)
+          enddo
+          call interpolate_column(nz_src, h_src, fld_loc, nz_dest, h_dest, out_loc, .true.)
+          do k=1,nz_dest+1
+            gpu_out_work(I,j,k) = out_loc(k)
+          enddo
+        endif
+      enddo ; enddo
+    else
+      !$omp target teams distribute parallel do collapse(2) private(h_src, h_dest, fld_loc, out_loc)
+      do j=G%jsc,G%jec ; do I=G%IscB,G%IecB
+        do k=1,nz_src
+          h_src(k) = 0.5 * (gpu_h_work(i,j,k) + gpu_h_work(i+1,j,k))
+        enddo
+        do k=1,nz_dest
+          h_dest(k) = 0.5 * (gpu_htgt_work(i,j,k) + gpu_htgt_work(i+1,j,k))
+        enddo
+        do k=1,nz_src+1
+          fld_loc(k) = gpu_fld_work(I,j,k)
+        enddo
+        call interpolate_column(nz_src, h_src, fld_loc, nz_dest, h_dest, out_loc, .true.)
+        do k=1,nz_dest+1
+          gpu_out_work(I,j,k) = out_loc(k)
+        enddo
       enddo ; enddo
     endif
   elseif (staggered_in_y .and. .not. staggered_in_x) then
     ! V-points
-    if (present(mask)) then
-      do J=G%jscB,G%jecB ; do i=G%isc,G%iec ; if (mask(I,j) > 0.0) then
-        h_src(:) = 0.5 * (h(i,j,:) + h(i,j+1,:))
-        h_dest(:) = 0.5 * (remap_cs%h(i,j,:) + remap_cs%h(i,j+1,:))
-        call interpolate_column(nz_src, h_src, field(i,J,:), &
-                                nz_dest, h_dest, interpolated_field(i,J,:), .true.)
-      endif ; enddo ; enddo
-    else
+    if (have_mask) then
+      !$omp target teams distribute parallel do collapse(2) private(h_src, h_dest, fld_loc, out_loc)
       do J=G%jscB,G%jecB ; do i=G%isc,G%iec
-        h_src(:) = 0.5 * (h(i,j,:) + h(i,j+1,:))
-        h_dest(:) = 0.5 * (remap_cs%h(i,j,:) + remap_cs%h(i,j+1,:))
-        call interpolate_column(nz_src, h_src, field(i,J,:), &
-                                nz_dest, h_dest, interpolated_field(i,J,:), .true.)
+        if (gpu_mask_work(i,J) > 0.0) then
+          do k=1,nz_src
+            h_src(k) = 0.5 * (gpu_h_work(i,j,k) + gpu_h_work(i,j+1,k))
+          enddo
+          do k=1,nz_dest
+            h_dest(k) = 0.5 * (gpu_htgt_work(i,j,k) + gpu_htgt_work(i,j+1,k))
+          enddo
+          do k=1,nz_src+1
+            fld_loc(k) = gpu_fld_work(i,J,k)
+          enddo
+          call interpolate_column(nz_src, h_src, fld_loc, nz_dest, h_dest, out_loc, .true.)
+          do k=1,nz_dest+1
+            gpu_out_work(i,J,k) = out_loc(k)
+          enddo
+        endif
+      enddo ; enddo
+    else
+      !$omp target teams distribute parallel do collapse(2) private(h_src, h_dest, fld_loc, out_loc)
+      do J=G%jscB,G%jecB ; do i=G%isc,G%iec
+        do k=1,nz_src
+          h_src(k) = 0.5 * (gpu_h_work(i,j,k) + gpu_h_work(i,j+1,k))
+        enddo
+        do k=1,nz_dest
+          h_dest(k) = 0.5 * (gpu_htgt_work(i,j,k) + gpu_htgt_work(i,j+1,k))
+        enddo
+        do k=1,nz_src+1
+          fld_loc(k) = gpu_fld_work(i,J,k)
+        enddo
+        call interpolate_column(nz_src, h_src, fld_loc, nz_dest, h_dest, out_loc, .true.)
+        do k=1,nz_dest+1
+          gpu_out_work(i,J,k) = out_loc(k)
+        enddo
       enddo ; enddo
     endif
   elseif ((.not. staggered_in_x) .and. (.not. staggered_in_y)) then
     ! H-points
-    if (present(mask)) then
-      do j=G%jsc,G%jec ; do i=G%isc,G%iec ; if (mask(i,j) > 0.0) then
-        call interpolate_column(nz_src, h(i,j,:), field(i,j,:), &
-                                nz_dest, remap_cs%h(i,j,:), interpolated_field(i,j,:), .true.)
-      endif ; enddo ; enddo
-    else
+    if (have_mask) then
+      !$omp target teams distribute parallel do collapse(2) private(h_src, h_dest, fld_loc, out_loc)
       do j=G%jsc,G%jec ; do i=G%isc,G%iec
-        call interpolate_column(nz_src, h(i,j,:), field(i,j,:), &
-                                nz_dest, remap_cs%h(i,j,:), interpolated_field(i,j,:), .true.)
+        if (gpu_mask_work(i,j) > 0.0) then
+          do k=1,nz_src
+            h_src(k) = gpu_h_work(i,j,k)
+          enddo
+          do k=1,nz_src+1
+            fld_loc(k) = gpu_fld_work(i,j,k)
+          enddo
+          do k=1,nz_dest
+            h_dest(k) = gpu_htgt_work(i,j,k)
+          enddo
+          call interpolate_column(nz_src, h_src, fld_loc, nz_dest, h_dest, out_loc, .true.)
+          do k=1,nz_dest+1
+            gpu_out_work(i,j,k) = out_loc(k)
+          enddo
+        endif
+      enddo ; enddo
+    else
+      !$omp target teams distribute parallel do collapse(2) private(h_src, h_dest, fld_loc, out_loc)
+      do j=G%jsc,G%jec ; do i=G%isc,G%iec
+        do k=1,nz_src
+          h_src(k) = gpu_h_work(i,j,k)
+        enddo
+        do k=1,nz_src+1
+          fld_loc(k) = gpu_fld_work(i,j,k)
+        enddo
+        do k=1,nz_dest
+          h_dest(k) = gpu_htgt_work(i,j,k)
+        enddo
+        call interpolate_column(nz_src, h_src, fld_loc, nz_dest, h_dest, out_loc, .true.)
+        do k=1,nz_dest+1
+          gpu_out_work(i,j,k) = out_loc(k)
+        enddo
       enddo ; enddo
     endif
   else
     call assert(.false., 'vertically_interpolate_diag_field: Q point remapping is not coded yet.')
   endif
+
+  ! Copy result back from device
+  !$omp target update from(gpu_out_work)
+  do k=1,nz_dest+1
+    do j=jsdf,jsdf+size(interpolated_field,2)-1
+      do i=isdf,isdf+size(interpolated_field,1)-1
+        interpolated_field(i,j,k) = gpu_out_work(i,j,k)
+      enddo
+    enddo
+  enddo
 
 end subroutine vertically_interpolate_field
 

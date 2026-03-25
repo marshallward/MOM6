@@ -38,7 +38,8 @@ contains
 !! Both boundary edge values are set equal to the boundary cell averages.
 !! Any extrapolation scheme is applied after this routine has been called.
 !! Therefore, boundary cells are treated as if they were local extrema.
-subroutine bound_edge_values( N, h, u, edge_val, h_neglect, answer_date )
+subroutine bound_edge_values( N, h, u, edge_val, h_neglect, answer_date ) ! GPU PORT DIAGNOSTICS
+  !$omp declare target
   integer,              intent(in)    :: N !< Number of cells
   real, dimension(N),   intent(in)    :: h !< cell widths [H]
   real, dimension(N),   intent(in)    :: u !< cell average properties in arbitrary units [A]
@@ -131,7 +132,8 @@ end subroutine average_discontinuous_edge_values
 !!
 !! For each interior edge, check whether the edge values are discontinuous.
 !! If so and if they are not monotonic, replace each edge value by their average.
-subroutine check_discontinuous_edge_values( N, u, edge_val )
+subroutine check_discontinuous_edge_values( N, u, edge_val ) ! GPU PORT DIAGNOSTICS
+  !$omp declare target
   integer,              intent(in)    :: N !< Number of cells
   real, dimension(N),   intent(in)    :: u !< cell averages in arbitrary units [A]
   real, dimension(N,2), intent(inout) :: edge_val !< Cell edge values [A]; the
@@ -212,7 +214,8 @@ end subroutine edge_values_explicit_h2
 !! available interpolant.
 !!
 !! For this fourth-order scheme, at least four cells must exist.
-subroutine edge_values_explicit_h4( N, h, u, edge_val, h_neglect, answer_date )
+subroutine edge_values_explicit_h4( N, h, u, edge_val, h_neglect, answer_date ) ! GPU PORT DIAGNOSTICS
+  !$omp declare target
   integer,              intent(in)    :: N !< Number of cells
   real, dimension(N),   intent(in)    :: h !< cell widths [H]
   real, dimension(N),   intent(in)    :: u !< cell average properties in arbitrary units [A]
@@ -365,7 +368,8 @@ end subroutine edge_values_explicit_h4
 !!                 i-1/2
 !!
 !! For this fourth-order scheme, at least four cells must exist.
-subroutine edge_values_explicit_h4cw( N, h, u, edge_val, h_neglect )
+subroutine edge_values_explicit_h4cw( N, h, u, edge_val, h_neglect ) ! GPU PORT DIAGNOSTICS
+  !$omp declare target
   integer,              intent(in)    :: N !< Number of cells
   real, dimension(N),   intent(in)    :: h !< cell widths [H]
   real, dimension(N),   intent(in)    :: u !< cell average properties in arbitrary units [A]
@@ -472,7 +476,8 @@ end subroutine edge_values_explicit_h4cw
 !!
 !! There are N+1 unknowns and we are able to write N-1 equations. The
 !! boundary conditions close the system.
-subroutine edge_values_implicit_h4( N, h, u, edge_val, h_neglect, answer_date )
+subroutine edge_values_implicit_h4( N, h, u, edge_val, h_neglect, answer_date ) ! GPU PORT DIAGNOSTICS
+  !$omp declare target
   integer,              intent(in)    :: N !< Number of cells
   real, dimension(N),   intent(in)    :: h !< cell widths [H]
   real, dimension(N),   intent(in)    :: u !< cell average properties in arbitrary units [A]
@@ -510,7 +515,10 @@ subroutine edge_values_implicit_h4( N, h, u, edge_val, h_neglect, answer_date )
                            tri_x        ! tridiagonal system (solution vector) [A]
   logical   :: use_2018_answers  ! If true use older, less accurate expressions.
 
-  use_2018_answers = .true. ; if (present(answer_date)) use_2018_answers = (answer_date < 20190101)
+  ! present() not supported on GPU — answer_date always passed from callers
+  ! GPU: original code:
+  ! use_2018_answers = .true. ; if (present(answer_date)) use_2018_answers = (answer_date < 20190101)
+  use_2018_answers = (answer_date < 20190101)
 
   ! Loop on cells (except last one)
   do i = 1,N-1
@@ -633,7 +641,8 @@ end subroutine edge_values_implicit_h4
 
 !> Determine a one-sided 4th order polynomial fit of u to the data points for the purposes of specifying
 !! edge values, as described in the appendix of White and Adcroft JCP 2008.
-subroutine end_value_h4(dz, u, Csys)
+subroutine end_value_h4(dz, u, Csys) ! GPU PORT DIAGNOSTICS
+  !$omp declare target
   real, dimension(4), intent(in)  :: dz    !< The thicknesses of 4 layers, starting at the edge [H].
                                            !! The values of dz must be positive.
   real, dimension(4), intent(in)  :: u     !< The average properties of 4 layers, starting at the edge [A]
@@ -778,7 +787,8 @@ end subroutine end_value_h4
 !!
 !! There are N+1 unknowns and we are able to write N-1 equations. The
 !! boundary conditions close the system.
-subroutine edge_slopes_implicit_h3( N, h, u, edge_slopes, h_neglect, answer_date )
+subroutine edge_slopes_implicit_h3( N, h, u, edge_slopes, h_neglect, answer_date ) ! GPU PORT DIAGNOSTICS
+  !$omp declare target
   integer,              intent(in)    :: N !< Number of cells
   real, dimension(N),   intent(in)    :: h !< cell widths [H]
   real, dimension(N),   intent(in)    :: u !< cell average properties in arbitrary units [A]
@@ -950,7 +960,8 @@ end subroutine edge_slopes_implicit_h3
 
 !------------------------------------------------------------------------------
 !> Compute ih5 edge slopes (implicit fifth order accurate)
-subroutine edge_slopes_implicit_h5( N, h, u, edge_slopes, h_neglect, answer_date )
+subroutine edge_slopes_implicit_h5( N, h, u, edge_slopes, h_neglect, answer_date ) ! GPU PORT DIAGNOSTICS
+  !$omp declare target
   integer,              intent(in)    :: N !< Number of cells
   real, dimension(N),   intent(in)    :: h !< cell widths [H]
   real, dimension(N),   intent(in)    :: u !< cell average properties in arbitrary units [A]
@@ -1222,7 +1233,8 @@ end subroutine edge_slopes_implicit_h5
 !!          become computationally expensive if regridding is carried out
 !!          often. Figuring out closed-form expressions for these coefficients
 !!          on nonuniform meshes turned out to be intractable.
-subroutine edge_values_implicit_h6( N, h, u, edge_val, h_neglect, answer_date )
+subroutine edge_values_implicit_h6( N, h, u, edge_val, h_neglect, answer_date ) ! GPU PORT DIAGNOSTICS
+  !$omp declare target
   integer,              intent(in)    :: N !< Number of cells
   real, dimension(N),   intent(in)    :: h !< cell widths [H]
   real, dimension(N),   intent(in)    :: u !< cell average properties (size N) in arbitrary units [A]
