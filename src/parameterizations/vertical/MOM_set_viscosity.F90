@@ -2223,6 +2223,10 @@ subroutine set_viscous_ML(u, v, h, tv, forces, visc, dt, G, GV, US, CS)
   dz_neglect = GV%dZ_subroundoff
   g_H_Rho0 = (GV%g_Earth*GV%H_to_Z) / (GV%Rho0)
 
+  !$omp target enter data map(alloc: U_star_2d, htot, dztot, Thtot, Shtot, SpV_htot, Rhtot, &
+  !$omp   uhtot, vhtot, Idecay_len_TKE, dR_dT, dR_dS, dSpV_dT, dSpV_dS, ustar, press, T_EOS, &
+  !$omp   S_EOS, dz, mask_u, mask_v, h_at_vel, dz_at_vel, k_massive, u2_bg, do_i)
+
   if (associated(forces%frac_shelf_u) .neqv. associated(forces%frac_shelf_v)) &
     call MOM_error(FATAL, "set_viscous_ML: one of forces%frac_shelf_u and "//&
                    "forces%frac_shelf_v is associated, but the other is not.")
@@ -2286,7 +2290,7 @@ subroutine set_viscous_ML(u, v, h, tv, forces, visc, dt, G, GV, US, CS)
     EOSdom(2,1) = 1 ; EOSdom(2,2) = jend-jstart+1
     if (CS%dynamic_viscous_ML) then
       do_any = .false.
-      do j=jstart,jend ; do I=istart,iend
+      do concurrent (j=jstart:jend, I=istart:iend) reduce(.or.:do_any)
         II=I-istart+1 ; jj=j-jstart+1
         htot(II,jj) = 0.0
         if (G%mask2dCu(I,j) < 0.5) then
@@ -2307,22 +2311,21 @@ subroutine set_viscous_ML(u, v, h, tv, forces, visc, dt, G, GV, US, CS)
           U_star = max(CS%ustar_min, 0.5*(U_star_2d(i,j) + U_star_2d(i+1,j)))
           Idecay_len_TKE(II,jj) = (absf / U_star) * CS%TKE_decay
         endif
-      enddo ; enddo
+      enddo
 
-      if (do_any) then ; do k=1,nz
+      if (do_any) then ; k2 = max(1,nkml) ; do k=1,nz
         if (k > nkml) then
           do_any = .false.
           if (use_EOS .and. (k==nkml+1)) then
             ! Find dRho/dT and dRho_dS.
-            do j=jstart,jend ; do I=istart,iend
+            do concurrent (j=jstart:jend, I=istart:iend)
               jj=j-jstart+1 ; II=I-istart+1
               press(II,jj) = (GV%H_to_RZ*GV%g_Earth) * htot(II,jj)
               if (associated(tv%p_surf)) press(II,jj) = press(II,jj) + 0.5*(tv%p_surf(i,j)+tv%p_surf(i+1,j))
-              k2 = max(1,nkml)
               I_2hlay = 1.0 / (h(i,j,k2) + h(i+1,j,k2) + h_neglect)
               T_EOS(II,jj) = ((h(i,j,k2)*tv%T(i,j,k2)) + (h(i+1,j,k2)*tv%T(i+1,j,k2))) * I_2hlay
               S_EOS(II,jj) = ((h(i,j,k2)*tv%S(i,j,k2)) + (h(i+1,j,k2)*tv%S(i+1,j,k2))) * I_2hlay
-            enddo ; enddo
+            enddo
             call calculate_density_derivs(T_EOS, S_EOS, press, dR_dT, dR_dS, &
                                           tv%eqn_of_state, EOSdom)
             if (nonBous_ML) then
@@ -2334,7 +2337,7 @@ subroutine set_viscous_ML(u, v, h, tv, forces, visc, dt, G, GV, US, CS)
             endif
           endif
 
-          do j=jstart,jend ; do I=istart,iend
+          do concurrent (j=jstart:jend, I=istart:iend) reduce(.or.:do_any)
             jj=j-jstart+1 ; II=I-istart+1
             if (do_i(II,jj)) then
               hlay = 0.5*(h(i,j,k) + h(i+1,j,k))
@@ -2374,12 +2377,12 @@ subroutine set_viscous_ML(u, v, h, tv, forces, visc, dt, G, GV, US, CS)
 
               if (do_i(II,jj)) do_any = .true.
             endif
-          enddo ; enddo
+          enddo
 
           if (.not.do_any) exit ! All columns are done.
         endif
 
-        do j=jstart,jend ; do I=istart,iend
+        do concurrent (j=jstart:jend, I=istart:iend)
           jj=j-jstart+1 ; II=I-istart+1
           if (do_i(II,jj)) then
             htot(II,jj) = htot(II,jj) + 0.5 * (h(i,j,k) + h(i+1,j,k))
@@ -2393,16 +2396,16 @@ subroutine set_viscous_ML(u, v, h, tv, forces, visc, dt, G, GV, US, CS)
               Rhtot(II,jj) = Rhtot(II,jj) + 0.5 * (h(i,j,k) + h(i+1,j,k)) * GV%Rlay(k)
             endif
           endif
-        enddo ; enddo
+        enddo
       enddo ; endif
 
       if (do_any) then
-        do j=jstart,jend ; do I=istart,iend
+        do concurrent (j=jstart:jend, I=istart:iend)
           jj=j-jstart+1 ; II=I-istart+1
           if (do_i(II,jj)) then
             visc%nkml_visc_u(I,j) = k_massive(II,jj)
           endif
-        enddo ; enddo
+        enddo
       endif
     endif ! dynamic_viscous_ML
 
@@ -2583,22 +2586,13 @@ subroutine set_viscous_ML(u, v, h, tv, forces, visc, dt, G, GV, US, CS)
     endif ! do_any_shelf
   enddo ; enddo
 
-  !!$OMP parallel do default(private) shared(u,v,h,dz,tv,forces,visc,dt,G,GV,US,CS,use_EOS,dt_Rho0, &
-  !!$OMP                                     nonBous_ML,h_neglect,dz_neglect,h_tiny,g_H_Rho0, &
-  !!$OMP                                     js,je,OBC,Isq,Ieq,nz,nkml,U_star_2d,mask_v, &
-  !!$OMP                                     cdrag_sqrt,cdrag_sqrt_H,cdrag_sqrt_H_RL,Rho0x400_G)
-
-  !!$OMP parallel do default(private) shared(u,v,h,dz,tv,forces,visc,dt,G,GV,US,CS,use_EOS,dt_Rho0, &
-  !!$OMP                                     nonBous_ML,h_neglect,dz_neglect,h_tiny,g_H_Rho0, &
-  !!$OMP                                     is,ie,OBC,Jsq,Jeq,nz,nkml,U_star_2d,mask_u, &
-  !!$OMP                                     cdrag_sqrt,cdrag_sqrt_H,cdrag_sqrt_H_RL,Rho0x400_G)
   do jstart=Jsq,Jeq,TILE_SIZE_Y ; do istart=is,ie,TILE_SIZE_X
     jend=min(Jeq,jstart+TILE_SIZE_Y-1) ; iend=min(Ieq,istart+TILE_SIZE_X-1)
     EOSdom(1,1) = 1 ; EOSdom(1, 2) = iend-istart+1
     EOSdom(2,1) = 1 ; EOSdom(2, 2) = jend-jstart+1
     if (CS%dynamic_viscous_ML) then
       do_any = .false.
-      do J=jstart,jend ; do i=istart,iend
+      do concurrent (J=jstart:jend, i=istart:iend) reduce(.or.:do_any)
         JJ=J-jstart+1 ; ii=i-istart+1
         htot(ii,JJ) = 0.0
         if (G%mask2dCv(i,J) < 0.5) then
@@ -2621,22 +2615,22 @@ subroutine set_viscous_ML(u, v, h, tv, forces, visc, dt, G, GV, US, CS)
           Idecay_len_TKE(ii,JJ) = (absf / U_star) * CS%TKE_decay
 
         endif
-      enddo ; enddo
+      enddo
 
-      if (do_any) then ; do k=1,nz
+      if (do_any) then ; k2 = max(1,nkml) ; do k=1,nz
         if (k > nkml) then
           do_any = .false.
           if (use_EOS .and. (k==nkml+1)) then
             ! Find dRho/dT and dRho_dS.
-            do J=jstart,jend ; do i=istart,iend
+            do concurrent (J=jstart:jend, i=istart:iend)
               JJ=J-jstart+1 ; ii=i-istart+1
               press(ii,JJ) = (GV%H_to_RZ * GV%g_Earth) * htot(ii,JJ)
               if (associated(tv%p_surf)) press(ii,JJ) = press(ii,JJ) + 0.5*(tv%p_surf(i,j)+tv%p_surf(i,j+1))
-              k2 = max(1,nkml)
+              
               I_2hlay = 1.0 / (h(i,j,k2) + h(i,j+1,k2) + h_neglect)
               T_EOS(ii,JJ) = ((h(i,j,k2)*tv%T(i,j,k2)) + (h(i,j+1,k2)*tv%T(i,j+1,k2))) * I_2hlay
               S_EOS(ii,JJ) = ((h(i,j,k2)*tv%S(i,j,k2)) + (h(i,j+1,k2)*tv%S(i,j+1,k2))) * I_2hlay
-            enddo ; enddo
+            enddo
             call calculate_density_derivs(T_EOS, S_EOS, press, dR_dT, dR_dS, &
                                           tv%eqn_of_state, EOSdom)
             if (nonBous_ML) then
@@ -2648,7 +2642,7 @@ subroutine set_viscous_ML(u, v, h, tv, forces, visc, dt, G, GV, US, CS)
             endif
           endif
 
-          do J=jstart,jend ; do i=istart,iend
+          do concurrent (J=jstart:jend, i=istart:iend) reduce(.or.:do_any)
             JJ=J-jstart+1 ; ii=i-istart+1
             if (do_i(ii,JJ)) then
               hlay = 0.5*(h(i,j,k) + h(i,j+1,k))
@@ -2688,12 +2682,12 @@ subroutine set_viscous_ML(u, v, h, tv, forces, visc, dt, G, GV, US, CS)
 
               if (do_i(ii,JJ)) do_any = .true.
             endif
-          enddo ; enddo
+          enddo
 
           if (.not.do_any) exit ! All columns are done.
         endif
 
-        do J=jstart,jend ; do i=istart,iend
+        do concurrent (J=jstart:jend, i=istart:iend)
           JJ=J-jstart+1 ; ii=i-istart+1
           if (do_i(ii,JJ)) then
             htot(ii,JJ) = htot(ii,JJ) + 0.5 * (h(i,J,k) + h(i,j+1,k))
@@ -2707,16 +2701,16 @@ subroutine set_viscous_ML(u, v, h, tv, forces, visc, dt, G, GV, US, CS)
               Rhtot(ii,JJ) = Rhtot(ii,JJ) + 0.5 * (h(i,j,k) + h(i,j+1,k)) * GV%Rlay(k)
             endif
           endif
-        enddo ; enddo
+        enddo
       enddo ; endif
 
       if (do_any) then
-        do J=jstart,jend ; do i=istart,iend
+        do concurrent (J=jstart:jend, i=istart:iend)
           JJ=J-jstart+1 ; ii=i-istart+1
           if (do_i(ii,JJ)) then
             visc%nkml_visc_v(i,J) = k_massive(ii,JJ)
           endif
-        enddo ; enddo
+        enddo
       endif
 
     endif ! dynamic_viscous_ML
@@ -2900,7 +2894,9 @@ subroutine set_viscous_ML(u, v, h, tv, forces, visc, dt, G, GV, US, CS)
 
   enddo ; enddo ! J-loop at v-points
 
-  !$omp target update to(visc%nkml_visc_u, visc%nkml_visc_v) if (CS%dynamic_viscous_ML)
+  !$omp target exit data map(release: U_star_2d, htot, dztot, Thtot, Shtot, SpV_htot, Rhtot, &
+  !$omp   uhtot, vhtot, Idecay_len_TKE, dR_dT, dR_dS, dSpV_dT, dSpV_dS, ustar, press, T_EOS, &
+  !$omp   S_EOS, dz, mask_u, mask_v, h_at_vel, dz_at_vel, k_massive, u2_bg, do_i)
 
   if (CS%debug) then
     if (allocated(visc%nkml_visc_u) .and. allocated(visc%nkml_visc_v)) &
