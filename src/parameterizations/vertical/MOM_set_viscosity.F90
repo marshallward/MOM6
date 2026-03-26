@@ -2071,7 +2071,7 @@ subroutine set_viscous_ML(u, v, h, tv, forces, visc, dt, G, GV, US, CS)
                                                  !! call to set_visc_init.
 
   ! Local variables
-  real, dimension(SZIB_(G)) :: &
+  real, dimension(SZIB_(G), SZJB_(G)) :: &
     htot, &     !   The total thickness of the layers that are within the
                 ! surface mixed layer [H ~> m or kg m-2].
     dztot, &    !   The distance from the surface to the bottom of the layers that are
@@ -2111,13 +2111,13 @@ subroutine set_viscous_ML(u, v, h, tv, forces, visc, dt, G, GV, US, CS)
   real :: U_star_2d(SZI_(G),SZJ_(G)) ! The wind friction velocity in thickness-based units,
                 ! calculated using the Boussinesq reference density or the time-evolving
                 ! surface density in non-Boussinesq mode [H T-1 ~> m s-1 or kg m-2 s-1]
-  real :: h_at_vel(SZIB_(G),SZK_(GV))! Layer thickness at velocity points,
+  real :: h_at_vel(SZIB_(G),SZJB_(G),SZK_(GV))! Layer thickness at velocity points,
                 ! using an upwind-biased second order accurate estimate based
                 ! on the previous velocity direction [H ~> m or kg m-2].
-  real :: dz_at_vel(SZIB_(G),SZK_(GV)) ! Vertical extent of a layer at velocity points,
+  real :: dz_at_vel(SZIB_(G),SZJB_(G),SZK_(GV)) ! Vertical extent of a layer at velocity points,
                 ! using an upwind-biased second order accurate estimate based
                 ! on the previous velocity direction [Z ~> m].
-  integer :: k_massive(SZIB_(G)) ! The k-index of the deepest layer yet found
+  integer :: k_massive(SZIB_(G),SZJB_(G)) ! The k-index of the deepest layer yet found
                 ! that has more than h_tiny thickness and will be in the
                 ! viscous mixed layer.
   real :: Uh2   ! The squared magnitude of the difference between the velocity
@@ -2166,7 +2166,7 @@ subroutine set_viscous_ML(u, v, h, tv, forces, visc, dt, G, GV, US, CS)
   real :: frac_used   ! The fraction of the present layer that contributes to Dh and Ddz [nondim]
   real :: Dh          ! The increment in layer thickness from the present layer [H ~> m or kg m-2].
   real :: Ddz         ! The increment in height change from the present layer [Z ~> m].
-  real :: u2_bg(SZIB_(G)) ! The square of an assumed background velocity, for
+  real :: u2_bg(SZIB_(G),SZJB_(G)) ! The square of an assumed background velocity, for
                           ! calculating the mean magnitude near the top for use in
                           ! the quadratic surface drag [L2 T-2 ~> m2 s-2].
   real :: h_tiny    ! A very small thickness [H ~> m or kg m-2]. Layers that are less than
@@ -2182,10 +2182,10 @@ subroutine set_viscous_ML(u, v, h, tv, forces, visc, dt, G, GV, US, CS)
                      ! The 400 is a constant proposed by Killworth and Edwards, 1999.
   real :: ustar1    ! ustar [H T-1 ~> m s-1 or kg m-2 s-1]
   real :: h2f2      ! (h*2*f)^2 [H2 T-2 ~> m2 s-2 or kg2 m-4 s-2]
-  logical :: use_EOS, do_any, do_any_shelf, do_i(SZIB_(G))
+  logical :: use_EOS, do_any, do_any_shelf, do_i(SZIB_(G),SZJB_(G))
   logical :: nonBous_ML  ! If true, use the non-Boussinesq form of some energy and
                          ! stratification calculations.
-  integer :: i, j, k, is, ie, js, je, Isq, Ieq, Jsq, Jeq, nz, K2, nkmb, nkml, n
+  integer :: i, j, k, is, ie, js, je, Isq, Ieq, Jsq, Jeq, nz, K2, nkmb, nkml, n, jstart, jend, istart, iend
   type(ocean_OBC_type), pointer :: OBC => NULL()
 
   is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec ; nz = GV%ke
@@ -2276,23 +2276,23 @@ subroutine set_viscous_ML(u, v, h, tv, forces, visc, dt, G, GV, US, CS)
     endif
   enddo ; endif
 
-  !$OMP parallel do default(private) shared(u,v,h,dz,tv,forces,visc,dt,G,GV,US,CS,use_EOS,dt_Rho0, &
-  !$OMP                                     nonBous_ML,h_neglect,dz_neglect,h_tiny,g_H_Rho0, &
-  !$OMP                                     js,je,OBC,Isq,Ieq,nz,nkml,U_star_2d,mask_v, &
-  !$OMP                                     cdrag_sqrt,cdrag_sqrt_H,cdrag_sqrt_H_RL,Rho0x400_G)
+  !!$OMP parallel do default(private) shared(u,v,h,dz,tv,forces,visc,dt,G,GV,US,CS,use_EOS,dt_Rho0, &
+  !!$OMP                                     nonBous_ML,h_neglect,dz_neglect,h_tiny,g_H_Rho0, &
+  !!$OMP                                     js,je,OBC,Isq,Ieq,nz,nkml,U_star_2d,mask_v, &
+  !!$OMP                                     cdrag_sqrt,cdrag_sqrt_H,cdrag_sqrt_H_RL,Rho0x400_G)
   do j=js,je  ! u-point loop
     if (CS%dynamic_viscous_ML) then
       do_any = .false.
       do I=Isq,Ieq
-        htot(I) = 0.0
+        htot(I,j) = 0.0
         if (G%mask2dCu(I,j) < 0.5) then
-          do_i(I) = .false. ; visc%nkml_visc_u(I,j) = nkml
+          do_i(I,j) = .false. ; visc%nkml_visc_u(I,j) = nkml
         else
-          do_i(I) = .true. ; do_any = .true.
-          k_massive(I) = nkml
-          Thtot(I) = 0.0 ; Shtot(I) = 0.0 ; Rhtot(i) = 0.0
-          uhtot(I) = dt_Rho0 * forces%taux(I,j)
-          vhtot(I) = 0.25 * dt_Rho0 * ((forces%tauy(i,J) + forces%tauy(i+1,J-1)) + &
+          do_i(I,j) = .true. ; do_any = .true.
+          k_massive(I,j) = nkml
+          Thtot(I,j) = 0.0 ; Shtot(I,j) = 0.0 ; Rhtot(I,j) = 0.0
+          uhtot(I,j) = dt_Rho0 * forces%taux(I,j)
+          vhtot(I,j) = 0.25 * dt_Rho0 * ((forces%tauy(i,J) + forces%tauy(i+1,J-1)) + &
                                        (forces%tauy(i,J-1) + forces%tauy(i+1,J)))
 
           if (CS%omega_frac >= 1.0) then ; absf = 2.0*CS%omega ; else
@@ -2301,7 +2301,7 @@ subroutine set_viscous_ML(u, v, h, tv, forces, visc, dt, G, GV, US, CS)
               absf = sqrt(CS%omega_frac*4.0*CS%omega**2 + (1.0-CS%omega_frac)*absf**2)
           endif
           U_star = max(CS%ustar_min, 0.5*(U_star_2d(i,j) + U_star_2d(i+1,j)))
-          Idecay_len_TKE(I) = (absf / U_star) * CS%TKE_decay
+          Idecay_len_TKE(I,j) = (absf / U_star) * CS%TKE_decay
         endif
       enddo
 
@@ -2311,80 +2311,80 @@ subroutine set_viscous_ML(u, v, h, tv, forces, visc, dt, G, GV, US, CS)
           if (use_EOS .and. (k==nkml+1)) then
             ! Find dRho/dT and dRho_dS.
             do I=Isq,Ieq
-              press(I) = (GV%H_to_RZ*GV%g_Earth) * htot(I)
-              if (associated(tv%p_surf)) press(I) = press(I) + 0.5*(tv%p_surf(i,j)+tv%p_surf(i+1,j))
+              press(I,j) = (GV%H_to_RZ*GV%g_Earth) * htot(I,j)
+              if (associated(tv%p_surf)) press(I,j) = press(I,j) + 0.5*(tv%p_surf(i,j)+tv%p_surf(i+1,j))
               k2 = max(1,nkml)
               I_2hlay = 1.0 / (h(i,j,k2) + h(i+1,j,k2) + h_neglect)
-              T_EOS(I) = ((h(i,j,k2)*tv%T(i,j,k2)) + (h(i+1,j,k2)*tv%T(i+1,j,k2))) * I_2hlay
-              S_EOS(I) = ((h(i,j,k2)*tv%S(i,j,k2)) + (h(i+1,j,k2)*tv%S(i+1,j,k2))) * I_2hlay
+              T_EOS(I,j) = ((h(i,j,k2)*tv%T(i,j,k2)) + (h(i+1,j,k2)*tv%T(i+1,j,k2))) * I_2hlay
+              S_EOS(I,j) = ((h(i,j,k2)*tv%S(i,j,k2)) + (h(i+1,j,k2)*tv%S(i+1,j,k2))) * I_2hlay
             enddo
-            call calculate_density_derivs(T_EOS, S_EOS, press, dR_dT, dR_dS, tv%eqn_of_state, &
-                                          (/Isq-G%IsdB+1,Ieq-G%IsdB+1/) )
+            call calculate_density_derivs(T_EOS(:,j), S_EOS(:,j), press(:,j), dR_dT(:,j), dR_dS(:,j), &
+                                          tv%eqn_of_state, (/Isq-G%IsdB+1,Ieq-G%IsdB+1/) )
             if (nonBous_ML) then
-              call calculate_specific_vol_derivs(T_EOS, S_EOS, press, dSpV_dT, dSpV_dS, tv%eqn_of_state, &
-                                                 (/Isq-G%IsdB+1,Ieq-G%IsdB+1/) )
+              call calculate_specific_vol_derivs(T_EOS(:,j), S_EOS(:,j), press(:,j), dSpV_dT(:,j), dSpV_dS(:,j), &
+                                                 tv%eqn_of_state, (/Isq-G%IsdB+1,Ieq-G%IsdB+1/) )
             endif
           endif
 
-          do I=Isq,Ieq ; if (do_i(I)) then
+          do I=Isq,Ieq ; if (do_i(I,j)) then
 
             hlay = 0.5*(h(i,j,k) + h(i+1,j,k))
             if (hlay > h_tiny) then ! Only consider non-vanished layers.
               I_2hlay = 1.0 / (h(i,j,k) + h(i+1,j,k))
               v_at_u = 0.5 * ((h(i,j,k)   * (v(i,J,k) + v(i,J-1,k))) + &
                               (h(i+1,j,k) * (v(i+1,J,k) + v(i+1,J-1,k)))) * I_2hlay
-              Uh2 = (uhtot(I) - htot(I)*u(I,j,k))**2 + (vhtot(I) - htot(I)*v_at_u)**2
+              Uh2 = (uhtot(I,j) - htot(I,j)*u(I,j,k))**2 + (vhtot(I,j) - htot(I,j)*v_at_u)**2
 
               if (use_EOS) then
                 T_lay = ((h(i,j,k)*tv%T(i,j,k)) + (h(i+1,j,k)*tv%T(i+1,j,k))) * I_2hlay
                 S_lay = ((h(i,j,k)*tv%S(i,j,k)) + (h(i+1,j,k)*tv%S(i+1,j,k))) * I_2hlay
                 if (nonBous_ML) then
-                  gHprime = (GV%g_Earth * GV%H_to_RZ) * (dSpV_dT(I) * (Thtot(I) - T_lay*htot(I)) + &
-                                                         dSpV_dS(I) * (Shtot(I) - S_lay*htot(I)))
+                  gHprime = (GV%g_Earth * GV%H_to_RZ) * (dSpV_dT(I,j) * (Thtot(I,j) - T_lay*htot(I,j)) + &
+                                                         dSpV_dS(I,j) * (Shtot(I,j) - S_lay*htot(I,j)))
                 else
-                  gHprime = g_H_Rho0 * (dR_dT(I) * (T_lay*htot(I) - Thtot(I)) + &
-                                        dR_dS(I) * (S_lay*htot(I) - Shtot(I)))
+                  gHprime = g_H_Rho0 * (dR_dT(I,j) * (T_lay*htot(I,j) - Thtot(I,j)) + &
+                                        dR_dS(I,j) * (S_lay*htot(I,j) - Shtot(I,j)))
                 endif
               else
-                gHprime = g_H_Rho0 * (GV%Rlay(k)*htot(I) - Rhtot(I))
+                gHprime = g_H_Rho0 * (GV%Rlay(k)*htot(I,j) - Rhtot(I,j))
               endif
 
               if (gHprime > 0.0) then
-                RiBulk = CS%bulk_Ri_ML * exp(-htot(I) * Idecay_len_TKE(I))
-                if (RiBulk * Uh2 <= (htot(I)**2) * gHprime) then
-                  visc%nkml_visc_u(I,j) = real(k_massive(I))
-                  do_i(I) = .false.
-                elseif (RiBulk * Uh2 <= (htot(I) + hlay)**2 * gHprime) then
+                RiBulk = CS%bulk_Ri_ML * exp(-htot(I,j) * Idecay_len_TKE(I,j))
+                if (RiBulk * Uh2 <= (htot(I,j)**2) * gHprime) then
+                  visc%nkml_visc_u(I,j) = real(k_massive(I,j))
+                  do_i(I,j) = .false.
+                elseif (RiBulk * Uh2 <= (htot(I,j) + hlay)**2 * gHprime) then
                   visc%nkml_visc_u(I,j) = real(k-1) + &
-                    ( sqrt(RiBulk * Uh2 / gHprime) - htot(I) ) / hlay
-                  do_i(I) = .false.
+                    ( sqrt(RiBulk * Uh2 / gHprime) - htot(I,j) ) / hlay
+                  do_i(I,j) = .false.
                 endif
               endif
-              k_massive(I) = k
+              k_massive(I,j) = k
             endif ! hlay > h_tiny
 
-            if (do_i(I)) do_any = .true.
+            if (do_i(I,j)) do_any = .true.
           endif ; enddo
 
           if (.not.do_any) exit ! All columns are done.
         endif
 
-        do I=Isq,Ieq ; if (do_i(I)) then
-          htot(I) = htot(I) + 0.5 * (h(i,j,k) + h(i+1,j,k))
-          uhtot(I) = uhtot(I) + 0.5 * (h(i,j,k) + h(i+1,j,k)) * u(I,j,k)
-          vhtot(I) = vhtot(I) + 0.25 * ((h(i,j,k) * (v(i,J,k) + v(i,J-1,k))) + &
+        do I=Isq,Ieq ; if (do_i(I,j)) then
+          htot(I,j) = htot(I,j) + 0.5 * (h(i,j,k) + h(i+1,j,k))
+          uhtot(I,j) = uhtot(I,j) + 0.5 * (h(i,j,k) + h(i+1,j,k)) * u(I,j,k)
+          vhtot(I,j) = vhtot(I,j) + 0.25 * ((h(i,j,k) * (v(i,J,k) + v(i,J-1,k))) + &
                                         (h(i+1,j,k) * (v(i+1,J,k) + v(i+1,J-1,k))))
           if (use_EOS) then
-            Thtot(I) = Thtot(I) + 0.5 * ((h(i,j,k)*tv%T(i,j,k)) + (h(i+1,j,k)*tv%T(i+1,j,k)))
-            Shtot(I) = Shtot(I) + 0.5 * ((h(i,j,k)*tv%S(i,j,k)) + (h(i+1,j,k)*tv%S(i+1,j,k)))
+            Thtot(I,j) = Thtot(I,j) + 0.5 * ((h(i,j,k)*tv%T(i,j,k)) + (h(i+1,j,k)*tv%T(i+1,j,k)))
+            Shtot(I,j) = Shtot(I,j) + 0.5 * ((h(i,j,k)*tv%S(i,j,k)) + (h(i+1,j,k)*tv%S(i+1,j,k)))
           else
-            Rhtot(i) = Rhtot(i) + 0.5 * (h(i,j,k) + h(i+1,j,k)) * GV%Rlay(k)
+            Rhtot(I,j) = Rhtot(I,j) + 0.5 * (h(i,j,k) + h(i+1,j,k)) * GV%Rlay(k)
           endif
         endif ; enddo
       enddo ; endif
 
-      if (do_any) then ; do I=Isq,Ieq ; if (do_i(I)) then
-        visc%nkml_visc_u(I,j) = k_massive(I)
+      if (do_any) then ; do I=Isq,Ieq ; if (do_i(I,j)) then
+        visc%nkml_visc_u(I,j) = k_massive(I,j)
       endif ; enddo ; endif
     endif ! dynamic_viscous_ML
 
@@ -2392,160 +2392,160 @@ subroutine set_viscous_ML(u, v, h, tv, forces, visc, dt, G, GV, US, CS)
     if (associated(forces%frac_shelf_u)) then
       do I=Isq,Ieq
         if (forces%frac_shelf_u(I,j)*G%mask2dCu(I,j) == 0.0) then
-          do_i(I) = .false.
+          do_i(I,j) = .false.
           visc%tbl_thick_shelf_u(I,j) = 0.0 ; visc%kv_tbl_shelf_u(I,j) = 0.0
         else
-          do_i(I) = .true. ; do_any_shelf = .true.
+          do_i(I,j) = .true. ; do_any_shelf = .true.
         endif
       enddo
     endif
 
     if (do_any_shelf) then
-      do k=1,nz ; do I=Isq,Ieq ; if (do_i(I)) then
+      do k=1,nz ; do I=Isq,Ieq ; if (do_i(I,j)) then
         if (u(I,j,k) * (h(i+1,j,k) - h(i,j,k)) >= 0) then
-          h_at_vel(i,k) = 2.0*h(i,j,k)*h(i+1,j,k) / &
+          h_at_vel(i,J,k) = 2.0*h(i,j,k)*h(i+1,j,k) / &
                           (h(i,j,k) + h(i+1,j,k) + h_neglect)
-          dz_at_vel(i,k) = 2.0*dz(i,j,k)*dz(i+1,j,k) / &
+          dz_at_vel(i,J,k) = 2.0*dz(i,j,k)*dz(i+1,j,k) / &
                           (dz(i,j,k) + dz(i+1,j,k) + dz_neglect)
         else
-          h_at_vel(i,k) =  0.5 * (h(i,j,k) + h(i+1,j,k))
-          dz_at_vel(i,k) =  0.5 * (dz(i,j,k) + dz(i+1,j,k))
+          h_at_vel(i,J,k) =  0.5 * (h(i,j,k) + h(i+1,j,k))
+          dz_at_vel(i,J,k) =  0.5 * (dz(i,j,k) + dz(i+1,j,k))
         endif
       else
-        h_at_vel(I,k) = 0.0
-        dz_at_vel(I,k) = 0.0
-        ustar(I) = 0.0
+        h_at_vel(I,j,k) = 0.0
+        dz_at_vel(I,j,k) = 0.0
+        ustar(I,j) = 0.0
       endif ; enddo ; enddo
 
-      do I=Isq,Ieq ; if (do_i(I)) then
+      do I=Isq,Ieq ; if (do_i(I,j)) then
         htot_vel = 0.0 ; hwtot = 0.0 ; hutot = 0.0
-        Thtot(I) = 0.0 ; Shtot(I) = 0.0 ; SpV_htot(I) = 0.0
+        Thtot(I,j) = 0.0 ; Shtot(I,j) = 0.0 ; SpV_htot(I,j) = 0.0
         if (use_EOS .or. .not.CS%linear_drag) then ; do k=1,nz
           if (htot_vel>=CS%Htbl_shelf) exit ! terminate the k loop
-          hweight = MIN(CS%Htbl_shelf - htot_vel, h_at_vel(i,k))
+          hweight = MIN(CS%Htbl_shelf - htot_vel, h_at_vel(i,J,k))
           if (hweight <= 1.5*GV%Angstrom_H + h_neglect) cycle
 
-          htot_vel  = htot_vel + h_at_vel(i,k)
+          htot_vel  = htot_vel + h_at_vel(i,J,k)
           hwtot = hwtot + hweight
 
           if (.not.CS%linear_drag) then
             v_at_u = set_v_at_u(v, h, G, GV, i, j, k, mask_v, OBC)
             ! Set the "back ground" friction velocity scale to either the tidal amplitude or place-holder constant
             if (CS%BBL_use_tidal_bg) then
-              u2_bg(I) = 0.5*( G%mask2dT(i,j)*(CS%tideamp(i,j)*CS%tideamp(i,j))+ &
+              u2_bg(I,j) = 0.5*( G%mask2dT(i,j)*(CS%tideamp(i,j)*CS%tideamp(i,j))+ &
                                G%mask2dT(i+1,j)*(CS%tideamp(i+1,j)*CS%tideamp(i+1,j)) )
             else
-              u2_bg(I) = CS%drag_bg_vel * CS%drag_bg_vel
+              u2_bg(I,j) = CS%drag_bg_vel * CS%drag_bg_vel
             endif
-            hutot = hutot + hweight * sqrt(u(I,j,k)**2 + v_at_u**2 + u2_bg(I))
+            hutot = hutot + hweight * sqrt(u(I,j,k)**2 + v_at_u**2 + u2_bg(I,j))
           endif
           if (use_EOS) then
-            Thtot(I) = Thtot(I) + hweight * 0.5 * (tv%T(i,j,k) + tv%T(i+1,j,k))
-            Shtot(I) = Shtot(I) + hweight * 0.5 * (tv%S(i,j,k) + tv%S(i+1,j,k))
+            Thtot(I,j) = Thtot(I,j) + hweight * 0.5 * (tv%T(i,j,k) + tv%T(i+1,j,k))
+            Shtot(I,j) = Shtot(I,j) + hweight * 0.5 * (tv%S(i,j,k) + tv%S(i+1,j,k))
           endif
           if (allocated(tv%SpV_avg)) then
-            SpV_htot(I) = SpV_htot(I) + hweight * 0.5 * (tv%SpV_avg(i,j,k) + tv%SpV_avg(i+1,j,k))
+            SpV_htot(I,j) = SpV_htot(I,j) + hweight * 0.5 * (tv%SpV_avg(i,j,k) + tv%SpV_avg(i+1,j,k))
           endif
         enddo ; endif
 
         if ((hwtot <= 0.0) .or. (CS%linear_drag .and. .not.allocated(tv%SpV_avg))) then
-          ustar(I) = cdrag_sqrt_H * CS%drag_bg_vel
+          ustar(I,j) = cdrag_sqrt_H * CS%drag_bg_vel
         elseif (CS%linear_drag .and. allocated(tv%SpV_avg)) then
-          ustar(I) = cdrag_sqrt_H_RL * CS%drag_bg_vel * (hwtot / SpV_htot(I))
+          ustar(I,j) = cdrag_sqrt_H_RL * CS%drag_bg_vel * (hwtot / SpV_htot(I,j))
         elseif (allocated(tv%SpV_avg)) then ! (.not.CS%linear_drag)
-          ustar(I) = cdrag_sqrt_H_RL * hutot / SpV_htot(I)
+          ustar(I,j) = cdrag_sqrt_H_RL * hutot / SpV_htot(I,j)
         else ! (.not.CS%linear_drag .and. .not.allocated(tv%SpV_avg))
-          ustar(I) = cdrag_sqrt_H * hutot / hwtot
+          ustar(I,j) = cdrag_sqrt_H * hutot / hwtot
         endif
 
         if (use_EOS) then ; if (hwtot > 0.0) then
-          T_EOS(I) = Thtot(I)/hwtot ; S_EOS(I) = Shtot(I)/hwtot
+          T_EOS(I,j) = Thtot(I,j)/hwtot ; S_EOS(I,j) = Shtot(I,j)/hwtot
         else
-          T_EOS(I) = 0.0 ; S_EOS(I) = 0.0
+          T_EOS(I,j) = 0.0 ; S_EOS(I,j) = 0.0
         endif ; endif
         ! if (allocated(tv%SpV_avg)) SpV_av(I) = SpVhtot(I) / hwtot
       endif ; enddo ! I-loop
 
       if (use_EOS) then
-        call calculate_density_derivs(T_EOS, S_EOS, forces%p_surf(:,j), dR_dT, dR_dS, &
+        call calculate_density_derivs(T_EOS(:,j), S_EOS(:,j), forces%p_surf(:,j), dR_dT(:,j), dR_dS(:,j), &
                                       tv%eqn_of_state, (/Isq-G%IsdB+1,Ieq-G%IsdB+1/) )
       endif
 
-      do I=Isq,Ieq ; if (do_i(I)) then
+      do I=Isq,Ieq ; if (do_i(I,j)) then
   !  The 400.0 in this expression is the square of a constant proposed
   !  by Killworth and Edwards, 1999, in equation (2.20).
-        ustarsq = Rho0x400_G * ustar(i)**2
-        htot(i) = 0.0 ; dztot(i) = 0.0
+        ustarsq = Rho0x400_G * ustar(I,j)**2
+        htot(I,j) = 0.0 ; dztot(I,j) = 0.0
         if (use_EOS) then
-          Thtot(i) = 0.0 ; Shtot(i) = 0.0 ; oldfn = 0.0
+          Thtot(I,j) = 0.0 ; Shtot(I,j) = 0.0 ; oldfn = 0.0
           do k=1,nz-1
-            if (h_at_vel(i,k) <= 0.0) cycle
+            if (h_at_vel(i,J,k) <= 0.0) cycle
             T_Lay = 0.5 * (tv%T(i,j,k) + tv%T(i+1,j,k))
             S_Lay = 0.5 * (tv%S(i,j,k) + tv%S(i+1,j,k))
-            oldfn = dR_dT(i)*(T_Lay*htot(i) - Thtot(i)) + dR_dS(i)*(S_Lay*htot(i) - Shtot(i))
+            oldfn = dR_dT(I,j)*(T_Lay*htot(I,j) - Thtot(I,j)) + dR_dS(I,j)*(S_Lay*htot(I,j) - Shtot(I,j))
             if (oldfn >= ustarsq) exit
 
-            Dfn = (dR_dT(i)*(0.5*(tv%T(i,j,k+1)+tv%T(i+1,j,k+1)) - T_Lay) + &
-                   dR_dS(i)*(0.5*(tv%S(i,j,k+1)+tv%S(i+1,j,k+1)) - S_Lay)) * &
-                  (h_at_vel(i,k)+htot(i))
+            Dfn = (dR_dT(I,j)*(0.5*(tv%T(i,j,k+1)+tv%T(i+1,j,k+1)) - T_Lay) + &
+                   dR_dS(I,j)*(0.5*(tv%S(i,j,k+1)+tv%S(i+1,j,k+1)) - S_Lay)) * &
+                  (h_at_vel(i,J,k)+htot(I,j))
             if ((oldfn + Dfn) <= ustarsq) then
-              Dh = h_at_vel(i,k)
-              Ddz = dz_at_vel(i,k)
+              Dh = h_at_vel(i,J,k)
+              Ddz = dz_at_vel(i,J,k)
             else
               frac_used = sqrt((ustarsq-oldfn) / (Dfn))
-              Dh = h_at_vel(i,k) * frac_used
-              Ddz = dz_at_vel(i,k) * frac_used
+              Dh = h_at_vel(i,J,k) * frac_used
+              Ddz = dz_at_vel(i,J,k) * frac_used
             endif
 
-            htot(i) = htot(i) + Dh
-            dztot(i) = dztot(i) + Ddz
-            Thtot(i) = Thtot(i) + T_Lay*Dh ; Shtot(i) = Shtot(i) + S_Lay*Dh
+            htot(I,j) = htot(I,j) + Dh
+            dztot(I,j) = dztot(I,j) + Ddz
+            Thtot(I,j) = Thtot(I,j) + T_Lay*Dh ; Shtot(I,j) = Shtot(I,j) + S_Lay*Dh
           enddo
-          if ((oldfn < ustarsq) .and. (h_at_vel(i,nz) > 0.0)) then
+          if ((oldfn < ustarsq) .and. (h_at_vel(i,J,nz) > 0.0)) then
             T_Lay = 0.5*(tv%T(i,j,nz) + tv%T(i+1,j,nz))
             S_Lay = 0.5*(tv%S(i,j,nz) + tv%S(i+1,j,nz))
-            if (dR_dT(i)*(T_Lay*htot(i) - Thtot(i)) + &
-                dR_dS(i)*(S_Lay*htot(i) - Shtot(i)) < ustarsq) then
-              htot(i) = htot(i) + h_at_vel(i,nz)
-              dztot(i) = dztot(i) + dz_at_vel(i,nz)
+            if (dR_dT(I,j)*(T_Lay*htot(I,j) - Thtot(I,j)) + &
+                dR_dS(I,j)*(S_Lay*htot(I,j) - Shtot(I,j)) < ustarsq) then
+              htot(I,j) = htot(I,j) + h_at_vel(i,J,nz)
+              dztot(I,j) = dztot(I,j) + dz_at_vel(i,J,nz)
             endif
           endif ! Examination of layer nz.
         else  ! Use Rlay as the density variable.
-          Rhtot = 0.0
+          Rhtot(I,j) = 0.0
           do k=1,nz-1
             Rlay = GV%Rlay(k) ; Rlb = GV%Rlay(k+1)
 
-            oldfn = Rlay*htot(i) - Rhtot(i)
+            oldfn = Rlay*htot(I,j) - Rhtot(I,j)
             if (oldfn >= ustarsq) exit
 
-            Dfn = (Rlb - Rlay)*(h_at_vel(i,k)+htot(i))
+            Dfn = (Rlb - Rlay)*(h_at_vel(i,J,k)+htot(I,j))
             if ((oldfn + Dfn) <= ustarsq) then
-              Dh = h_at_vel(i,k)
-              Ddz = dz_at_vel(i,k)
+              Dh = h_at_vel(i,J,k)
+              Ddz = dz_at_vel(i,J,k)
             else
               frac_used = sqrt((ustarsq-oldfn) / (Dfn))
-              Dh = h_at_vel(i,k) * frac_used
-              Ddz = dz_at_vel(i,k) * frac_used
+              Dh = h_at_vel(i,J,k) * frac_used
+              Ddz = dz_at_vel(i,J,k) * frac_used
             endif
 
-            htot(i) = htot(i) + Dh
-            dztot(i) = dztot(i) + Ddz
-            Rhtot(i) = Rhtot(i) + Rlay*Dh
+            htot(I,j) = htot(I,j) + Dh
+            dztot(I,j) = dztot(I,j) + Ddz
+            Rhtot(I,j) = Rhtot(I,j) + Rlay*Dh
           enddo
-          if (GV%Rlay(nz)*htot(i) - Rhtot(i) < ustarsq) then
-            htot(i) = htot(i) + h_at_vel(i,nz)
-            dztot(i) = dztot(i) + dz_at_vel(i,nz)
+          if (GV%Rlay(nz)*htot(I,j) - Rhtot(I,j) < ustarsq) then
+            htot(I,j) = htot(I,j) + h_at_vel(i,J,nz)
+            dztot(I,j) = dztot(I,j) + dz_at_vel(i,J,nz)
           endif
         endif ! use_EOS
 
        ! visc%tbl_thick_shelf_u(I,j) = max(CS%Htbl_shelf_min, &
        !    dztot(I) / (0.5 + sqrt(0.25 + &
-       !                 ((htot(i)*(G%CoriolisBu(I,J-1)+G%CoriolisBu(I,J)))**2) / &
-       !                 (ustar(i)**2) )) )
-        ustar1 = ustar(i)
-        h2f2 = (htot(i)*(G%CoriolisBu(I,J-1)+G%CoriolisBu(I,J)) + h_neglect*CS%omega)**2
+       !                 ((htot(i,J)*(G%CoriolisBu(I,J-1)+G%CoriolisBu(I,J)))**2) / &
+       !                 (ustar(i,J)**2) )) )
+        ustar1 = ustar(I,j)
+        h2f2 = (htot(I,j)*(G%CoriolisBu(I,J-1)+G%CoriolisBu(I,J)) + h_neglect*CS%omega)**2
         tbl_thick = max(CS%Htbl_shelf_min, &
-                        ( dztot(I)*ustar(i) ) / ( 0.5*ustar1 + sqrt((0.5*ustar1)**2 + h2f2 ) ) )
+                        ( dztot(I,j)*ustar(I,j) ) / ( 0.5*ustar1 + sqrt((0.5*ustar1)**2 + h2f2 ) ) )
         visc%tbl_thick_shelf_u(I,j) = tbl_thick
         visc%Kv_tbl_shelf_u(I,j) = max(CS%Kv_TBL_min, cdrag_sqrt*ustar1*tbl_thick)
       endif ; enddo ! I-loop
@@ -2561,15 +2561,15 @@ subroutine set_viscous_ML(u, v, h, tv, forces, visc, dt, G, GV, US, CS)
     if (CS%dynamic_viscous_ML) then
       do_any = .false.
       do i=is,ie
-        htot(i) = 0.0
+        htot(i,J) = 0.0
         if (G%mask2dCv(i,J) < 0.5) then
-          do_i(i) = .false. ; visc%nkml_visc_v(i,J) = nkml
+          do_i(i,J) = .false. ; visc%nkml_visc_v(i,J) = nkml
         else
-          do_i(i) = .true. ; do_any = .true.
-          k_massive(i) = nkml
-          Thtot(i) = 0.0 ; Shtot(i) = 0.0 ; Rhtot(i) = 0.0
-          vhtot(i) = dt_Rho0 * forces%tauy(i,J)
-          uhtot(i) = 0.25 * dt_Rho0 * ((forces%taux(I,j) + forces%taux(I-1,j+1)) + &
+          do_i(i,J) = .true. ; do_any = .true.
+          k_massive(i,J) = nkml
+          Thtot(i,J) = 0.0 ; Shtot(i,J) = 0.0 ; Rhtot(i,J) = 0.0
+          vhtot(i,J) = dt_Rho0 * forces%tauy(i,J)
+          uhtot(i,J) = 0.25 * dt_Rho0 * ((forces%taux(I,j) + forces%taux(I-1,j+1)) + &
                                        (forces%taux(I-1,j) + forces%taux(I,j+1)))
 
           if (CS%omega_frac >= 1.0) then ; absf = 2.0*CS%omega ; else
@@ -2579,7 +2579,7 @@ subroutine set_viscous_ML(u, v, h, tv, forces, visc, dt, G, GV, US, CS)
           endif
 
           U_star = max(CS%ustar_min, 0.5*(U_star_2d(i,j) + U_star_2d(i,j+1)))
-          Idecay_len_TKE(i) = (absf / U_star) * CS%TKE_decay
+          Idecay_len_TKE(i,J) = (absf / U_star) * CS%TKE_decay
 
         endif
       enddo
@@ -2590,80 +2590,80 @@ subroutine set_viscous_ML(u, v, h, tv, forces, visc, dt, G, GV, US, CS)
           if (use_EOS .and. (k==nkml+1)) then
             ! Find dRho/dT and dRho_dS.
             do i=is,ie
-              press(i) = (GV%H_to_RZ * GV%g_Earth) * htot(i)
-              if (associated(tv%p_surf)) press(i) = press(i) + 0.5*(tv%p_surf(i,j)+tv%p_surf(i,j+1))
+              press(i,J) = (GV%H_to_RZ * GV%g_Earth) * htot(i,J)
+              if (associated(tv%p_surf)) press(i,J) = press(i,J) + 0.5*(tv%p_surf(i,j)+tv%p_surf(i,j+1))
               k2 = max(1,nkml)
               I_2hlay = 1.0 / (h(i,j,k2) + h(i,j+1,k2) + h_neglect)
-              T_EOS(i) = ((h(i,j,k2)*tv%T(i,j,k2)) + (h(i,j+1,k2)*tv%T(i,j+1,k2))) * I_2hlay
-              S_EOS(i) = ((h(i,j,k2)*tv%S(i,j,k2)) + (h(i,j+1,k2)*tv%S(i,j+1,k2))) * I_2hlay
+              T_EOS(i,J) = ((h(i,j,k2)*tv%T(i,j,k2)) + (h(i,j+1,k2)*tv%T(i,j+1,k2))) * I_2hlay
+              S_EOS(i,J) = ((h(i,j,k2)*tv%S(i,j,k2)) + (h(i,j+1,k2)*tv%S(i,j+1,k2))) * I_2hlay
             enddo
-            call calculate_density_derivs(T_EOS, S_EOS, press, dR_dT, dR_dS, &
+            call calculate_density_derivs(T_EOS(:,J), S_EOS(:,J), press(:,J), dR_dT(:,J), dR_dS(:,J), &
                                           tv%eqn_of_state, (/is-G%IsdB+1,ie-G%IsdB+1/) )
             if (nonBous_ML) then
-              call calculate_specific_vol_derivs(T_EOS, S_EOS, press, dSpV_dT, dSpV_dS, tv%eqn_of_state, &
-                                                 (/is-G%IsdB+1,ie-G%IsdB+1/) )
+              call calculate_specific_vol_derivs(T_EOS(:,J), S_EOS(:,J), press(:,J), dSpV_dT(:,J), dSpV_dS(:,J), &
+                                                 tv%eqn_of_state, (/is-G%IsdB+1,ie-G%IsdB+1/) )
             endif
           endif
 
-          do i=is,ie ; if (do_i(i)) then
+          do i=is,ie ; if (do_i(i,J)) then
 
             hlay = 0.5*(h(i,j,k) + h(i,j+1,k))
             if (hlay > h_tiny) then ! Only consider non-vanished layers.
               I_2hlay = 1.0 / (h(i,j,k) + h(i,j+1,k))
               u_at_v = 0.5 * ((h(i,j,k)   * (u(I-1,j,k)   + u(I,j,k))) + &
                               (h(i,j+1,k) * (u(I-1,j+1,k) + u(I,j+1,k)))) * I_2hlay
-              Uh2 = (vhtot(i) - htot(i)*v(i,J,k))**2 + (uhtot(i) - htot(i)*u_at_v)**2
+              Uh2 = (vhtot(i,J) - htot(i,J)*v(i,J,k))**2 + (uhtot(i,J) - htot(i,J)*u_at_v)**2
 
               if (use_EOS) then
                 T_lay = ((h(i,j,k)*tv%T(i,j,k)) + (h(i,j+1,k)*tv%T(i,j+1,k))) * I_2hlay
                 S_lay = ((h(i,j,k)*tv%S(i,j,k)) + (h(i,j+1,k)*tv%S(i,j+1,k))) * I_2hlay
                 if (nonBous_ML) then
-                  gHprime = (GV%g_Earth * GV%H_to_RZ) * (dSpV_dT(i) * (Thtot(i) - T_lay*htot(i)) + &
-                                                         dSpV_dS(i) * (Shtot(i) - S_lay*htot(i)))
+                  gHprime = (GV%g_Earth * GV%H_to_RZ) * (dSpV_dT(i,J) * (Thtot(i,J) - T_lay*htot(i,J)) + &
+                                                         dSpV_dS(i,J) * (Shtot(i,J) - S_lay*htot(i,J)))
                 else
-                  gHprime = g_H_Rho0 * (dR_dT(i) * (T_lay*htot(i) - Thtot(i)) + &
-                                        dR_dS(i) * (S_lay*htot(i) - Shtot(i)))
+                  gHprime = g_H_Rho0 * (dR_dT(i,J) * (T_lay*htot(i,J) - Thtot(i,J)) + &
+                                        dR_dS(i,J) * (S_lay*htot(i,J) - Shtot(i,J)))
                 endif
               else
-                gHprime = g_H_Rho0 * (GV%Rlay(k)*htot(i) - Rhtot(i))
+                gHprime = g_H_Rho0 * (GV%Rlay(k)*htot(i,J) - Rhtot(i,J))
               endif
 
               if (gHprime > 0.0) then
-                RiBulk = CS%bulk_Ri_ML * exp(-htot(i) * Idecay_len_TKE(i))
-                if (RiBulk * Uh2 <= htot(i)**2 * gHprime) then
-                  visc%nkml_visc_v(i,J) = real(k_massive(i))
-                  do_i(i) = .false.
-                elseif (RiBulk * Uh2 <= (htot(i) + hlay)**2 * gHprime) then
+                RiBulk = CS%bulk_Ri_ML * exp(-htot(i,J) * Idecay_len_TKE(i,J))
+                if (RiBulk * Uh2 <= htot(i,J)**2 * gHprime) then
+                  visc%nkml_visc_v(i,J) = real(k_massive(i,J))
+                  do_i(i,J) = .false.
+                elseif (RiBulk * Uh2 <= (htot(i,J) + hlay)**2 * gHprime) then
                   visc%nkml_visc_v(i,J) = real(k-1) + &
-                    ( sqrt(RiBulk * Uh2 / gHprime) - htot(i) ) / hlay
-                  do_i(i) = .false.
+                    ( sqrt(RiBulk * Uh2 / gHprime) - htot(i,J) ) / hlay
+                  do_i(i,J) = .false.
                 endif
               endif
-              k_massive(i) = k
+              k_massive(i,J) = k
             endif ! hlay > h_tiny
 
-            if (do_i(i)) do_any = .true.
+            if (do_i(i,J)) do_any = .true.
           endif ; enddo
 
           if (.not.do_any) exit ! All columns are done.
         endif
 
-        do i=is,ie ; if (do_i(i)) then
-          htot(i) = htot(i) + 0.5 * (h(i,J,k) + h(i,j+1,k))
-          vhtot(i) = vhtot(i) + 0.5 * (h(i,j,k) + h(i,j+1,k)) * v(i,J,k)
-          uhtot(i) = uhtot(i) + 0.25 * ((h(i,j,k) * (u(I-1,j,k) + u(I,j,k))) + &
+        do i=is,ie ; if (do_i(i,J)) then
+          htot(i,J) = htot(i,J) + 0.5 * (h(i,J,k) + h(i,j+1,k))
+          vhtot(i,J) = vhtot(i,J) + 0.5 * (h(i,j,k) + h(i,j+1,k)) * v(i,J,k)
+          uhtot(i,J) = uhtot(i,J) + 0.25 * ((h(i,j,k) * (u(I-1,j,k) + u(I,j,k))) + &
                                         (h(i,j+1,k) * (u(I-1,j+1,k) + u(I,j+1,k))))
           if (use_EOS) then
-            Thtot(i) = Thtot(i) + 0.5 * ((h(i,j,k)*tv%T(i,j,k)) + (h(i,j+1,k)*tv%T(i,j+1,k)))
-            Shtot(i) = Shtot(i) + 0.5 * ((h(i,j,k)*tv%S(i,j,k)) + (h(i,j+1,k)*tv%S(i,j+1,k)))
+            Thtot(i,J) = Thtot(i,J) + 0.5 * ((h(i,j,k)*tv%T(i,j,k)) + (h(i,j+1,k)*tv%T(i,j+1,k)))
+            Shtot(i,J) = Shtot(i,J) + 0.5 * ((h(i,j,k)*tv%S(i,j,k)) + (h(i,j+1,k)*tv%S(i,j+1,k)))
           else
-            Rhtot(i) = Rhtot(i) + 0.5 * (h(i,j,k) + h(i,j+1,k)) * GV%Rlay(k)
+            Rhtot(i,J) = Rhtot(i,J) + 0.5 * (h(i,j,k) + h(i,j+1,k)) * GV%Rlay(k)
           endif
         endif ; enddo
       enddo ; endif
 
-      if (do_any) then ; do i=is,ie ; if (do_i(i)) then
-        visc%nkml_visc_v(i,J) = k_massive(i)
+      if (do_any) then ; do i=is,ie ; if (do_i(i,J)) then
+        visc%nkml_visc_v(i,J) = k_massive(i,J)
       endif ; enddo ; endif
 
     endif ! dynamic_viscous_ML
@@ -2672,122 +2672,122 @@ subroutine set_viscous_ML(u, v, h, tv, forces, visc, dt, G, GV, US, CS)
     if (associated(forces%frac_shelf_v)) then
       do i=is,ie
         if (forces%frac_shelf_v(i,J)*G%mask2dCv(i,J) == 0.0) then
-          do_i(i) = .false.
+          do_i(i,J) = .false.
           visc%tbl_thick_shelf_v(i,J) = 0.0 ; visc%kv_tbl_shelf_v(i,J) = 0.0
         else
-          do_i(i) = .true. ; do_any_shelf = .true.
+          do_i(i,J) = .true. ; do_any_shelf = .true.
         endif
       enddo
     endif
 
     if (do_any_shelf) then
-      do k=1,nz ; do i=is,ie ; if (do_i(i)) then
+      do k=1,nz ; do i=is,ie ; if (do_i(i,J)) then
         if (v(i,J,k) * (h(i,j+1,k) - h(i,j,k)) >= 0) then
-          h_at_vel(i,k) = 2.0*h(i,j,k)*h(i,j+1,k) / &
+          h_at_vel(i,J,k) = 2.0*h(i,j,k)*h(i,j+1,k) / &
                           (h(i,j,k) + h(i,j+1,k) + h_neglect)
-          dz_at_vel(i,k) = 2.0*dz(i,j,k)*dz(i,j+1,k) / &
+          dz_at_vel(i,J,k) = 2.0*dz(i,j,k)*dz(i,j+1,k) / &
                           (dz(i,j,k) + dz(i,j+1,k) + dz_neglect)
         else
-          h_at_vel(i,k) =  0.5 * (h(i,j,k) + h(i,j+1,k))
-          dz_at_vel(i,k) =  0.5 * (dz(i,j,k) + dz(i,j+1,k))
+          h_at_vel(i,J,k) =  0.5 * (h(i,j,k) + h(i,j+1,k))
+          dz_at_vel(i,J,k) =  0.5 * (dz(i,j,k) + dz(i,j+1,k))
         endif
       else
-        h_at_vel(I,k) = 0.0
-        dz_at_vel(I,k) = 0.0
-        ustar(i) = 0.0
+        h_at_vel(I,j,k) = 0.0
+        dz_at_vel(I,j,k) = 0.0
+        ustar(i,J) = 0.0
       endif ; enddo ; enddo
 
-      do i=is,ie ; if (do_i(i)) then
+      do i=is,ie ; if (do_i(i,J)) then
         htot_vel = 0.0 ; hwtot = 0.0 ; hutot = 0.0
-        Thtot(i) = 0.0 ; Shtot(i) = 0.0 ; SpV_htot(i) = 0.0
+        Thtot(i,J) = 0.0 ; Shtot(i,J) = 0.0 ; SpV_htot(i,J) = 0.0
         if (use_EOS .or. .not.CS%linear_drag) then ; do k=1,nz
           if (htot_vel>=CS%Htbl_shelf) exit ! terminate the k loop
-          hweight = MIN(CS%Htbl_shelf - htot_vel, h_at_vel(i,k))
+          hweight = MIN(CS%Htbl_shelf - htot_vel, h_at_vel(i,J,k))
           if (hweight <= 1.5*GV%Angstrom_H + h_neglect) cycle
 
-          htot_vel  = htot_vel + h_at_vel(i,k)
+          htot_vel  = htot_vel + h_at_vel(i,J,k)
           hwtot = hwtot + hweight
 
           if (.not.CS%linear_drag) then
             u_at_v = set_u_at_v(u, h, G, GV, i, J, k, mask_u, OBC)
             ! Set the "back ground" friction velocity scale to either the tidal amplitude or place-holder constant
             if (CS%BBL_use_tidal_bg) then
-              u2_bg(i) = 0.5*( G%mask2dT(i,j)*(CS%tideamp(i,j)*CS%tideamp(i,j))+ &
+              u2_bg(i,J) = 0.5*( G%mask2dT(i,j)*(CS%tideamp(i,j)*CS%tideamp(i,j))+ &
                                G%mask2dT(i,j+1)*(CS%tideamp(i,j+1)*CS%tideamp(i,j+1)) )
             else
-              u2_bg(i) = CS%drag_bg_vel * CS%drag_bg_vel
+              u2_bg(i,J) = CS%drag_bg_vel * CS%drag_bg_vel
             endif
-            hutot = hutot + hweight * sqrt(v(i,J,k)**2 + u_at_v**2 + u2_bg(i))
+            hutot = hutot + hweight * sqrt(v(i,J,k)**2 + u_at_v**2 + u2_bg(i,J))
           endif
           if (use_EOS) then
-            Thtot(i) = Thtot(i) + hweight * 0.5 * (tv%T(i,j,k) + tv%T(i,j+1,k))
-            Shtot(i) = Shtot(i) + hweight * 0.5 * (tv%S(i,j,k) + tv%S(i,j+1,k))
+            Thtot(i,J) = Thtot(i,J) + hweight * 0.5 * (tv%T(i,j,k) + tv%T(i,j+1,k))
+            Shtot(i,J) = Shtot(i,J) + hweight * 0.5 * (tv%S(i,j,k) + tv%S(i,j+1,k))
           endif
           if (allocated(tv%SpV_avg)) then
-            SpV_htot(i) = SpV_htot(i) + hweight * 0.5 * (tv%SpV_avg(i,j,k) + tv%SpV_avg(i,j+1,k))
+            SpV_htot(i,J) = SpV_htot(i,J) + hweight * 0.5 * (tv%SpV_avg(i,j,k) + tv%SpV_avg(i,j+1,k))
           endif
         enddo ; endif
 
         if ((hwtot <= 0.0) .or. (CS%linear_drag .and. .not.allocated(tv%SpV_avg))) then
-          ustar(i) = cdrag_sqrt_H * CS%drag_bg_vel
+          ustar(i,J) = cdrag_sqrt_H * CS%drag_bg_vel
         elseif (CS%linear_drag .and. allocated(tv%SpV_avg)) then
-          ustar(i) = cdrag_sqrt_H_RL * CS%drag_bg_vel * (hwtot / SpV_htot(i))
+          ustar(i,J) = cdrag_sqrt_H_RL * CS%drag_bg_vel * (hwtot / SpV_htot(i,J))
         elseif (allocated(tv%SpV_avg)) then ! (.not.CS%linear_drag)
-          ustar(i) = cdrag_sqrt_H_RL * hutot / SpV_htot(i)
+          ustar(i,J) = cdrag_sqrt_H_RL * hutot / SpV_htot(i,J)
         else ! (.not.CS%linear_drag .and. .not.allocated(tv%SpV_avg))
-          ustar(i) = cdrag_sqrt_H * hutot / hwtot
+          ustar(i,J) = cdrag_sqrt_H * hutot / hwtot
         endif
 
         if (use_EOS) then ; if (hwtot > 0.0) then
-          T_EOS(i) = Thtot(i)/hwtot ; S_EOS(i) = Shtot(i)/hwtot
+          T_EOS(i,J) = Thtot(i,J)/hwtot ; S_EOS(i,J) = Shtot(i,J)/hwtot
         else
-          T_EOS(i) = 0.0 ; S_EOS(i) = 0.0
+          T_EOS(i,J) = 0.0 ; S_EOS(i,J) = 0.0
         endif ; endif
       endif ; enddo ! I-loop
 
       if (use_EOS) then
-        call calculate_density_derivs(T_EOS, S_EOS, forces%p_surf(:,j), dR_dT, dR_dS, &
+        call calculate_density_derivs(T_EOS(:,J), S_EOS(:,J), forces%p_surf(:,j), dR_dT(:,J), dR_dS(:,J), &
                                       tv%eqn_of_state, (/is-G%IsdB+1,ie-G%IsdB+1/) )
       endif
 
-      do i=is,ie ; if (do_i(i)) then
+      do i=is,ie ; if (do_i(i,J)) then
   !  The 400.0 in this expression is the square of a constant proposed
   !  by Killworth and Edwards, 1999, in equation (2.20).
-        ustarsq = Rho0x400_G * ustar(i)**2
-        htot(i) = 0.0
-        dztot(i) = 0.0
+        ustarsq = Rho0x400_G * ustar(i,J)**2
+        htot(i,J) = 0.0
+        dztot(i,J) = 0.0
         if (use_EOS) then
-          Thtot(i) = 0.0 ; Shtot(i) = 0.0 ; oldfn = 0.0
+          Thtot(i,J) = 0.0 ; Shtot(i,J) = 0.0 ; oldfn = 0.0
           do k=1,nz-1
-            if (h_at_vel(i,k) <= 0.0) cycle
+            if (h_at_vel(i,J,k) <= 0.0) cycle
             T_Lay = 0.5 * (tv%T(i,j,k) + tv%T(i,j+1,k))
             S_Lay = 0.5 * (tv%S(i,j,k) + tv%S(i,j+1,k))
-            oldfn = dR_dT(i)*(T_Lay*htot(i) - Thtot(i)) + dR_dS(i)*(S_Lay*htot(i) - Shtot(i))
+            oldfn = dR_dT(i,J)*(T_Lay*htot(i,J) - Thtot(i,J)) + dR_dS(i,J)*(S_Lay*htot(i,J) - Shtot(i,J))
             if (oldfn >= ustarsq) exit
 
-            Dfn = (dR_dT(i)*(0.5*(tv%T(i,j,k+1)+tv%T(i,j+1,k+1)) - T_Lay) + &
-                   dR_dS(i)*(0.5*(tv%S(i,j,k+1)+tv%S(i,j+1,k+1)) - S_Lay)) * &
-                  (h_at_vel(i,k)+htot(i))
+            Dfn = (dR_dT(i,J)*(0.5*(tv%T(i,j,k+1)+tv%T(i,j+1,k+1)) - T_Lay) + &
+                   dR_dS(i,J)*(0.5*(tv%S(i,j,k+1)+tv%S(i,j+1,k+1)) - S_Lay)) * &
+                  (h_at_vel(i,J,k)+htot(i,J))
             if ((oldfn + Dfn) <= ustarsq) then
-              Dh = h_at_vel(i,k)
-              Ddz = dz_at_vel(i,k)
+              Dh = h_at_vel(i,J,k)
+              Ddz = dz_at_vel(i,J,k)
             else
               frac_used = sqrt((ustarsq-oldfn) / (Dfn))
-              Dh = h_at_vel(i,k) * frac_used
-              Ddz = dz_at_vel(i,k) * frac_used
+              Dh = h_at_vel(i,J,k) * frac_used
+              Ddz = dz_at_vel(i,J,k) * frac_used
             endif
 
-            htot(i) = htot(i) + Dh
-            dztot(i) = dztot(i) + Ddz
-            Thtot(i) = Thtot(i) + T_Lay*Dh ; Shtot(i) = Shtot(i) + S_Lay*Dh
+            htot(i,J) = htot(i,J) + Dh
+            dztot(i,J) = dztot(i,J) + Ddz
+            Thtot(i,J) = Thtot(i,J) + T_Lay*Dh ; Shtot(i,J) = Shtot(i,J) + S_Lay*Dh
           enddo
-          if ((oldfn < ustarsq) .and. (h_at_vel(i,nz) > 0.0)) then
+          if ((oldfn < ustarsq) .and. (h_at_vel(i,J,nz) > 0.0)) then
             T_Lay = 0.5*(tv%T(i,j,nz) + tv%T(i,j+1,nz))
             S_Lay = 0.5*(tv%S(i,j,nz) + tv%S(i,j+1,nz))
-            if (dR_dT(i)*(T_Lay*htot(i) - Thtot(i)) + &
-                dR_dS(i)*(S_Lay*htot(i) - Shtot(i)) < ustarsq) then
-              htot(i) = htot(i) + h_at_vel(i,nz)
-              dztot(i) = dztot(i) + dz_at_vel(i,nz)
+            if (dR_dT(i,J)*(T_Lay*htot(i,J) - Thtot(i,J)) + &
+                dR_dS(i,J)*(S_Lay*htot(i,J) - Shtot(i,J)) < ustarsq) then
+              htot(i,J) = htot(i,J) + h_at_vel(i,J,nz)
+              dztot(i,J) = dztot(i,J) + dz_at_vel(i,J,nz)
             endif
           endif ! Examination of layer nz.
         else  ! Use Rlay as the density variable.
@@ -2795,37 +2795,37 @@ subroutine set_viscous_ML(u, v, h, tv, forces, visc, dt, G, GV, US, CS)
           do k=1,nz-1
             Rlay = GV%Rlay(k) ; Rlb = GV%Rlay(k+1)
 
-            oldfn = Rlay*htot(i) - Rhtot(i)
+            oldfn = Rlay*htot(i,J) - Rhtot(i,J)
             if (oldfn >= ustarsq) exit
 
-            Dfn = (Rlb - Rlay)*(h_at_vel(i,k)+htot(i))
+            Dfn = (Rlb - Rlay)*(h_at_vel(i,J,k)+htot(i,J))
             if ((oldfn + Dfn) <= ustarsq) then
-              Dh = h_at_vel(i,k)
-              Ddz = dz_at_vel(i,k)
+              Dh = h_at_vel(i,J,k)
+              Ddz = dz_at_vel(i,J,k)
             else
               frac_used = sqrt((ustarsq-oldfn) / (Dfn))
-              Dh = h_at_vel(i,k) * frac_used
-              Ddz = dz_at_vel(i,k) * frac_used
+              Dh = h_at_vel(i,J,k) * frac_used
+              Ddz = dz_at_vel(i,J,k) * frac_used
             endif
 
-            htot(i) = htot(i) + Dh
-            dztot(i) = dztot(i) + Ddz
+            htot(i,J) = htot(i,J) + Dh
+            dztot(i,J) = dztot(i,J) + Ddz
             Rhtot = Rhtot + Rlay*Dh
           enddo
-          if (GV%Rlay(nz)*htot(i) - Rhtot(i) < ustarsq) then
-            htot(i) = htot(i) + h_at_vel(i,nz)
-            dztot(i) = dztot(i) + dz_at_vel(i,nz)
+          if (GV%Rlay(nz)*htot(i,J) - Rhtot(i,J) < ustarsq) then
+            htot(i,J) = htot(i,J) + h_at_vel(i,J,nz)
+            dztot(i,J) = dztot(i,J) + dz_at_vel(i,J,nz)
           endif
         endif ! use_EOS
 
        ! visc%tbl_thick_shelf_v(i,J) = max(CS%Htbl_shelf_min, &
-       !    dztot(i) / (0.5 + sqrt(0.25 + &
-       !        (htot(i)*(G%CoriolisBu(I-1,J)+G%CoriolisBu(I,J)))**2 / &
-       !        (ustar(i))**2 )) )
-        ustar1 = ustar(i)
-        h2f2 = (htot(i)*(G%CoriolisBu(I-1,J)+G%CoriolisBu(I,J)) + h_neglect*CS%omega)**2
+       !    dztot(i,J) / (0.5 + sqrt(0.25 + &
+       !        (htot(i,J)*(G%CoriolisBu(I-1,J)+G%CoriolisBu(I,J)))**2 / &
+       !        (ustar(i,J))**2 )) )
+        ustar1 = ustar(i,J)
+        h2f2 = (htot(i,J)*(G%CoriolisBu(I-1,J)+G%CoriolisBu(I,J)) + h_neglect*CS%omega)**2
         tbl_thick = max(CS%Htbl_shelf_min, &
-            ( dztot(i)*ustar(i) ) / ( 0.5*ustar1 + sqrt((0.5*ustar1)**2 + h2f2 ) ) )
+            ( dztot(i,J)*ustar(i,J) ) / ( 0.5*ustar1 + sqrt((0.5*ustar1)**2 + h2f2 ) ) )
         visc%tbl_thick_shelf_v(i,J) = tbl_thick
         visc%Kv_tbl_shelf_v(i,J) = max(CS%Kv_TBL_min, cdrag_sqrt*ustar1*tbl_thick)
 
