@@ -433,7 +433,7 @@ subroutine advect_x(Tr, hprev, uhr, uh_neglect, OBC, domore_u, ntr, Idt, &
   real :: mA            ! Average of the reconstruction tracer edge values [conc]
   real :: a6            ! Curvature of the reconstruction tracer values [conc]
   logical :: do_i(SZI_(G),SZJ_(G))     ! If true, work on given points.
-  logical :: usePLMslope
+  logical :: usePLMslope, domore_u_jk
   integer :: i, j, m, n, i_up, stencil, ntr_id
   type(OBC_segment_type), pointer :: segment=>NULL()
   logical, dimension(SZJ_(G),SZK_(GV)) :: domore_u_initial
@@ -460,9 +460,9 @@ subroutine advect_x(Tr, hprev, uhr, uh_neglect, OBC, domore_u, ntr, Idt, &
   !$omp target enter data &
   !$omp   map(alloc: slope_x, T_tmp, uhh, CFL, hlst, Ihnew, do_i, flux_x)
   !$omp target teams loop private(slope_x, T_tmp, uhh, CFL, hlst, Ihnew, Tp, dMx, dMn, m, i, n, &
-  !$omp                           ntr_id, hup, hlos, i_up, Tc, Tm, aL, aR, dA, mA, a6)
+  !$omp                           ntr_id, hup, hlos, i_up, Tc, Tm, aL, aR, dA, mA, a6, domore_u_jk)
   do j=js,je ; if (domore_u(j,k)) then
-    domore_u(j,k) = .false.
+    domore_u_jk = .false.
 
     ! Calculate the i-direction profiles (slopes) of each tracer that is being advected.
     if (usePLMslope) then
@@ -535,7 +535,7 @@ subroutine advect_x(Tr, hprev, uhr, uh_neglect, OBC, domore_u, ntr, Idt, &
     ! the minimum of the remaining mass flux (uhr) and the half the mass
     ! in the cell plus whatever part of its half of the mass flux that
     ! the flux through the other side does not require.
-    do concurrent (I=is-1:ie)
+    do concurrent (I=is-1:ie) reduce(.or.:domore_u_jk)
       if ((uhr(I,j,k) == 0.0) .or. &
           ((uhr(I,j,k) < 0.0) .and. (hprev(i+1,j,k) <= tiny_h)) .or. &
           ((uhr(I,j,k) > 0.0) .and. (hprev(i,j,k) <= tiny_h)) ) then
@@ -547,7 +547,7 @@ subroutine advect_x(Tr, hprev, uhr, uh_neglect, OBC, domore_u, ntr, Idt, &
         if ((((hup - hlos) + uhr(I,j,k)) < 0.0) .and. &
             ((0.5*hup + uhr(I,j,k)) < 0.0)) then
           uhh(I) = MIN(-0.5*hup, -hup+hlos, 0.0)
-          domore_u(j,k) = .true.
+          domore_u_jk = .true.
         else
           uhh(I) = uhr(I,j,k)
         endif
@@ -558,13 +558,15 @@ subroutine advect_x(Tr, hprev, uhr, uh_neglect, OBC, domore_u, ntr, Idt, &
         if ((((hup - hlos) - uhr(I,j,k)) < 0.0) .and. &
             ((0.5*hup - uhr(I,j,k)) < 0.0)) then
           uhh(I) = MAX(0.5*hup, hup-hlos, 0.0)
-          domore_u(j,k) = .true.
+          domore_u_jk = .true.
         else
           uhh(I) = uhr(I,j,k)
         endif
         CFL(I) = uhh(I) / (hprev(i,j,k))  ! CFL is positive
       endif
     enddo
+    
+    domore_u(j,k) = domore_u_jk
 
     do concurrent (m=1:ntr)
 
