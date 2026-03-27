@@ -2,6 +2,8 @@
 ! See the LICENSE file for licensing information.
 ! SPDX-License-Identifier: Apache-2.0
 
+#include <do_concurrent_compat.h>
+
 !>  This module contains the subroutines that advect tracers along coordinate surfaces.
 module MOM_tracer_advect
 
@@ -114,17 +116,6 @@ subroutine advect_tracer(h_end, uhtr, vhtr, OBC, dt, G, GV, US, CS, Reg, x_first
   integer :: stencil_local          ! Stencil for the local adection scheme
   integer :: local_advect_scheme(Reg%ntr) ! contains the list of the advection for each tracer
 
-  !$omp target update to(uhtr, vhtr, h_end)
-
-  !$omp target enter data map(to: OBC) map(alloc: domore_u, domore_v, uhr, vhr, uh_neglect, &
-  !$omp   vh_neglect, hprev, domore_k, local_advect_scheme, Reg, Reg%Tr(:))
-
-  do concurrent (k=1:GV%ke, j=G%jsd:G%jed)
-    domore_u(j,k) = .false.
-  enddo
-  do concurrent (k=1:GV%ke, j=G%jsdB:G%jedB)
-    domore_v(j,k) = .false.
-  enddo
   is  = G%isc ; ie  = G%iec ; js  = G%jsc ; je  = G%jec ; nz = GV%ke
   isd = G%isd ; ied = G%ied ; jsd = G%jsd ; jed = G%jed
   IsdB = G%IsdB ; IedB = G%IedB ; JsdB = G%JsdB ; JedB = G%JedB
@@ -139,6 +130,19 @@ subroutine advect_tracer(h_end, uhtr, vhtr, OBC, dt, G, GV, US, CS, Reg, x_first
   if (.not. associated(Reg)) call MOM_error(FATAL, "MOM_tracer_advect: "// &
        "register_tracer must be called before advect_tracer.")
   if (Reg%ntr==0) return
+
+  !$omp target update to(uhtr, vhtr, h_end)
+
+  !$omp target enter data map(to: OBC) map(alloc: domore_u, domore_v, uhr, vhr, uh_neglect, &
+  !$omp   vh_neglect, hprev, domore_k, local_advect_scheme, Reg, Reg%Tr(:))
+
+  do concurrent (k=1:nz, j=jsd:jed)
+    domore_u(j,k) = .false.
+  enddo
+  do concurrent (k=1:nz, j=jsdB:jedB)
+    domore_v(j,k) = .false.
+  enddo
+
   call cpu_clock_begin(id_clock_advect)
   x_first = (MOD(G%first_direction,2) == 0)
 
@@ -584,7 +588,7 @@ subroutine advect_x(Tr, hprev, uhr, uh_neglect, OBC, domore_u, ntr, Idt, &
     ! the minimum of the remaining mass flux (uhr) and the half the mass
     ! in the cell plus whatever part of its half of the mass flux that
     ! the flux through the other side does not require.
-    do concurrent (I=is-1:ie) reduce(.or.:domore_u_jk)
+    do concurrent (I=is-1:ie) DO_LOCALITY(reduce(.or.:domore_u_jk))
       if ((uhr(I,j,k) == 0.0) .or. &
           ((uhr(I,j,k) < 0.0) .and. (hprev(i+1,j,k) <= tiny_h)) .or. &
           ((uhr(I,j,k) > 0.0) .and. (hprev(i,j,k) <= tiny_h)) ) then
@@ -614,7 +618,7 @@ subroutine advect_x(Tr, hprev, uhr, uh_neglect, OBC, domore_u, ntr, Idt, &
         CFL(I) = uhh(I) / (hprev(i,j,k))  ! CFL is positive
       endif
     enddo
-    
+
     domore_u(j,k) = domore_u_jk
 
     do concurrent (m=1:ntr)
@@ -1006,7 +1010,7 @@ subroutine advect_y(Tr, hprev, vhr, vh_neglect, OBC, domore_v, ntr, Idt, &
   do J=js-1,je ; if (domore_v(J,k)) then
     domore_v_jk = .false.
 
-    do concurrent (i=is:ie) reduce(.or.:domore_v_jk)
+    do concurrent (i=is:ie) DO_LOCALITY(reduce(.or.:domore_v_jk))
       if ((vhr(i,J,k) == 0.0) .or. &
           ((vhr(i,J,k) < 0.0) .and. (hprev(i,j+1,k) <= tiny_h)) .or. &
           ((vhr(i,J,k) > 0.0) .and. (hprev(i,j,k) <= tiny_h)) ) then
