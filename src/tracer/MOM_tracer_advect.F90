@@ -821,7 +821,7 @@ subroutine advect_y(Tr, hprev, vhr, vh_neglect, OBC, domore_v, ntr, Idt, &
   logical :: usePLMslope
   integer :: i, j, j2, m, n, j_up, stencil, ntr_id
   type(OBC_segment_type), pointer :: segment=>NULL()
-  logical :: domore_v_initial(SZJB_(G)) ! Initial state of domore_v
+  logical :: domore_v_initial(SZJB_(G)), domore_v_jk ! Initial state of domore_v
 
   usePLMslope = .false.
   ! stencil for calculating slope values
@@ -936,11 +936,12 @@ subroutine advect_y(Tr, hprev, vhr, vh_neglect, OBC, domore_v, ntr, Idt, &
   ! in the cell plus whatever part of its half of the mass flux that
   ! the flux through the other side does not require.
   !$omp target teams loop &
-  !$omp   private(CFL, Ihnew, hup, hlos, j_up, Tp, Tc, Tm, i, m, aL, aR, dA, mA, a6, n, ntr_id)
+  !$omp   private(CFL, Ihnew, hup, hlos, j_up, Tp, Tc, Tm, i, m, aL, aR, dA, mA, a6, n, ntr_id, &
+  !$omp     domore_v_jk)
   do J=js-1,je ; if (domore_v(J,k)) then
-    domore_v(J,k) = .false.
+    domore_v_jk = .false.
 
-    do concurrent (i=is:ie)
+    do concurrent (i=is:ie) reduce(.or.:domore_v_jk)
       if ((vhr(i,J,k) == 0.0) .or. &
           ((vhr(i,J,k) < 0.0) .and. (hprev(i,j+1,k) <= tiny_h)) .or. &
           ((vhr(i,J,k) > 0.0) .and. (hprev(i,j,k) <= tiny_h)) ) then
@@ -952,7 +953,7 @@ subroutine advect_y(Tr, hprev, vhr, vh_neglect, OBC, domore_v, ntr, Idt, &
         if ((((hup - hlos) + vhr(i,J,k)) < 0.0) .and. &
             ((0.5*hup + vhr(i,J,k)) < 0.0)) then
           vhh(i,J) = MIN(-0.5*hup, -hup+hlos, 0.0)
-          domore_v(J,k) = .true.
+          domore_v_jk = .true.
         else
           vhh(i,J) = vhr(i,J,k)
         endif
@@ -963,13 +964,15 @@ subroutine advect_y(Tr, hprev, vhr, vh_neglect, OBC, domore_v, ntr, Idt, &
         if ((((hup - hlos) - vhr(i,J,k)) < 0.0) .and. &
             ((0.5*hup - vhr(i,J,k)) < 0.0)) then
           vhh(i,J) = MAX(0.5*hup, hup-hlos, 0.0)
-          domore_v(J,k) = .true.
+          domore_v_jk = .true.
         else
           vhh(i,J) = vhr(i,J,k)
         endif
         CFL(i) = vhh(i,J) / hprev(i,j,k)  ! CFL is positive
       endif
     enddo
+
+    domore_v(j,k) = domore_v_jk
 
     do concurrent (m=1:ntr)
 
