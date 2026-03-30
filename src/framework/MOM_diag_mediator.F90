@@ -68,6 +68,7 @@ public diag_grid_storage_init, diag_grid_storage_end
 public diag_copy_diag_to_storage, diag_copy_storage_to_diag
 public diag_save_grids, diag_restore_grids
 public found_in_diagtable
+private :: copy_2d_into_3d
 
 !> Make a diagnostic available for averaging or output.
 interface post_data
@@ -800,6 +801,10 @@ subroutine set_masks_for_axes(G, diag_cs)
   ! Local variables
   integer :: c, nk, i, j, k
   type(axes_grp), pointer :: axes => NULL(), h_axes => NULL() ! Current axes, for convenience
+  ! Local pointer aliases to avoid derived-type components in OpenMP map clauses
+  real, pointer :: mTL(:,:,:), mCuL(:,:,:), mCvL(:,:,:), mBL(:,:,:)
+  real, pointer :: mTi(:,:,:), mCui(:,:,:), mCvi(:,:,:), mBi(:,:,:)
+  real, pointer :: h_mask(:,:,:)
 
   do c=1, diag_cs%num_diag_coords
     ! This vertical coordinate has been configured so can be used.
@@ -809,17 +814,23 @@ subroutine set_masks_for_axes(G, diag_cs)
       axes => diag_cs%remap_axesTL(c)
       nk = axes%nz
       allocate( axes%mask3d(G%isd:G%ied,G%jsd:G%jed,nk), source=0. )
-      call diag_remap_calc_hmask(diag_cs%diag_remap_cs(c), G, axes%mask3d)
+      mTL => axes%mask3d
+      !$omp target enter data map(alloc: mTL)
+      call diag_remap_calc_hmask(diag_cs%diag_remap_cs(c), G, axes%mask3d, diag_cs%diag_remap_cs(c)%h)
 
       h_axes => diag_cs%remap_axesTL(c) ! Use the h-point masks to generate the u-, v- and q- masks
+      h_mask => h_axes%mask3d
 
       ! Level/layer u-points in diagnostic coordinate
       axes => diag_cs%remap_axesCuL(c)
       call assert(axes%nz == nk, 'set_masks_for_axes: vertical size mismatch at u-layers')
       call assert(.not. associated(axes%mask3d), 'set_masks_for_axes: already associated')
       allocate( axes%mask3d(G%IsdB:G%IedB,G%jsd:G%jed,nk), source=0. )
+      mCuL => axes%mask3d
+      !$omp target enter data map(alloc: mCuL)
+      !$omp target teams distribute parallel do collapse(3)
       do k = 1, nk ; do j=G%jsc,G%jec ; do I=G%isc-1,G%iec
-        if (h_axes%mask3d(i,j,k) + h_axes%mask3d(i+1,j,k) > 0.) axes%mask3d(I,j,k) = 1.
+        if (h_mask(i,j,k) + h_mask(i+1,j,k) > 0.) mCuL(I,j,k) = 1.
       enddo ; enddo ; enddo
 
       ! Level/layer v-points in diagnostic coordinate
@@ -827,8 +838,11 @@ subroutine set_masks_for_axes(G, diag_cs)
       call assert(axes%nz == nk, 'set_masks_for_axes: vertical size mismatch at v-layers')
       call assert(.not. associated(axes%mask3d), 'set_masks_for_axes: already associated')
       allocate( axes%mask3d(G%isd:G%ied,G%JsdB:G%JedB,nk), source=0. )
+      mCvL => axes%mask3d
+      !$omp target enter data map(alloc: mCvL)
+      !$omp target teams distribute parallel do collapse(3)
       do k = 1, nk ; do J=G%jsc-1,G%jec ; do i=G%isc,G%iec
-        if (h_axes%mask3d(i,j,k) + h_axes%mask3d(i,j+1,k) > 0.) axes%mask3d(i,J,k) = 1.
+        if (h_mask(i,j,k) + h_mask(i,j+1,k) > 0.) mCvL(i,J,k) = 1.
       enddo ; enddo ; enddo
 
       ! Level/layer q-points in diagnostic coordinate
@@ -836,9 +850,12 @@ subroutine set_masks_for_axes(G, diag_cs)
       call assert(axes%nz == nk, 'set_masks_for_axes: vertical size mismatch at q-layers')
       call assert(.not. associated(axes%mask3d), 'set_masks_for_axes: already associated')
       allocate( axes%mask3d(G%IsdB:G%IedB,G%JsdB:G%JedB,nk), source=0. )
+      mBL => axes%mask3d
+      !$omp target enter data map(alloc: mBL)
+      !$omp target teams distribute parallel do collapse(3)
       do k = 1, nk ; do J=G%jsc-1,G%jec ; do I=G%isc-1,G%iec
-        if (h_axes%mask3d(i,j,k) + h_axes%mask3d(i+1,j+1,k) + &
-            h_axes%mask3d(i+1,j,k) + h_axes%mask3d(i,j+1,k) > 0.) axes%mask3d(I,J,k) = 1.
+        if (h_mask(i,j,k) + h_mask(i+1,j+1,k) + &
+            h_mask(i+1,j,k) + h_mask(i,j+1,k) > 0.) mBL(I,J,k) = 1.
       enddo ; enddo ; enddo
 
       ! Interface h-points in diagnostic coordinate (w-point)
@@ -846,23 +863,30 @@ subroutine set_masks_for_axes(G, diag_cs)
       call assert(axes%nz == nk, 'set_masks_for_axes: vertical size mismatch at h-interfaces')
       call assert(.not. associated(axes%mask3d), 'set_masks_for_axes: already associated')
       allocate( axes%mask3d(G%isd:G%ied,G%jsd:G%jed,nk+1), source=0. )
-      do J=G%jsc-1,G%jec+1 ; do i=G%isc-1,G%iec+1
-        if (h_axes%mask3d(i,j,1) > 0.) axes%mask3d(i,J,1) = 1.
+      mTi => axes%mask3d
+      !$omp target enter data map(alloc: mTi)
+      !$omp target teams distribute parallel do collapse(2) private(K)
+      do j=G%jsc-1,G%jec+1 ; do i=G%isc-1,G%iec+1
+        if (h_mask(i,j,1) > 0.) mTi(i,j,1) = 1.
         do K = 2, nk
-          if (h_axes%mask3d(i,j,k-1) + h_axes%mask3d(i,j,k) > 0.) axes%mask3d(i,J,k) = 1.
+          if (h_mask(i,j,k-1) + h_mask(i,j,k) > 0.) mTi(i,j,K) = 1.
         enddo
-        if (h_axes%mask3d(i,j,nk) > 0.) axes%mask3d(i,J,nk+1) = 1.
+        if (h_mask(i,j,nk) > 0.) mTi(i,j,nk+1) = 1.
       enddo ; enddo
 
       h_axes => diag_cs%remap_axesTi(c) ! Use the w-point masks to generate the u-, v- and q- masks
+      h_mask => h_axes%mask3d
 
       ! Interface u-points in diagnostic coordinate
       axes => diag_cs%remap_axesCui(c)
       call assert(axes%nz == nk, 'set_masks_for_axes: vertical size mismatch at u-interfaces')
       call assert(.not. associated(axes%mask3d), 'set_masks_for_axes: already associated')
       allocate( axes%mask3d(G%IsdB:G%IedB,G%jsd:G%jed,nk+1), source=0. )
+      mCui => axes%mask3d
+      !$omp target enter data map(alloc: mCui)
+      !$omp target teams distribute parallel do collapse(3)
       do k = 1, nk+1 ; do j=G%jsc,G%jec ; do I=G%isc-1,G%iec
-        if (h_axes%mask3d(i,j,k) + h_axes%mask3d(i+1,j,k) > 0.) axes%mask3d(I,j,k) = 1.
+        if (h_mask(i,j,k) + h_mask(i+1,j,k) > 0.) mCui(I,j,k) = 1.
       enddo ; enddo ; enddo
 
       ! Interface v-points in diagnostic coordinate
@@ -870,8 +894,11 @@ subroutine set_masks_for_axes(G, diag_cs)
       call assert(axes%nz == nk, 'set_masks_for_axes: vertical size mismatch at v-interfaces')
       call assert(.not. associated(axes%mask3d), 'set_masks_for_axes: already associated')
       allocate( axes%mask3d(G%isd:G%ied,G%JsdB:G%JedB,nk+1), source=0. )
+      mCvi => axes%mask3d
+      !$omp target enter data map(alloc: mCvi)
+      !$omp target teams distribute parallel do collapse(3)
       do k = 1, nk+1 ; do J=G%jsc-1,G%jec ; do i=G%isc,G%iec
-        if (h_axes%mask3d(i,j,k) + h_axes%mask3d(i,j+1,k) > 0.) axes%mask3d(i,J,k) = 1.
+        if (h_mask(i,j,k) + h_mask(i,j+1,k) > 0.) mCvi(i,J,k) = 1.
       enddo ; enddo ; enddo
 
       ! Interface q-points in diagnostic coordinate
@@ -879,10 +906,16 @@ subroutine set_masks_for_axes(G, diag_cs)
       call assert(axes%nz == nk, 'set_masks_for_axes: vertical size mismatch at q-interfaces')
       call assert(.not. associated(axes%mask3d), 'set_masks_for_axes: already associated')
       allocate( axes%mask3d(G%IsdB:G%IedB,G%JsdB:G%JedB,nk+1), source=0. )
-      do k = 1, nk ; do J=G%jsc-1,G%jec ; do I=G%isc-1,G%iec
-        if (h_axes%mask3d(i,j,k) + h_axes%mask3d(i+1,j+1,k) + &
-            h_axes%mask3d(i+1,j,k) + h_axes%mask3d(i,j+1,k) > 0.) axes%mask3d(I,J,k) = 1.
+      mBi => axes%mask3d
+      !$omp target enter data map(alloc: mBi)
+      !$omp target teams distribute parallel do collapse(3)
+      do k = 1, nk+1 ; do J=G%jsc-1,G%jec ; do I=G%isc-1,G%iec
+        if (h_mask(i,j,k) + h_mask(i+1,j+1,k) + &
+            h_mask(i+1,j,k) + h_mask(i,j+1,k) > 0.) mBi(I,J,k) = 1.
       enddo ; enddo ; enddo
+
+      ! Copy all 8 masks back to host for use by set_masks_for_axes_dsamp
+      !$omp target exit data map(from: mTL, mCuL, mCvL, mBL, mTi, mCui, mCvi, mBi)
     endif
   enddo
 
@@ -898,10 +931,16 @@ subroutine set_masks_for_axes_dsamp(G, diag_cs)
   ! Local variables
   integer :: c, dl
   type(axes_grp), pointer :: axes => NULL() ! Current axes, for convenience
+  ! Local aliases for downsample outputs to avoid derived-type references in map clauses
+  real, pointer :: ds_mTL(:,:,:), ds_mCuL(:,:,:), ds_mCvL(:,:,:), ds_mBL(:,:,:)
+  real, pointer :: ds_mTi(:,:,:), ds_mCui(:,:,:), ds_mCvi(:,:,:), ds_mBi(:,:,:)
 
   ! Each downsampled axis needs both downsampled and non-downsampled masks.
   ! The downsampled mask is needed for sending out the diagnostics output via diag_manager.
   ! The non-downsampled mask is needed for downsampling the diagnostics field.
+  ! NOTE: axes%mask3d arrays are already device-resident after set_masks_for_axes,
+  ! and downsample_mask expects field_in on device. Outputs stay on device until the
+  ! bulk map(from:) at the end of the c loop.
   do dl=2,MAX_DSAMP_LEV
     if (dl /= 2) call MOM_error(FATAL, "set_masks_for_axes_dsamp: Downsample level other than 2 is not supported!")
     do c=1, diag_cs%num_diag_coords
@@ -953,6 +992,17 @@ subroutine set_masks_for_axes_dsamp(G, diag_cs)
               dl, G%IscB, G%JscB, G%IsdB, G%JsdB, &
               G%HId2%IscB, G%HId2%IecB, G%HId2%JscB, G%HId2%JecB, G%HId2%IsdB, G%HId2%IedB, G%HId2%JsdB, G%HId2%JedB)
       diag_cs%dsamp(dl)%remap_axesBi(c)%mask3d => axes%mask3d ! Set a pointer to the non-downsampled mask
+
+      ! Bind local aliases to the downsampled outputs for bulk map(from:)
+      ds_mTL  => diag_cs%dsamp(dl)%remap_axesTL(c)%dsamp(dl)%mask3d
+      ds_mCuL => diag_cs%dsamp(dl)%remap_axesCuL(c)%dsamp(dl)%mask3d
+      ds_mCvL => diag_cs%dsamp(dl)%remap_axesCvL(c)%dsamp(dl)%mask3d
+      ds_mBL  => diag_cs%dsamp(dl)%remap_axesBL(c)%dsamp(dl)%mask3d
+      ds_mTi  => diag_cs%dsamp(dl)%remap_axesTi(c)%dsamp(dl)%mask3d
+      ds_mCui => diag_cs%dsamp(dl)%remap_axesCui(c)%dsamp(dl)%mask3d
+      ds_mCvi => diag_cs%dsamp(dl)%remap_axesCvi(c)%dsamp(dl)%mask3d
+      ds_mBi  => diag_cs%dsamp(dl)%remap_axesBi(c)%dsamp(dl)%mask3d
+      !$omp target exit data map(from: ds_mTL, ds_mCuL, ds_mCvL, ds_mBL, ds_mTi, ds_mCui, ds_mCvi, ds_mBi)
     enddo
   enddo
 end subroutine set_masks_for_axes_dsamp
@@ -1503,8 +1553,12 @@ subroutine post_data_2d_low(diag, field, diag_cs, is_static, mask)
     do j=jsv,jev ; do i=isv,iev
       locfield(i,j) = field(i,j) * diag%conversion_factor
     enddo ; enddo
+    ! locfield is a host-only copy; map it to device so downsample_field_2d
+    ! can access it without an internal map(to:) transfer.
+    !$omp target enter data map(to: locfield)
   else
     locfield => field
+    ! locfield points to a model-state array already resident on device.
   endif
 
   if (present(mask)) then
@@ -1522,7 +1576,10 @@ subroutine post_data_2d_low(diag, field, diag_cs, is_static, mask)
   if (dl > 1) then
     isv_o = isv ; jsv_o = jsv
     call downsample_diag_field(locfield, locfield_dsamp, dl, diag_cs, diag, isv, iev, jsv, jev, mask)
-    if ((diag%conversion_factor /= 0.) .and. (diag%conversion_factor /= 1.)) deallocate( locfield )
+    if ((diag%conversion_factor /= 0.) .and. (diag%conversion_factor /= 1.)) then
+      !$omp target exit data map(delete: locfield)
+      deallocate( locfield )
+    endif
     locfield => locfield_dsamp
     if (present(mask)) then
       call downsample_field_2d(locmask, locmask_dsamp, dl, MSK, locmask, diag_cs, diag, &
@@ -1837,8 +1894,12 @@ subroutine post_data_3d_low(diag, field, diag_cs, is_static, mask)
     do k=ks,ke ; do j=jsv,jev ; do i=isv,iev
       locfield(i,j,k) = field(i,j,k) * diag%conversion_factor
     enddo ; enddo ; enddo
+    ! locfield is a host-only copy; map it to device so downsample_field_3d
+    ! can access it without an internal map(to:) transfer.
+    !$omp target enter data map(to: locfield)
   else
     locfield => field
+    ! locfield points to a model-state array already resident on device.
   endif
 
   if (present(mask)) then
@@ -1856,7 +1917,10 @@ subroutine post_data_3d_low(diag, field, diag_cs, is_static, mask)
   if (dl > 1) then
     isv_o = isv ; jsv_o = jsv
     call downsample_diag_field(locfield, locfield_dsamp, dl, diag_cs, diag, isv, iev, jsv, jev, mask)
-    if ((diag%conversion_factor /= 0.) .and. (diag%conversion_factor /= 1.)) deallocate( locfield )
+    if ((diag%conversion_factor /= 0.) .and. (diag%conversion_factor /= 1.)) then
+      !$omp target exit data map(delete: locfield)
+      deallocate( locfield )
+    endif
     locfield => locfield_dsamp
     if (present(mask)) then
       call downsample_field_3d(locmask, locmask_dsamp, dl, MSK, locmask, diag_cs, diag, &
@@ -4223,24 +4287,19 @@ subroutine downsample_diag_masks_set(G, nz, diag_cs)
   type(diag_ctrl),               pointer    :: diag_cs !< A pointer to a type with many variables
                                                        !! used for diagnostics
   ! Local variables
-  integer :: k, dl
+  integer :: i, j, k, dl
+  ! Local pointer aliases used in OpenMP target map clauses to avoid derived-type
+  ! deep-copy issues.
+  real, pointer :: m2dT(:,:), m2dBu(:,:), m2dCu(:,:), m2dCv(:,:)
+  real, pointer :: m3dTL(:,:,:),  m3dBL(:,:,:),  m3dCuL(:,:,:),  m3dCvL(:,:,:)
+  real, pointer :: m3dTi(:,:,:),  m3dBi(:,:,:),  m3dCui(:,:,:),  m3dCvi(:,:,:)
 
-!print*,'original c extents ',G%isc,G%iec,G%jsc,G%jec
-!print*,'original c extents ',G%iscb,G%iecb,G%jscb,G%jecb
-!print*,'coarse   c extents ',G%HId2%isc,G%HId2%iec,G%HId2%jsc,G%HId2%jec
-!print*,'original d extents ',G%isd,G%ied,G%jsd,G%jed
-!print*,'coarse   d extents ',G%HId2%isd,G%HId2%ied,G%HId2%jsd,G%HId2%jed
-! original c  extents           5          52           5          52
-! original cB-nonsym extents    5          52           5          52
-! original cB-sym    extents    4          52           4          52
-! coarse   c extents            3          26           3          26
-! original d extents            1          56           1          56
-! original dB-nonsym extents    1          56           1          56
-! original dB-sym extents       0          56           0          56
-! coarse   d extents            1          28           1          28
+  ! Map the four 2D input masks to the device once, before the dl loop.
+  ! downsample_mask_2d/3d expect field_in to already be present on device.
+  !$omp target enter data map(to: G%mask2dT, G%mask2dBu, G%mask2dCu, G%mask2dCv)
 
   do dl=2,MAX_DSAMP_LEV
-    ! 2d mask
+    ! --- 2D masks ---
     call downsample_mask(G%mask2dT, diag_cs%dsamp(dl)%mask2dT,  dl, G%isc, G%jsc, G%isd, G%jsd, &
             G%HId2%isc, G%HId2%iec, G%HId2%jsc, G%HId2%jec, G%HId2%isd, G%HId2%ied, G%HId2%jsd, G%HId2%jed)
     call downsample_mask(G%mask2dBu, diag_cs%dsamp(dl)%mask2dBu, dl,G%IscB, G%JscB, G%IsdB, G%JsdB, &
@@ -4249,29 +4308,54 @@ subroutine downsample_diag_masks_set(G, nz, diag_cs)
             G%HId2%IscB,G%HId2%IecB, G%HId2%jsc, G%HId2%jec,G%HId2%IsdB,G%HId2%IedB,G%HId2%jsd, G%HId2%jed)
     call downsample_mask(G%mask2dCv, diag_cs%dsamp(dl)%mask2dCv, dl,G %isc ,G%JscB, G%isd, G%JsdB, &
             G%HId2%isc ,G%HId2%iec, G%HId2%JscB,G%HId2%JecB,G%HId2%isd ,G%HId2%ied, G%HId2%JsdB,G%HId2%JedB)
+
+    ! Bind local aliases to the (now device-mapped) 2D mask arrays
+    m2dT  => diag_cs%dsamp(dl)%mask2dT
+    m2dBu => diag_cs%dsamp(dl)%mask2dBu
+    m2dCu => diag_cs%dsamp(dl)%mask2dCu
+    m2dCv => diag_cs%dsamp(dl)%mask2dCv
+
+    ! --- 3D layer masks (nz levels) ---
     ! 3d native masks are needed by diag_manager but the native variables
-    ! can only be masked 2d - for ocean points, all layers exists.
+    ! can only be masked 2d - for ocean points, all layers exist.
     allocate(diag_cs%dsamp(dl)%mask3dTL(G%HId2%isd:G%HId2%ied,G%HId2%jsd:G%HId2%jed,1:nz))
     allocate(diag_cs%dsamp(dl)%mask3dBL(G%HId2%IsdB:G%HId2%IedB,G%HId2%JsdB:G%HId2%JedB,1:nz))
     allocate(diag_cs%dsamp(dl)%mask3dCuL(G%HId2%IsdB:G%HId2%IedB,G%HId2%jsd:G%HId2%jed,1:nz))
     allocate(diag_cs%dsamp(dl)%mask3dCvL(G%HId2%isd:G%HId2%ied,G%HId2%JsdB:G%HId2%JedB,1:nz))
-    do k=1,nz
-      diag_cs%dsamp(dl)%mask3dTL(:,:,k) = diag_cs%dsamp(dl)%mask2dT(:,:)
-      diag_cs%dsamp(dl)%mask3dBL(:,:,k) = diag_cs%dsamp(dl)%mask2dBu(:,:)
-      diag_cs%dsamp(dl)%mask3dCuL(:,:,k) = diag_cs%dsamp(dl)%mask2dCu(:,:)
-      diag_cs%dsamp(dl)%mask3dCvL(:,:,k) = diag_cs%dsamp(dl)%mask2dCv(:,:)
-    enddo
+    m3dTL  => diag_cs%dsamp(dl)%mask3dTL
+    m3dBL  => diag_cs%dsamp(dl)%mask3dBL
+    m3dCuL => diag_cs%dsamp(dl)%mask3dCuL
+    m3dCvL => diag_cs%dsamp(dl)%mask3dCvL
+    !$omp target enter data map(alloc: m3dTL, m3dBL, m3dCuL, m3dCvL)
+    call copy_2d_into_3d(m2dT,  m3dTL)
+    call copy_2d_into_3d(m2dBu, m3dBL)
+    call copy_2d_into_3d(m2dCu, m3dCuL)
+    call copy_2d_into_3d(m2dCv, m3dCvL)
+
+    ! --- 3D interface masks (nz+1 levels) ---
     allocate(diag_cs%dsamp(dl)%mask3dTi(G%HId2%isd:G%HId2%ied,G%HId2%jsd:G%HId2%jed,1:nz+1))
     allocate(diag_cs%dsamp(dl)%mask3dBi(G%HId2%IsdB:G%HId2%IedB,G%HId2%JsdB:G%HId2%JedB,1:nz+1))
     allocate(diag_cs%dsamp(dl)%mask3dCui(G%HId2%IsdB:G%HId2%IedB,G%HId2%jsd:G%HId2%jed,1:nz+1))
     allocate(diag_cs%dsamp(dl)%mask3dCvi(G%HId2%isd:G%HId2%ied,G%HId2%JsdB:G%HId2%JedB,1:nz+1))
-    do k=1,nz+1
-      diag_cs%dsamp(dl)%mask3dTi(:,:,k) = diag_cs%dsamp(dl)%mask2dT(:,:)
-      diag_cs%dsamp(dl)%mask3dBi(:,:,k) = diag_cs%dsamp(dl)%mask2dBu(:,:)
-      diag_cs%dsamp(dl)%mask3dCui(:,:,k) = diag_cs%dsamp(dl)%mask2dCu(:,:)
-      diag_cs%dsamp(dl)%mask3dCvi(:,:,k) = diag_cs%dsamp(dl)%mask2dCv(:,:)
-    enddo
+    m3dTi  => diag_cs%dsamp(dl)%mask3dTi
+    m3dBi  => diag_cs%dsamp(dl)%mask3dBi
+    m3dCui => diag_cs%dsamp(dl)%mask3dCui
+    m3dCvi => diag_cs%dsamp(dl)%mask3dCvi
+    !$omp target enter data map(alloc: m3dTi, m3dBi, m3dCui, m3dCvi)
+    call copy_2d_into_3d(m2dT,  m3dTi)
+    call copy_2d_into_3d(m2dBu, m3dBi)
+    call copy_2d_into_3d(m2dCu, m3dCui)
+    call copy_2d_into_3d(m2dCv, m3dCvi)
+
+    ! Copy all output masks back to the host
+    !$omp target exit data map(from: m2dT, m2dBu, m2dCu, m2dCv)
+    !$omp target exit data map(from: m3dTL, m3dBL, m3dCuL, m3dCvL)
+    !$omp target exit data map(from: m3dTi, m3dBi, m3dCui, m3dCvi)
   enddo
+
+  ! Release the input masks from the device now that all dl levels are done.
+  !$omp target exit data map(release: G%mask2dT, G%mask2dBu, G%mask2dCu, G%mask2dCv)
+
 end subroutine downsample_diag_masks_set
 
 !> Get the diagnostics-compute indices (to be passed to send_data) based on the shape of
@@ -4491,6 +4575,8 @@ subroutine downsample_field_3d(field_in, field_out, dl, method, mask, diag_cs, d
   real :: eps_vol   ! A negligibly small volume or mass [H L2 ~> m3 or kg]
   real :: eps_area  ! A negligibly small area [L2 ~> m2]
   real :: eps_face  ! A negligibly small face area [H L ~> m2 or kg m-1]
+  ! Local pointer aliases for arrays accessed inside target regions
+  real, pointer :: areaT(:,:), dyCu(:,:), dxCv(:,:), h_ptr(:,:,:)
 
   ks = 1 ; ke = size(field_in,3)
   eps_face = 1.0e-20 * diag_cs%G%US%m_to_L * diag_cs%GV%m_to_H
@@ -4511,23 +4597,37 @@ subroutine downsample_field_3d(field_in, field_out, dl, method, mask, diag_cs, d
   endif
   allocate(field_out(1:f1,1:f2,ks:ke))
 
+  ! Bind local aliases to device-resident grid arrays (mapped in MOM.F90 init).
+  areaT => diag_cs%G%areaT
+  dyCu  => diag_cs%G%dyCu
+  dxCv  => diag_cs%G%dxCv
+  h_ptr => diag_cs%h
+
+  ! field_in and mask are guaranteed to be device-resident by the caller.
+  ! field_out is a fresh temporary: allocate it on device and copy back after.
+  !$omp target enter data map(alloc: field_out)
+
   ! Fill the down sampled field on the down sampled diagnostics (almost always compute) domain
   !### The averaging used here is not rotationally invariant.
   !  Also, it would be better to use a max with eps_vol instead of adding it in the denominator.
   if (method == MMM) then
+    !$omp target teams distribute parallel do collapse(3) &
+    !$omp   private(i0,j0,ave,total_weight,ii,jj,weight)
     do k=ks,ke ; do j=jsv_d,jev_d ; do i=isv_d,iev_d
       i0 = isv_o+dl*(i-isv_d)
       j0 = jsv_o+dl*(j-jsv_d)
       ave = 0.0
       total_weight = 0.0
       do jj=j0,j0+dl-1 ; do ii=i0,i0+dl-1
-        weight = mask(ii,jj,k) * diag_cs%G%areaT(ii,jj) * diag_cs%h(ii,jj,k)
+        weight = mask(ii,jj,k) * areaT(ii,jj) * h_ptr(ii,jj,k)
         total_weight = total_weight + weight
         ave = ave+field_in(ii,jj,k) * weight
       enddo ; enddo
       field_out(i,j,k)  = ave / (total_weight + eps_vol)  ! Eps_vol avoids division by 0.
     enddo ; enddo ; enddo
   elseif (method == SSS) then   ! e.g., volcello
+    !$omp target teams distribute parallel do collapse(3) &
+    !$omp   private(i0,j0,ave,ii,jj,weight)
     do k=ks,ke ; do j=jsv_d,jev_d ; do i=isv_d,iev_d
       i0 = isv_o+dl*(i-isv_d)
       j0 = jsv_o+dl*(j-jsv_d)
@@ -4539,19 +4639,23 @@ subroutine downsample_field_3d(field_in, field_out, dl, method, mask, diag_cs, d
       field_out(i,j,k)  = ave ! This is a masked sum, and total_weight = 1.
     enddo ; enddo ; enddo
   elseif (method == MMP .or. method == MMS) then   ! e.g., T_advection_xy
+    !$omp target teams distribute parallel do collapse(3) &
+    !$omp   private(i0,j0,ave,total_weight,ii,jj,weight)
     do k=ks,ke ; do j=jsv_d,jev_d ; do i=isv_d,iev_d
       i0 = isv_o+dl*(i-isv_d)
       j0 = jsv_o+dl*(j-jsv_d)
       ave = 0.0
       total_weight = 0.0
       do jj=j0,j0+dl-1 ; do ii=i0,i0+dl-1
-        weight = mask(ii,jj,k) * diag_cs%G%areaT(ii,jj)
+        weight = mask(ii,jj,k) * areaT(ii,jj)
         total_weight = total_weight + weight
         ave = ave+field_in(ii,jj,k) * weight
       enddo ; enddo
       field_out(i,j,k)  = ave / (total_weight + eps_area)  ! Eps_area avoids division by 0.
     enddo ; enddo ; enddo
   elseif (method == PMM) then
+    !$omp target teams distribute parallel do collapse(3) &
+    !$omp   private(i0,j0,ave,total_weight,ii,jj,weight)
     do k=ks,ke ; do j=jsv_d,jev_d ; do i=isv_d,iev_d
       i0 = isv_o+dl*(i-isv_d)
       j0 = jsv_o+dl*(j-jsv_d)
@@ -4559,13 +4663,15 @@ subroutine downsample_field_3d(field_in, field_out, dl, method, mask, diag_cs, d
       total_weight = 0.0
       ii=i0
       do jj=j0,j0+dl-1
-        weight = mask(ii,jj,k) * diag_cs%G%dyCu(ii,jj) * diag_cs%h(ii,jj,k)
+        weight = mask(ii,jj,k) * dyCu(ii,jj) * h_ptr(ii,jj,k)
         total_weight = total_weight + weight
         ave = ave+field_in(ii,jj,k) * weight
       enddo
       field_out(i,j,k)  = ave / (total_weight + eps_face)  ! Eps_face avoids division by 0.
     enddo ; enddo ; enddo
   elseif (method == PSS) then    ! e.g. umo
+    !$omp target teams distribute parallel do collapse(3) &
+    !$omp   private(i0,j0,ave,ii,jj,weight)
     do k=ks,ke ; do j=jsv_d,jev_d ; do i=isv_d,iev_d
       i0 = isv_o+dl*(i-isv_d)
       j0 = jsv_o+dl*(j-jsv_d)
@@ -4578,6 +4684,8 @@ subroutine downsample_field_3d(field_in, field_out, dl, method, mask, diag_cs, d
       field_out(i,j,k)  = ave   ! This is a masked sum, and total_weight = 1.
     enddo ; enddo ; enddo
   elseif (method == SPS) then   ! e.g. vmo
+    !$omp target teams distribute parallel do collapse(3) &
+    !$omp   private(i0,j0,ave,ii,jj,weight)
     do k=ks,ke ; do j=jsv_d,jev_d ; do i=isv_d,iev_d
       i0 = isv_o+dl*(i-isv_d)
       j0 = jsv_o+dl*(j-jsv_d)
@@ -4590,6 +4698,8 @@ subroutine downsample_field_3d(field_in, field_out, dl, method, mask, diag_cs, d
       field_out(i,j,k)  = ave  ! This is a masked sum, and total_weight = 1.
     enddo ; enddo ; enddo
   elseif (method == MPM) then
+    !$omp target teams distribute parallel do collapse(3) &
+    !$omp   private(i0,j0,ave,total_weight,ii,jj,weight)
     do k=ks,ke ; do j=jsv_d,jev_d ; do i=isv_d,iev_d
       i0 = isv_o+dl*(i-isv_d)
       j0 = jsv_o+dl*(j-jsv_d)
@@ -4597,14 +4707,19 @@ subroutine downsample_field_3d(field_in, field_out, dl, method, mask, diag_cs, d
       total_weight = 0.0
       jj=j0
       do ii=i0,i0+dl-1
-        weight = mask(ii,jj,k) * diag_cs%G%dxCv(ii,jj) * diag_cs%h(ii,jj,k)
+        weight = mask(ii,jj,k) * dxCv(ii,jj) * h_ptr(ii,jj,k)
         total_weight = total_weight + weight
         ave = ave+field_in(ii,jj,k) * weight
       enddo
       field_out(i,j,k)  = ave / (total_weight + eps_face)  ! Eps_face avoids division by 0.
     enddo ; enddo ; enddo
   elseif (method == MSK) then ! The input field is a mask, so subsample it instead of averaging.
-    field_out(:,:,:) = 0.0
+    !$omp target teams distribute parallel do collapse(3)
+    do k=ks,ke ; do j=jsv_d,jev_d ; do i=isv_d,iev_d
+      field_out(i,j,k) = 0.0
+    enddo ; enddo ; enddo
+    !$omp target teams distribute parallel do collapse(3) &
+    !$omp   private(i0,j0,ave,ii,jj)
     do k=ks,ke ; do j=jsv_d,jev_d ; do i=isv_d,iev_d
       i0 = isv_o+dl*(i-isv_d)
       j0 = jsv_o+dl*(j-jsv_d)
@@ -4618,6 +4733,8 @@ subroutine downsample_field_3d(field_in, field_out, dl, method, mask, diag_cs, d
     write (mesg,*) " unknown sampling method: ",method
     call MOM_error(FATAL, "downsample_field_3d: "//trim(mesg)//" "//trim(diag%debug_str))
   endif
+
+  !$omp target exit data map(from: field_out)
 
 end subroutine downsample_field_3d
 
@@ -4647,6 +4764,8 @@ subroutine downsample_field_2d(field_in, field_out, dl, method, mask, diag_cs, d
   real :: total_weight ! The sum of weights contributing to a point [nondim] or [L2 ~> m2]
   real :: eps_area  ! A negligibly small area [L2 ~> m2]
   real :: eps_len   ! A negligibly small horizontal length [L ~> m]
+  ! Local pointer aliases for device-resident grid arrays
+  real, pointer :: areaT(:,:), dyCu(:,:), dxCv(:,:)
 
   eps_len = 1.0e-20 * diag_cs%G%US%m_to_L
   eps_area = 1.0e-20 * diag_cs%G%US%m_to_L**2
@@ -4666,55 +4785,70 @@ subroutine downsample_field_2d(field_in, field_out, dl, method, mask, diag_cs, d
   endif
   allocate(field_out(1:f1,1:f2))
 
+  ! Bind local aliases to device-resident grid arrays (mapped in MOM.F90 init).
+  areaT => diag_cs%G%areaT
+  dyCu  => diag_cs%G%dyCu
+  dxCv  => diag_cs%G%dxCv
+
+  ! field_in and mask are guaranteed device-resident by the caller.
+  !$omp target enter data map(alloc: field_out)
+
   if (method == MMP) then
+    !$omp target teams distribute parallel do collapse(2) &
+    !$omp   private(i0,j0,ave,total_weight,ii,jj,weight)
     do j=jsv_d,jev_d ; do i=isv_d,iev_d
       i0 = isv_o+dl*(i-isv_d)
       j0 = jsv_o+dl*(j-jsv_d)
       ave = 0.0
       total_weight = 0.0
       do jj=j0,j0+dl-1 ; do ii=i0,i0+dl-1
-        weight = mask(ii,jj)*diag_cs%G%areaT(ii,jj)
+        weight = mask(ii,jj) * areaT(ii,jj)
         total_weight = total_weight + weight
         ave = ave+field_in(ii,jj) * weight
       enddo ; enddo
       field_out(i,j) = ave / (total_weight + eps_area)  ! Eps_area avoids division by 0.
     enddo ; enddo
   elseif (method == SSP) then    ! e.g., T_dfxy_cont_tendency_2d
+    !$omp target teams distribute parallel do collapse(2) &
+    !$omp   private(i0,j0,ave,ii,jj)
     do j=jsv_d,jev_d ; do i=isv_d,iev_d
       i0 = isv_o+dl*(i-isv_d)
       j0 = jsv_o+dl*(j-jsv_d)
       ave = 0.0
       do jj=j0,j0+dl-1 ; do ii=i0,i0+dl-1
-        weight = mask(ii,jj)
-        ave = ave+field_in(ii,jj)*weight
+        ave = ave+field_in(ii,jj) * mask(ii,jj)
       enddo ; enddo
       field_out(i,j) = ave  ! This is a masked sum, and total_weight = 1.
     enddo ; enddo
   elseif (method == PSP) then   ! e.g., umo_2d
+    !$omp target teams distribute parallel do collapse(2) &
+    !$omp   private(i0,j0,ave,ii,jj)
     do j=jsv_d,jev_d ; do i=isv_d,iev_d
       i0 = isv_o+dl*(i-isv_d)
       j0 = jsv_o+dl*(j-jsv_d)
       ave = 0.0
       ii=i0
       do jj=j0,j0+dl-1
-        weight = mask(ii,jj)
-        ave = ave+field_in(ii,jj)*weight
+        ave = ave+field_in(ii,jj) * mask(ii,jj)
       enddo
       field_out(i,j) = ave  ! This is a masked sum, and total_weight = 1.
     enddo ; enddo
   elseif (method == SPP) then   ! e.g., vmo_2d
+    !$omp target teams distribute parallel do collapse(2) &
+    !$omp   private(i0,j0,ave,ii,jj)
     do j=jsv_d,jev_d ; do i=isv_d,iev_d
       i0 = isv_o+dl*(i-isv_d)
       j0 = jsv_o+dl*(j-jsv_d)
       ave = 0.0
       jj=j0
       do ii=i0,i0+dl-1
-        weight = mask(ii,jj)
-        ave = ave+field_in(ii,jj)*weight
+        ave = ave+field_in(ii,jj) * mask(ii,jj)
       enddo
       field_out(i,j) = ave  ! This is a masked sum, and total_weight = 1.
     enddo ; enddo
   elseif (method == PMP) then
+    !$omp target teams distribute parallel do collapse(2) &
+    !$omp   private(i0,j0,ave,total_weight,ii,jj,weight)
     do j=jsv_d,jev_d ; do i=isv_d,iev_d
       i0 = isv_o+dl*(i-isv_d)
       j0 = jsv_o+dl*(j-jsv_d)
@@ -4722,13 +4856,15 @@ subroutine downsample_field_2d(field_in, field_out, dl, method, mask, diag_cs, d
       total_weight = 0.0
       ii=i0
       do jj=j0,j0+dl-1
-        weight = mask(ii,jj) * diag_cs%G%dyCu(ii,jj)!*diag_cs%h(ii,jj,1) !Niki?
+        weight = mask(ii,jj) * dyCu(ii,jj)
         total_weight = total_weight + weight
         ave = ave+field_in(ii,jj) * weight
       enddo
       field_out(i,j) = ave / (total_weight + eps_len)  ! Eps_len avoids division by 0.
     enddo ; enddo
   elseif (method == MPP) then
+    !$omp target teams distribute parallel do collapse(2) &
+    !$omp   private(i0,j0,ave,total_weight,ii,jj,weight)
     do j=jsv_d,jev_d ; do i=isv_d,iev_d
       i0 = isv_o+dl*(i-isv_d)
       j0 = jsv_o+dl*(j-jsv_d)
@@ -4736,14 +4872,19 @@ subroutine downsample_field_2d(field_in, field_out, dl, method, mask, diag_cs, d
       total_weight = 0.0
       jj=j0
       do ii=i0,i0+dl-1
-        weight = mask(ii,jj)* diag_cs%G%dxCv(ii,jj)!*diag_cs%h(ii,jj,1) !Niki?
+        weight = mask(ii,jj) * dxCv(ii,jj)
         total_weight = total_weight +weight
         ave = ave+field_in(ii,jj)*weight
       enddo
       field_out(i,j) = ave / (total_weight + eps_len)  ! Eps_len avoids division by 0.
     enddo ; enddo
   elseif (method == MSK) then ! The input field is a mask, so subsample it instead of averaging.
-    field_out(:,:) = 0.0
+    !$omp target teams distribute parallel do collapse(2)
+    do j=jsv_d,jev_d ; do i=isv_d,iev_d
+      field_out(i,j) = 0.0
+    enddo ; enddo
+    !$omp target teams distribute parallel do collapse(2) &
+    !$omp   private(i0,j0,ave,ii,jj)
     do j=jsv_d,jev_d ; do i=isv_d,iev_d
       i0 = isv_o+dl*(i-isv_d)
       j0 = jsv_o+dl*(j-jsv_d)
@@ -4757,6 +4898,8 @@ subroutine downsample_field_2d(field_in, field_out, dl, method, mask, diag_cs, d
     write (mesg,*) " unknown sampling method: ",method
     call MOM_error(FATAL, "downsample_field_2d: "//trim(mesg)//" "//trim(diag%debug_str))
   endif
+
+  !$omp target exit data map(from: field_out)
 
 end subroutine downsample_field_2d
 
@@ -4785,8 +4928,16 @@ subroutine downsample_mask_2d(field_in, field_out, dl, isc_o, jsc_o, isd_o, jsd_
   real    :: tot_non_zero  ! The sum of values in the down-scaled cell [A]
 
   ! down sampled mask = 0 unless the mask value of one of the down sampling cells is 1
+  ! field_in should already be on the device
   allocate(field_out(isd_d:ied_d,jsd_d:jed_d))
-  field_out(:,:) = 0.0
+  !$omp target enter data map(alloc: field_out)
+
+  !$omp target teams distribute parallel do collapse(2)
+  do j = jsd_d,jed_d ; do i = isd_d,ied_d
+    field_out(i,j) = 0.0
+  enddo ; enddo
+
+  !$omp target teams distribute parallel do collapse(2) private(i0,j0,tot_non_zero,ii,jj)
   do j=jsc_d,jec_d ; do i=isc_d,iec_d
     i0 = isc_o+dl*(i-isc_d)
     j0 = jsc_o+dl*(j-jsc_d)
@@ -4796,6 +4947,7 @@ subroutine downsample_mask_2d(field_in, field_out, dl, isc_o, jsc_o, isd_o, jsd_
     enddo ; enddo
     if (tot_non_zero > 0.0) field_out(i,j)=1.0
   enddo ; enddo
+
 end subroutine downsample_mask_2d
 
 !> Allocate and compute the 3d down sampled mask
@@ -4824,9 +4976,20 @@ subroutine downsample_mask_3d(field_in, field_out, dl, isc_o, jsc_o, isd_o, jsd_
   real    :: tot_non_zero  ! The sum of values in the down-scaled cell [A]
 
   ! down sampled mask = 0 unless the mask value of one of the down sampling cells is 1
-  ks = lbound(field_in,3) ; ke = ubound(field_in,3)
+  ! field_in should already be on the device
+  ks = lbound(field_in,3)
+  ke = ubound(field_in,3)
+
   allocate(field_out(isd_d:ied_d,jsd_d:jed_d,ks:ke))
-  field_out(:,:,:) = 0.0
+
+  !$omp target enter data map(alloc: field_out)
+
+  !$omp target teams distribute parallel do collapse(3)
+  do k=ks,ke ; do j = jsd_d,jed_d ; do i = isd_d,ied_d
+    field_out(i,j,k) = 0.0
+  enddo ; enddo ; enddo
+
+  !$omp target teams distribute parallel do collapse(3) private(i0,j0,tot_non_zero,ii,jj)
   do k=ks,ke ; do j=jsc_d,jec_d ; do i=isc_d,iec_d
     i0 = isc_o+dl*(i-isc_d)
     j0 = jsc_o+dl*(j-jsc_d)
@@ -4836,6 +4999,9 @@ subroutine downsample_mask_3d(field_in, field_out, dl, isc_o, jsc_o, isd_o, jsd_
     enddo ; enddo
     if (tot_non_zero > 0.0) field_out(i,j,k)=1.0
   enddo ; enddo ; enddo
+
+  !$omp target exit data map(delete: field_out)
+
 end subroutine downsample_mask_3d
 
 !> Fakes a register of a diagnostic to find out if an obsolete
@@ -4858,5 +5024,21 @@ end function found_in_diagtable
 subroutine MOM_diag_send_complete()
   call diag_send_complete_infra()
 end subroutine MOM_diag_send_complete
+
+!> Broadcast a 2D array into every k-level of a 3D array on the GPU.
+!! Both arrays must already be device-mapped before calling.
+subroutine copy_2d_into_3d(field_2d, field_3d)
+  real, intent(in)    :: field_2d(:,:)
+  real, intent(inout) :: field_3d(:,:,:)
+  integer :: i, j, k
+  !$omp target teams distribute parallel do collapse(3)
+  do k = 1, size(field_3d, 3)
+    do j = 1, size(field_3d, 2)
+      do i = 1, size(field_3d, 1)
+        field_3d(i,j,k) = field_2d(i,j)
+      enddo
+    enddo
+  enddo
+end subroutine copy_2d_into_3d
 
 end module MOM_diag_mediator
