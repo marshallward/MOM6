@@ -138,6 +138,14 @@ elseif(CMAKE_Fortran_COMPILER_ID STREQUAL "Cray")
     -O2
   )
 
+elseif(CMAKE_Fortran_COMPILER_ID STREQUAL "LLVMFlang")
+  set(FLAGS_STANDARD -fdefault-real-8)
+  set(FLAGS_DEBUG "-O0 -g")
+  set(FLAGS_RELEASE "-O2")
+  #add_compile_definitions(
+  #  HAVE_MPI=1
+  #  HAVE_FC_DO_CONCURRENT_LOCAL=1
+  #)
 else()
   message(WARNING "Unknown Fortran compiler: ${CMAKE_Fortran_COMPILER_ID}. Using default flags.")
   set(FLAGS_STANDARD "")

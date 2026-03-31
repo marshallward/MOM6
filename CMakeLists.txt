@@ -34,7 +34,9 @@ set(FMS_GIT_URL "https://github.com/edoyango/FMS.git"
     CACHE STRING "FMS Git repository URL")
 set(FMS_GIT_TAG "cmake/nvhpc"
     CACHE STRING "FMS Git tag/branch/commit")
-set(FMS_Fortran_FLAGS "-O2 -Mnovect  -gpu=mem:separate -Mnofma  -mp=gpu -acc=gpu"
+#set(FMS_Fortran_FLAGS "-O2 -Mnovect  -gpu=mem:separate -Mnofma  -mp=gpu -acc=gpu"
+#    CACHE STRING "Additional Fortran flags for FMS compilation")
+set(FMS_Fortran_FLAGS "-O2"
     CACHE STRING "Additional Fortran flags for FMS compilation")
 
 #------------------------------------------------------------------------------
