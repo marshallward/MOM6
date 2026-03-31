@@ -152,9 +152,6 @@ type, public :: set_visc_CS ; private
   integer :: id_clock_ML = -1 !< CPU time clock id for set_viscous_ML
 end type set_visc_CS
 
-  ! tile size dimensions
-  integer, parameter :: TILE_SIZE_X = 32, TILE_SIZE_Y = 4
-
 contains
 
 !> Calculates the thickness of the bottom boundary layer and the viscosity within that layer.
@@ -2053,7 +2050,7 @@ end function set_u_at_v
 !! A bulk Richardson criterion or the thickness of the topmost NKML layers (with a bulk mixed layer)
 !! are currently used.  The thicknesses are given in terms of fractional layers, so that this
 !! thickness will move as the thickness of the topmost layers change.
-subroutine set_viscous_ML(u, v, h, tv, forces, visc, dt, G, GV, US, CS)
+subroutine set_viscous_ML(u, v, h, tv, forces, visc, dt, G, GV, US, CS, TILE_SIZE_X, TILE_SIZE_Y)
   type(ocean_grid_type),   intent(inout) :: G    !< The ocean's grid structure.
   type(verticalGrid_type), intent(in)    :: GV   !< The ocean's vertical grid structure.
   type(unit_scale_type),   intent(in)    :: US   !< A dimensional unit scaling type
@@ -2072,6 +2069,8 @@ subroutine set_viscous_ML(u, v, h, tv, forces, visc, dt, G, GV, US, CS)
   real,                    intent(in)    :: dt   !< Time increment [T ~> s].
   type(set_visc_CS),       intent(inout) :: CS   !< The control structure returned by a previous
                                                  !! call to set_visc_init.
+  integer,                 intent(in)    :: TILE_SIZE_X !< Size of loop tile in x dim
+  integer,                 intent(in)    :: TILE_SIZE_Y !< Size of loop tile in y dim
 
   ! Local variables
   real, dimension(TILE_SIZE_X,TILE_SIZE_Y) :: &
@@ -2257,32 +2256,37 @@ subroutine set_viscous_ML(u, v, h, tv, forces, visc, dt, G, GV, US, CS)
     call thickness_to_dz(h, tv, dz, G, GV, US, halo_size=1)
   endif
 
-  !$OMP parallel do default(shared)
-  do J=js-1,je ; do i=is-1,ie+1
-    mask_v(i,J) = G%mask2dCv(i,J)
-  enddo ; enddo
-  !$OMP parallel do default(shared)
-  do j=js-1,je+1 ; do I=is-1,ie
-    mask_u(I,j) = G%mask2dCu(I,j)
-  enddo ; enddo
+  ! set mask_u/v - only used in ice shelf loops
+  if (associated(forces%frac_shelf_u) .or. associated(forces%frac_shelf_v)) then
 
-  if (associated(OBC)) then ; do n=1,OBC%number_of_segments
-    ! Project bottom depths across cell-corner points in the OBCs.
-    if (.not. OBC%segment(n)%on_pe) cycle
-    ! Use a one-sided projection of bottom depths at OBC points.
-    I = OBC%segment(n)%HI%IsdB ; J = OBC%segment(n)%HI%JsdB
-    if (OBC%segment(n)%is_N_or_S .and. (J >= js-1) .and. (J <= je)) then
-      do I = max(is-1,OBC%segment(n)%HI%IsdB), min(ie,OBC%segment(n)%HI%IedB)
-        if (OBC%segment(n)%direction == OBC_DIRECTION_N) mask_u(I,j+1) = 0.0
-        if (OBC%segment(n)%direction == OBC_DIRECTION_S) mask_u(I,j) = 0.0
-      enddo
-    elseif (OBC%segment(n)%is_E_or_W .and. (I >= is-1) .and. (I <= ie)) then
-      do J = max(js-1,OBC%segment(n)%HI%JsdB), min(je,OBC%segment(n)%HI%JedB)
-        if (OBC%segment(n)%direction == OBC_DIRECTION_E) mask_v(i+1,J) = 0.0
-        if (OBC%segment(n)%direction == OBC_DIRECTION_W) mask_v(i,J) = 0.0
-      enddo
-    endif
-  enddo ; endif
+    !$OMP parallel do default(shared)
+    do J=js-1,je ; do i=is-1,ie+1
+      mask_v(i,J) = G%mask2dCv(i,J)
+    enddo ; enddo
+    !$OMP parallel do default(shared)
+    do j=js-1,je+1 ; do I=is-1,ie
+      mask_u(I,j) = G%mask2dCu(I,j)
+    enddo ; enddo
+
+    if (associated(OBC)) then ; do n=1,OBC%number_of_segments
+      ! Project bottom depths across cell-corner points in the OBCs.
+      if (.not. OBC%segment(n)%on_pe) cycle
+      ! Use a one-sided projection of bottom depths at OBC points.
+      I = OBC%segment(n)%HI%IsdB ; J = OBC%segment(n)%HI%JsdB
+      if (OBC%segment(n)%is_N_or_S .and. (J >= js-1) .and. (J <= je)) then
+        do I = max(is-1,OBC%segment(n)%HI%IsdB), min(ie,OBC%segment(n)%HI%IedB)
+          if (OBC%segment(n)%direction == OBC_DIRECTION_N) mask_u(I,j+1) = 0.0
+          if (OBC%segment(n)%direction == OBC_DIRECTION_S) mask_u(I,j) = 0.0
+        enddo
+      elseif (OBC%segment(n)%is_E_or_W .and. (I >= is-1) .and. (I <= ie)) then
+        do J = max(js-1,OBC%segment(n)%HI%JsdB), min(je,OBC%segment(n)%HI%JedB)
+          if (OBC%segment(n)%direction == OBC_DIRECTION_E) mask_v(i+1,J) = 0.0
+          if (OBC%segment(n)%direction == OBC_DIRECTION_W) mask_v(i,J) = 0.0
+        enddo
+      endif
+    enddo ; endif
+
+  endif
 
   do jstart=js,je,TILE_SIZE_Y ; do istart=Isq,Ieq,TILE_SIZE_X  ! u-point loop
     jend=min(je, jstart+TILE_SIZE_Y-1) ; iend = min(Ieq, istart+TILE_SIZE_X-1)
