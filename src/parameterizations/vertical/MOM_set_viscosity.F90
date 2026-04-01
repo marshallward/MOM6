@@ -2318,34 +2318,64 @@ subroutine set_viscous_ML(u, v, h, tv, forces, visc, dt, G, GV, US, CS, TILE_SIZ
         endif
       enddo
 
-      if (do_any) then ; k2 = max(1,nkml) ; do k=1,nz
-        if (k > nkml) then
-          do_any = .false.
-          if (use_EOS .and. (k==nkml+1)) then
-            ! Find dRho/dT and dRho_dS.
-            do concurrent (j=jstart:jend, I=istart:iend)
-              jj=j-jstart+1 ; II=I-istart+1
-              press(II,jj) = (GV%H_to_RZ*GV%g_Earth) * htot(II,jj)
-              if (associated(tv%p_surf)) &
-                press(II,jj) = press(II,jj) + 0.5*(tv%p_surf(i,j)+tv%p_surf(i+1,j))
-              I_2hlay = 1.0 / (h(i,j,k2) + h(i+1,j,k2) + h_neglect)
-              T_EOS(II,jj) = ((h(i,j,k2)*tv%T(i,j,k2)) + (h(i+1,j,k2)*tv%T(i+1,j,k2))) * I_2hlay
-              S_EOS(II,jj) = ((h(i,j,k2)*tv%S(i,j,k2)) + (h(i+1,j,k2)*tv%S(i+1,j,k2))) * I_2hlay
-            enddo
-            call calculate_density_derivs(T_EOS, S_EOS, press, dR_dT, dR_dS, &
-                                          tv%eqn_of_state, EOSdom)
-            if (nonBous_ML) then
-              !$omp target update from(T_EOS,S_EOS,press)
-              do j=jstart,jend
-                jj=j-jstart+1
-              call calculate_specific_vol_derivs(T_EOS(:,jj), S_EOS(:,jj), press(:,jj), &
-                                                 dSpV_dT(:,jj), dSpV_dS(:,jj), tv%eqn_of_state)
-              enddo
-              !$omp target update to(dSpV_dT,dSpV_dS)
+      if (do_any) then
+        !$omp target
+        do k=1,min(nkml,nz)
+          !$omp loop collapse(2) private(jj,II)
+          do j=jstart,jend ; do I=istart,iend
+            jj=j-jstart+1 ; II=I-istart+1
+            if (do_i(II,jj)) then
+              htot(II,jj) = htot(II,jj) + 0.5 * (h(i,j,k) + h(i+1,j,k))
+              uhtot(II,jj) = uhtot(II,jj) + 0.5 * (h(i,j,k) + h(i+1,j,k)) * u(I,j,k)
+              vhtot(II,jj) = vhtot(II,jj) + 0.25 * ((h(i,j,k) * (v(i,J,k) + v(i,J-1,k))) + &
+                                            (h(i+1,j,k) * (v(i+1,J,k) + v(i+1,J-1,k))))
+              if (use_EOS) then
+                Thtot(II,jj) = Thtot(II,jj) + &
+                  0.5 * ((h(i,j,k)*tv%T(i,j,k)) + (h(i+1,j,k)*tv%T(i+1,j,k)))
+                Shtot(II,jj) = Shtot(II,jj) + &
+                  0.5 * ((h(i,j,k)*tv%S(i,j,k)) + (h(i+1,j,k)*tv%S(i+1,j,k)))
+              else
+                Rhtot(II,jj) = Rhtot(II,jj) + 0.5 * (h(i,j,k) + h(i+1,j,k)) * GV%Rlay(k)
+              endif
             endif
-          endif
+          enddo ; enddo
+        enddo
+        !$omp end target
 
-          do concurrent (j=jstart:jend, I=istart:iend) DO_LOCALITY(reduce(.or.:do_any))
+        k2 = max(1,nkml)
+        if (use_EOS .and. (nz>nkml)) then
+          ! Find dRho/dT and dRho_dS.
+          do concurrent (j=jstart:jend, I=istart:iend)
+            jj=j-jstart+1 ; II=I-istart+1
+            press(II,jj) = (GV%H_to_RZ*GV%g_Earth) * htot(II,jj)
+            if (associated(tv%p_surf)) &
+              press(II,jj) = press(II,jj) + 0.5*(tv%p_surf(i,j)+tv%p_surf(i+1,j))
+            I_2hlay = 1.0 / (h(i,j,k2) + h(i+1,j,k2) + h_neglect)
+            T_EOS(II,jj) = ((h(i,j,k2)*tv%T(i,j,k2)) + (h(i+1,j,k2)*tv%T(i+1,j,k2))) * I_2hlay
+            S_EOS(II,jj) = ((h(i,j,k2)*tv%S(i,j,k2)) + (h(i+1,j,k2)*tv%S(i+1,j,k2))) * I_2hlay
+          enddo
+          call calculate_density_derivs(T_EOS, S_EOS, press, dR_dT, dR_dS, &
+                                        tv%eqn_of_state, EOSdom)
+          if (nonBous_ML) then
+            !$omp target update from(T_EOS,S_EOS,press)
+            do j=jstart,jend
+              jj=j-jstart+1
+            call calculate_specific_vol_derivs(T_EOS(:,jj), S_EOS(:,jj), press(:,jj), &
+                                                dSpV_dT(:,jj), dSpV_dS(:,jj), tv%eqn_of_state)
+            enddo
+            !$omp target update to(dSpV_dT,dSpV_dS)
+          endif
+        endif
+
+        !$omp target
+        do k=nkml+1,nz
+#ifndef __NVCOMPILER_OPENMP_GPU
+          do_any = .false.
+#endif
+
+          !$omp loop collapse(2) &
+          !$omp   private(jj,II,hlay,I_2hlay,v_at_u,Uh2,T_lay,S_lay,gHprime,RiBulk)
+          do j=jstart,jend ; do I=istart,iend
             jj=j-jstart+1 ; II=I-istart+1
             if (do_i(II,jj)) then
               hlay = 0.5*(h(i,j,k) + h(i+1,j,k))
@@ -2385,31 +2415,37 @@ subroutine set_viscous_ML(u, v, h, tv, forces, visc, dt, G, GV, US, CS, TILE_SIZ
                 k_massive(II,jj) = k
               endif ! hlay > h_tiny
 
+#ifndef __NVCOMPILER_OPENMP_GPU
               if (do_i(II,jj)) do_any = .true.
+#endif
             endif
-          enddo
+          enddo ; enddo
 
+#ifndef __NVCOMPILER_OPENMP_GPU
           if (.not.do_any) exit ! All columns are done.
-        endif
+#endif
 
-        do concurrent (j=jstart:jend, I=istart:iend)
-          jj=j-jstart+1 ; II=I-istart+1
-          if (do_i(II,jj)) then
-            htot(II,jj) = htot(II,jj) + 0.5 * (h(i,j,k) + h(i+1,j,k))
-            uhtot(II,jj) = uhtot(II,jj) + 0.5 * (h(i,j,k) + h(i+1,j,k)) * u(I,j,k)
-            vhtot(II,jj) = vhtot(II,jj) + 0.25 * ((h(i,j,k) * (v(i,J,k) + v(i,J-1,k))) + &
-                                          (h(i+1,j,k) * (v(i+1,J,k) + v(i+1,J-1,k))))
-            if (use_EOS) then
-              Thtot(II,jj) = Thtot(II,jj) + &
-                0.5 * ((h(i,j,k)*tv%T(i,j,k)) + (h(i+1,j,k)*tv%T(i+1,j,k)))
-              Shtot(II,jj) = Shtot(II,jj) + &
-                0.5 * ((h(i,j,k)*tv%S(i,j,k)) + (h(i+1,j,k)*tv%S(i+1,j,k)))
-            else
-              Rhtot(II,jj) = Rhtot(II,jj) + 0.5 * (h(i,j,k) + h(i+1,j,k)) * GV%Rlay(k)
+          !$omp loop collapse(2) private(jj,II)
+          do j=jstart,jend ; do I=istart,iend
+            jj=j-jstart+1 ; II=I-istart+1
+            if (do_i(II,jj)) then
+              htot(II,jj) = htot(II,jj) + 0.5 * (h(i,j,k) + h(i+1,j,k))
+              uhtot(II,jj) = uhtot(II,jj) + 0.5 * (h(i,j,k) + h(i+1,j,k)) * u(I,j,k)
+              vhtot(II,jj) = vhtot(II,jj) + 0.25 * ((h(i,j,k) * (v(i,J,k) + v(i,J-1,k))) + &
+                                            (h(i+1,j,k) * (v(i+1,J,k) + v(i+1,J-1,k))))
+              if (use_EOS) then
+                Thtot(II,jj) = Thtot(II,jj) + &
+                  0.5 * ((h(i,j,k)*tv%T(i,j,k)) + (h(i+1,j,k)*tv%T(i+1,j,k)))
+                Shtot(II,jj) = Shtot(II,jj) + &
+                  0.5 * ((h(i,j,k)*tv%S(i,j,k)) + (h(i+1,j,k)*tv%S(i+1,j,k)))
+              else
+                Rhtot(II,jj) = Rhtot(II,jj) + 0.5 * (h(i,j,k) + h(i+1,j,k)) * GV%Rlay(k)
+              endif
             endif
-          endif
+          enddo ; enddo
         enddo
-      enddo ; endif
+        !$omp end target
+      endif
 
       if (do_any) then
         do concurrent (j=jstart:jend, I=istart:iend)
@@ -2632,35 +2668,67 @@ subroutine set_viscous_ML(u, v, h, tv, forces, visc, dt, G, GV, US, CS, TILE_SIZ
         endif
       enddo
 
-      if (do_any) then ; k2 = max(1,nkml) ; do k=1,nz
-        if (k > nkml) then
-          do_any = .false.
-          if (use_EOS .and. (k==nkml+1)) then
-            ! Find dRho/dT and dRho_dS.
-            do concurrent (J=jstart:jend, i=istart:iend)
-              JJ=J-jstart+1 ; ii=i-istart+1
-              press(ii,JJ) = (GV%H_to_RZ * GV%g_Earth) * htot(ii,JJ)
-              if (associated(tv%p_surf)) press(ii,JJ) = press(ii,JJ) + &
-                0.5*(tv%p_surf(i,j)+tv%p_surf(i,j+1))
-
-              I_2hlay = 1.0 / (h(i,j,k2) + h(i,j+1,k2) + h_neglect)
-              T_EOS(ii,JJ) = ((h(i,j,k2)*tv%T(i,j,k2)) + (h(i,j+1,k2)*tv%T(i,j+1,k2))) * I_2hlay
-              S_EOS(ii,JJ) = ((h(i,j,k2)*tv%S(i,j,k2)) + (h(i,j+1,k2)*tv%S(i,j+1,k2))) * I_2hlay
-            enddo
-            call calculate_density_derivs(T_EOS, S_EOS, press, dR_dT, dR_dS, &
-                                          tv%eqn_of_state, EOSdom)
-            if (nonBous_ML) then
-              !$omp target update from(T_EOS,S_EOS,press)
-              do J=jstart,jend
-              JJ=J-jstart+1
-              call calculate_specific_vol_derivs(T_EOS(:,JJ), S_EOS(:,JJ), press(:,JJ), &
-                                                 dSpV_dT(:,JJ), dSpV_dS(:,JJ), tv%eqn_of_state)
-              enddo
-              !$omp target update to(dSpV_dT,dSpV_dS)
+      if (do_any) then
+        !$omp target
+        do k=1,nkml
+          !$omp loop collapse(2) private(JJ,ii)
+          do J=jstart,jend ; do i=istart,iend
+            JJ=J-jstart+1 ; ii=i-istart+1
+            if (do_i(ii,JJ)) then
+              htot(ii,JJ) = htot(ii,JJ) + 0.5 * (h(i,J,k) + h(i,j+1,k))
+              vhtot(ii,JJ) = vhtot(ii,JJ) + 0.5 * (h(i,j,k) + h(i,j+1,k)) * v(i,J,k)
+              uhtot(ii,JJ) = uhtot(ii,JJ) + 0.25 * ((h(i,j,k) * (u(I-1,j,k) + u(I,j,k))) + &
+                                            (h(i,j+1,k) * (u(I-1,j+1,k) + u(I,j+1,k))))
+              if (use_EOS) then
+                Thtot(ii,JJ) = Thtot(ii,JJ) + &
+                  0.5 * ((h(i,j,k)*tv%T(i,j,k)) + (h(i,j+1,k)*tv%T(i,j+1,k)))
+                Shtot(ii,JJ) = Shtot(ii,JJ) + &
+                  0.5 * ((h(i,j,k)*tv%S(i,j,k)) + (h(i,j+1,k)*tv%S(i,j+1,k)))
+              else
+                Rhtot(ii,JJ) = Rhtot(ii,JJ) + 0.5 * (h(i,j,k) + h(i,j+1,k)) * GV%Rlay(k)
+              endif
             endif
-          endif
+          enddo ; enddo
+        enddo
+        !$omp end target
 
-          do concurrent (J=jstart:jend, i=istart:iend) DO_LOCALITY(reduce(.or.:do_any))
+        if (use_EOS .and. (nz > nkml)) then
+          k2 = max(1,nkml)
+          ! Find dRho/dT and dRho_dS.
+          do concurrent (J=jstart:jend, i=istart:iend)
+            JJ=J-jstart+1 ; ii=i-istart+1
+            press(ii,JJ) = (GV%H_to_RZ * GV%g_Earth) * htot(ii,JJ)
+            if (associated(tv%p_surf)) press(ii,JJ) = press(ii,JJ) + &
+              0.5*(tv%p_surf(i,j)+tv%p_surf(i,j+1))
+
+            I_2hlay = 1.0 / (h(i,j,k2) + h(i,j+1,k2) + h_neglect)
+            T_EOS(ii,JJ) = ((h(i,j,k2)*tv%T(i,j,k2)) + (h(i,j+1,k2)*tv%T(i,j+1,k2))) * I_2hlay
+            S_EOS(ii,JJ) = ((h(i,j,k2)*tv%S(i,j,k2)) + (h(i,j+1,k2)*tv%S(i,j+1,k2))) * I_2hlay
+          enddo
+          call calculate_density_derivs(T_EOS, S_EOS, press, dR_dT, dR_dS, &
+                                        tv%eqn_of_state, EOSdom)
+          if (nonBous_ML) then
+            !$omp target update from(T_EOS,S_EOS,press)
+            do J=jstart,jend
+            JJ=J-jstart+1
+            call calculate_specific_vol_derivs(T_EOS(:,JJ), S_EOS(:,JJ), press(:,JJ), &
+                                                dSpV_dT(:,JJ), dSpV_dS(:,JJ), tv%eqn_of_state)
+            enddo
+            !$omp target update to(dSpV_dT,dSpV_dS)
+          endif
+        endif
+
+        ! do remaining iterations
+        !$omp target
+        do k=nkml+1,nz
+! no tracking of early exit on GPU
+#ifndef __NVCOMPILER_OPENMP_GPU
+          do_any = .false.
+#endif
+
+          !$omp loop collapse(2) &
+          !$omp   private(JJ,ii,hlay,I_2hlay,u_at_v,Uh2,T_lay,S_lay,gHprime,RiBulk)
+          do J=jstart,jend ; do i=istart,iend
             JJ=J-jstart+1 ; ii=i-istart+1
             if (do_i(ii,JJ)) then
               hlay = 0.5*(h(i,j,k) + h(i,j+1,k))
@@ -2700,31 +2768,39 @@ subroutine set_viscous_ML(u, v, h, tv, forces, visc, dt, G, GV, US, CS, TILE_SIZ
                 k_massive(ii,JJ) = k
               endif ! hlay > h_tiny
 
+! no early exit on GPU
+#ifndef __NVCOMPILER_OPENMP_GPU
               if (do_i(ii,JJ)) do_any = .true.
+#endif
             endif
-          enddo
+          enddo ; enddo
 
+! on GPU, faster to do all k iterations, instead of exit early.
+#ifndef __NVCOMPILER_OPENMP_GPU
           if (.not.do_any) exit ! All columns are done.
-        endif
-
-        do concurrent (J=jstart:jend, i=istart:iend)
-          JJ=J-jstart+1 ; ii=i-istart+1
-          if (do_i(ii,JJ)) then
-            htot(ii,JJ) = htot(ii,JJ) + 0.5 * (h(i,J,k) + h(i,j+1,k))
-            vhtot(ii,JJ) = vhtot(ii,JJ) + 0.5 * (h(i,j,k) + h(i,j+1,k)) * v(i,J,k)
-            uhtot(ii,JJ) = uhtot(ii,JJ) + 0.25 * ((h(i,j,k) * (u(I-1,j,k) + u(I,j,k))) + &
-                                          (h(i,j+1,k) * (u(I-1,j+1,k) + u(I,j+1,k))))
-            if (use_EOS) then
-              Thtot(ii,JJ) = Thtot(ii,JJ) + &
-                0.5 * ((h(i,j,k)*tv%T(i,j,k)) + (h(i,j+1,k)*tv%T(i,j+1,k)))
-              Shtot(ii,JJ) = Shtot(ii,JJ) + &
-                0.5 * ((h(i,j,k)*tv%S(i,j,k)) + (h(i,j+1,k)*tv%S(i,j+1,k)))
-            else
-              Rhtot(ii,JJ) = Rhtot(ii,JJ) + 0.5 * (h(i,j,k) + h(i,j+1,k)) * GV%Rlay(k)
+#endif
+          !$omp loop collapse(2) private(ii,JJ)
+          do J=jstart,jend ; do i=istart,iend
+            JJ=J-jstart+1 ; ii=i-istart+1
+            if (do_i(ii,JJ)) then
+              htot(ii,JJ) = htot(ii,JJ) + 0.5 * (h(i,J,k) + h(i,j+1,k))
+              vhtot(ii,JJ) = vhtot(ii,JJ) + 0.5 * (h(i,j,k) + h(i,j+1,k)) * v(i,J,k)
+              uhtot(ii,JJ) = uhtot(ii,JJ) + 0.25 * ((h(i,j,k) * (u(I-1,j,k) + u(I,j,k))) + &
+                                            (h(i,j+1,k) * (u(I-1,j+1,k) + u(I,j+1,k))))
+              if (use_EOS) then
+                Thtot(ii,JJ) = Thtot(ii,JJ) + &
+                  0.5 * ((h(i,j,k)*tv%T(i,j,k)) + (h(i,j+1,k)*tv%T(i,j+1,k)))
+                Shtot(ii,JJ) = Shtot(ii,JJ) + &
+                  0.5 * ((h(i,j,k)*tv%S(i,j,k)) + (h(i,j+1,k)*tv%S(i,j+1,k)))
+              else
+                Rhtot(ii,JJ) = Rhtot(ii,JJ) + 0.5 * (h(i,j,k) + h(i,j+1,k)) * GV%Rlay(k)
+              endif
             endif
-          endif
+          enddo ; enddo
+
         enddo
-      enddo ; endif
+        !$omp end target
+      endif
 
       if (do_any) then
         do concurrent (J=jstart:jend, i=istart:iend)
