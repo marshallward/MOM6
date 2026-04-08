@@ -174,7 +174,7 @@ subroutine int_density_dz_generic_pcm(T, S, z_t, z_b, rho_ref, rho_0, G_e, HI, &
   real :: T15((15*HI%iscB+1):(15*(HI%iecB+1)),HI%jscB:HI%jecB) ! Temperatures at an array of subgrid locations [C ~> degC]
   real :: S15((15*HI%iscB+1):(15*(HI%iecB+1)),HI%jscB:HI%jecB) ! Salinities at an array of subgrid locations [S ~> ppt]
   real :: p15((15*HI%iscB+1):(15*(HI%iecB+1)),HI%jscB:HI%jecB) ! Pressures at an array of subgrid locations [R L2 T-2 ~> Pa]
-  real :: r15((15*HI%iscB+1):(15*(HI%iecB+1))) ! Densities at an array of subgrid locations [R ~> kg m-3]
+  real :: r15((15*HI%iscB+1):(15*(HI%iecB+1)),HI%jscB:HI%jecB) ! Densities at an array of subgrid locations [R ~> kg m-3]
   real :: rho_anom   ! The depth averaged density anomaly [R ~> kg m-3]
   real, parameter :: C1_90 = 1.0/90.0  ! A rational constant [nondim]
   real :: GxRho      ! The product of the gravitational acceleration and reference density [R L2 Z-1 T-2 ~> Pa m-1]
@@ -210,8 +210,6 @@ subroutine int_density_dz_generic_pcm(T, S, z_t, z_b, rho_ref, rho_0, G_e, HI, &
   Jsq = HI%JscB ; Jeq = HI%JecB
   is = HI%isc ; ie = HI%iec
   js = HI%jsc ; je = HI%jec
-
-  TILE_SIZE_X = Ieq+1-Isq+1 ; TILE_SIZE_Y=Jeq+1-Jsq+1
 
   GxRho = G_e * rho_0
   if (present(Z_0p)) then
@@ -250,6 +248,8 @@ subroutine int_density_dz_generic_pcm(T, S, z_t, z_b, rho_ref, rho_0, G_e, HI, &
   EOSdom_q15(1) = 1 ; EOSdom_q15(2) = 15*(Ieq-Isq+1)
   EOSdom_h15(1) = 1 ; EOSdom_h15(2) = 15*(HI%iec-HI%isc+1)
 
+  TILE_SIZE_X = Ieq+1-Isq+1 ; TILE_SIZE_Y=Jeq+1-Jsq+1
+
   do jstart=Jsq,Jeq+1,TILE_SIZE_Y ; do istart=Isq,Ieq+1,TILE_SIZE_X
     jend = min(Jeq+1,jstart+TILE_SIZE_Y-1)
     iend = min(Ieq+1,iend+TILE_SIZE_X-1)
@@ -286,8 +286,12 @@ subroutine int_density_dz_generic_pcm(T, S, z_t, z_b, rho_ref, rho_0, G_e, HI, &
   ! these are alloced on GPU in PressureForce_FV beforehand.
   !$omp target update from(dpa, intx_dpa, inty_dpa, intz_dpa)
 
-  if (present(intx_dpa)) then ; do j=js,je
-    do I=Isq,Ieq
+  TILE_SIZE_X = Ieq-Isq+1 ; TILE_SIZE_Y = je-js+1
+
+  if (present(intx_dpa)) then ; do jstart=js,je,TILE_SIZE_Y ; do istart=Isq,Ieq,TILE_SIZE_X
+    jend=min(je,jstart+TILE_SIZE_Y-1) ; iend=min(Ieq,istart+TILE_SIZE_X-1)
+    
+    do j=jstart,jend ; do I=istart,iend
       ! hWght is the distance measure by which the cell is violation of
       ! hydrostatic consistency. For large hWght we bias the interpolation of
       ! T & S along the top and bottom integrals, akin to thickness weighting.
@@ -326,12 +330,16 @@ subroutine int_density_dz_generic_pcm(T, S, z_t, z_b, rho_ref, rho_0, G_e, HI, &
           p15(pos+n,j) = p15(pos+n-1,j) + GxRho*0.25*dz_x(m,i,j)
         enddo
       enddo
-    enddo
+    enddo ; enddo
+
+  enddo ; enddo ; endif
+
+  if (present(intx_dpa)) then ; do j=js,je
 
     if (use_rho_ref) then
-      call calculate_density(T15(:,j), S15(:,j), p15(:,j), r15, EOS, EOSdom_q15, rho_ref=rho_ref)
+      call calculate_density(T15(:,j), S15(:,j), p15(:,j), r15(:,j), EOS, EOSdom_q15, rho_ref=rho_ref)
     else
-      call calculate_density(T15(:,j), S15(:,j), p15(:,j), r15, EOS, EOSdom_q15)
+      call calculate_density(T15(:,j), S15(:,j), p15(:,j), r15(:,j), EOS, EOSdom_q15)
     endif
 
     do I=Isq,Ieq
@@ -340,16 +348,16 @@ subroutine int_density_dz_generic_pcm(T, S, z_t, z_b, rho_ref, rho_0, G_e, HI, &
       if (use_rho_ref) then
         do m=2,4
           pos = i*15+(m-2)*5
-          intz(m) = (G_e*dz_x(m,i,j)*(C1_90*( 7.0*(r15(pos+1)+r15(pos+5)) + &
-                                           32.0*(r15(pos+2)+r15(pos+4)) + &
-                                           12.0*r15(pos+3)) ))
+          intz(m) = (G_e*dz_x(m,i,j)*(C1_90*( 7.0*(r15(pos+1,j)+r15(pos+5,j)) + &
+                                           32.0*(r15(pos+2,j)+r15(pos+4,j)) + &
+                                           12.0*r15(pos+3,j)) ))
         enddo
       else
         do m=2,4
           pos = i*15+(m-2)*5
-          intz(m) = (G_e*dz_x(m,i,j)*(C1_90*( 7.0*(r15(pos+1)+r15(pos+5)) + &
-                                           32.0*(r15(pos+2)+r15(pos+4)) + &
-                                           12.0*r15(pos+3)) - rho_ref ))
+          intz(m) = (G_e*dz_x(m,i,j)*(C1_90*( 7.0*(r15(pos+1,j)+r15(pos+5,j)) + &
+                                           32.0*(r15(pos+2,j)+r15(pos+4,j)) + &
+                                           12.0*r15(pos+3,j)) - rho_ref ))
         enddo
       endif
       ! Use Boole's rule to integrate the bottom pressure anomaly values in x.
@@ -402,10 +410,10 @@ subroutine int_density_dz_generic_pcm(T, S, z_t, z_b, rho_ref, rho_0, G_e, HI, &
 
     if (use_rho_ref) then
       call calculate_density(T15(15*HI%isc+1:,j), S15(15*HI%isc+1:,j), p15(15*HI%isc+1:,j), &
-                             r15(15*HI%isc+1:), EOS, EOSdom_h15, rho_ref=rho_ref)
+                             r15(15*HI%isc+1:,j), EOS, EOSdom_h15, rho_ref=rho_ref)
     else
       call calculate_density(T15(15*HI%isc+1:,j), S15(15*HI%isc+1:,j), p15(15*HI%isc+1:,j), &
-                             r15(15*HI%isc+1:), EOS, EOSdom_h15)
+                             r15(15*HI%isc+1:,j), EOS, EOSdom_h15)
     endif
 
     do i=is,ie
@@ -414,13 +422,13 @@ subroutine int_density_dz_generic_pcm(T, S, z_t, z_b, rho_ref, rho_0, G_e, HI, &
       do m=2,4
         pos = i*15+(m-2)*5
         if (use_rho_ref) then
-          intz(m) = (G_e*dz_y(m,i)*(C1_90*(7.0*(r15(pos+1)+r15(pos+5)) + &
-                                          32.0*(r15(pos+2)+r15(pos+4)) + &
-                                          12.0*r15(pos+3)) ))
+          intz(m) = (G_e*dz_y(m,i)*(C1_90*(7.0*(r15(pos+1,j)+r15(pos+5,j)) + &
+                                          32.0*(r15(pos+2,j)+r15(pos+4,j)) + &
+                                          12.0*r15(pos+3,j)) ))
         else
-          intz(m) = (G_e*dz_y(m,i)*(C1_90*(7.0*(r15(pos+1)+r15(pos+5)) + &
-                                          32.0*(r15(pos+2)+r15(pos+4)) + &
-                                          12.0*r15(pos+3)) - rho_ref ))
+          intz(m) = (G_e*dz_y(m,i)*(C1_90*(7.0*(r15(pos+1,j)+r15(pos+5,j)) + &
+                                          32.0*(r15(pos+2,j)+r15(pos+4,j)) + &
+                                          12.0*r15(pos+3,j)) - rho_ref ))
         endif
       enddo
       ! Use Boole's rule to integrate the values.
