@@ -332,15 +332,19 @@ subroutine int_density_dz_generic_pcm(T, S, z_t, z_b, rho_ref, rho_0, G_e, HI, &
       enddo
     enddo ; enddo
 
-  enddo ; enddo ; endif
+    EOSdom_q15(1) = 15*(istart-Isq)+1 ; EOSdom_q15(2) = 15*(iend-Isq+1)
 
-  if (present(intx_dpa)) then ; do j=js,je
-
+    do j=jstart,jend
     if (use_rho_ref) then
       call calculate_density(T15(:,j), S15(:,j), p15(:,j), r15(:,j), EOS, EOSdom_q15, rho_ref=rho_ref)
     else
       call calculate_density(T15(:,j), S15(:,j), p15(:,j), r15(:,j), EOS, EOSdom_q15)
     endif
+    enddo
+
+  enddo ; enddo ; endif
+
+  if (present(intx_dpa)) then ; do j=js,je
 
     do I=Isq,Ieq
       intz(1) = dpa(i,j) ; intz(5) = dpa(i+1,j)
