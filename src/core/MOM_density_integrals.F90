@@ -271,11 +271,7 @@ subroutine int_density_dz_generic_pcm(T, S, z_t, z_b, rho_ref, rho_0, G_e, HI, &
       call calculate_density(T5, S5, p5, r5, EOS, EOSdom_h5)
     endif
 
-  enddo ; enddo
-
-  do j=Jsq,Jeq+1
-
-    do i=Isq,Ieq+1
+    do j=jstart,jend ; do i=istart,iend
       ! Use Boole's rule to estimate the pressure anomaly change.
       rho_anom = C1_90*(7.0*(r5(i*5+1,j)+r5(i*5+5,j)) + 32.0*(r5(i*5+2,j)+r5(i*5+4,j)) + 12.0*r5(i*5+3,j))
       if (.not.use_rho_ref) rho_anom = rho_anom - rho_ref
@@ -285,8 +281,9 @@ subroutine int_density_dz_generic_pcm(T, S, z_t, z_b, rho_ref, rho_0, G_e, HI, &
       ! the pressure anomaly.
       if (present(intz_dpa)) intz_dpa(i,j) = 0.5*G_e*dz**2 * &
             (rho_anom - C1_90*(16.0*(r5(i*5+4,j)-r5(i*5+2,j)) + 7.0*(r5(i*5+5,j)-r5(i*5+1,j))) )
-    enddo
-  enddo
+    enddo ; enddo
+
+  enddo ; enddo
 
   if (present(intx_dpa)) then ; do j=js,je
     do I=Isq,Ieq
