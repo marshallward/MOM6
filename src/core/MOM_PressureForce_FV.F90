@@ -116,6 +116,8 @@ type, public :: PressureForce_FV_CS ; private
   integer :: nkblock      !< Vertical block size for PLM density integrals [nondim]
   integer :: niblock_plm  !< i-tile size for PLM density integrals, 0 = full domain [nondim]
   integer :: njblock_plm  !< j-tile size for PLM density integrals, 0 = full domain [nondim]
+  integer :: niblock_pcm  !< i-tile size for PCM density integrals, 0 = full domain [nondim]
+  integer :: njblock_pcm  !< j-tile size for PCM density integrals, 0 = full domain [nondim]
   type(SAL_CS), pointer :: SAL_CSp => NULL() !< SAL control structure
   type(tidal_forcing_CS), pointer :: tides_CSp => NULL() !< Tides control structure
 end type PressureForce_FV_CS
@@ -1324,7 +1326,7 @@ subroutine PressureForce_FV_Bouss(h, tv, PFu, PFv, G, GV, US, CS, ALE_CSp, ADp, 
     ! assumed when regridding is activated. Otherwise, the previous version
     ! is used, whereby densities within each layer are constant no matter
     ! where the layers are located.
-    !$omp target enter data map(to: tv)
+    !$omp target enter data map(to: tv) if (use_ALE .and. CS%Recon_Scheme > 0)
     do kstart=1,nz,nkblock
       kend = min(kstart+nkblock-1, nz)
       if ( use_ALE .and. CS%Recon_Scheme > 0 ) then
@@ -1353,7 +1355,8 @@ subroutine PressureForce_FV_Bouss(h, tv, PFu, PFv, G, GV, US, CS, ALE_CSp, ADp, 
                   rho_ref, rho0_int_density, GV%g_Earth, G%HI, tv%eqn_of_state, US, dpa(:,:,k), &
                   intz_dpa(:,:,k), intx_dpa(:,:,k), inty_dpa(:,:,k), G%bathyT, e(:,:,1), dz_neglect, &
                   CS%MassWghtInterp, Z_0p=Z_0p, &
-                  MassWghtInterpVanOnly=CS%MassWghtInterpVanOnly, h_nv=dz_nonvanished)
+                  MassWghtInterpVanOnly=CS%MassWghtInterpVanOnly, h_nv=dz_nonvanished, &
+                  niblock=CS%niblock_pcm, njblock=CS%njblock_pcm)
         enddo
       endif
       if (GV%Z_to_H /= 1.0) then
@@ -1860,9 +1863,6 @@ subroutine PressureForce_FV_Bouss(h, tv, PFu, PFv, G, GV, US, CS, ALE_CSp, ADp, 
   !   temporarily being used to set up the data regions below.
   ! Eventually, they should be set up *outside* of the function.
 
-  !$omp target enter data if(use_EOS) &
-  !$omp   map(to: tv, EOSdom2d)
-
   ! NOTE: e_sal condition could be sharpened, but this is close enough.
   !$omp target enter data map(to: e_tidal_eq, e_tidal_sal, e_sal_and_tide) if (CS%tides)
   !$omp target enter data map(to: e_sal) if (CS%calculate_SAL)
@@ -1970,7 +1970,7 @@ subroutine PressureForce_FV_Bouss(h, tv, PFu, PFv, G, GV, US, CS, ALE_CSp, ADp, 
   endif
 
   !$omp target exit data if (use_EOS) &
-  !$omp   map(delete:tv_tmp, tv_tmp%T, tv_tmp%S, tv, tv%eqn_of_state, EOSdom2d)
+  !$omp   map(delete:tv_tmp, tv_tmp%T, tv_tmp%S)
 
   !$omp target exit data map(delete: Z_0p) if (use_EOS)
 
@@ -2146,6 +2146,12 @@ subroutine PressureForce_FV_init(Time, G, GV, US, param_file, diag, CS, ADp, SAL
   logical :: use_ALE       ! If true, use the Vertical Lagrangian Remap algorithm
   logical :: stoch_eos     ! Can't use Stanley param here unless stoch_eos is true
   integer :: isd, ied, jsd, jed, IsdB, IedB, JsdB, JedB, nz
+#ifdef __NVCOMPILER_OPENMP_GPU
+  integer, parameter :: default_njblock_pcm = 0  !< Default j block size for PCM density integrals [nondim]
+#else
+  integer, parameter :: default_njblock_pcm = 1  !< Default j block size for PCM density integrals [nondim]
+#endif
+  integer, parameter :: default_niblock_pcm = 0  !< Default i block size for PCM density integrals [nondim]
 
   isd  = G%isd  ; ied  = G%ied  ; jsd  = G%jsd  ; jed  = G%jed ; nz = GV%ke
   IsdB = G%IsdB ; IedB = G%IedB ; JsdB = G%JsdB ; JedB = G%JedB
@@ -2285,6 +2291,14 @@ subroutine PressureForce_FV_init(Time, G, GV, US, param_file, diag, CS, ADp, SAL
                  " 1: PLM reconstruction.\n"//&
                  " 2: PPM reconstruction.\n"//&
                  " 3: PLM with least squares slope.", default=1)
+  call get_param(param_file, mdl, "PGF_PCM_NIBLOCK", CS%niblock_pcm, &
+                 "i-tile size for the PCM pressure gradient density integral. "//&
+                 "0 uses the full i compute domain.", &
+                 default=default_niblock_pcm)
+  call get_param(param_file, mdl, "PGF_PCM_NJBLOCK", CS%njblock_pcm, &
+                 "j-tile size for the PCM pressure gradient density integral. "//&
+                 "0 uses the full j compute domain.", &
+                 default=default_njblock_pcm)
   call get_param(param_file, mdl, "BOUNDARY_EXTRAPOLATION_PRESSURE", CS%boundary_extrap, &
                  "If true, the reconstruction of T & S for pressure in "//&
                  "boundary cells is extrapolated, rather than using PCM "//&
