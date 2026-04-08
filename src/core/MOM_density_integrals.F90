@@ -167,10 +167,10 @@ subroutine int_density_dz_generic_pcm(T, S, z_t, z_b, rho_ref, rho_0, G_e, HI, &
               optional, intent(in)  :: Z_0p  !< The height at which the pressure is 0 [Z ~> m]
 
   ! Local variables
-  real :: T5((5*HI%iscB+1):(5*(HI%iecB+2)))  ! Temperatures along a line of subgrid locations [C ~> degC]
-  real :: S5((5*HI%iscB+1):(5*(HI%iecB+2)))  ! Salinities along a line of subgrid locations [S ~> ppt]
-  real :: p5((5*HI%iscB+1):(5*(HI%iecB+2)))  ! Pressures along a line of subgrid locations [R L2 T-2 ~> Pa]
-  real :: r5((5*HI%iscB+1):(5*(HI%iecB+2)))  ! Densities anomalies along a line of subgrid locations [R ~> kg m-3]
+  real :: T5((5*HI%iscB+1):(5*(HI%iecB+2)),HI%JscB:HI%JecB+1)  ! Temperatures along a line of subgrid locations [C ~> degC]
+  real :: S5((5*HI%iscB+1):(5*(HI%iecB+2)),HI%JscB:HI%JecB+1)  ! Salinities along a line of subgrid locations [S ~> ppt]
+  real :: p5((5*HI%iscB+1):(5*(HI%iecB+2)),HI%JscB:HI%JecB+1)  ! Pressures along a line of subgrid locations [R L2 T-2 ~> Pa]
+  real :: r5((5*HI%iscB+1):(5*(HI%iecB+2)),HI%JscB:HI%JecB+1)  ! Densities anomalies along a line of subgrid locations [R ~> kg m-3]
   real :: T15((15*HI%iscB+1):(15*(HI%iecB+1))) ! Temperatures at an array of subgrid locations [C ~> degC]
   real :: S15((15*HI%iscB+1):(15*(HI%iecB+1))) ! Salinities at an array of subgrid locations [S ~> ppt]
   real :: p15((15*HI%iscB+1):(15*(HI%iecB+1))) ! Pressures at an array of subgrid locations [R L2 T-2 ~> Pa]
@@ -201,7 +201,8 @@ subroutine int_density_dz_generic_pcm(T, S, z_t, z_b, rho_ref, rho_0, G_e, HI, &
   integer, dimension(2) :: EOSdom_h5  ! The 5-point h-point i-computational domain for the equation of state
   integer, dimension(2) :: EOSdom_q15 ! The 3x5-point q-point i-computational domain for the equation of state
   integer, dimension(2) :: EOSdom_h15 ! The 3x5-point h-point i-computational domain for the equation of state
-  integer :: is, ie, js, je, Isq, Ieq, Jsq, Jeq, i, j, m, n, pos
+  integer :: is, ie, js, je, Isq, Ieq, Jsq, Jeq, i, j, m, n, pos, jstart, jend, istart, iend
+  integer, parameter :: TILE_SIZE_X = 32, TILE_SIZE_Y = 4
 
   ! These array bounds work for the indexing convention of the input arrays, but
   ! on the computational domain defined for the output arrays.
@@ -248,31 +249,41 @@ subroutine int_density_dz_generic_pcm(T, S, z_t, z_b, rho_ref, rho_0, G_e, HI, &
   EOSdom_q15(1) = 1 ; EOSdom_q15(2) = 15*(Ieq-Isq+1)
   EOSdom_h15(1) = 1 ; EOSdom_h15(2) = 15*(HI%iec-HI%isc+1)
 
-  do j=Jsq,Jeq+1
-    do i=Isq,Ieq+1
+  do jstart=Jsq,Jeq+1,TILE_SIZE_Y ; do istart=Isq,Ieq+1,TILE_SIZE_X
+    jend = min(Jeq+1,jstart+TILE_SIZE_Y-1)
+    iend = min(Ieq+1,iend+TILE_SIZE_X-1)
+
+    do j=jstart,jend ; do i=istart,iend
       dz = z_t(i,j) - z_b(i,j)
       do n=1,5
         T5(i*5+n) = T(i,j) ; S5(i*5+n) = S(i,j)
         p5(i*5+n) = -GxRho*((z_t(i,j) - z0pres(i,j)) - 0.25*real(n-1)*dz)
       enddo
-    enddo
+    enddo ; enddo
 
+    EOSdom_h5(1) = 5*(istart-Isq)+1 ; EOSdom_h5(2) = 5*(iend-Isq+1)
+
+    do j=jstart,jend
     if (use_rho_ref) then
-      call calculate_density(T5, S5, p5, r5, EOS, EOSdom_h5, rho_ref=rho_ref)
+      call calculate_density(T5(:,j), S5(:,j), p5(:,j), r5(:,j), EOS, EOSdom_h5, rho_ref=rho_ref)
     else
-      call calculate_density(T5, S5, p5, r5, EOS, EOSdom_h5)
+      call calculate_density(T5(:,j), S5(:,j), p5(:,j), r5(:,j), EOS, EOSdom_h5)
     endif
+    enddo
+  enddo ; enddo
+
+  do j=Jsq,Jeq+1
 
     do i=Isq,Ieq+1
       ! Use Boole's rule to estimate the pressure anomaly change.
-      rho_anom = C1_90*(7.0*(r5(i*5+1)+r5(i*5+5)) + 32.0*(r5(i*5+2)+r5(i*5+4)) + 12.0*r5(i*5+3))
+      rho_anom = C1_90*(7.0*(r5(i*5+1,j)+r5(i*5+5,j)) + 32.0*(r5(i*5+2,j)+r5(i*5+4,j)) + 12.0*r5(i*5+3,j))
       if (.not.use_rho_ref) rho_anom = rho_anom - rho_ref
       dz = z_t(i,j) - z_b(i,j)
       dpa(i,j) = G_e*dz*rho_anom
       ! Use a Boole's-rule-like fifth-order accurate estimate of the double integral of
       ! the pressure anomaly.
       if (present(intz_dpa)) intz_dpa(i,j) = 0.5*G_e*dz**2 * &
-            (rho_anom - C1_90*(16.0*(r5(i*5+4)-r5(i*5+2)) + 7.0*(r5(i*5+5)-r5(i*5+1))) )
+            (rho_anom - C1_90*(16.0*(r5(i*5+4,j)-r5(i*5+2,j)) + 7.0*(r5(i*5+5,j)-r5(i*5+1,j))) )
     enddo
   enddo
 
