@@ -198,11 +198,11 @@ subroutine int_density_dz_generic_pcm(T, S, z_t, z_b, rho_ref, rho_0, G_e, HI, &
   real :: h_nonvanished             ! nonvanished height [Z ~> m]
   logical :: use_rho_ref ! Pass rho_ref to the equation of state for more accurate calculation
                          ! of density anomalies.
-  integer, dimension(2) :: EOSdom_h5  ! The 5-point h-point i-computational domain for the equation of state
+  integer, dimension(2,2) :: EOSdom_h5  ! The 5-point h-point i-computational domain for the equation of state
   integer, dimension(2) :: EOSdom_q15 ! The 3x5-point q-point i-computational domain for the equation of state
   integer, dimension(2) :: EOSdom_h15 ! The 3x5-point h-point i-computational domain for the equation of state
   integer :: is, ie, js, je, Isq, Ieq, Jsq, Jeq, i, j, m, n, pos, jstart, jend, istart, iend
-  integer, parameter :: TILE_SIZE_X = 32, TILE_SIZE_Y = 4
+  integer :: TILE_SIZE_X, TILE_SIZE_Y
 
   ! These array bounds work for the indexing convention of the input arrays, but
   ! on the computational domain defined for the output arrays.
@@ -210,6 +210,8 @@ subroutine int_density_dz_generic_pcm(T, S, z_t, z_b, rho_ref, rho_0, G_e, HI, &
   Jsq = HI%JscB ; Jeq = HI%JecB
   is = HI%isc ; ie = HI%iec
   js = HI%jsc ; je = HI%jec
+
+  TILE_SIZE_X = Ieq+1-Isq+1 ; TILE_SIZE_Y=Jeq+1-Jsq+1
 
   GxRho = G_e * rho_0
   if (present(Z_0p)) then
@@ -245,7 +247,6 @@ subroutine int_density_dz_generic_pcm(T, S, z_t, z_b, rho_ref, rho_0, G_e, HI, &
   endif
 
   ! Set the loop ranges for equation of state calculations at various points.
-  EOSdom_h5(1) = 1 ; EOSdom_h5(2) = 5*(Ieq-Isq+2)
   EOSdom_q15(1) = 1 ; EOSdom_q15(2) = 15*(Ieq-Isq+1)
   EOSdom_h15(1) = 1 ; EOSdom_h15(2) = 15*(HI%iec-HI%isc+1)
 
@@ -261,15 +262,15 @@ subroutine int_density_dz_generic_pcm(T, S, z_t, z_b, rho_ref, rho_0, G_e, HI, &
       enddo
     enddo ; enddo
 
-    EOSdom_h5(1) = 5*(istart-Isq)+1 ; EOSdom_h5(2) = 5*(iend-Isq+1)
+    EOSdom_h5(1,1) = 5*(istart-Isq)+1 ; EOSdom_h5(1,2) = 5*(iend-Isq+1)
+    EOSdom_h5(2,1) = jstart-Jsq+1 ; EOSdom_h5(2,2) = jend-Jsq+1
 
-    do j=jstart,jend
     if (use_rho_ref) then
-      call calculate_density(T5(:,j), S5(:,j), p5(:,j), r5(:,j), EOS, EOSdom_h5, rho_ref=rho_ref)
+      call calculate_density(T5, S5, p5, r5, EOS, EOSdom_h5, rho_ref=rho_ref)
     else
-      call calculate_density(T5(:,j), S5(:,j), p5(:,j), r5(:,j), EOS, EOSdom_h5)
+      call calculate_density(T5, S5, p5, r5, EOS, EOSdom_h5)
     endif
-    enddo
+
   enddo ; enddo
 
   do j=Jsq,Jeq+1
