@@ -171,15 +171,15 @@ subroutine int_density_dz_generic_pcm(T, S, z_t, z_b, rho_ref, rho_0, G_e, HI, &
   real :: S5((5*HI%iscB+1):(5*(HI%iecB+2)),HI%JscB:HI%JecB+1)  ! Salinities along a line of subgrid locations [S ~> ppt]
   real :: p5((5*HI%iscB+1):(5*(HI%iecB+2)),HI%JscB:HI%JecB+1)  ! Pressures along a line of subgrid locations [R L2 T-2 ~> Pa]
   real :: r5((5*HI%iscB+1):(5*(HI%iecB+2)),HI%JscB:HI%JecB+1)  ! Densities anomalies along a line of subgrid locations [R ~> kg m-3]
-  real :: T15((15*HI%iscB+1):(15*(HI%iecB+1))) ! Temperatures at an array of subgrid locations [C ~> degC]
-  real :: S15((15*HI%iscB+1):(15*(HI%iecB+1))) ! Salinities at an array of subgrid locations [S ~> ppt]
-  real :: p15((15*HI%iscB+1):(15*(HI%iecB+1))) ! Pressures at an array of subgrid locations [R L2 T-2 ~> Pa]
+  real :: T15((15*HI%iscB+1):(15*(HI%iecB+1)),HI%jscB:HI%jecB) ! Temperatures at an array of subgrid locations [C ~> degC]
+  real :: S15((15*HI%iscB+1):(15*(HI%iecB+1)),HI%jscB:HI%jecB) ! Salinities at an array of subgrid locations [S ~> ppt]
+  real :: p15((15*HI%iscB+1):(15*(HI%iecB+1)),HI%jscB:HI%jecB) ! Pressures at an array of subgrid locations [R L2 T-2 ~> Pa]
   real :: r15((15*HI%iscB+1):(15*(HI%iecB+1))) ! Densities at an array of subgrid locations [R ~> kg m-3]
   real :: rho_anom   ! The depth averaged density anomaly [R ~> kg m-3]
   real, parameter :: C1_90 = 1.0/90.0  ! A rational constant [nondim]
   real :: GxRho      ! The product of the gravitational acceleration and reference density [R L2 Z-1 T-2 ~> Pa m-1]
   real :: dz         ! The layer thickness [Z ~> m]
-  real :: dz_x(5,HI%iscB:HI%iecB) ! Layer thicknesses along an x-line of subgrid locations [Z ~> m]
+  real :: dz_x(5,HI%iscB:HI%iecB,HI%jsd:HI%jed) ! Layer thicknesses along an x-line of subgrid locations [Z ~> m]
   real :: dz_y(5,HI%isc:HI%iec)   ! Layer thicknesses along a y-line of subgrid locations [Z ~> m]
   real :: z0pres(HI%isd:HI%ied,HI%jsd:HI%jed) ! The height at which the pressure is zero [Z ~> m]
   real :: hWght      ! A pressure-thickness below topography [Z ~> m]
@@ -254,13 +254,11 @@ subroutine int_density_dz_generic_pcm(T, S, z_t, z_b, rho_ref, rho_0, G_e, HI, &
     jend = min(Jeq+1,jstart+TILE_SIZE_Y-1)
     iend = min(Ieq+1,iend+TILE_SIZE_X-1)
 
-    do j=jstart,jend ; do i=istart,iend
+    do concurrent (j=jstart:jend, i=istart:iend, n=1:5)
       dz = z_t(i,j) - z_b(i,j)
-      do n=1,5
-        T5(i*5+n) = T(i,j) ; S5(i*5+n) = S(i,j)
-        p5(i*5+n) = -GxRho*((z_t(i,j) - z0pres(i,j)) - 0.25*real(n-1)*dz)
-      enddo
-    enddo ; enddo
+      T5(i*5+n,j) = T(i,j) ; S5(i*5+n,j) = S(i,j)
+      p5(i*5+n,j) = -GxRho*((z_t(i,j) - z0pres(i,j)) - 0.25*real(n-1)*dz)
+    enddo
 
     EOSdom_h5(1,1) = 5*(istart-Isq)+1 ; EOSdom_h5(1,2) = 5*(iend-Isq+1)
     EOSdom_h5(2,1) = jstart-Jsq+1 ; EOSdom_h5(2,2) = jend-Jsq+1
@@ -271,7 +269,7 @@ subroutine int_density_dz_generic_pcm(T, S, z_t, z_b, rho_ref, rho_0, G_e, HI, &
       call calculate_density(T5, S5, p5, r5, EOS, EOSdom_h5)
     endif
 
-    do j=jstart,jend ; do i=istart,iend
+    do concurrent (j=jstart:jend, i=istart:iend)
       ! Use Boole's rule to estimate the pressure anomaly change.
       rho_anom = C1_90*(7.0*(r5(i*5+1,j)+r5(i*5+5,j)) + 32.0*(r5(i*5+2,j)+r5(i*5+4,j)) + 12.0*r5(i*5+3,j))
       if (.not.use_rho_ref) rho_anom = rho_anom - rho_ref
@@ -281,9 +279,12 @@ subroutine int_density_dz_generic_pcm(T, S, z_t, z_b, rho_ref, rho_0, G_e, HI, &
       ! the pressure anomaly.
       if (present(intz_dpa)) intz_dpa(i,j) = 0.5*G_e*dz**2 * &
             (rho_anom - C1_90*(16.0*(r5(i*5+4,j)-r5(i*5+2,j)) + 7.0*(r5(i*5+5,j)-r5(i*5+1,j))) )
-    enddo ; enddo
+    enddo
 
   enddo ; enddo
+
+  ! these are alloced on GPU in PressureForce_FV beforehand.
+  !$omp target update from(dpa, intx_dpa, inty_dpa, intz_dpa)
 
   if (present(intx_dpa)) then ; do j=js,je
     do I=Isq,Ieq
@@ -315,22 +316,22 @@ subroutine int_density_dz_generic_pcm(T, S, z_t, z_b, rho_ref, rho_0, G_e, HI, &
         ! is linear, but for T and S it may be thickness weighted.
         wt_L = 0.25*real(5-m) ; wt_R = 1.0-wt_L
         wtT_L = (wt_L*hWt_LL) + (wt_R*hWt_RL) ; wtT_R = (wt_L*hWt_LR) + (wt_R*hWt_RR)
-        dz_x(m,i) = (wt_L*(z_t(i,j) - z_b(i,j))) + (wt_R*(z_t(i+1,j) - z_b(i+1,j)))
+        dz_x(m,i,j) = (wt_L*(z_t(i,j) - z_b(i,j))) + (wt_R*(z_t(i+1,j) - z_b(i+1,j)))
         pos = i*15+(m-2)*5
-        T15(pos+1) = (wtT_L*T(i,j)) + (wtT_R*T(i+1,j))
-        S15(pos+1) = (wtT_L*S(i,j)) + (wtT_R*S(i+1,j))
-        p15(pos+1) = -GxRho * ((wt_L*(z_t(i,j)-z0pres(i,j))) + (wt_R*(z_t(i+1,j)-z0pres(i+1,j))))
+        T15(pos+1,j) = (wtT_L*T(i,j)) + (wtT_R*T(i+1,j))
+        S15(pos+1,j) = (wtT_L*S(i,j)) + (wtT_R*S(i+1,j))
+        p15(pos+1,j) = -GxRho * ((wt_L*(z_t(i,j)-z0pres(i,j))) + (wt_R*(z_t(i+1,j)-z0pres(i+1,j))))
         do n=2,5
-          T15(pos+n) = T15(pos+1) ; S15(pos+n) = S15(pos+1)
-          p15(pos+n) = p15(pos+n-1) + GxRho*0.25*dz_x(m,i)
+          T15(pos+n,j) = T15(pos+1,j) ; S15(pos+n,j) = S15(pos+1,j)
+          p15(pos+n,j) = p15(pos+n-1,j) + GxRho*0.25*dz_x(m,i,j)
         enddo
       enddo
     enddo
 
     if (use_rho_ref) then
-      call calculate_density(T15, S15, p15, r15, EOS, EOSdom_q15, rho_ref=rho_ref)
+      call calculate_density(T15(:,j), S15(:,j), p15(:,j), r15, EOS, EOSdom_q15, rho_ref=rho_ref)
     else
-      call calculate_density(T15, S15, p15, r15, EOS, EOSdom_q15)
+      call calculate_density(T15(:,j), S15(:,j), p15(:,j), r15, EOS, EOSdom_q15)
     endif
 
     do I=Isq,Ieq
@@ -339,14 +340,14 @@ subroutine int_density_dz_generic_pcm(T, S, z_t, z_b, rho_ref, rho_0, G_e, HI, &
       if (use_rho_ref) then
         do m=2,4
           pos = i*15+(m-2)*5
-          intz(m) = (G_e*dz_x(m,i)*(C1_90*( 7.0*(r15(pos+1)+r15(pos+5)) + &
+          intz(m) = (G_e*dz_x(m,i,j)*(C1_90*( 7.0*(r15(pos+1)+r15(pos+5)) + &
                                            32.0*(r15(pos+2)+r15(pos+4)) + &
                                            12.0*r15(pos+3)) ))
         enddo
       else
         do m=2,4
           pos = i*15+(m-2)*5
-          intz(m) = (G_e*dz_x(m,i)*(C1_90*( 7.0*(r15(pos+1)+r15(pos+5)) + &
+          intz(m) = (G_e*dz_x(m,i,j)*(C1_90*( 7.0*(r15(pos+1)+r15(pos+5)) + &
                                            32.0*(r15(pos+2)+r15(pos+4)) + &
                                            12.0*r15(pos+3)) - rho_ref ))
         enddo
@@ -389,21 +390,21 @@ subroutine int_density_dz_generic_pcm(T, S, z_t, z_b, rho_ref, rho_0, G_e, HI, &
         wtT_L = (wt_L*hWt_LL) + (wt_R*hWt_RL) ; wtT_R = (wt_L*hWt_LR) + (wt_R*hWt_RR)
         dz_y(m,i) = (wt_L*(z_t(i,j) - z_b(i,j))) + (wt_R*(z_t(i,j+1) - z_b(i,j+1)))
         pos = i*15+(m-2)*5
-        T15(pos+1) = (wtT_L*T(i,j)) + (wtT_R*T(i,j+1))
-        S15(pos+1) = (wtT_L*S(i,j)) + (wtT_R*S(i,j+1))
-        p15(pos+1) = -GxRho * ((wt_L*(z_t(i,j)-z0pres(i,j))) + (wt_R*(z_t(i,j+1)-z0pres(i,j+1))))
+        T15(pos+1,j) = (wtT_L*T(i,j)) + (wtT_R*T(i,j+1))
+        S15(pos+1,j) = (wtT_L*S(i,j)) + (wtT_R*S(i,j+1))
+        p15(pos+1,j) = -GxRho * ((wt_L*(z_t(i,j)-z0pres(i,j))) + (wt_R*(z_t(i,j+1)-z0pres(i,j+1))))
         do n=2,5
-          T15(pos+n) = T15(pos+1) ; S15(pos+n) = S15(pos+1)
-          p15(pos+n) = p15(pos+n-1) + GxRho*0.25*dz_y(m,i)
+          T15(pos+n,j) = T15(pos+1,j) ; S15(pos+n,j) = S15(pos+1,j)
+          p15(pos+n,j) = p15(pos+n-1,j) + GxRho*0.25*dz_y(m,i)
         enddo
       enddo
     enddo
 
     if (use_rho_ref) then
-      call calculate_density(T15(15*HI%isc+1:), S15(15*HI%isc+1:), p15(15*HI%isc+1:), &
+      call calculate_density(T15(15*HI%isc+1:,j), S15(15*HI%isc+1:,j), p15(15*HI%isc+1:,j), &
                              r15(15*HI%isc+1:), EOS, EOSdom_h15, rho_ref=rho_ref)
     else
-      call calculate_density(T15(15*HI%isc+1:), S15(15*HI%isc+1:), p15(15*HI%isc+1:), &
+      call calculate_density(T15(15*HI%isc+1:,j), S15(15*HI%isc+1:,j), p15(15*HI%isc+1:,j), &
                              r15(15*HI%isc+1:), EOS, EOSdom_h15)
     endif
 
