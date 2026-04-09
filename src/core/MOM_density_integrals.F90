@@ -200,7 +200,7 @@ subroutine int_density_dz_generic_pcm(T, S, z_t, z_b, rho_ref, rho_0, G_e, HI, &
                          ! of density anomalies.
   integer, dimension(2,2) :: EOSdom_h5  ! The 5-point h-point i-computational domain for the equation of state
   integer, dimension(2,2) :: EOSdom_q15 ! The 3x5-point q-point i-computational domain for the equation of state
-  integer, dimension(2) :: EOSdom_h15 ! The 3x5-point h-point i-computational domain for the equation of state
+  integer, dimension(2,2) :: EOSdom_h15 ! The 3x5-point h-point i-computational domain for the equation of state
   integer :: is, ie, js, je, Isq, Ieq, Jsq, Jeq, i, j, m, n, pos, jstart, jend, istart, iend
   integer :: TILE_SIZE_X, TILE_SIZE_Y
 
@@ -243,9 +243,6 @@ subroutine int_density_dz_generic_pcm(T, S, z_t, z_b, rho_ref, rho_0, G_e, HI, &
   if (present(h_nv)) then
     h_nonvanished = h_nv
   endif
-
-  ! Set the loop ranges for equation of state calculations at various points.
-  EOSdom_h15(1) = 1 ; EOSdom_h15(2) = 15*(HI%iec-HI%isc+1)
 
   TILE_SIZE_X = Ieq+1-Isq+1 ; TILE_SIZE_Y=Jeq+1-Jsq+1
 
@@ -407,17 +404,20 @@ subroutine int_density_dz_generic_pcm(T, S, z_t, z_b, rho_ref, rho_0, G_e, HI, &
         enddo
       enddo
     enddo ; enddo
+
+    EOSdom_h15(1,1) = 15*(istart-Isq)+1 ; EOSdom_h15(1,2) = 15*(iend-Isq+1)
+    EOSdom_h15(2,1) = jstart-Jsq+1 ; EOSdom_h15(2,2) = jend-Jsq+1
+
+    if (use_rho_ref) then
+      call calculate_density(T15, S15, p15, &
+                             r15, EOS, EOSdom_h15, rho_ref=rho_ref)
+    else
+      call calculate_density(T15, S15, p15, &
+                             r15, EOS, EOSdom_h15)
+    endif
   enddo ; enddo ; endif
 
   if (present(inty_dpa)) then ; do J=Jsq,Jeq
-
-    if (use_rho_ref) then
-      call calculate_density(T15(15*HI%isc+1:,j), S15(15*HI%isc+1:,j), p15(15*HI%isc+1:,j), &
-                             r15(15*HI%isc+1:,j), EOS, EOSdom_h15, rho_ref=rho_ref)
-    else
-      call calculate_density(T15(15*HI%isc+1:,j), S15(15*HI%isc+1:,j), p15(15*HI%isc+1:,j), &
-                             r15(15*HI%isc+1:,j), EOS, EOSdom_h15)
-    endif
 
     do i=is,ie
       intz(1) = dpa(i,j) ; intz(5) = dpa(i,j+1)
