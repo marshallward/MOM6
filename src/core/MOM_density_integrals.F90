@@ -167,30 +167,8 @@ subroutine int_density_dz_generic_pcm(T, S, z_t, z_b, rho_ref, rho_0, G_e, HI, &
               optional, intent(in)  :: Z_0p  !< The height at which the pressure is 0 [Z ~> m]
 
   ! Local variables
-  real :: T5((5*HI%iscB+1):(5*(HI%iecB+2)),HI%JscB:HI%JecB+1)  ! Temperatures along a line of subgrid locations [C ~> degC]
-  real :: S5((5*HI%iscB+1):(5*(HI%iecB+2)),HI%JscB:HI%JecB+1)  ! Salinities along a line of subgrid locations [S ~> ppt]
-  real :: p5((5*HI%iscB+1):(5*(HI%iecB+2)),HI%JscB:HI%JecB+1)  ! Pressures along a line of subgrid locations [R L2 T-2 ~> Pa]
-  real :: r5((5*HI%iscB+1):(5*(HI%iecB+2)),HI%JscB:HI%JecB+1)  ! Densities anomalies along a line of subgrid locations [R ~> kg m-3]
-  real :: T15((15*HI%iscB+1):(15*(HI%iecB+1)),HI%jscB:HI%jecB) ! Temperatures at an array of subgrid locations [C ~> degC]
-  real :: S15((15*HI%iscB+1):(15*(HI%iecB+1)),HI%jscB:HI%jecB) ! Salinities at an array of subgrid locations [S ~> ppt]
-  real :: p15((15*HI%iscB+1):(15*(HI%iecB+1)),HI%jscB:HI%jecB) ! Pressures at an array of subgrid locations [R L2 T-2 ~> Pa]
-  real :: r15((15*HI%iscB+1):(15*(HI%iecB+1)),HI%jscB:HI%jecB) ! Densities at an array of subgrid locations [R ~> kg m-3]
-  real :: rho_anom   ! The depth averaged density anomaly [R ~> kg m-3]
-  real, parameter :: C1_90 = 1.0/90.0  ! A rational constant [nondim]
   real :: GxRho      ! The product of the gravitational acceleration and reference density [R L2 Z-1 T-2 ~> Pa m-1]
-  real :: dz         ! The layer thickness [Z ~> m]
-  real :: dz_x(5,HI%iscB:HI%iecB,HI%jsd:HI%jed) ! Layer thicknesses along an x-line of subgrid locations [Z ~> m]
-  real :: dz_y(5,HI%isc:HI%iec,HI%jsdB:HI%jedB)   ! Layer thicknesses along a y-line of subgrid locations [Z ~> m]
   real :: z0pres(HI%isd:HI%ied,HI%jsd:HI%jed) ! The height at which the pressure is zero [Z ~> m]
-  real :: hWght      ! A pressure-thickness below topography [Z ~> m]
-  real :: hL, hR     ! Pressure-thicknesses of the columns to the left and right [Z ~> m]
-  real :: iDenom     ! The inverse of the denominator in the weights [Z-2 ~> m-2]
-  real :: hWt_LL, hWt_LR ! hWt_LA is the weighted influence of A on the left column [nondim]
-  real :: hWt_RL, hWt_RR ! hWt_RA is the weighted influence of A on the right column [nondim]
-  real :: wt_L, wt_R ! The linear weights of the left and right columns [nondim]
-  real :: wtT_L, wtT_R ! The weights for tracers from the left and right columns [nondim]
-  real :: intz(5)    ! The gravitational acceleration times the integrals of density
-                     ! with height at the 5 sub-column locations [R L2 T-2 ~> Pa]
   logical :: do_massWeight ! Indicates whether to do mass weighting near bathymetry
   logical :: top_massWeight ! Indicates whether to do mass weighting the sea surface
   real :: massWeightNVonlyToggle    ! A non-dimensional toggle factor for only using mass weighting
@@ -198,9 +176,6 @@ subroutine int_density_dz_generic_pcm(T, S, z_t, z_b, rho_ref, rho_0, G_e, HI, &
   real :: h_nonvanished             ! nonvanished height [Z ~> m]
   logical :: use_rho_ref ! Pass rho_ref to the equation of state for more accurate calculation
                          ! of density anomalies.
-  integer, dimension(2,2) :: EOSdom_h5  ! The 5-point h-point i-computational domain for the equation of state
-  integer, dimension(2,2) :: EOSdom_q15 ! The 3x5-point q-point i-computational domain for the equation of state
-  integer, dimension(2,2) :: EOSdom_h15 ! The 3x5-point h-point i-computational domain for the equation of state
   integer :: is, ie, js, je, Isq, Ieq, Jsq, Jeq, i, j, m, n, pos, jstart, jend, istart, iend
   integer :: TILE_SIZE_X, TILE_SIZE_Y
 
@@ -248,45 +223,15 @@ subroutine int_density_dz_generic_pcm(T, S, z_t, z_b, rho_ref, rho_0, G_e, HI, &
 
   TILE_SIZE_X = Ieq+1-Isq+1 ; TILE_SIZE_Y=Jeq+1-Jsq+1
 
-  do jstart=Jsq,Jeq+1,TILE_SIZE_Y ; do istart=Isq,Ieq+1,TILE_SIZE_X
-    jend = min(Jeq+1,jstart+TILE_SIZE_Y-1)
-    iend = min(Ieq+1,iend+TILE_SIZE_X-1)
-
-    do concurrent (j=jstart:jend, i=istart:iend, n=1:5)
-      dz = z_t(i,j) - z_b(i,j)
-      T5(i*5+n,j) = T(i,j) ; S5(i*5+n,j) = S(i,j)
-      p5(i*5+n,j) = -GxRho*((z_t(i,j) - z0pres(i,j)) - 0.25*real(n-1)*dz)
-    enddo
-
-    EOSdom_h5(1,1) = 5*(istart-Isq)+1 ; EOSdom_h5(1,2) = 5*(iend-Isq+1)
-    EOSdom_h5(2,1) = jstart-Jsq+1 ; EOSdom_h5(2,2) = jend-Jsq+1
-
-    if (use_rho_ref) then
-      call calculate_density(T5, S5, p5, r5, EOS, EOSdom_h5, rho_ref=rho_ref)
-    else
-      call calculate_density(T5, S5, p5, r5, EOS, EOSdom_h5)
-    endif
-
-    do concurrent (j=jstart:jend, i=istart:iend)
-      ! Use Boole's rule to estimate the pressure anomaly change.
-      rho_anom = C1_90*(7.0*(r5(i*5+1,j)+r5(i*5+5,j)) + 32.0*(r5(i*5+2,j)+r5(i*5+4,j)) + 12.0*r5(i*5+3,j))
-      if (.not.use_rho_ref) rho_anom = rho_anom - rho_ref
-      dz = z_t(i,j) - z_b(i,j)
-      dpa(i,j) = G_e*dz*rho_anom
-      ! Use a Boole's-rule-like fifth-order accurate estimate of the double integral of
-      ! the pressure anomaly.
-      if (present(intz_dpa)) intz_dpa(i,j) = 0.5*G_e*dz**2 * &
-            (rho_anom - C1_90*(16.0*(r5(i*5+4,j)-r5(i*5+2,j)) + 7.0*(r5(i*5+5,j)-r5(i*5+1,j))) )
-    enddo
-
-  enddo ; enddo
+  call generic_pcm_update_dpa(TILE_SIZE_X, TILE_SIZE_Y, HI, T, S, z_t, z_b, &
+      z0pres, dpa, intz_dpa, G_e, gxRho, rho_ref, use_rho_ref, EOS)
 
   if (present(intx_dpa)) then
 
     TILE_SIZE_X = Ieq-Isq+1 ; TILE_SIZE_Y = je-js+1
     call generic_pcm_update_intx_dpa(TILE_SIZE_X, TILE_SIZE_Y, HI, T, S, z_t, z_b, &
       bathyT, SSH, z0pres, dpa, intx_dpa, G_e, gxRho, dz_neglect, top_massWeight, h_nonvanished, massWeightNVonlyToggle, do_massWeight, rho_ref, use_rho_ref, EOS)
-    endif
+  endif
 
   if (present(inty_dpa)) then
 
@@ -299,6 +244,86 @@ subroutine int_density_dz_generic_pcm(T, S, z_t, z_b, rho_ref, rho_0, G_e, HI, &
   !$omp target update from(dpa, intx_dpa, inty_dpa, intz_dpa)
 
 end subroutine int_density_dz_generic_pcm
+
+subroutine generic_pcm_update_dpa(TILE_SIZE_X, TILE_SIZE_Y, HI, T, S, z_t, &
+                                  z_b, z0pres, dpa, intz_dpa, G_e, gxRho, &
+                                  rho_ref, use_rho_ref, EOS)
+
+  type(hor_index_type), intent(in)  :: HI  !< Horizontal index type for input variables.
+  real, dimension(SZI_(HI),SZJ_(HI)), &
+                        intent(in)  :: T  !< Potential temperature of the layer [C ~> degC]
+  real, dimension(SZI_(HI),SZJ_(HI)), &
+                        intent(in)  :: S  !< Salinity of the layer [S ~> ppt]
+  integer, intent(in) :: TILE_SIZE_X, TILE_SIZE_Y
+  real, dimension(SZI_(HI),SZJ_(HI)), &
+                        intent(in)  :: z_t !< Height at the top of the layer in depth units [Z ~> m]
+  real, dimension(SZI_(HI),SZJ_(HI)), &
+                        intent(in)  :: z_b !< Height at the bottom of the layer [Z ~> m]
+  real, dimension(HI%isd:HI%ied,HI%jsd:HI%jed), intent(in) :: z0pres ! The height at which the pressure is zero [Z ~> m]
+  real, dimension(SZI_(HI),SZJ_(HI)), &
+                      intent(inout) :: dpa !< The change in the pressure anomaly
+                                          !! across the layer [R L2 T-2 ~> Pa]
+  real, dimension(SZI_(HI),SZJ_(HI)), &
+            optional, intent(inout) :: intz_dpa !< The integral through the thickness of the
+                                          !! layer of the pressure anomaly relative to the
+                                          !! anomaly at the top of the layer [R L2 Z T-2 ~> Pa m]
+  real,                 intent(in)  :: G_e !< The Earth's gravitational acceleration
+                                          !! [L2 Z-1 T-2 ~> m s-2]
+  real, intent(in) :: GxRho      ! The product of the gravitational acceleration and reference density [R L2 Z-1 T-2 ~> Pa m-1]
+  real,                 intent(in)  :: rho_ref !< A mean density [R ~> kg m-3], that is
+                                          !! subtracted out to reduce the magnitude
+                                          !! of each of the integrals.
+  logical, intent(in) :: use_rho_ref ! Pass rho_ref to the equation of state for more accurate calculation
+                         ! of density anomalies.
+  type(EOS_type),       intent(in)  :: EOS !< Equation of state structure
+  integer :: Isq, Ieq, Jsq, Jeq, istart, jstart, iend, jend, i, j, n, ii, jj
+  real :: dz
+  real :: T5(5*TILE_SIZE_X,TILE_SIZE_Y) ! Temperatures at an array of subgrid locations [C ~> degC]
+  real :: S5(5*TILE_SIZE_X,TILE_SIZE_Y) ! Salinities at an array of subgrid locations [S ~> ppt]
+  real :: p5(5*TILE_SIZE_X,TILE_SIZE_Y) ! Pressures at an array of subgrid locations [R L2 T-2 ~> Pa]
+  real :: r5(5*TILE_SIZE_X,TILE_SIZE_Y) ! Densities at an array of subgrid locations [R ~> kg m-3]
+  real :: rho_anom   ! The depth averaged density anomaly [R ~> kg m-3]
+  integer, dimension(2,2) :: EOSdom_h5 ! The 5-point h-point i-computational domain for the equation of state
+  real, parameter :: C1_90 = 1.0/90.0  ! A rational constant [nondim]
+  Isq = HI%IscB ; Ieq = HI%IecB
+  Jsq = HI%JscB ; Jeq = HI%JecB
+
+  do jstart=Jsq,Jeq+1,TILE_SIZE_Y ; do istart=Isq,Ieq+1,TILE_SIZE_X
+    jend = min(Jeq+1,jstart+TILE_SIZE_Y-1)
+    iend = min(Ieq+1,istart+TILE_SIZE_X-1)
+
+    do concurrent (j=jstart:jend, i=istart:iend, n=1:5) local(ii,jj,dz)
+      ii=i-istart+1 ; jj=j-jstart+1
+      dz = z_t(i,j) - z_b(i,j)
+      T5((ii-1)*5+n,jj) = T(i,j) ; S5((ii-1)*5+n,jj) = S(i,j)
+      p5((ii-1)*5+n,jj) = -GxRho*((z_t(i,j) - z0pres(i,j)) - 0.25*real(n-1)*dz)
+    enddo
+
+    EOSdom_h5(1,1) = 1 ; EOSdom_h5(1,2) = 5*(iend-istart+1)
+    EOSdom_h5(2,1) = 1 ; EOSdom_h5(2,2) = jend-jstart+1
+
+    if (use_rho_ref) then
+      call calculate_density(T5, S5, p5, r5, EOS, EOSdom_h5, rho_ref=rho_ref)
+    else
+      call calculate_density(T5, S5, p5, r5, EOS, EOSdom_h5)
+    endif
+
+    do concurrent (j=jstart:jend, i=istart:iend) local(ii,jj,dz,rho_anom)
+      ii=i-istart+1 ; jj=j-jstart+1
+      ! Use Boole's rule to estimate the pressure anomaly change.
+      rho_anom = C1_90*(7.0*(r5((ii-1)*5+1,jj)+r5((ii-1)*5+5,jj)) + 32.0*(r5((ii-1)*5+2,jj)+r5((ii-1)*5+4,jj)) + 12.0*r5((ii-1)*5+3,jj))
+      if (.not.use_rho_ref) rho_anom = rho_anom - rho_ref
+      dz = z_t(i,j) - z_b(i,j)
+      dpa(i,j) = G_e*dz*rho_anom
+      ! Use a Boole's-rule-like fifth-order accurate estimate of the double integral of
+      ! the pressure anomaly.
+      if (present(intz_dpa)) intz_dpa(i,j) = 0.5*G_e*dz**2 * &
+            (rho_anom - C1_90*(16.0*(r5((ii-1)*5+4,jj)-r5((ii-1)*5+2,jj)) + 7.0*(r5((ii-1)*5+5,jj)-r5((ii-1)*5+1,jj))) )
+    enddo
+
+  enddo ; enddo
+
+end subroutine generic_pcm_update_dpa
 
 subroutine generic_pcm_update_intx_dpa(TILE_SIZE_X, TILE_SIZE_Y, HI, T, S, z_t, &
                                        z_b, bathyT, SSH, z0pres, dpa, intx_dpa, G_e, gxRho, dz_neglect, top_massWeight, &
