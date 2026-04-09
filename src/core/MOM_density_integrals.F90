@@ -418,7 +418,7 @@ subroutine generic_pcm_update_inty_dpa(TILE_SIZE_X, TILE_SIZE_Y, HI, T, S, z_t, 
   real :: hWt_RL, hWt_RR ! hWt_RA is the weighted influence of A on the right column [nondim]
   integer :: Isq, Ieq, Jsq, Jeq, is, ie, istart, jstart, iend, jend, i, j, m, pos, n, ii, jj
   real :: Hwght, hL, hR, wt_L, wt_R, wtT_L, wtT_R
-  real :: dz_y(5,HI%isc:HI%iec,HI%jsdB:HI%jedB)   ! Layer thicknesses along a y-line of subgrid locations [Z ~> m]
+  real :: dz_y(5,TILE_SIZE_X,TILE_SIZE_Y)   ! Layer thicknesses along a y-line of subgrid locations [Z ~> m]
   real :: T15(15*TILE_SIZE_X,TILE_SIZE_Y) ! Temperatures at an array of subgrid locations [C ~> degC]
   real :: S15(15*TILE_SIZE_X,TILE_SIZE_Y) ! Salinities at an array of subgrid locations [S ~> ppt]
   real :: p15(15*TILE_SIZE_X,TILE_SIZE_Y) ! Pressures at an array of subgrid locations [R L2 T-2 ~> Pa]
@@ -463,14 +463,14 @@ subroutine generic_pcm_update_inty_dpa(TILE_SIZE_X, TILE_SIZE_Y, HI, T, S, z_t, 
         ! is linear, but for T and S it may be thickness weighted.
         wt_L = 0.25*real(5-m) ; wt_R = 1.0-wt_L
         wtT_L = (wt_L*hWt_LL) + (wt_R*hWt_RL) ; wtT_R = (wt_L*hWt_LR) + (wt_R*hWt_RR)
-        dz_y(m,i,j) = (wt_L*(z_t(i,j) - z_b(i,j))) + (wt_R*(z_t(i,j+1) - z_b(i,j+1)))
+        dz_y(m,ii,jj) = (wt_L*(z_t(i,j) - z_b(i,j))) + (wt_R*(z_t(i,j+1) - z_b(i,j+1)))
         pos = (ii-1)*15+(m-2)*5
         T15(pos+1,jj) = (wtT_L*T(i,j)) + (wtT_R*T(i,j+1))
         S15(pos+1,jj) = (wtT_L*S(i,j)) + (wtT_R*S(i,j+1))
         p15(pos+1,jj) = -GxRho * ((wt_L*(z_t(i,j)-z0pres(i,j))) + (wt_R*(z_t(i,j+1)-z0pres(i,j+1))))
         do n=2,5
           T15(pos+n,jj) = T15(pos+1,jj) ; S15(pos+n,jj) = S15(pos+1,jj)
-          p15(pos+n,jj) = p15(pos+n-1,jj) + GxRho*0.25*dz_y(m,i,j)
+          p15(pos+n,jj) = p15(pos+n-1,jj) + GxRho*0.25*dz_y(m,ii,jj)
         enddo
       enddo
     enddo
@@ -493,11 +493,11 @@ subroutine generic_pcm_update_inty_dpa(TILE_SIZE_X, TILE_SIZE_Y, HI, T, S, z_t, 
       do m=2,4
         pos = (ii-1)*15+(m-2)*5
         if (use_rho_ref) then
-          intz(m) = (G_e*dz_y(m,i,j)*(C1_90*(7.0*(r15(pos+1,jj)+r15(pos+5,jj)) + &
+          intz(m) = (G_e*dz_y(m,ii,jj)*(C1_90*(7.0*(r15(pos+1,jj)+r15(pos+5,jj)) + &
                                           32.0*(r15(pos+2,jj)+r15(pos+4,jj)) + &
                                           12.0*r15(pos+3,jj)) ))
         else
-          intz(m) = (G_e*dz_y(m,i,j)*(C1_90*(7.0*(r15(pos+1,jj)+r15(pos+5,jj)) + &
+          intz(m) = (G_e*dz_y(m,ii,jj)*(C1_90*(7.0*(r15(pos+1,jj)+r15(pos+5,jj)) + &
                                           32.0*(r15(pos+2,jj)+r15(pos+4,jj)) + &
                                           12.0*r15(pos+3,jj)) - rho_ref ))
         endif
