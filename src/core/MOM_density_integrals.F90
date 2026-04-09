@@ -213,11 +213,13 @@ subroutine int_density_dz_generic_pcm(T, S, z_t, z_b, rho_ref, rho_0, G_e, HI, &
 
   GxRho = G_e * rho_0
   if (present(Z_0p)) then
-    do j=Jsq,Jeq+1 ; do i=Isq,Ieq+1
+    do concurrent (j=Jsq:Jeq+1, i=Isq:Ieq+1)
       z0pres(i,j) = Z_0p(i,j)
-    enddo ; enddo
+    enddo
   else
-    z0pres(:,:) = 0.0
+    do concurrent (j=HI%jsd:HI%jed, i=HI%isd:HI%ied)
+      z0pres(i,j) = 0.0
+    enddo
   endif
   use_rho_ref = .true.
   if (present(use_inaccurate_form)) then
@@ -279,15 +281,12 @@ subroutine int_density_dz_generic_pcm(T, S, z_t, z_b, rho_ref, rho_0, G_e, HI, &
 
   enddo ; enddo
 
-  ! these are alloced on GPU in PressureForce_FV beforehand.
-  !$omp target update from(dpa, intx_dpa, inty_dpa, intz_dpa)
-
   TILE_SIZE_X = Ieq-Isq+1 ; TILE_SIZE_Y = je-js+1
 
   if (present(intx_dpa)) then ; do jstart=js,je,TILE_SIZE_Y ; do istart=Isq,Ieq,TILE_SIZE_X
     jend=min(je,jstart+TILE_SIZE_Y-1) ; iend=min(Ieq,istart+TILE_SIZE_X-1)
     
-    do j=jstart,jend ; do I=istart,iend
+    do concurrent (j=jstart:jend, I=istart:iend)
       ! hWght is the distance measure by which the cell is violation of
       ! hydrostatic consistency. For large hWght we bias the interpolation of
       ! T & S along the top and bottom integrals, akin to thickness weighting.
@@ -326,7 +325,7 @@ subroutine int_density_dz_generic_pcm(T, S, z_t, z_b, rho_ref, rho_0, G_e, HI, &
           p15(pos+n,j) = p15(pos+n-1,j) + GxRho*0.25*dz_x(m,i,j)
         enddo
       enddo
-    enddo ; enddo
+    enddo
 
     EOSdom_q15(1,1) = 15*(istart-Isq)+1 ; EOSdom_q15(1,2) = 15*(iend-Isq+1)
     EOSdom_q15(2,1) = jstart-Jsq+1 ; EOSdom_q15(2,2) = jend-Jsq+1
@@ -337,7 +336,7 @@ subroutine int_density_dz_generic_pcm(T, S, z_t, z_b, rho_ref, rho_0, G_e, HI, &
       call calculate_density(T15, S15, p15, r15, EOS, EOSdom_q15)
     endif
 
-    do j=jstart,jend ; do I=istart,iend
+    do concurrent (j=jstart:jend, I=istart:iend)
       intz(1) = dpa(i,j) ; intz(5) = dpa(i+1,j)
       ! Use Boole's rule to estimate the pressure anomaly change.
       if (use_rho_ref) then
@@ -358,13 +357,13 @@ subroutine int_density_dz_generic_pcm(T, S, z_t, z_b, rho_ref, rho_0, G_e, HI, &
       ! Use Boole's rule to integrate the bottom pressure anomaly values in x.
       intx_dpa(i,j) = C1_90*(7.0*(intz(1)+intz(5)) + 32.0*(intz(2)+intz(4)) + &
                              12.0*intz(3))
-    enddo ; enddo
+    enddo
 
   enddo ; enddo ; endif
 
   if (present(inty_dpa)) then ; do jstart=Jsq,Jeq,TILE_SIZE_Y ; do istart=is,ie,TILE_SIZE_X
     jend=min(Jeq,jstart+TILE_SIZE_Y-1) ; iend = min(ie,istart+TILE_SIZE_X-1)
-    do j=jstart,jend ; do i=istart,iend
+    do concurrent (j=jstart:jend, i=istart:iend)
       ! hWght is the distance measure by which the cell is violation of
       ! hydrostatic consistency. For large hWght we bias the interpolation of
       ! T & S along the top and bottom integrals, akin to thickness weighting.
@@ -403,7 +402,7 @@ subroutine int_density_dz_generic_pcm(T, S, z_t, z_b, rho_ref, rho_0, G_e, HI, &
           p15(pos+n,j) = p15(pos+n-1,j) + GxRho*0.25*dz_y(m,i,j)
         enddo
       enddo
-    enddo ; enddo
+    enddo
 
     EOSdom_h15(1,1) = 15*(istart-Isq)+1 ; EOSdom_h15(1,2) = 15*(iend-Isq+1)
     EOSdom_h15(2,1) = jstart-Jsq+1 ; EOSdom_h15(2,2) = jend-Jsq+1
@@ -416,7 +415,7 @@ subroutine int_density_dz_generic_pcm(T, S, z_t, z_b, rho_ref, rho_0, G_e, HI, &
                              r15, EOS, EOSdom_h15)
     endif
 
-    do j=jstart,jend ; do i=istart,iend
+    do concurrent (j=jstart:jend, i=istart:iend)
       intz(1) = dpa(i,j) ; intz(5) = dpa(i,j+1)
       ! Use Boole's rule to estimate the pressure anomaly change.
       do m=2,4
@@ -434,8 +433,11 @@ subroutine int_density_dz_generic_pcm(T, S, z_t, z_b, rho_ref, rho_0, G_e, HI, &
       ! Use Boole's rule to integrate the values.
       inty_dpa(i,j) = C1_90*(7.0*(intz(1)+intz(5)) + 32.0*(intz(2)+intz(4)) + &
                                        12.0*intz(3))
-    enddo ; enddo
+    enddo
   enddo ; enddo ; endif
+
+  ! these are alloced on GPU in PressureForce_FV beforehand.
+  !$omp target update from(dpa, intx_dpa, inty_dpa, intz_dpa)
 
 end subroutine int_density_dz_generic_pcm
 
