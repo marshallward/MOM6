@@ -180,7 +180,7 @@ subroutine int_density_dz_generic_pcm(T, S, z_t, z_b, rho_ref, rho_0, G_e, HI, &
   real :: GxRho      ! The product of the gravitational acceleration and reference density [R L2 Z-1 T-2 ~> Pa m-1]
   real :: dz         ! The layer thickness [Z ~> m]
   real :: dz_x(5,HI%iscB:HI%iecB,HI%jsd:HI%jed) ! Layer thicknesses along an x-line of subgrid locations [Z ~> m]
-  real :: dz_y(5,HI%isc:HI%iec)   ! Layer thicknesses along a y-line of subgrid locations [Z ~> m]
+  real :: dz_y(5,HI%isc:HI%iec,HI%jsdB:HI%jedB)   ! Layer thicknesses along a y-line of subgrid locations [Z ~> m]
   real :: z0pres(HI%isd:HI%ied,HI%jsd:HI%jed) ! The height at which the pressure is zero [Z ~> m]
   real :: hWght      ! A pressure-thickness below topography [Z ~> m]
   real :: hL, hR     ! Pressure-thicknesses of the columns to the left and right [Z ~> m]
@@ -365,6 +365,10 @@ subroutine int_density_dz_generic_pcm(T, S, z_t, z_b, rho_ref, rho_0, G_e, HI, &
 
   enddo ; enddo ; endif
 
+  if (present(inty_dpa)) then ; do jstart=Jsq,Jeq,TILE_SIZE_Y ; do istart=is,ie,TILE_SIZE_X
+    jend=min(Jeq,jstart+TILE_SIZE_Y-1) ; iend = min(ie,istart+TILE_SIZE_X-1)
+  enddo ; enddo ; endif
+
   if (present(inty_dpa)) then ; do J=Jsq,Jeq
     do i=is,ie
       ! hWght is the distance measure by which the cell is violation of
@@ -395,14 +399,14 @@ subroutine int_density_dz_generic_pcm(T, S, z_t, z_b, rho_ref, rho_0, G_e, HI, &
         ! is linear, but for T and S it may be thickness weighted.
         wt_L = 0.25*real(5-m) ; wt_R = 1.0-wt_L
         wtT_L = (wt_L*hWt_LL) + (wt_R*hWt_RL) ; wtT_R = (wt_L*hWt_LR) + (wt_R*hWt_RR)
-        dz_y(m,i) = (wt_L*(z_t(i,j) - z_b(i,j))) + (wt_R*(z_t(i,j+1) - z_b(i,j+1)))
+        dz_y(m,i,j) = (wt_L*(z_t(i,j) - z_b(i,j))) + (wt_R*(z_t(i,j+1) - z_b(i,j+1)))
         pos = i*15+(m-2)*5
         T15(pos+1,j) = (wtT_L*T(i,j)) + (wtT_R*T(i,j+1))
         S15(pos+1,j) = (wtT_L*S(i,j)) + (wtT_R*S(i,j+1))
         p15(pos+1,j) = -GxRho * ((wt_L*(z_t(i,j)-z0pres(i,j))) + (wt_R*(z_t(i,j+1)-z0pres(i,j+1))))
         do n=2,5
           T15(pos+n,j) = T15(pos+1,j) ; S15(pos+n,j) = S15(pos+1,j)
-          p15(pos+n,j) = p15(pos+n-1,j) + GxRho*0.25*dz_y(m,i)
+          p15(pos+n,j) = p15(pos+n-1,j) + GxRho*0.25*dz_y(m,i,j)
         enddo
       enddo
     enddo
@@ -421,11 +425,11 @@ subroutine int_density_dz_generic_pcm(T, S, z_t, z_b, rho_ref, rho_0, G_e, HI, &
       do m=2,4
         pos = i*15+(m-2)*5
         if (use_rho_ref) then
-          intz(m) = (G_e*dz_y(m,i)*(C1_90*(7.0*(r15(pos+1,j)+r15(pos+5,j)) + &
+          intz(m) = (G_e*dz_y(m,i,j)*(C1_90*(7.0*(r15(pos+1,j)+r15(pos+5,j)) + &
                                           32.0*(r15(pos+2,j)+r15(pos+4,j)) + &
                                           12.0*r15(pos+3,j)) ))
         else
-          intz(m) = (G_e*dz_y(m,i)*(C1_90*(7.0*(r15(pos+1,j)+r15(pos+5,j)) + &
+          intz(m) = (G_e*dz_y(m,i,j)*(C1_90*(7.0*(r15(pos+1,j)+r15(pos+5,j)) + &
                                           32.0*(r15(pos+2,j)+r15(pos+4,j)) + &
                                           12.0*r15(pos+3,j)) - rho_ref ))
         endif
