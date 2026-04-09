@@ -340,11 +340,7 @@ subroutine int_density_dz_generic_pcm(T, S, z_t, z_b, rho_ref, rho_0, G_e, HI, &
       call calculate_density(T15, S15, p15, r15, EOS, EOSdom_q15)
     endif
 
-  enddo ; enddo ; endif
-
-  if (present(intx_dpa)) then ; do j=js,je
-
-    do I=Isq,Ieq
+    do j=jstart,jend ; do I=istart,iend
       intz(1) = dpa(i,j) ; intz(5) = dpa(i+1,j)
       ! Use Boole's rule to estimate the pressure anomaly change.
       if (use_rho_ref) then
@@ -365,8 +361,9 @@ subroutine int_density_dz_generic_pcm(T, S, z_t, z_b, rho_ref, rho_0, G_e, HI, &
       ! Use Boole's rule to integrate the bottom pressure anomaly values in x.
       intx_dpa(i,j) = C1_90*(7.0*(intz(1)+intz(5)) + 32.0*(intz(2)+intz(4)) + &
                              12.0*intz(3))
-    enddo
-  enddo ; endif
+    enddo ; enddo
+
+  enddo ; enddo ; endif
 
   if (present(inty_dpa)) then ; do J=Jsq,Jeq
     do i=is,ie
