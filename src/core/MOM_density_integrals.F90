@@ -416,13 +416,13 @@ subroutine generic_pcm_update_inty_dpa(TILE_SIZE_X, TILE_SIZE_Y, HI, T, S, z_t, 
   real :: iDenom     ! The inverse of the denominator in the weights [Z-2 ~> m-2]
   real :: hWt_LL, hWt_LR ! hWt_LA is the weighted influence of A on the left column [nondim]
   real :: hWt_RL, hWt_RR ! hWt_RA is the weighted influence of A on the right column [nondim]
-  integer :: Isq, Ieq, Jsq, Jeq, is, ie, istart, jstart, iend, jend, i, j, m, pos, n
+  integer :: Isq, Ieq, Jsq, Jeq, is, ie, istart, jstart, iend, jend, i, j, m, pos, n, ii, jj
   real :: Hwght, hL, hR, wt_L, wt_R, wtT_L, wtT_R
   real :: dz_y(5,HI%isc:HI%iec,HI%jsdB:HI%jedB)   ! Layer thicknesses along a y-line of subgrid locations [Z ~> m]
-  real :: T15((15*HI%iscB+1):(15*(HI%iecB+1)),HI%jscB:HI%jecB) ! Temperatures at an array of subgrid locations [C ~> degC]
-  real :: S15((15*HI%iscB+1):(15*(HI%iecB+1)),HI%jscB:HI%jecB) ! Salinities at an array of subgrid locations [S ~> ppt]
-  real :: p15((15*HI%iscB+1):(15*(HI%iecB+1)),HI%jscB:HI%jecB) ! Pressures at an array of subgrid locations [R L2 T-2 ~> Pa]
-  real :: r15((15*HI%iscB+1):(15*(HI%iecB+1)),HI%jscB:HI%jecB) ! Densities at an array of subgrid locations [R ~> kg m-3]
+  real :: T15(15*TILE_SIZE_X,TILE_SIZE_Y) ! Temperatures at an array of subgrid locations [C ~> degC]
+  real :: S15(15*TILE_SIZE_X,TILE_SIZE_Y) ! Salinities at an array of subgrid locations [S ~> ppt]
+  real :: p15(15*TILE_SIZE_X,TILE_SIZE_Y) ! Pressures at an array of subgrid locations [R L2 T-2 ~> Pa]
+  real :: r15(15*TILE_SIZE_X,TILE_SIZE_Y) ! Densities at an array of subgrid locations [R ~> kg m-3]
   integer, dimension(2,2) :: EOSdom_h15 ! The 3x5-point h-point i-computational domain for the equation of state
   real :: intz(5)    ! The gravitational acceleration times the integrals of density
                      ! with height at the 5 sub-column locations [R L2 T-2 ~> Pa]
@@ -434,6 +434,7 @@ subroutine generic_pcm_update_inty_dpa(TILE_SIZE_X, TILE_SIZE_Y, HI, T, S, z_t, 
   do jstart=Jsq,Jeq,TILE_SIZE_Y ; do istart=is,ie,TILE_SIZE_X
     jend=min(Jeq,jstart+TILE_SIZE_Y-1) ; iend = min(ie,istart+TILE_SIZE_X-1)
     do concurrent (j=jstart:jend, i=istart:iend)
+      ii=i-istart+1 ; jj=j-jstart+1
       ! hWght is the distance measure by which the cell is violation of
       ! hydrostatic consistency. For large hWght we bias the interpolation of
       ! T & S along the top and bottom integrals, akin to thickness weighting.
@@ -463,19 +464,19 @@ subroutine generic_pcm_update_inty_dpa(TILE_SIZE_X, TILE_SIZE_Y, HI, T, S, z_t, 
         wt_L = 0.25*real(5-m) ; wt_R = 1.0-wt_L
         wtT_L = (wt_L*hWt_LL) + (wt_R*hWt_RL) ; wtT_R = (wt_L*hWt_LR) + (wt_R*hWt_RR)
         dz_y(m,i,j) = (wt_L*(z_t(i,j) - z_b(i,j))) + (wt_R*(z_t(i,j+1) - z_b(i,j+1)))
-        pos = i*15+(m-2)*5
-        T15(pos+1,j) = (wtT_L*T(i,j)) + (wtT_R*T(i,j+1))
-        S15(pos+1,j) = (wtT_L*S(i,j)) + (wtT_R*S(i,j+1))
-        p15(pos+1,j) = -GxRho * ((wt_L*(z_t(i,j)-z0pres(i,j))) + (wt_R*(z_t(i,j+1)-z0pres(i,j+1))))
+        pos = (ii-1)*15+(m-2)*5
+        T15(pos+1,jj) = (wtT_L*T(i,j)) + (wtT_R*T(i,j+1))
+        S15(pos+1,jj) = (wtT_L*S(i,j)) + (wtT_R*S(i,j+1))
+        p15(pos+1,jj) = -GxRho * ((wt_L*(z_t(i,j)-z0pres(i,j))) + (wt_R*(z_t(i,j+1)-z0pres(i,j+1))))
         do n=2,5
-          T15(pos+n,j) = T15(pos+1,j) ; S15(pos+n,j) = S15(pos+1,j)
-          p15(pos+n,j) = p15(pos+n-1,j) + GxRho*0.25*dz_y(m,i,j)
+          T15(pos+n,jj) = T15(pos+1,jj) ; S15(pos+n,jj) = S15(pos+1,jj)
+          p15(pos+n,jj) = p15(pos+n-1,jj) + GxRho*0.25*dz_y(m,i,j)
         enddo
       enddo
     enddo
 
-    EOSdom_h15(1,1) = 15*(istart-Isq)+1 ; EOSdom_h15(1,2) = 15*(iend-Isq+1)
-    EOSdom_h15(2,1) = jstart-Jsq+1 ; EOSdom_h15(2,2) = jend-Jsq+1
+    EOSdom_h15(1,1) = 1 ; EOSdom_h15(1,2) = 15*(iend-istart+1)
+    EOSdom_h15(2,1) = 1 ; EOSdom_h15(2,2) = jend-jstart+1
 
     if (use_rho_ref) then
       call calculate_density(T15, S15, p15, &
@@ -486,18 +487,19 @@ subroutine generic_pcm_update_inty_dpa(TILE_SIZE_X, TILE_SIZE_Y, HI, T, S, z_t, 
     endif
 
     do concurrent (j=jstart:jend, i=istart:iend)
+      ii=i-istart+1 ; jj=j-jstart+1
       intz(1) = dpa(i,j) ; intz(5) = dpa(i,j+1)
       ! Use Boole's rule to estimate the pressure anomaly change.
       do m=2,4
-        pos = i*15+(m-2)*5
+        pos = (ii-1)*15+(m-2)*5
         if (use_rho_ref) then
-          intz(m) = (G_e*dz_y(m,i,j)*(C1_90*(7.0*(r15(pos+1,j)+r15(pos+5,j)) + &
-                                          32.0*(r15(pos+2,j)+r15(pos+4,j)) + &
-                                          12.0*r15(pos+3,j)) ))
+          intz(m) = (G_e*dz_y(m,i,j)*(C1_90*(7.0*(r15(pos+1,jj)+r15(pos+5,jj)) + &
+                                          32.0*(r15(pos+2,jj)+r15(pos+4,jj)) + &
+                                          12.0*r15(pos+3,jj)) ))
         else
-          intz(m) = (G_e*dz_y(m,i,j)*(C1_90*(7.0*(r15(pos+1,j)+r15(pos+5,j)) + &
-                                          32.0*(r15(pos+2,j)+r15(pos+4,j)) + &
-                                          12.0*r15(pos+3,j)) - rho_ref ))
+          intz(m) = (G_e*dz_y(m,i,j)*(C1_90*(7.0*(r15(pos+1,jj)+r15(pos+5,jj)) + &
+                                          32.0*(r15(pos+2,jj)+r15(pos+4,jj)) + &
+                                          12.0*r15(pos+3,jj)) - rho_ref ))
         endif
       enddo
       ! Use Boole's rule to integrate the values.
