@@ -367,10 +367,7 @@ subroutine int_density_dz_generic_pcm(T, S, z_t, z_b, rho_ref, rho_0, G_e, HI, &
 
   if (present(inty_dpa)) then ; do jstart=Jsq,Jeq,TILE_SIZE_Y ; do istart=is,ie,TILE_SIZE_X
     jend=min(Jeq,jstart+TILE_SIZE_Y-1) ; iend = min(ie,istart+TILE_SIZE_X-1)
-  enddo ; enddo ; endif
-
-  if (present(inty_dpa)) then ; do J=Jsq,Jeq
-    do i=is,ie
+    do j=jstart,jend ; do i=istart,iend
       ! hWght is the distance measure by which the cell is violation of
       ! hydrostatic consistency. For large hWght we bias the interpolation of
       ! T & S along the top and bottom integrals, akin to thickness weighting.
@@ -409,7 +406,10 @@ subroutine int_density_dz_generic_pcm(T, S, z_t, z_b, rho_ref, rho_0, G_e, HI, &
           p15(pos+n,j) = p15(pos+n-1,j) + GxRho*0.25*dz_y(m,i,j)
         enddo
       enddo
-    enddo
+    enddo ; enddo
+  enddo ; enddo ; endif
+
+  if (present(inty_dpa)) then ; do J=Jsq,Jeq
 
     if (use_rho_ref) then
       call calculate_density(T15(15*HI%isc+1:,j), S15(15*HI%isc+1:,j), p15(15*HI%isc+1:,j), &
