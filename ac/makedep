@@ -13,6 +13,7 @@ import sys
 # Fortran tokenization
 
 re_module = re.compile(r"^ *module +([a-z_0-9]+)")
+re_submodule = re.compile(r"^ *submodule *\((([a-z_0-9]+)(?::[a-z_0-9]+)?)\) +([a-z_0-9]+)")
 re_use = re.compile(r"^ *use +([a-z_0-9]+)")
 re_cpp_define = re.compile(r"^ *# *define +[_a-zA-Z][_a-zA-Z0-9]")
 re_cpp_undef = re.compile(r"^ *# *undef +[_a-zA-Z][_a-zA-Z0-9]")
@@ -152,15 +153,23 @@ def create_deps(src_dirs, skip_dirs, makefile, debug, exec_target, fc_rule,
 
     o2mods, o2uses, o2h, o2inc, o2prg, prg2o, mod2o = {}, {}, {}, {}, {}, {}, {}
     externals, all_modules = [], []
+    parent2subobjs = {}
     for f in F90_files:
         mods, used, cpp, inc, prg, has_externals = scan_fortran_file(f, defines)
+        obj = object_file(f)
         # maps object file to modules produced
-        o2mods[object_file(f)] = mods
+        o2mods[obj] = mods
         # maps module produced to object file
         for m in mods:
-            mod2o[m] = object_file(f)
+            mod2o[m] = obj
+            if '-' in m:
+                # This is a submodule (nvfortran convention parent-name.mod)
+                parent = m.split('-')[0] + '.mod'
+                if parent not in parent2subobjs:
+                    parent2subobjs[parent] = []
+                parent2subobjs[parent].append(obj)
         # maps object file to modules used
-        o2uses[object_file(f)] = used
+        o2uses[obj] = used
         # maps object file to .h files included
         o2h[object_file(f)] = cpp
         # maps object file to .inc files included
@@ -310,7 +319,7 @@ def create_deps(src_dirs, skip_dirs, makefile, debug, exec_target, fc_rule,
         for p in sorted(prg2o.keys()):
             o = prg2o[p]
             print(file=file)
-            print(p+':', ' '.join(link_obj(o, o2uses, mod2o, all_modules) + externals), file=file)
+            print(p+':', ' '.join(link_obj(o, o2uses, mod2o, all_modules, parent2subobjs, o2mods) + externals), file=file)
             print('\t$(LD) $(LDFLAGS) -o $@ $^ $(LIBS)', file=file)
 
         # Write rules for building libraries
@@ -330,11 +339,16 @@ def create_deps(src_dirs, skip_dirs, makefile, debug, exec_target, fc_rule,
         print('\t'+' '.join(sys.argv), file=file)
 
 
-def link_obj(obj, o2uses, mod2o, all_modules):
+def link_obj(obj, o2uses, mod2o, all_modules, parent2subobjs, o2mods):
     """List of all objects needed to link "obj","""
     def recur(obj, depth=0):
         if obj not in olst:
             olst.append(obj)
+            # If this object defines modules, add their submodules
+            for m in o2mods.get(obj, []):
+                if m in parent2subobjs:
+                    for subobj in parent2subobjs[m]:
+                        recur(subobj, depth=depth+1)
         else:
             return
         uses = [m for m in o2uses[obj] if m in all_modules]
@@ -343,9 +357,6 @@ def link_obj(obj, o2uses, mod2o, all_modules):
             for m in uses:
                 o = mod2o[m]
                 recur(o, depth=depth+1)
-                # if o not in olst:
-                #    recur(o, depth=depth+1)
-                #    olst.append(o)
             return
         return
     olst = []
@@ -479,10 +490,20 @@ def scan_fortran_file(src_file, defines=None):
 
             match = re_module.match(line.lower())
             if match:
-                # Avoid "module procedure" statements
-                if match.group(1) not in 'procedure':
+                # Avoid "module procedure", "module subroutine", "module function" statements
+                if match.group(1) not in ['procedure', 'subroutine', 'function']:
                     module_decl.append(match.group(1))
                     external_namespace = False
+
+            match = re_submodule.match(line.lower())
+            if match:
+                # Submodule declaration: submodule (parent[:ancestor]) name
+                # nvfortran produces parent-name.mod
+                parent = match.group(2)
+                name = match.group(3)
+                module_decl.append(parent + "-" + name)
+                used_modules.append(parent)
+                external_namespace = False
 
             match = re_use.match(line.lower())
             if match:
