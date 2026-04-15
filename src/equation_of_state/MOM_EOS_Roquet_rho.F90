@@ -10,6 +10,9 @@ use MOM_EOS_base_type, only : EOS_base
 implicit none ; private
 
 public Roquet_rho_EOS
+public density_elem_Roquet_rho_loc
+public calculate_density_derivs_elem_Roquet_rho_loc
+public calculate_specvol_derivs_elem_Roquet_rho_loc
 
 real, parameter :: Pa2kb  = 1.e-8 !< Conversion factor between Pa and kbar [kbar Pa-1]
 !>@{ Parameters in the Roquet_rho (Roquet density) equation of state
@@ -197,6 +200,17 @@ real elemental function density_elem_Roquet_rho(this, T, S, pressure)
   real,                  intent(in) :: S        !< Absolute salinity [g kg-1]
   real,                  intent(in) :: pressure !< Pressure [Pa]
 
+  density_elem_Roquet_rho = density_elem_Roquet_rho_loc(T, S, pressure)
+
+end function density_elem_Roquet_rho
+
+!> Standalone (GPU-callable) variant of density_elem_Roquet_rho.
+real elemental function density_elem_Roquet_rho_loc(T, S, pressure) result(rho)
+  !$omp declare target
+  real, intent(in) :: T        !< Conservative temperature [degC]
+  real, intent(in) :: S        !< Absolute salinity [g kg-1]
+  real, intent(in) :: pressure !< Pressure [Pa]
+
   ! Local variables
   real :: zp     ! Pressure [Pa]
   real :: zt     ! Conservative temperature [degC]
@@ -243,9 +257,9 @@ real elemental function density_elem_Roquet_rho(this, T, S, pressure)
   rho00p = zp*(R00 + zp*(R01 + zp*(R02 + zp*(R03 + zp*(R04 + zp*R05)))))
 
   rhoTS  = (rhoTS0 + rho0S0) + zp*(rhoTS1 + zp*(rhoTS2 +  zp*rhoTS3))
-  density_elem_Roquet_rho = rhoTS + rho00p  ! In situ density [kg m-3]
+  rho = rhoTS + rho00p  ! In situ density [kg m-3]
 
-end function density_elem_Roquet_rho
+end function density_elem_Roquet_rho_loc
 
 !> In situ density anomaly of sea water from Roquet et al., 2015 [kg m-3]
 !!
@@ -344,10 +358,21 @@ elemental subroutine calculate_density_derivs_elem_Roquet_rho(this, T, S, pressu
   real,                  intent(in)  :: T        !< Conservative temperature [degC]
   real,                  intent(in)  :: S        !< Absolute salinity [g kg-1]
   real,                  intent(in)  :: pressure !< Pressure [Pa]
-  real,                  intent(out) :: drho_dT  !< The partial derivative of density with potential
-                                                 !! temperature [kg m-3 degC-1]
-  real,                  intent(out) :: drho_dS  !< The partial derivative of density with salinity,
-                                                 !! in [kg m-3 ppt-1]
+  real,                  intent(out) :: drho_dT  !< [kg m-3 degC-1]
+  real,                  intent(out) :: drho_dS  !< [kg m-3 ppt-1]
+
+  call calculate_density_derivs_elem_Roquet_rho_loc(T, S, pressure, drho_dT, drho_dS)
+
+end subroutine calculate_density_derivs_elem_Roquet_rho
+
+!> Standalone (GPU-callable) variant of calculate_density_derivs_elem_Roquet_rho.
+elemental subroutine calculate_density_derivs_elem_Roquet_rho_loc(T, S, pressure, drho_dT, drho_dS)
+  !$omp declare target
+  real, intent(in)  :: T        !< Conservative temperature [degC]
+  real, intent(in)  :: S        !< Absolute salinity [g kg-1]
+  real, intent(in)  :: pressure !< Pressure [Pa]
+  real, intent(out) :: drho_dT  !< [kg m-3 degC-1]
+  real, intent(out) :: drho_dS  !< [kg m-3 ppt-1]
 
   ! Local variables
   real :: zp      ! Pressure [Pa]
@@ -410,7 +435,7 @@ elemental subroutine calculate_density_derivs_elem_Roquet_rho(this, T, S, pressu
   ! The division by zs here is because zs = sqrt(S + S0), so drho_dS = dzs_dS * drho_dzs = (0.5 / zs) * drho_dzs
   drho_dS = (dRdzs0 + zp*(dRdzs1 + zp*(dRdzs2 + zp * dRdzs3))) / zs
 
-end subroutine calculate_density_derivs_elem_Roquet_rho
+end subroutine calculate_density_derivs_elem_Roquet_rho_loc
 
 !> Second derivatives of density with respect to temperature, salinity, and pressure
 elemental subroutine calculate_density_second_derivs_elem_Roquet_rho(this, T, S, pressure, &
@@ -511,21 +536,32 @@ elemental subroutine calculate_specvol_derivs_elem_Roquet_rho(this, T, S, pressu
   real,                  intent(in)    :: T        !< Conservative temperature [degC]
   real,                  intent(in)    :: S        !< Absolute salinity [g kg-1]
   real,                  intent(in)    :: pressure !< Pressure [Pa]
-  real,                  intent(inout) :: dSV_dT   !< The partial derivative of specific volume with
-                                                   !! potential temperature [m3 kg-1 degC-1]
-  real,                  intent(inout) :: dSV_dS   !< The partial derivative of specific volume with
-                                                   !! salinity [m3 kg-1 ppt-1]
+  real,                  intent(inout) :: dSV_dT   !< [m3 kg-1 degC-1]
+  real,                  intent(inout) :: dSV_dS   !< [m3 kg-1 ppt-1]
+
+  call calculate_specvol_derivs_elem_Roquet_rho_loc(T, S, pressure, dSV_dT, dSV_dS)
+
+end subroutine calculate_specvol_derivs_elem_Roquet_rho
+
+!> Standalone (GPU-callable) variant of calculate_specvol_derivs_elem_Roquet_rho.
+elemental subroutine calculate_specvol_derivs_elem_Roquet_rho_loc(T, S, pressure, dSV_dT, dSV_dS)
+  !$omp declare target
+  real, intent(in)    :: T        !< Conservative temperature [degC]
+  real, intent(in)    :: S        !< Absolute salinity [g kg-1]
+  real, intent(in)    :: pressure !< Pressure [Pa]
+  real, intent(inout) :: dSV_dT   !< [m3 kg-1 degC-1]
+  real, intent(inout) :: dSV_dS   !< [m3 kg-1 ppt-1]
   ! Local variables
   real :: rho     ! In situ density [kg m-3]
   real :: dRho_dT ! Derivative of density with temperature [kg m-3 degC-1]
   real :: dRho_dS ! Derivative of density with salinity [kg m-3 ppt-1]
 
-  call this%calculate_density_derivs_elem(T, S, pressure, drho_dT, drho_dS)
-  rho = this%density_elem(T, S, pressure)
+  call calculate_density_derivs_elem_Roquet_rho_loc(T, S, pressure, drho_dT, drho_dS)
+  rho = density_elem_Roquet_rho_loc(T, S, pressure)
   dSV_dT = -dRho_DT/(rho**2)
   dSV_dS = -dRho_DS/(rho**2)
 
-end subroutine calculate_specvol_derivs_elem_Roquet_rho
+end subroutine calculate_specvol_derivs_elem_Roquet_rho_loc
 
 !> Compute the in situ density of sea water (rho in [kg m-3]) and the compressibility
 !! (drho/dp = C_sound^-2, stored as drho_dp [s2 m-2]) from absolute salinity (sal [g kg-1]),

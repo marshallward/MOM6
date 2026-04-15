@@ -10,14 +10,28 @@ use MOM_EOS_linear, only : linear_EOS, avg_spec_vol_linear
 use MOM_EOS_linear, only : int_density_dz_linear, int_spec_vol_dp_linear
 use MOM_EOS_Wright, only : buggy_Wright_EOS, avg_spec_vol_buggy_Wright
 use MOM_EOS_Wright, only : int_density_dz_wright, int_spec_vol_dp_wright
+use MOM_EOS_Wright, only : calculate_density_derivs_elem_buggy_Wright_loc
+use MOM_EOS_Wright, only : calculate_specvol_derivs_elem_buggy_Wright_loc
 use MOM_EOS_Wright_full, only : Wright_full_EOS, avg_spec_vol_Wright_full
 use MOM_EOS_Wright_full, only : int_density_dz_wright_full, int_spec_vol_dp_wright_full
+use MOM_EOS_Wright_full, only : calculate_density_derivs_elem_Wright_full_loc
+use MOM_EOS_Wright_full, only : calculate_specvol_derivs_elem_Wright_full_loc
 use MOM_EOS_Wright_red,  only : Wright_red_EOS, avg_spec_vol_Wright_red
 use MOM_EOS_Wright_red,  only : int_density_dz_wright_red, int_spec_vol_dp_wright_red
+use MOM_EOS_Wright_red,  only : calculate_density_derivs_elem_Wright_red_loc
+use MOM_EOS_Wright_red,  only : calculate_specvol_derivs_elem_Wright_red_loc
 use MOM_EOS_Jackett06, only : Jackett06_EOS
+use MOM_EOS_Jackett06, only : calculate_density_derivs_elem_Jackett06_loc
+use MOM_EOS_Jackett06, only : calculate_specvol_derivs_elem_Jackett06_loc
 use MOM_EOS_UNESCO, only : UNESCO_EOS
+use MOM_EOS_UNESCO, only : calculate_density_derivs_elem_UNESCO_loc
+use MOM_EOS_UNESCO, only : calculate_specvol_derivs_elem_UNESCO_loc
 use MOM_EOS_Roquet_rho, only : Roquet_rho_EOS
+use MOM_EOS_Roquet_rho, only : calculate_density_derivs_elem_Roquet_rho_loc
+use MOM_EOS_Roquet_rho, only : calculate_specvol_derivs_elem_Roquet_rho_loc
 use MOM_EOS_Roquet_SpV, only : Roquet_SpV_EOS
+use MOM_EOS_Roquet_SpV, only : calculate_density_derivs_elem_Roquet_SpV_loc
+use MOM_EOS_Roquet_SpV, only : calculate_specvol_derivs_elem_Roquet_SpV_loc
 use MOM_EOS_TEOS10, only : TEOS10_EOS
 use MOM_EOS_TEOS10, only : gsw_sp_from_sr, gsw_pt_from_ct, gsw_sr_from_sp, gsw_ct_from_pt
 use MOM_temperature_convert, only : poTemp_to_consTemp, consTemp_to_poTemp
@@ -51,6 +65,10 @@ public calculate_spec_vol
 public calculate_specific_vol_derivs
 public calculate_TFreeze
 public convert_temp_salt_for_TEOS10
+public EOS_dispatch_type
+public get_eos_dispatch
+public eos_density_derivs_elem
+public eos_specvol_derivs_elem
 public cons_temp_to_pot_temp
 public abs_saln_to_prac_saln
 public gsw_sp_from_sr
@@ -156,6 +174,19 @@ type, public :: EOS_type ; private
   class(EOS_base), allocatable :: type
 
 end type EOS_type
+
+!> A GPU-friendly snapshot of EOS dispatch state.
+!!
+!! Contains only plain data, no pointers or polymorphic components, so it can be
+!! passed by value into OpenMP target regions and used from !$omp declare target
+!! routines. Populate with get_eos_dispatch() before entering a device kernel.
+type :: EOS_dispatch_type
+  integer :: form_of_EOS = 0 !< Integer tag selecting the active EOS form.
+  real :: lin_Rho_T0_S0 = 1000.0 !< Linear-EOS density at T=0, S=0 [kg m-3]
+  real :: lin_dRho_dT = 0.0 !< Linear-EOS density derivative wrt T [kg m-3 degC-1]
+  real :: lin_dRho_dS = 0.0 !< Linear-EOS density derivative wrt S [kg m-3 ppt-1]
+  real :: lin_dRho_dp = 0.0 !< Linear-EOS density derivative wrt p [s2 m-2]
+end type EOS_dispatch_type
 
 ! The named integers that might be stored in eqn_of_state_type%form_of_EOS.
 integer, parameter, public :: EOS_LINEAR = 1 !< A named integer specifying an equation of state
@@ -828,10 +859,15 @@ subroutine calculate_density_derivs_array(T, S, pressure, drho_dT, drho_dS, star
   ! Local variables
   integer :: j
 
+  type(EOS_dispatch_type) :: disp
+
   if (.not. allocated(EOS%type)) call MOM_error(FATAL, &
               "calculate_density_derivs_array: EOS%form_of_EOS is not valid.")
 
-  call EOS%type%calculate_density_derivs_array(T, S, pressure, drho_dT, drho_dS, start, npts)
+  disp = get_eos_dispatch(EOS)
+  do j=start,start+npts-1
+    call eos_density_derivs_elem(T(j), S(j), pressure(j), drho_dT(j), drho_dS(j), disp)
+  enddo
 
   if (present(scale)) then ; if (scale /= 1.0) then ; do j=start,start+npts-1
     drho_dT(j) = scale * drho_dT(j)
@@ -1149,10 +1185,17 @@ subroutine calculate_spec_vol_derivs_array(T, S, pressure, dSV_dT, dSV_dS, start
   integer,            intent(in)  :: npts   !< The number of values to calculate
   type(EOS_type),     intent(in)  :: EOS    !< Equation of state structure
 
+  ! Local
+  type(EOS_dispatch_type) :: disp
+  integer :: j
+
   if (.not. allocated(EOS%type)) call MOM_error(FATAL, &
               "calculate_spec_vol_derivs_array: EOS%form_of_EOS is not valid.")
 
-  call EOS%type%calculate_specvol_derivs_array(T, S, pressure, dSV_dT, dSV_dS, start, npts)
+  disp = get_eos_dispatch(EOS)
+  do j=start,start+npts-1
+    call eos_specvol_derivs_elem(T(j), S(j), pressure(j), dSV_dT(j), dSV_dS(j), disp)
+  enddo
 
 end subroutine calculate_spec_vol_derivs_array
 
@@ -2778,6 +2821,93 @@ logical function test_EOS_consistency(T_test, S_test, p_test, EOS, verbose, &
   end function check_FD
 
 end function test_EOS_consistency
+
+!> Build an EOS_dispatch_type snapshot from an EOS_type, suitable for passing
+!! into OpenMP target regions.
+function get_eos_dispatch(EOS) result(disp)
+  type(EOS_type), intent(in) :: EOS !< The source EOS state
+  type(EOS_dispatch_type) :: disp   !< Flat POD dispatch record
+
+  disp%form_of_EOS  = EOS%form_of_EOS
+  disp%lin_Rho_T0_S0 = EOS%Rho_T0_S0
+  disp%lin_dRho_dT   = EOS%dRho_dT
+  disp%lin_dRho_dS   = EOS%dRho_dS
+  disp%lin_dRho_dp   = EOS%dRho_dp
+end function get_eos_dispatch
+
+!> Static-dispatch elemental wrapper around the per-backend density-derivatives
+!! routines. Safe to call from inside !$omp target regions.
+elemental subroutine eos_density_derivs_elem(T, S, pressure, drho_dT, drho_dS, disp)
+  !$omp declare target
+  real, intent(in)  :: T        !< Potential (or conservative) temperature [degC]
+  real, intent(in)  :: S        !< Salinity (practical or absolute) [PSU or g kg-1]
+  real, intent(in)  :: pressure !< Pressure [Pa]
+  real, intent(out) :: drho_dT  !< Partial derivative of density wrt T [kg m-3 degC-1]
+  real, intent(out) :: drho_dS  !< Partial derivative of density wrt S [kg m-3 PSU-1]
+  type(EOS_dispatch_type), intent(in) :: disp !< Dispatch state
+
+  select case (disp%form_of_EOS)
+  case (EOS_LINEAR)
+    drho_dT = disp%lin_dRho_dT
+    drho_dS = disp%lin_dRho_dS
+  case (EOS_UNESCO)
+    call calculate_density_derivs_elem_UNESCO_loc(T, S, pressure, drho_dT, drho_dS)
+  case (EOS_WRIGHT)
+    call calculate_density_derivs_elem_buggy_Wright_loc(T, S, pressure, drho_dT, drho_dS)
+  case (EOS_WRIGHT_FULL)
+    call calculate_density_derivs_elem_Wright_full_loc(T, S, pressure, drho_dT, drho_dS)
+  case (EOS_WRIGHT_REDUCED)
+    call calculate_density_derivs_elem_Wright_red_loc(T, S, pressure, drho_dT, drho_dS)
+  case (EOS_ROQUET_RHO)
+    call calculate_density_derivs_elem_Roquet_rho_loc(T, S, pressure, drho_dT, drho_dS)
+  case (EOS_ROQUET_SPV)
+    call calculate_density_derivs_elem_Roquet_SpV_loc(T, S, pressure, drho_dT, drho_dS)
+  case (EOS_JACKETT06)
+    call calculate_density_derivs_elem_Jackett06_loc(T, S, pressure, drho_dT, drho_dS)
+  case default
+    ! TEOS10 and unknown forms are not device-callable; return zeros.
+    drho_dT = 0.0
+    drho_dS = 0.0
+  end select
+end subroutine eos_density_derivs_elem
+
+!> Static-dispatch elemental wrapper around the per-backend specific-volume
+!! derivatives routines. Safe to call from inside !$omp target regions.
+elemental subroutine eos_specvol_derivs_elem(T, S, pressure, dSV_dT, dSV_dS, disp)
+  !$omp declare target
+  real, intent(in)    :: T        !< Potential (or conservative) temperature [degC]
+  real, intent(in)    :: S        !< Salinity (practical or absolute) [PSU or g kg-1]
+  real, intent(in)    :: pressure !< Pressure [Pa]
+  real, intent(inout) :: dSV_dT   !< Partial derivative of specific volume wrt T [m3 kg-1 degC-1]
+  real, intent(inout) :: dSV_dS   !< Partial derivative of specific volume wrt S [m3 kg-1 PSU-1]
+  type(EOS_dispatch_type), intent(in) :: disp !< Dispatch state
+  ! Local
+  real :: I_rho2 ! The inverse of density squared [m6 kg-2]
+
+  select case (disp%form_of_EOS)
+  case (EOS_LINEAR)
+    I_rho2 = 1.0 / (disp%lin_Rho_T0_S0 + &
+       ((disp%lin_dRho_dT*T + disp%lin_dRho_dS*S) + disp%lin_dRho_dp*pressure))**2
+    dSV_dT = -disp%lin_dRho_dT * I_rho2
+    dSV_dS = -disp%lin_dRho_dS * I_rho2
+  case (EOS_UNESCO)
+    call calculate_specvol_derivs_elem_UNESCO_loc(T, S, pressure, dSV_dT, dSV_dS)
+  case (EOS_WRIGHT)
+    call calculate_specvol_derivs_elem_buggy_Wright_loc(T, S, pressure, dSV_dT, dSV_dS)
+  case (EOS_WRIGHT_FULL)
+    call calculate_specvol_derivs_elem_Wright_full_loc(T, S, pressure, dSV_dT, dSV_dS)
+  case (EOS_WRIGHT_REDUCED)
+    call calculate_specvol_derivs_elem_Wright_red_loc(T, S, pressure, dSV_dT, dSV_dS)
+  case (EOS_ROQUET_RHO)
+    call calculate_specvol_derivs_elem_Roquet_rho_loc(T, S, pressure, dSV_dT, dSV_dS)
+  case (EOS_ROQUET_SPV)
+    call calculate_specvol_derivs_elem_Roquet_SpV_loc(T, S, pressure, dSV_dT, dSV_dS)
+  case (EOS_JACKETT06)
+    call calculate_specvol_derivs_elem_Jackett06_loc(T, S, pressure, dSV_dT, dSV_dS)
+  case default
+    ! TEOS10 and unknown forms are not device-callable; leave outputs unchanged.
+  end select
+end subroutine eos_specvol_derivs_elem
 
 end module MOM_EOS
 

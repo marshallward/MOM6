@@ -15,6 +15,9 @@ public buggy_Wright_EOS
 public int_density_dz_wright, int_spec_vol_dp_wright
 public avg_spec_vol_buggy_Wright
 public set_params_buggy_Wright
+public density_elem_buggy_Wright_loc
+public calculate_density_derivs_elem_buggy_Wright_loc
+public calculate_specvol_derivs_elem_buggy_Wright_loc
 
 !>@{ Parameters in the Wright equation of state using the reduced range formula, which is a fit to the UNESCO
 !    equation of state for the restricted range: -2 < theta < 30 [degC], 28 < S < 38 [PSU], 0  < p < 5e7 [Pa].
@@ -84,6 +87,7 @@ contains
 !!
 !! This is an elemental function that can be applied to any combination of scalar and array inputs.
 real elemental function density_elem_buggy_Wright_loc(T, S, pressure)
+  !$omp declare target
   real, intent(in) :: T        !< potential temperature relative to the surface [degC].
   real, intent(in) :: S        !< salinity [PSU].
   real, intent(in) :: pressure !< pressure [Pa].
@@ -193,6 +197,7 @@ end function spec_vol_anomaly_elem_buggy_Wright
 !> Calculate the partial derivatives of density with potential temperature and salinity
 !! using the buggy implementation of the equation of state, as fit by Wright, 1997
 elemental subroutine calculate_density_derivs_elem_buggy_Wright_loc( T, S, pressure, drho_dT, drho_dS)
+  !$omp declare target
   real,               intent(in)  :: T        !< Potential temperature relative to the surface [degC]
   real,               intent(in)  :: S        !< Salinity [PSU]
   real,               intent(in)  :: pressure !< Pressure [Pa]
@@ -305,10 +310,21 @@ elemental subroutine calculate_specvol_derivs_elem_buggy_Wright(this, T, S, pres
   real,               intent(in)    :: T        !< Potential temperature [degC]
   real,               intent(in)    :: S        !< Salinity [PSU]
   real,               intent(in)    :: pressure !< Pressure [Pa]
-  real,               intent(inout) :: dSV_dT   !< The partial derivative of specific volume with
-                                                !! potential temperature [m3 kg-1 degC-1]
-  real,               intent(inout) :: dSV_dS   !< The partial derivative of specific volume with
-                                                !! salinity [m3 kg-1 PSU-1]
+  real,               intent(inout) :: dSV_dT   !< [m3 kg-1 degC-1]
+  real,               intent(inout) :: dSV_dS   !< [m3 kg-1 PSU-1]
+
+  call calculate_specvol_derivs_elem_buggy_Wright_loc(T, S, pressure, dSV_dT, dSV_dS)
+
+end subroutine calculate_specvol_derivs_elem_buggy_Wright
+
+!> Standalone (GPU-callable) variant of calculate_specvol_derivs_elem_buggy_Wright.
+elemental subroutine calculate_specvol_derivs_elem_buggy_Wright_loc(T, S, pressure, dSV_dT, dSV_dS)
+  !$omp declare target
+  real, intent(in)    :: T        !< Potential temperature [degC]
+  real, intent(in)    :: S        !< Salinity [PSU]
+  real, intent(in)    :: pressure !< Pressure [Pa]
+  real, intent(inout) :: dSV_dT   !< [m3 kg-1 degC-1]
+  real, intent(inout) :: dSV_dS   !< [m3 kg-1 PSU-1]
   ! Local variables
   real :: p0      ! The pressure offset in the Wright EOS [Pa]
   real :: lambda  ! The sound speed squared at 0 alpha in the Wright EOS [m2 s-2]
@@ -326,7 +342,7 @@ elemental subroutine calculate_specvol_derivs_elem_buggy_Wright(this, T, S, pres
   dSV_dS = (a2 + I_denom * (c4 + c5*T)) - &
               (I_denom**2 * lambda) *  (b4 + b5*T)
 
-end subroutine calculate_specvol_derivs_elem_buggy_Wright
+end subroutine calculate_specvol_derivs_elem_buggy_Wright_loc
 
 !> Compute the in situ density of sea water (rho) and the compressibility (drho/dp == C_sound^-2)
 !! at the given salinity, potential temperature and pressure

@@ -587,10 +587,16 @@ subroutine zonal_mass_flux(u, h_in, h_W, h_E, uh, dt, G, GV, US, CS, OBC, por_fa
   integer :: l_seg ! The OBC segment number
   logical :: use_visc_rem, set_BT_cont
   logical :: local_specified_BC, local_open_BC, any_simple_OBC  ! OBC-related logicals
+  logical :: has_du_cor, has_u_cor, has_uhbt
+    ! Hoisted present() checks; evaluating present() inside a device region
+    ! on an optional dummy requires the descriptor to be on device.
 
   call cpu_clock_begin(id_clock_correct)
 
   use_visc_rem = present(visc_rem_u)
+  has_du_cor = present(du_cor)
+  has_u_cor  = present(u_cor)
+  has_uhbt   = present(uhbt)
 
   set_BT_cont = .false. ; if (present(BT_cont)) set_BT_cont = (associated(BT_cont))
 
@@ -615,24 +621,30 @@ subroutine zonal_mass_flux(u, h_in, h_W, h_E, uh, dt, G, GV, US, CS, OBC, por_fa
   !$omp   map(alloc: visc_rem_u_tmp, duhdu, du, du_min_CFL, du_max_CFL, duhdu_tot_0, uh_tot_0, &
   !$omp     visc_rem_max)
 
+  ! Populate visc_rem_u_tmp from an explicit target region so the optional
+  ! visc_rem_u descriptor only reaches the device where it is actually present.
+  if (.not.use_visc_rem) then
+    !$omp target teams loop collapse(3)
+    do k=1,nz ; do j=jsh,jeh ; do i=ish-1,ieh
+      visc_rem_u_tmp(i,j,k) = 1.0
+    enddo ; enddo ; enddo
+  else
+    !$omp target teams loop collapse(3) map(to: visc_rem_u)
+    do k=1,nz ; do j=jsh,jeh ; do i=ish-1,ieh
+      visc_rem_u_tmp(i,j,k) = visc_rem_u(i,j,k)
+    enddo ; enddo ; enddo
+  endif
+
+  ! Zero du_cor where requested in a separate explicit target region so the
+  ! optional du_cor descriptor does not need to live in the big outer kernel.
+  if (has_du_cor) then
+    !$omp target teams loop collapse(2) map(from: du_cor)
+    do j=jsh,jeh ; do i=ish-1,ieh
+      du_cor(i,j) = 0.0
+    enddo ; enddo
+  endif
+
   do concurrent (j=jsh:jeh)
-
-    if (present(du_cor)) then
-      do concurrent (i=ish-1:ieh)
-        du_cor(i,j) = 0.0
-      enddo
-    endif
-
-    if (.not.use_visc_rem) then
-      do concurrent (k=1:nz, i=ish-1:ieh)
-        visc_rem_u_tmp(i,j,k) = 1.0
-      enddo
-    else
-      ! this is expensive
-      do concurrent (k=1:nz, i=ish-1:ieh)
-        visc_rem_u_tmp(i,j,k) = visc_rem_u(i,j,k)
-      enddo
-    end if
 
     ! Set uh and duhdu.
     do concurrent (k=1:nz , I=ish-1:ieh)
@@ -657,7 +669,7 @@ subroutine zonal_mass_flux(u, h_in, h_W, h_E, uh, dt, G, GV, US, CS, OBC, por_fa
       enddo
     endif
 
-    if (present(uhbt) .or. set_BT_cont) then
+    if (has_uhbt .or. set_BT_cont) then
       if (use_visc_rem.and.CS%use_visc_rem_max) then
         ! poor performance for nvfortran + do concurrent if k is inside loop
         do concurrent (I=ish-1:ieh)
@@ -750,7 +762,7 @@ subroutine zonal_mass_flux(u, h_in, h_W, h_E, uh, dt, G, GV, US, CS, OBC, por_fa
         du_max_CFL(I,j) = max(du_max_CFL(I,j),0.0)
         du_min_CFL(I,j) = min(du_min_CFL(I,j),0.0)
       enddo
-    endif ! present(uhbt) .or. set_BT_cont
+    endif ! has_uhbt .or. set_BT_cont
   enddo
 
   call present_uhbt_or_set_BT_cont(u, h_in, h_W, h_E, uh_tot_0, duhdu_tot_0, du, du_max_CFL, &
@@ -827,10 +839,16 @@ subroutine present_uhbt_or_set_BT_cont(u, h_in, h_W, h_E, uh_tot_0, duhdu_tot_0,
   logical, dimension(SZIB_(G), SZJ_(G)) :: simple_OBC_pt  ! Indicates points in a row with specified transport OBCs
   logical:: set_BT_cont
   logical:: local_specified_BC, local_Flather_OBC, local_open_BC, any_simple_OBC  ! OBC-related logicals
+  logical :: has_du_cor, has_u_cor, has_uhbt
+    ! Hoisted present() checks for optional dummy arrays.
   integer:: l_seg, i, j, k, n, ish, ieh, jsh, jeh, nz
   real :: FAuI, FA_u
 
   ish = LB%ish ; ieh = LB%ieh ; jsh = LB%jsh ; jeh = LB%jeh ; nz = GV%ke
+
+  has_du_cor = present(du_cor)
+  has_u_cor  = present(u_cor)
+  has_uhbt   = present(uhbt)
 
   set_BT_cont = .false. ; if (present(BT_cont)) set_BT_cont = (associated(BT_cont))
 
@@ -841,7 +859,7 @@ subroutine present_uhbt_or_set_BT_cont(u, h_in, h_W, h_E, uh_tot_0, duhdu_tot_0,
     local_open_BC = OBC%open_u_BCs_exist_globally
   endif ; endif
 
-  if (present(uhbt) .or. set_BT_cont) then
+  if (has_uhbt .or. set_BT_cont) then
     !$omp target enter data map(alloc: do_I, simple_OBC_pt)
     any_simple_OBC = .false.
     if (local_specified_BC .or. local_Flather_OBC) then
@@ -859,14 +877,14 @@ subroutine present_uhbt_or_set_BT_cont(u, h_in, h_W, h_E, uh_tot_0, duhdu_tot_0,
       enddo
     endif
 
-    if (present(uhbt)) then
+    if (has_uhbt) then
       ! Find du and uh.
       call zonal_flux_adjust(u, h_in, h_W, h_E, uh_tot_0, duhdu_tot_0, du, &
                             du_max_CFL, du_min_CFL, dt, G, GV, US, CS, visc_rem_u, &
                             ish, ieh, jsh, jeh, do_I, por_face_areaU, uhbt, uh, OBC=OBC)
 
       do concurrent (j=jsh:jeh)
-        if (present(u_cor)) then
+        if (has_u_cor) then
           do concurrent (k=1:nz, I=ish-1:ieh)
             u_cor(I,j,k) = u(I,j,k) + du(I,j) * visc_rem_u(I,j,k)
           enddo
@@ -878,7 +896,7 @@ subroutine present_uhbt_or_set_BT_cont(u, h_in, h_W, h_E, uh_tot_0, duhdu_tot_0,
           endif
         endif ! u-corrected
 
-        if (present(du_cor)) then
+        if (has_du_cor) then
           do concurrent (I=ish-1:ieh)
             du_cor(I,j) = du(I,j)
           enddo
@@ -1678,10 +1696,15 @@ subroutine meridional_mass_flux(v, h_in, h_S, h_N, vh, dt, G, GV, US, CS, OBC, p
   integer :: l_seg ! The OBC segment number
   logical :: use_visc_rem, set_BT_cont
   logical :: local_specified_BC, local_open_BC, any_simple_OBC  ! OBC-related logicals
+  logical :: has_dv_cor, has_v_cor, has_vhbt
+    ! Hoisted present() checks for optional dummy arrays.
 
   call cpu_clock_begin(id_clock_correct)
 
   use_visc_rem = present(visc_rem_v)
+  has_dv_cor = present(dv_cor)
+  has_v_cor  = present(v_cor)
+  has_vhbt   = present(vhbt)
 
   set_BT_cont = .false. ; if (present(BT_cont)) set_BT_cont = (associated(BT_cont))
 
@@ -1708,7 +1731,7 @@ subroutine meridional_mass_flux(v, h_in, h_S, h_N, vh, dt, G, GV, US, CS, OBC, p
 
   do concurrent (J=jsh-1:jeh)
 
-    if (present(dv_cor)) then
+    if (has_dv_cor) then
       do concurrent (i=ish:ieh)
         dv_cor(i,J) = 0.0
       enddo
@@ -1748,7 +1771,7 @@ subroutine meridional_mass_flux(v, h_in, h_S, h_N, vh, dt, G, GV, US, CS, OBC, p
       enddo
     endif
 
-    if (present(vhbt) .or. set_BT_cont) then
+    if (has_vhbt .or. set_BT_cont) then
       if (use_visc_rem .and. CS%use_visc_rem_max) then
         do concurrent (i=ish:ieh)
           visc_rem_max(i,J) = 0.0
@@ -1835,7 +1858,7 @@ subroutine meridional_mass_flux(v, h_in, h_S, h_N, vh, dt, G, GV, US, CS, OBC, p
         dv_max_CFL(i,J) = max(dv_max_CFL(i,J),0.0)
         dv_min_CFL(i,J) = min(dv_min_CFL(i,J),0.0)
       enddo
-    endif ! present(vhbt) .or. set_BT_cont
+    endif ! has_vhbt .or. set_BT_cont
 
   enddo
 
@@ -1914,9 +1937,15 @@ subroutine present_vhbt_or_set_BT_cont(v, h_in, h_S, h_N, vh_tot_0, dvhdv_tot_0,
   real :: FAvi, FA_v    ! A sum of meridional face areas [H L ~> m2 or kg m-1].
   logical :: set_BT_cont
   logical :: any_simple_OBC, local_specified_BC, local_Flather_OBC, local_open_BC  ! OBC-related logicals
+  logical :: has_dv_cor, has_v_cor, has_vhbt
+    ! Hoisted present() checks for optional dummy arrays.
   integer :: l_seg, i, j, k, n, ish, ieh, jsh, jeh, nz
 
   ish = LB%ish ; ieh = LB%ieh ; jsh = LB%jsh ; jeh = LB%jeh ; nz = GV%ke
+
+  has_dv_cor = present(dv_cor)
+  has_v_cor  = present(v_cor)
+  has_vhbt   = present(vhbt)
 
   set_BT_cont = .false. ; if (present(BT_cont)) set_BT_cont = (associated(BT_cont))
 
@@ -1927,7 +1956,7 @@ subroutine present_vhbt_or_set_BT_cont(v, h_in, h_S, h_N, vh_tot_0, dvhdv_tot_0,
     local_open_BC = OBC%open_u_BCs_exist_globally
   endif ; endif
 
-  if (present(vhbt) .or. set_BT_cont) then
+  if (has_vhbt .or. set_BT_cont) then
     !$omp target enter data map(alloc: do_I, simple_OBC_pt)
     any_simple_OBC = .false.
     if (local_specified_BC .or. local_Flather_OBC) then
@@ -1946,14 +1975,14 @@ subroutine present_vhbt_or_set_BT_cont(v, h_in, h_S, h_N, vh_tot_0, dvhdv_tot_0,
       enddo
     endif ! local_specified_BC .or. local_Flather_OBC
 
-    if (present(vhbt)) then
+    if (has_vhbt) then
       ! Find dv and vh.
       call meridional_flux_adjust(v, h_in, h_S, h_N, vh_tot_0, dvhdv_tot_0, dv, &
                              dv_max_CFL, dv_min_CFL, dt, G, GV, US, CS, visc_rem_v, &
                              ish, ieh, jsh, jeh, do_I, por_face_areaV, vhbt, vh, OBC=OBC)
 
       do concurrent (J=jsh-1:jeh)
-        if (present(v_cor)) then
+        if (has_v_cor) then
           do concurrent (k=1:nz, i=ish:ieh)
             v_cor(i,J,k) = v(i,J,k) + dv(i,J) * visc_rem_v(i,J,k)
           enddo
@@ -1965,7 +1994,7 @@ subroutine present_vhbt_or_set_BT_cont(v, h_in, h_S, h_N, vh_tot_0, dvhdv_tot_0,
           endif
         endif ! v-corrected
 
-        if (present(dv_cor)) then
+        if (has_dv_cor) then
           do concurrent (i=ish:ieh)
             dv_cor(i,J) = dv(i,J)
           enddo

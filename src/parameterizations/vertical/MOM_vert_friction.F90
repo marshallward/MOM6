@@ -610,6 +610,9 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
 
   logical :: DoStokesMixing
   logical :: lfpmix
+  logical :: has_Ray_u, has_Ray_v
+    ! Hoisted allocation checks; evaluating allocated() inside a device region
+    ! requires the descriptor to be on device even when the result is false.
 
   integer :: i, j, k, is, ie, js, je, Isq, Ieq, Jsq, Jeq, nz, n
   is = G%isc ; ie = G%iec; js = G%jsc; je = G%jec
@@ -617,6 +620,9 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
 
   if (.not.CS%initialized) call MOM_error(FATAL,"MOM_vert_friction(visc): "// &
          "Module must be initialized before it is used.")
+
+  has_Ray_u = allocated(visc%Ray_u)
+  has_Ray_v = allocated(visc%Ray_v)
 
   if (CS%id_GLwork > 0) then
     allocate(KE_u(G%IsdB:G%IedB,G%jsd:G%jed,GV%ke), source=0.0)
@@ -737,13 +743,13 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
   ! and the right-hand-side is destructively updated to be d'_k
 
   !$omp target enter data map(alloc: c1)
-  !$omp target enter data map(to: visc%Ray_u) if (allocated(visc%Ray_u))
+  ! visc%Ray_u has a persistent device mapping from set_visc_init.
 
   !$omp target teams loop collapse(2) &
   !$omp   private(b1, c1, d1, Ray, b_denom_1)
   do j=G%jsc,G%jec ; do I=Isq,Ieq ; if (G%mask2dCu(I,j) > 0.) then
     Ray = 0.
-    if (allocated(visc%Ray_u)) Ray = visc%Ray_u(I,j,1)
+    if (has_Ray_u) Ray = visc%Ray_u(I,j,1)
 
     b_denom_1 = CS%h_u(I,j,1) + dt * (Ray + CS%a_u(I,j,1))
     b1 = 1. / (b_denom_1 + dt * CS%a_u(I,j,2))
@@ -755,7 +761,7 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
     endif
 
     do k=2,nz
-      if (allocated(visc%Ray_u)) Ray = visc%Ray_u(I,j,k)
+      if (has_Ray_u) Ray = visc%Ray_u(I,j,k)
 
       c1(k) = dt * CS%a_u(I,j,K) * b1
       b_denom_1 = CS%h_u(I,j,k) + dt * (Ray + CS%a_u(I,j,K) * d1)
@@ -936,13 +942,13 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
     enddo
   endif
 
-  !$omp target enter data map(to: visc%Ray_v) if (allocated(visc%Ray_v))
+  ! visc%Ray_v has a persistent device mapping from set_visc_init.
 
   !$omp target teams loop collapse(2) &
   !$omp   private(b1, c1, d1, Ray, b_denom_1)
   do J=Jsq,Jeq ; do i=is,ie ; if (G%mask2dCv(i,J) > 0.) then
     Ray = 0.
-    if (allocated(visc%Ray_v)) Ray = visc%Ray_v(i,J,1)
+    if (has_Ray_v) Ray = visc%Ray_v(i,J,1)
 
     b_denom_1 = CS%h_v(i,J,1) + dt * (Ray + CS%a_v(i,J,1))
     b1 = 1.0 / (b_denom_1 + dt*CS%a_v(i,J,2))
@@ -954,7 +960,7 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
     endif
 
     do k=2,nz
-      if (allocated(visc%Ray_v)) Ray = visc%Ray_v(i,J,k)
+      if (has_Ray_v) Ray = visc%Ray_v(i,J,k)
 
       c1(k) = dt * CS%a_v(i,J,K) * b1
       b_denom_1 = CS%h_v(i,J,k) + dt * (Ray + CS%a_v(i,J,K) * d1)
@@ -1103,8 +1109,7 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
   !$omp target exit data map(from: ADp%du_dt_str, ADp%dv_dt_str)
   !$omp target exit data map(delete: ADp)
   !$omp target exit data map(delete: surface_stress)
-  !$omp target exit data map(delete: visc%Ray_u) if (allocated(visc%Ray_u))
-  !$omp target exit data map(delete: visc%Ray_v) if (allocated(visc%Ray_v))
+  ! visc%Ray_u/v are released by set_visc_end (persistent mapping).
 
   ! Here the velocities associated with open boundary conditions are applied.
   if (associated(OBC)) then
@@ -1212,6 +1217,9 @@ subroutine vertvisc_remnant(visc, visc_rem_u, visc_rem_v, dt, G, GV, US, CS)
   real :: b_denom_1
     ! The first term in the denominator of b1 [H ~> m or kg m-2].
 
+  logical :: has_Ray_u, has_Ray_v
+    ! Hoisted allocation checks; evaluating allocated() inside a device region
+    ! requires the descriptor to be on device even when the result is false.
   integer :: i, j, k, is, ie, Isq, Ieq, Jsq, Jeq, nz
   is = G%isc ; ie = G%iec
   Isq = G%IscB ; Ieq = G%IecB ; Jsq = G%JscB ; Jeq = G%JecB ; nz = GV%ke
@@ -1219,13 +1227,16 @@ subroutine vertvisc_remnant(visc, visc_rem_u, visc_rem_v, dt, G, GV, US, CS)
   if (.not.CS%initialized) call MOM_error(FATAL,"MOM_vert_friction(remnant): "// &
          "Module must be initialized before it is used.")
 
+  has_Ray_u = allocated(visc%Ray_u)
+  has_Ray_v = allocated(visc%Ray_v)
+
   ! Find the zonal viscous remnant using a modification of a standard tridagonal solver.
 
   !$omp target teams loop collapse(2) &
   !$omp   private(b1, c1, d1, Ray, b_denom_1)
   do j=G%jsc,G%jec ; do I=Isq,Ieq ; if (G%mask2dCu(I,j) > 0.) then
     Ray = 0.
-    if (allocated(visc%Ray_u)) Ray = visc%Ray_u(I,j,1)
+    if (has_Ray_u) Ray = visc%Ray_u(I,j,1)
 
     b_denom_1 = CS%h_u(I,j,1) + dt * (Ray + CS%a_u(I,j,1))
     b1 = 1.0 / (b_denom_1 + dt * CS%a_u(I,j,2))
@@ -1233,7 +1244,7 @@ subroutine vertvisc_remnant(visc, visc_rem_u, visc_rem_v, dt, G, GV, US, CS)
     visc_rem_u(I,j,1) = b1 * CS%h_u(I,j,1)
 
     do k=2,nz
-      if (allocated(visc%Ray_u)) Ray = visc%Ray_u(I,j,k)
+      if (has_Ray_u) Ray = visc%Ray_u(I,j,k)
 
       c1(k) = dt * CS%a_u(I,j,K) * b1
       b_denom_1 = CS%h_u(I,j,k) + dt * (Ray + CS%a_u(I,j,K) * d1)
@@ -1253,7 +1264,7 @@ subroutine vertvisc_remnant(visc, visc_rem_u, visc_rem_v, dt, G, GV, US, CS)
   !$omp   private(b1, c1, d1, Ray, b_denom_1)
   do J=Jsq,Jeq ; do i=is,ie ; if (G%mask2dCv(i,J) > 0.) then
     Ray = 0.
-    if (allocated(visc%Ray_v)) Ray = visc%Ray_v(i,J,1)
+    if (has_Ray_v) Ray = visc%Ray_v(i,J,1)
 
     b_denom_1 = CS%h_v(i,J,1) + dt * (Ray + CS%a_v(i,J,1))
     b1 = 1.0 / (b_denom_1 + dt*CS%a_v(i,J,2))
@@ -1261,7 +1272,7 @@ subroutine vertvisc_remnant(visc, visc_rem_u, visc_rem_v, dt, G, GV, US, CS)
     visc_rem_v(i,J,1) = b1 * CS%h_v(i,J,1)
 
     do k=2,nz
-      if (allocated(visc%Ray_v)) Ray = visc%Ray_v(i,J,k)
+      if (has_Ray_v) Ray = visc%Ray_v(i,J,k)
 
       c1(k) = dt * CS%a_v(i,J,K) * b1
       b_denom_1 = CS%h_v(i,J,k) + dt * (Ray + CS%a_v(i,J,K) * d1)
@@ -3233,7 +3244,8 @@ subroutine vertvisc_limit_vel(u, v, h, ADp, CDp, forces, visc, dt, G, GV, US, CS
     endif
   else  ! Do not report accelerations leading to large velocities.
     if (CS%CFL_based_trunc) then
-      do concurrent (k=1:nz, j=js:je, I=Isq:Ieq)
+      !$omp target teams loop collapse(3) map(to: h) map(tofrom: u, CS)
+      do k=1,nz ; do j=js,je ; do I=Isq,Ieq
         if (abs(u(I,j,k)) < CS%vel_underflow) then ; u(I,j,k) = 0.0
         elseif ((u(I,j,k) * (dt * G%dy_Cu(I,j))) * G%IareaT(i+1,j) < -CS%CFL_trunc) then
           u(I,j,k) = (-0.9*CS%CFL_trunc) * (G%areaT(i+1,j) / (dt * G%dy_Cu(I,j)))
@@ -3242,7 +3254,7 @@ subroutine vertvisc_limit_vel(u, v, h, ADp, CDp, forces, visc, dt, G, GV, US, CS
           u(I,j,k) = (0.9*CS%CFL_trunc) * (G%areaT(i,j) / (dt * G%dy_Cu(I,j)))
           if (h(i,j,k) + h(i+1,j,k) > H_report) CS%ntrunc = CS%ntrunc + 1
         endif
-      enddo
+      enddo ; enddo ; enddo
     else
       !$OMP parallel do default(shared)
       do k=1,nz ; do j=js,je ; do I=Isq,Ieq
@@ -3321,7 +3333,8 @@ subroutine vertvisc_limit_vel(u, v, h, ADp, CDp, forces, visc, dt, G, GV, US, CS
 
   else  ! Do not report accelerations leading to large velocities.
     if (CS%CFL_based_trunc) then
-      do concurrent (k=1:nz, J=Jsq:Jeq, i=is:ie)
+      !$omp target teams loop collapse(3) map(to: h) map(tofrom: v)
+      do k=1,nz ; do J=Jsq,Jeq ; do i=is,ie
         if (abs(v(i,J,k)) < CS%vel_underflow) then ; v(i,J,k) = 0.0
         elseif ((v(i,J,k) * (dt * G%dx_Cv(i,J))) * G%IareaT(i,j+1) < -CS%CFL_trunc) then
           v(i,J,k) = (-0.9*CS%CFL_trunc) * (G%areaT(i,j+1) / (dt * G%dx_Cv(i,J)))
@@ -3330,7 +3343,7 @@ subroutine vertvisc_limit_vel(u, v, h, ADp, CDp, forces, visc, dt, G, GV, US, CS
           v(i,J,k) = (0.9*CS%CFL_trunc) * (G%areaT(i,j) / (dt * G%dx_Cv(i,J)))
           if (h(i,j,k) + h(i,j+1,k) > H_report) CS%ntrunc = CS%ntrunc + 1
         endif
-      enddo
+      enddo ; enddo ; enddo
     else
       !$OMP parallel do default(shared)
       do k=1,nz ; do J=Jsq,Jeq ; do i=is,ie

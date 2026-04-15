@@ -10,6 +10,8 @@ use MOM_EOS_base_type, only : EOS_base
 implicit none ; private
 
 public Jackett06_EOS
+public calculate_density_derivs_elem_Jackett06_loc
+public calculate_specvol_derivs_elem_Jackett06_loc
 
 !>@{ Parameters in the Jackett et al. equation of state, which is a fit to the Fiestel (2003)
 !    equation of state for the range: -2 < theta < 40 [degC], 0 < S < 42 [PSU], 0 < p < 1e8 [Pa].
@@ -220,10 +222,21 @@ elemental subroutine calculate_density_derivs_elem_Jackett06(this, T, S, pressur
   real,                 intent(in)  :: T        !< Potential temperature relative to the surface [degC]
   real,                 intent(in)  :: S        !< Salinity [PSU]
   real,                 intent(in)  :: pressure !< Pressure [Pa]
-  real,                 intent(out) :: drho_dT  !< The partial derivative of density with potential
-                                                !! temperature [kg m-3 degC-1]
-  real,                 intent(out) :: drho_dS  !< The partial derivative of density with salinity,
-                                                !! in [kg m-3 PSU-1]
+  real,                 intent(out) :: drho_dT  !< [kg m-3 degC-1]
+  real,                 intent(out) :: drho_dS  !< [kg m-3 PSU-1]
+
+  call calculate_density_derivs_elem_Jackett06_loc(T, S, pressure, drho_dT, drho_dS)
+
+end subroutine calculate_density_derivs_elem_Jackett06
+
+!> Standalone (GPU-callable) variant of calculate_density_derivs_elem_Jackett06.
+elemental subroutine calculate_density_derivs_elem_Jackett06_loc(T, S, pressure, drho_dT, drho_dS)
+  !$omp declare target
+  real, intent(in)  :: T        !< Potential temperature relative to the surface [degC]
+  real, intent(in)  :: S        !< Salinity [PSU]
+  real, intent(in)  :: pressure !< Pressure [Pa]
+  real, intent(out) :: drho_dT  !< [kg m-3 degC-1]
+  real, intent(out) :: drho_dS  !< [kg m-3 PSU-1]
   ! Local variables
   real :: num     ! Numerator of the rational expresion for density [kg m-3]
   real :: den     ! Denominator of the rational expresion for density [nondim]
@@ -259,7 +272,7 @@ elemental subroutine calculate_density_derivs_elem_Jackett06(this, T, S, pressur
   drho_dT = (dnum_dT * den - num * dden_dT) * I_denom2
   drho_dS = (dnum_dS * den - num * dden_dS) * I_denom2
 
-end subroutine calculate_density_derivs_elem_Jackett06
+end subroutine calculate_density_derivs_elem_Jackett06_loc
 
 !> Calculate second derivatives of density with respect to temperature, salinity, and pressure,
 !! using Jackett et al., 2006
@@ -378,10 +391,21 @@ elemental subroutine calculate_specvol_derivs_elem_Jackett06(this, T, S, pressur
   real,               intent(in)    :: T        !< Potential temperature [degC]
   real,               intent(in)    :: S        !< Salinity [PSU]
   real,               intent(in)    :: pressure !< Pressure [Pa]
-  real,               intent(inout) :: dSV_dT   !< The partial derivative of specific volume with
-                                                !! potential temperature [m3 kg-1 degC-1]
-  real,               intent(inout) :: dSV_dS   !< The partial derivative of specific volume with
-                                                !! salinity [m3 kg-1 PSU-1]
+  real,               intent(inout) :: dSV_dT   !< [m3 kg-1 degC-1]
+  real,               intent(inout) :: dSV_dS   !< [m3 kg-1 PSU-1]
+
+  call calculate_specvol_derivs_elem_Jackett06_loc(T, S, pressure, dSV_dT, dSV_dS)
+
+end subroutine calculate_specvol_derivs_elem_Jackett06
+
+!> Standalone (GPU-callable) variant of calculate_specvol_derivs_elem_Jackett06.
+elemental subroutine calculate_specvol_derivs_elem_Jackett06_loc(T, S, pressure, dSV_dT, dSV_dS)
+  !$omp declare target
+  real, intent(in)    :: T        !< Potential temperature [degC]
+  real, intent(in)    :: S        !< Salinity [PSU]
+  real, intent(in)    :: pressure !< Pressure [Pa]
+  real, intent(inout) :: dSV_dT   !< [m3 kg-1 degC-1]
+  real, intent(inout) :: dSV_dS   !< [m3 kg-1 PSU-1]
 
   ! Local variables
   real :: num     ! Numerator of the rational expresion for density (not specific volume) [kg m-3]
@@ -418,7 +442,7 @@ elemental subroutine calculate_specvol_derivs_elem_Jackett06(this, T, S, pressur
   dSV_dT = (num * dden_dT - dnum_dT * den) * I_num2
   dSV_dS = (num * dden_dS - dnum_dS * den) * I_num2
 
-end subroutine calculate_specvol_derivs_elem_Jackett06
+end subroutine calculate_specvol_derivs_elem_Jackett06_loc
 
 !> Compute the in situ density of sea water (rho) and the compressibility (drho/dp == C_sound^-2)
 !! at the given salinity, potential temperature and pressure using Jackett et al., 2006

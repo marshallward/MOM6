@@ -159,6 +159,7 @@ end subroutine calculate_TFreeze_TEOS_poly_scalar
 !! from absolute salinity [g kg-1], and pressure [Pa] using a rescaled and
 !! refactored version of the polynomial expressions from the TEOS10 package.
 subroutine calculate_TFreeze_TEOS_poly_array(S, pres, T_Fr, start, npts)
+  !$omp declare target
   real, dimension(:), intent(in)  :: S     !< absolute salinity [g kg-1].
   real, dimension(:), intent(in)  :: pres  !< Pressure [Pa].
   real, dimension(:), intent(out) :: T_Fr  !< Freezing point conservative temperature [degC].

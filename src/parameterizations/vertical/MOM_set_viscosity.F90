@@ -452,21 +452,24 @@ subroutine set_viscous_BBL(u, v, h, tv, visc, G, GV, US, CS, pbv)
   endif
 
   if (.not.use_BBL_EOS) then
-    do concurrent (k=1:nz, j=G%jsdB:G%Jedb, i=G%isdB:G%iedB)
+    !$omp target teams loop collapse(3)
+    do k=1,nz ; do j=G%jsdB,G%Jedb ; do i=G%isdB,G%iedB
       Rml_vel(i,j,k) = 0.0
-    enddo
+    enddo ; enddo ; enddo
   endif
 
   ! Resetting Ray_[uv] is required by body force drag.
   if (allocated(visc%Ray_u)) then
-    do concurrent (k=1:nz, j=G%jsd:G%jed, i=G%isdB:G%iedB)
+    !$omp target teams loop collapse(3)
+    do k=1,nz ; do j=G%jsd,G%jed ; do i=G%isdB,G%iedB
       visc%Ray_u(i,j,k) = 0.0
-    enddo
+    enddo ; enddo ; enddo
   endif
   if (allocated(visc%Ray_v)) then
-    do concurrent (k=1:nz, j=G%jsdB:G%jedB, i=G%isd:G%ied)
+    !$omp target teams loop collapse(3)
+    do k=1,nz ; do j=G%jsdB,G%jedB ; do i=G%isd,G%ied
       visc%Ray_v(i,j,k) = 0.0
-    enddo
+    enddo ; enddo ; enddo
   endif
 
   !$omp target enter data map(alloc: S_vel, T_vel, SpV_vel, h_vel, h_at_vel, dz_vel, &
@@ -956,7 +959,10 @@ subroutine set_viscous_BBL(u, v, h, tv, visc, G, GV, US, CS, pbv)
             call find_L_open_concave_trigonometric(vol_below, D_vel, Dp, Dm, L, GV)
           else
             call find_L_open_concave_iterative(vol_below, D_vel, Dp, Dm, L, GV)
-            if (CS%debug) then
+            if (.false. .and. CS%debug) then
+              ! Compile-time gated out on the device path: this block is a pure diagnostic
+              ! breakpoint test with no effect on L or visc%Ray_*. Re-enable by flipping
+              ! `.false.` to `.true.` when debugging on the host.
               ! The tests in this block reveal that the iterative and trigonometric solutions are
               ! mathematically equivalent, but in some cases the iterative solution is consistent
               ! at roundoff, but that the trigonmetric solutions have errors that can be several
@@ -2824,6 +2830,7 @@ subroutine set_visc_register_restarts(HI, G, GV, US, param_file, visc, restart_C
 
   if (use_kappa_shear .or. useKPP .or. useEPBL .or. use_CVMix_shear .or. use_CVMix_conv) then
     call safe_alloc_ptr(visc%Kd_shear, isd, ied, jsd, jed, nz+1)
+    !$omp target enter data map(alloc: visc%Kd_shear)
     call register_restart_field(visc%Kd_shear, "Kd_shear", .false., restart_CS, &
                   "Shear-driven turbulent diffusivity at interfaces", &
                   units=Kd_units, conversion=GV%HZ_T_to_MKS, z_grid='i')
@@ -2839,17 +2846,21 @@ subroutine set_visc_register_restarts(HI, G, GV, US, param_file, visc, restart_C
   endif
   if (use_kappa_shear .and. KS_at_vertex) then
     call safe_alloc_ptr(visc%TKE_turb, HI%IsdB, HI%IedB, HI%JsdB, HI%JedB, nz+1)
+    !$omp target enter data map(alloc: visc%TKE_turb)
     call safe_alloc_ptr(visc%Kv_shear_Bu, HI%IsdB, HI%IedB, HI%JsdB, HI%JedB, nz+1)
+    !$omp target enter data map(alloc: visc%Kv_shear_Bu)
     call register_restart_field(visc%Kv_shear_Bu, "Kv_shear_Bu", .false., restart_CS, &
                   "Shear-driven turbulent viscosity at vertex interfaces", &
                   units=Kv_units, conversion=GV%HZ_T_to_MKS, hor_grid="Bu", z_grid='i')
   elseif (use_kappa_shear) then
     call safe_alloc_ptr(visc%TKE_turb, isd, ied, jsd, jed, nz+1)
+    !$omp target enter data map(alloc: visc%TKE_turb)
   endif
 
   if (useKPP) then
     ! MOM_bkgnd_mixing uses Kv_slow when KPP is defined.
     call safe_alloc_ptr(visc%Kv_slow, isd, ied, jsd, jed, nz+1)
+    !$omp target enter data map(alloc: visc%Kv_slow)
   endif
 
   ! visc%MLD and visc%h_ML are used to communicate the state of the (e)PBL or KPP to the rest of the model
@@ -3260,6 +3271,7 @@ subroutine set_visc_init(Time, G, GV, US, param_file, diag, visc, CS, restart_CS
   if (CS%Channel_drag .or. CS%body_force_drag) then
     allocate(visc%Ray_u(IsdB:IedB,jsd:jed,nz), source=0.0)
     allocate(visc%Ray_v(isd:ied,JsdB:JedB,nz), source=0.0)
+    !$omp target enter data map(to: visc%Ray_u, visc%Ray_v)
     CS%id_Ray_u = register_diag_field('ocean_model', 'Rayleigh_u', diag%axesCuL, &
        Time, 'Rayleigh drag velocity at u points', 'm s-1', conversion=GV%H_to_m*US%s_to_T)
     CS%id_Ray_v = register_diag_field('ocean_model', 'Rayleigh_v', diag%axesCvL, &
@@ -3290,21 +3302,60 @@ subroutine set_visc_end(visc, CS)
   type(set_visc_CS),   intent(inout) :: CS   !< The control structure returned by a previous
                                              !! call to set_visc_init.
 
-  if (allocated(visc%bbl_thick_u)) deallocate(visc%bbl_thick_u)
-  if (allocated(visc%bbl_thick_v)) deallocate(visc%bbl_thick_v)
-  if (allocated(visc%kv_bbl_u)) deallocate(visc%kv_bbl_u)
-  if (allocated(visc%kv_bbl_v)) deallocate(visc%kv_bbl_v)
+  if (allocated(visc%bbl_thick_u)) then
+    !$omp target exit data map(delete: visc%bbl_thick_u)
+    deallocate(visc%bbl_thick_u)
+  endif
+  if (allocated(visc%bbl_thick_v)) then
+    !$omp target exit data map(delete: visc%bbl_thick_v)
+    deallocate(visc%bbl_thick_v)
+  endif
+  if (allocated(visc%kv_bbl_u)) then
+    !$omp target exit data map(delete: visc%kv_bbl_u)
+    deallocate(visc%kv_bbl_u)
+  endif
+  if (allocated(visc%kv_bbl_v)) then
+    !$omp target exit data map(delete: visc%kv_bbl_v)
+    deallocate(visc%kv_bbl_v)
+  endif
   if (allocated(CS%bbl_u)) deallocate(CS%bbl_u)
   if (allocated(CS%bbl_v)) deallocate(CS%bbl_v)
-  if (allocated(visc%Ray_u)) deallocate(visc%Ray_u)
-  if (allocated(visc%Ray_v)) deallocate(visc%Ray_v)
-  if (allocated(visc%nkml_visc_u)) deallocate(visc%nkml_visc_u)
-  if (allocated(visc%nkml_visc_v)) deallocate(visc%nkml_visc_v)
-  if (associated(visc%Kd_shear)) deallocate(visc%Kd_shear)
-  if (associated(visc%Kv_slow)) deallocate(visc%Kv_slow)
-  if (associated(visc%TKE_turb)) deallocate(visc%TKE_turb)
-  if (associated(visc%Kv_shear)) deallocate(visc%Kv_shear)
-  if (associated(visc%Kv_shear_Bu)) deallocate(visc%Kv_shear_Bu)
+  if (allocated(visc%Ray_u)) then
+    !$omp target exit data map(delete: visc%Ray_u)
+    deallocate(visc%Ray_u)
+  endif
+  if (allocated(visc%Ray_v)) then
+    !$omp target exit data map(delete: visc%Ray_v)
+    deallocate(visc%Ray_v)
+  endif
+  if (allocated(visc%nkml_visc_u)) then
+    !$omp target exit data map(delete: visc%nkml_visc_u)
+    deallocate(visc%nkml_visc_u)
+  endif
+  if (allocated(visc%nkml_visc_v)) then
+    !$omp target exit data map(delete: visc%nkml_visc_v)
+    deallocate(visc%nkml_visc_v)
+  endif
+  if (associated(visc%Kd_shear)) then
+    !$omp target exit data map(delete: visc%Kd_shear)
+    deallocate(visc%Kd_shear)
+  endif
+  if (associated(visc%Kv_slow)) then
+    !$omp target exit data map(delete: visc%Kv_slow)
+    deallocate(visc%Kv_slow)
+  endif
+  if (associated(visc%TKE_turb)) then
+    !$omp target exit data map(delete: visc%TKE_turb)
+    deallocate(visc%TKE_turb)
+  endif
+  if (associated(visc%Kv_shear)) then
+    !$omp target exit data map(delete: visc%Kv_shear)
+    deallocate(visc%Kv_shear)
+  endif
+  if (associated(visc%Kv_shear_Bu)) then
+    !$omp target exit data map(delete: visc%Kv_shear_Bu)
+    deallocate(visc%Kv_shear_Bu)
+  endif
   if (allocated(visc%ustar_bbl)) deallocate(visc%ustar_bbl)
   if (allocated(visc%BBL_meanKE_loss)) deallocate(visc%BBL_meanKE_loss)
   if (allocated(visc%BBL_meanKE_loss_sqrtCd)) deallocate(visc%BBL_meanKE_loss_sqrtCd)

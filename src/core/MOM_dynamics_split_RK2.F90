@@ -1745,14 +1745,18 @@ subroutine initialize_dyn_split_RK2(u, v, h, tv, uh, vh, eta, Time, G, GV, US, p
       if (read_uv .and. read_h2) then
         call pass_var(CS%h_av, G%Domain, clock=id_clock_pass_init)
       else
-        do concurrent (k=1:nz, j=jsd:jed, i=isd:ied)
+        !$omp target teams loop collapse(3)
+        do k=1,nz ; do j=jsd,jed ; do i=isd,ied
           h_tmp(i,j,k) = h(i,j,k)
-        enddo
+        enddo ; enddo ; enddo
         call continuity(CS%u_av, CS%v_av, h, h_tmp, uh, vh, dt, G, GV, US, CS%continuity_CSp, CS%OBC, pbv)
+        !$omp target update from(h_tmp)
         call pass_var(h_tmp, G%Domain, clock=id_clock_pass_init)
-        do concurrent (k=1:nz, j=jsd:jed, i=isd:ied)
+        !$omp target update to(h_tmp)
+        !$omp target teams loop collapse(3)
+        do k=1,nz ; do j=jsd,jed ; do i=isd,ied
           CS%h_av(i,j,k) = 0.5*(h(i,j,k) + h_tmp(i,j,k))
-        enddo
+        enddo ; enddo ; enddo
       endif
       call pass_vector(CS%u_av, CS%v_av, G%Domain, halo=2, clock=id_clock_pass_init, complete=.false.)
       call pass_vector(uh, vh, G%Domain, halo=2, clock=id_clock_pass_init, complete=.true.)

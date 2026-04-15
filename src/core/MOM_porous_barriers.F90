@@ -284,6 +284,8 @@ subroutine porous_widths_interface(h, tv, G, GV, US, pbv, CS, eta_bt)
   if (CS%id_por_layer_widthU > 0) call post_data(CS%id_por_layer_widthU, pbv%por_layer_widthU, CS%diag)
   if (CS%id_por_layer_widthV > 0) call post_data(CS%id_por_layer_widthV, pbv%por_layer_widthV, CS%diag)
 
+  !$omp target update to(pbv%por_layer_widthU, pbv%por_layer_widthV)
+
   call cpu_clock_end(id_clock_porous_barrier)
 end subroutine porous_widths_interface
 

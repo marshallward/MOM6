@@ -10,6 +10,8 @@ use MOM_EOS_base_type, only : EOS_base
 implicit none ; private
 
 public UNESCO_EOS
+public calculate_density_derivs_elem_UNESCO_loc
+public calculate_specvol_derivs_elem_UNESCO_loc
 
 !>@{ Parameters in the UNESCO equation of state, as published in appendix A3 of Gill, 1982.
 ! The following constants are used to calculate rho0, the density of seawater at 1 atmosphere pressure.
@@ -252,6 +254,19 @@ elemental subroutine calculate_density_derivs_elem_UNESCO(this, T, S, pressure, 
                                              !! temperature [kg m-3 degC-1]
   real,              intent(out) :: drho_dS  !< The partial derivative of density with salinity,
                                              !! in [kg m-3 PSU-1]
+
+  call calculate_density_derivs_elem_UNESCO_loc(T, S, pressure, drho_dT, drho_dS)
+
+end subroutine calculate_density_derivs_elem_UNESCO
+
+!> Standalone (GPU-callable) variant of calculate_density_derivs_elem_UNESCO.
+elemental subroutine calculate_density_derivs_elem_UNESCO_loc(T, S, pressure, drho_dT, drho_dS)
+  !$omp declare target
+  real, intent(in)  :: T        !< Potential temperature relative to the surface [degC]
+  real, intent(in)  :: S        !< Salinity [PSU]
+  real, intent(in)  :: pressure !< Pressure [Pa]
+  real, intent(out) :: drho_dT  !< [kg m-3 degC-1]
+  real, intent(out) :: drho_dS  !< [kg m-3 PSU-1]
   ! Local variables
   real :: t1       ! A copy of the temperature at a point [degC]
   real :: s1       ! A copy of the salinity at a point [PSU]
@@ -296,7 +311,7 @@ elemental subroutine calculate_density_derivs_elem_UNESCO(this, T, S, pressure, 
   drho_dT = (ks*drho0_dT - dks_dT*((rho0*p1)*I_denom)) * I_denom
   drho_dS = (ks*drho0_dS - dks_dS*((rho0*p1)*I_denom)) * I_denom
 
-end subroutine calculate_density_derivs_elem_UNESCO
+end subroutine calculate_density_derivs_elem_UNESCO_loc
 
 !> Calculate second derivatives of density with respect to temperature, salinity, and pressure,
 !! using the UNESCO (1981) equation of state, as refit by Jackett and McDougall (1995)
@@ -426,10 +441,21 @@ elemental subroutine calculate_specvol_derivs_elem_UNESCO(this, T, S, pressure, 
   real,              intent(in)    :: T        !< Potential temperature [degC]
   real,              intent(in)    :: S        !< Salinity [PSU]
   real,              intent(in)    :: pressure !< Pressure [Pa]
-  real,              intent(inout) :: dSV_dT   !< The partial derivative of specific volume with
-                                               !! potential temperature [m3 kg-1 degC-1]
-  real,              intent(inout) :: dSV_dS   !< The partial derivative of specific volume with
-                                               !! salinity [m3 kg-1 PSU-1]
+  real,              intent(inout) :: dSV_dT   !< [m3 kg-1 degC-1]
+  real,              intent(inout) :: dSV_dS   !< [m3 kg-1 PSU-1]
+
+  call calculate_specvol_derivs_elem_UNESCO_loc(T, S, pressure, dSV_dT, dSV_dS)
+
+end subroutine calculate_specvol_derivs_elem_UNESCO
+
+!> Standalone (GPU-callable) variant of calculate_specvol_derivs_elem_UNESCO.
+elemental subroutine calculate_specvol_derivs_elem_UNESCO_loc(T, S, pressure, dSV_dT, dSV_dS)
+  !$omp declare target
+  real, intent(in)    :: T        !< Potential temperature [degC]
+  real, intent(in)    :: S        !< Salinity [PSU]
+  real, intent(in)    :: pressure !< Pressure [Pa]
+  real, intent(inout) :: dSV_dT   !< [m3 kg-1 degC-1]
+  real, intent(inout) :: dSV_dS   !< [m3 kg-1 PSU-1]
   ! Local variables
   real :: t1       ! A copy of the temperature at a point [degC]
   real :: s1       ! A copy of the salinity at a point [PSU]
@@ -475,7 +501,7 @@ elemental subroutine calculate_specvol_derivs_elem_UNESCO(this, T, S, pressure, 
   dSV_dT = ((p1*rho0)*dks_dT + ((p1 - ks)*ks)*drho0_dT) * I_denom2
   dSV_dS = ((p1*rho0)*dks_dS + ((p1 - ks)*ks)*drho0_dS) * I_denom2
 
-end subroutine calculate_specvol_derivs_elem_UNESCO
+end subroutine calculate_specvol_derivs_elem_UNESCO_loc
 
 !> Compute the in situ density of sea water (rho) and the compressibility (drho/dp == C_sound^-2)
 !! at the given salinity, potential temperature and pressure using the UNESCO (1981)

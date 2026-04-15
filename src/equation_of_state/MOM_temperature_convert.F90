@@ -59,6 +59,7 @@ contains
 !> Convert input potential temperature [degC] and absolute salinity [g kg-1] to returned
 !! conservative temperature [degC] using the polynomial expressions from TEOS-10.
 elemental real function poTemp_to_consTemp(T, Sa) result(Tc)
+  !$omp declare target
   real, intent(in) :: T  !< Potential temperature [degC]
   real, intent(in) :: Sa !< Absolute salinity [g kg-1]
 
@@ -81,6 +82,7 @@ end function poTemp_to_consTemp
 !> Return the partial derivative of conservative temperature with potential temperature [nondim]
 !! based on the polynomial expressions from TEOS-10.
 elemental real function dTc_dTp(T, Sa)
+  !$omp declare target
   real, intent(in) :: T  !< Potential temperature [degC]
   real, intent(in) :: Sa !< Absolute salinity [g kg-1]
 
@@ -103,6 +105,7 @@ end function dTc_dTp
 !> Convert input potential temperature [degC] and absolute salinity [g kg-1] to returned
 !! conservative temperature [degC] by inverting the polynomial expressions from TEOS-10.
 elemental real function consTemp_to_poTemp(Tc, Sa) result(Tp)
+  !$omp declare target
   real, intent(in) :: Tc !< Conservative temperature [degC]
   real, intent(in) :: Sa !< Absolute salinity [g kg-1]
 

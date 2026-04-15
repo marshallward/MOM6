@@ -32,6 +32,7 @@ contains
 !> Evaluate the inverse cosh, either using a math library or an
 !! equivalent expression
 function invcosh(x)
+  !$omp declare target
   real, intent(in) :: x !< The argument of the inverse of cosh [nondim].  NaNs will
                         !! occur if x<1, but there is no error checking
   real :: invcosh  ! The inverse of cosh of x [nondim]
@@ -48,6 +49,7 @@ end function invcosh
 !> Returns the cube root of a real argument at roundoff accuracy, in a form that works properly with
 !! rescaling of the argument by integer powers of 8.  If the argument is a NaN, a NaN is returned.
 elemental function cuberoot(x) result(root)
+  !$omp declare target
   real, intent(in) :: x !< The argument of cuberoot in arbitrary units cubed [A3]
   real :: root !< The real cube root of x in arbitrary units [A]
 
@@ -118,6 +120,7 @@ end function cuberoot
 
 !> Rescale `a` to the range [0.125, 1) and compute its cube-root exponent.
 pure subroutine rescale_cbrt(a, x, e_r, s_a)
+  !$omp declare target
   real, intent(in) :: a
     !< The real parameter to be rescaled for cube root in abitrary units cubed [A3]
   real, intent(out) :: x
@@ -142,9 +145,16 @@ pure subroutine rescale_cbrt(a, x, e_r, s_a)
   e_a = ibits(xb, expbit, explen) - bias
 
   ! Compute terms of exponent decomposition e = 3*(e/3) + modulo(e,3).
-  ! (Fortran division is round-to-zero, so we must emulate floor division.)
-  e_mod = modulo(e_a, 3_int64)
-  e_div = (e_a - e_mod)/3
+  ! Branchless floor-division emulation, avoiding int64 modulo intrinsic
+  ! (which lowers to a compiler runtime helper unavailable on device).
+  block
+    integer(kind=int64) :: q, r, sign_bit
+    q = e_a / 3_int64                      ! truncated quotient
+    r = e_a - q * 3_int64                  ! truncated remainder, sign of e_a
+    sign_bit = ishft(r, -63)               ! 1 if r < 0, else 0
+    e_mod = r + 3_int64 * sign_bit
+    e_div = q - sign_bit
+  end block
 
   ! Our scaling decomposes e_a into e = {3*(e/3) + 3} + {modulo(e,3) - 3}.
 
@@ -163,6 +173,7 @@ end subroutine rescale_cbrt
 
 !> Undo the rescaling of a real number back to its original base.
 pure function descale(x, e_a, s_a) result(a)
+  !$omp declare target
   real, intent(in) :: x
     !< The rescaled value which is to be restored in ambiguous units [B]
   integer(kind=int64), intent(in) :: e_a

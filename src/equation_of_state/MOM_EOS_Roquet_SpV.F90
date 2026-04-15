@@ -10,6 +10,9 @@ use MOM_EOS_base_type, only : EOS_base
 implicit none ; private
 
 public Roquet_SpV_EOS
+public spec_vol_elem_Roquet_SpV_loc
+public calculate_density_derivs_elem_Roquet_SpV_loc
+public calculate_specvol_derivs_elem_Roquet_SpV_loc
 
 real, parameter :: Pa2kb  = 1.e-8 !< Conversion factor between Pa and kbar [kbar Pa-1]
 !>@{ Parameters in the Roquet specific volume polynomial equation of state
@@ -196,6 +199,17 @@ real elemental function spec_vol_elem_Roquet_SpV(this, T, S, pressure)
   real,                  intent(in) :: S        !< Absolute salinity [g kg-1]
   real,                  intent(in) :: pressure !< pressure [Pa]
 
+  spec_vol_elem_Roquet_SpV = spec_vol_elem_Roquet_SpV_loc(T, S, pressure)
+
+end function spec_vol_elem_Roquet_SpV
+
+!> Standalone (GPU-callable) variant of spec_vol_elem_Roquet_SpV.
+real elemental function spec_vol_elem_Roquet_SpV_loc(T, S, pressure) result(specvol)
+  !$omp declare target
+  real, intent(in) :: T        !< Conservative temperature [degC]
+  real, intent(in) :: S        !< Absolute salinity [g kg-1]
+  real, intent(in) :: pressure !< pressure [Pa]
+
   ! Local variables
   real :: zp     ! Pressure [Pa]
   real :: zt     ! Conservative temperature [degC]
@@ -245,9 +259,9 @@ real elemental function spec_vol_elem_Roquet_SpV(this, T, S, pressure)
   SV_00p = zp*(V00 + zp*(V01 + zp*(V02 + zp*(V03 + zp*(V04 + zp*V05)))))
 
   SV_TS  = (SV_TS0 + SV_0S0) + zp*(SV_TS1 + zp*(SV_TS2 +  zp*SV_TS3))
-  spec_vol_elem_Roquet_SpV = SV_TS + SV_00p  ! In situ specific volume [m3 kg-1]
+  specvol = SV_TS + SV_00p  ! In situ specific volume [m3 kg-1]
 
-end function spec_vol_elem_Roquet_SpV
+end function spec_vol_elem_Roquet_SpV_loc
 
 !> Roquet et al. in situ specific volume anomaly of sea water [m3 kg-1]
 !!
@@ -356,10 +370,21 @@ elemental subroutine calculate_specvol_derivs_elem_Roquet_SpV(this, T, S, pressu
   real,                  intent(in)    :: T        !< Conservative temperature [degC]
   real,                  intent(in)    :: S        !< Absolute salinity [g kg-1]
   real,                  intent(in)    :: pressure !< Pressure [Pa]
-  real,                  intent(inout) :: dSV_dT   !< The partial derivative of specific volume with
-                                                   !! conservative temperature [m3 kg-1 degC-1]
-  real,                  intent(inout) :: dSV_dS   !< The partial derivative of specific volume with
-                                                   !! absolute salinity [m3 kg-1 ppt-1]
+  real,                  intent(inout) :: dSV_dT   !< [m3 kg-1 degC-1]
+  real,                  intent(inout) :: dSV_dS   !< [m3 kg-1 ppt-1]
+
+  call calculate_specvol_derivs_elem_Roquet_SpV_loc(T, S, pressure, dSV_dT, dSV_dS)
+
+end subroutine calculate_specvol_derivs_elem_Roquet_SpV
+
+!> Standalone (GPU-callable) variant of calculate_specvol_derivs_elem_Roquet_SpV.
+elemental subroutine calculate_specvol_derivs_elem_Roquet_SpV_loc(T, S, pressure, dSV_dT, dSV_dS)
+  !$omp declare target
+  real, intent(in)    :: T        !< Conservative temperature [degC]
+  real, intent(in)    :: S        !< Absolute salinity [g kg-1]
+  real, intent(in)    :: pressure !< Pressure [Pa]
+  real, intent(inout) :: dSV_dT   !< [m3 kg-1 degC-1]
+  real, intent(inout) :: dSV_dS   !< [m3 kg-1 ppt-1]
 
   real :: zp      ! Pressure [Pa]
   real :: zt      ! Conservative temperature [degC]
@@ -421,7 +446,7 @@ elemental subroutine calculate_specvol_derivs_elem_Roquet_SpV(this, T, S, pressu
   ! The division by zs here is because zs = sqrt(S + S0), so dSV_dS = dzs_dS * dSV_dzs = (0.5 / zs) * dSV_dzs
   dSV_dS = (dSVdzs0 + zp*(dSVdzs1 + zp*(dSVdzs2 + zp * dSVdzs3))) / zs
 
-end subroutine calculate_specvol_derivs_elem_Roquet_SpV
+end subroutine calculate_specvol_derivs_elem_Roquet_SpV_loc
 
 !> Compute an array of derivatives of densities of sea water with temperature (drho_dT in [kg m-3 degC-1])
 !! and salinity (drho_dS in [kg m-3 ppt-1]) from absolute salinity (S [g kg-1]), conservative temperature
@@ -431,10 +456,21 @@ elemental subroutine calculate_density_derivs_elem_Roquet_SpV(this, T, S, pressu
   real,                  intent(in)  :: T        !< Conservative temperature [degC]
   real,                  intent(in)  :: S        !< Absolute salinity [g kg-1]
   real,                  intent(in)  :: pressure !< pressure [Pa]
-  real,                  intent(out) :: drho_dT  !< The partial derivative of density with
-                                                  !! conservative temperature [kg m-3 degC-1]
-  real,                  intent(out) :: drho_dS  !< The partial derivative of density with
-                                                 !! absolute salinity [kg m-3 ppt-1]
+  real,                  intent(out) :: drho_dT  !< [kg m-3 degC-1]
+  real,                  intent(out) :: drho_dS  !< [kg m-3 ppt-1]
+
+  call calculate_density_derivs_elem_Roquet_SpV_loc(T, S, pressure, drho_dT, drho_dS)
+
+end subroutine calculate_density_derivs_elem_Roquet_SpV
+
+!> Standalone (GPU-callable) variant of calculate_density_derivs_elem_Roquet_SpV.
+elemental subroutine calculate_density_derivs_elem_Roquet_SpV_loc(T, S, pressure, drho_dT, drho_dS)
+  !$omp declare target
+  real, intent(in)  :: T        !< Conservative temperature [degC]
+  real, intent(in)  :: S        !< Absolute salinity [g kg-1]
+  real, intent(in)  :: pressure !< pressure [Pa]
+  real, intent(out) :: drho_dT  !< [kg m-3 degC-1]
+  real, intent(out) :: drho_dS  !< [kg m-3 ppt-1]
 
   ! Local variables
   real :: dSV_dT   ! The partial derivative of specific volume with
@@ -444,14 +480,14 @@ elemental subroutine calculate_density_derivs_elem_Roquet_SpV(this, T, S, pressu
   real :: specvol  ! The specific volume [m3 kg-1]
   real :: rho  ! The in situ density [kg m-3]
 
-  call this%calculate_specvol_derivs_elem(T, S, pressure, dSV_dT, dSV_dS)
+  call calculate_specvol_derivs_elem_Roquet_SpV_loc(T, S, pressure, dSV_dT, dSV_dS)
 
-  specvol = this%spec_vol_elem(T, S, pressure)
+  specvol = spec_vol_elem_Roquet_SpV_loc(T, S, pressure)
   rho = 1.0 / specvol
   drho_dT = -dSv_dT * rho**2
   drho_dS = -dSv_dS * rho**2
 
-end subroutine calculate_density_derivs_elem_Roquet_SpV
+end subroutine calculate_density_derivs_elem_Roquet_SpV_loc
 
 !> Compute the in situ density of sea water (rho in [kg m-3]) and the compressibility
 !! (drho/dp = C_sound^-2, stored as drho_dp [s2 m-2]) from absolute salinity (sal [g kg-1]),
