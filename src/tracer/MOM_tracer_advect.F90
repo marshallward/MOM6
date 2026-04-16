@@ -200,7 +200,11 @@ subroutine advect_tracer(h_end, uhtr, vhtr, OBC, dt, G, GV, US, CS, Reg, x_first
   do concurrent (k=1:nz, j=jsd:jed, i=Isd:Ied)
     hprev(i,j,k) = 0.0
   enddo
-  do concurrent (k=1:nz)
+  ! Plain do loop — domore_k is read on CPU by the plain do k loop below,
+  ! so it must be written on CPU. Auto-offloading this would leave the host
+  ! copy stale, causing the tracer iteration loop to be skipped entirely.
+  !$omp target teams loop
+  do k=1,nz
     domore_k(k) = 1
   enddo
   do concurrent (k=1:nz, j=js:je, I=is-1:ie)
@@ -281,29 +285,57 @@ subroutine advect_tracer(h_end, uhtr, vhtr, OBC, dt, G, GV, US, CS, Reg, x_first
       ! Reevaluate domore_u & domore_v unless the valid range is the same size as
       ! before.  Also, do this if there is Strang splitting.
       if ((nsten_halo > 1) .or. (itt==1)) then
-        do k=1,nz ; if (domore_k(k) > 0) then
-          do concurrent (j=jsv:jev, .not.domore_u(j,k))
-            do i=isv+stencil-1,iev-stencil ; if (uhr(I,j,k) /= 0.0) then
-              domore_u(j,k) = .true. ; exit
-            endif ; enddo ! i-loop
-          enddo
-          do concurrent (J=jsv+stencil-1:jev-stencil, .not.domore_v(J,k))
-            do i=isv+stencil,iev-stencil ; if (vhr(i,J,k) /= 0.0) then
-              domore_v(J,k) = .true. ; exit
-            endif ; enddo ! i-loop
-          enddo
+        ! Entire k-loop offloaded — domore_k is read/written on GPU only.
+        ! Inner j-loops use parallel do for the domore_u/v search; the
+        ! domore_k reduction is sequential per-team (small loop, no race).
+        !$omp target teams distribute
+        do k=1,nz
+          if (domore_k(k) > 0) then
+            !$omp parallel do private(i)
+            do j=jsv,jev
+              if (.not. domore_u(j,k)) then
+                do i=isv+stencil-1,iev-stencil
+                  if (uhr(I,j,k) /= 0.0) then
+                    domore_u(j,k) = .true.
+                    exit
+                  endif
+                enddo
+              endif
+            enddo
+            !$omp parallel do private(i)
+            do j=jsv+stencil-1,jev-stencil
+              if (.not. domore_v(j,k)) then
+                do i=isv+stencil,iev-stencil
+                  if (vhr(i,j,k) /= 0.0) then
+                    domore_v(j,k) = .true.
+                    exit
+                  endif
+                enddo
+              endif
+            enddo
 
-          !   At this point, domore_k is global.  Change it so that it indicates
-          ! whether any work is needed on a layer on this processor.
-          domore_k(k) = 0
-          do concurrent (j=jsv:jev, domore_u(j,k))
-            domore_k(k) = 1
-          enddo
-          do concurrent (J=jsv+stencil-1:jev-stencil, domore_v(J,k))
-            domore_k(k) = 1
-          enddo
-
-        endif ; enddo ! k-loop
+            !   At this point, domore_k is global.  Change it so that it indicates
+            ! whether any work is needed on a layer on this processor.
+            domore_k(k) = 0
+            do j=jsv,jev
+              if (domore_u(j,k)) then
+                domore_k(k) = 1
+                exit
+              endif
+            enddo
+            if (domore_k(k) == 0) then
+              do j=jsv+stencil-1,jev-stencil
+                if (domore_v(j,k)) then
+                  domore_k(k) = 1
+                  exit
+                endif
+              enddo
+            endif
+          endif
+        enddo
+        ! Sync domore_k from GPU to CPU so the plain do k loops in
+        ! advect_x/advect_y below read the correct values.
+        !$omp target update from(domore_k)
       endif
     endif
 
@@ -334,13 +366,19 @@ subroutine advect_tracer(h_end, uhtr, vhtr, OBC, dt, G, GV, US, CS, Reg, x_first
         ! Update domore_k(k) for the next iteration
         !$omp target
         domore_k(k) = 0
+        do j=jsv-stencil,jev+stencil
+          if (domore_u(j,k)) then
+            domore_k(k) = 1 ; exit
+          endif
+        enddo
+        if (domore_k(k) == 0) then
+          do j=jsv-1,jev
+            if (domore_v(j,k)) then
+              domore_k(k) = 1 ; exit
+            endif
+          enddo
+        endif
         !$omp end target
-        do concurrent (j=jsv-stencil:jev+stencil, domore_u(j,k))
-          domore_k(k) = 1
-        enddo
-        do concurrent (J=jsv-1:jev, domore_v(J,k))
-          domore_k(k) = 1
-        enddo
 
       endif ; enddo
 
@@ -361,13 +399,19 @@ subroutine advect_tracer(h_end, uhtr, vhtr, OBC, dt, G, GV, US, CS, Reg, x_first
         ! Update domore_k(k) for the next iteration
         !$omp target
         domore_k(k) = 0
+        do j=jsv,jev
+          if (domore_u(j,k)) then
+            domore_k(k) = 1 ; exit
+          endif
+        enddo
+        if (domore_k(k) == 0) then
+          do j=jsv-1,jev
+            if (domore_v(j,k)) then
+              domore_k(k) = 1 ; exit
+            endif
+          enddo
+        endif
         !$omp end target
-        do concurrent (j=jsv:jev, domore_u(j,k))
-          domore_k(k) = 1
-        enddo
-        do concurrent (J=jsv-1:jev, domore_v(J,k))
-          domore_k(k) = 1
-        enddo
       endif ; enddo
 
     endif ! x_first
@@ -388,7 +432,9 @@ subroutine advect_tracer(h_end, uhtr, vhtr, OBC, dt, G, GV, US, CS, Reg, x_first
       if (do_any == 0) then
         exit
       endif
-
+      ! Push the global sum back to GPU so the reevaluation block
+      ! (which runs entirely on device) sees the cross-PE values.
+      !$omp target update to(domore_k)
     endif
 
   enddo ! Iterations loop
