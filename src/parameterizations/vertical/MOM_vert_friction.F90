@@ -1395,6 +1395,9 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
   logical :: do_i_shelf(SZIB_(G), SZJB_(G))
     ! Land mask with fractional shelf
   logical :: do_any_shelf
+  logical :: has_SpV_avg
+    ! Hoisted allocation check for tv%SpV_avg; evaluating allocated() inside a
+    ! device region requires the descriptor on device, but tv is map(alloc:).
   integer :: zi_dir
     ! A ternary logical indicating which thickness to use for finding z_clear.
   integer :: i, j, k, is, ie, js, je, Isq, Ieq, Jsq, Jeq, nz, ij
@@ -1447,10 +1450,17 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
   !$omp target enter data map(alloc: Ustar_2d)
   call find_ustar(forces, tv, Ustar_2d, G, GV, US, halo=1)
 
+  ! Hoist tv%SpV_avg allocation check to host — evaluating allocated() on the
+  ! device descriptor is undefined because tv is only map(alloc:).
+  has_SpV_avg = allocated(tv%SpV_avg)
+  if (has_SpV_avg) then
+    !$omp target enter data map(to: tv%SpV_avg)
+  endif
+
   ! First do u-points
 
   !$omp target enter data map(alloc: z_i, z_i_gl90, dz_harm, hvel, dz_vel, a_cpl, a_cpl_gl90, &
-  !$omp& tv, varmix, hvel_shelf, dz_vel_shelf, a_shelf)
+  !$omp& varmix, hvel_shelf, dz_vel_shelf, a_shelf)
 
   ! These are used in diagnostics, so they need to be mapped back and forth
   !$omp target enter data map(to: hML_u, kv_u, kv_gl90_u )
@@ -1609,7 +1619,8 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
     enddo
 
     call find_coupling_coef_k(a_cpl, dz_vel, i, j, dz_harm, bbl_thick, kv_bbl, z_i, &
-        h_ml, dt, G, GV, US, CS, visc, Ustar_2d, tv, work_on_u=.true., OBC=OBC)
+        h_ml, dt, G, GV, US, CS, visc, Ustar_2d, tv, work_on_u=.true., OBC=OBC, &
+        has_SpV_avg=has_SpV_avg)
 
     if (allocated(hML_u)) hML_u(I,j) = h_ml
 
@@ -1695,7 +1706,8 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
 
         call find_coupling_coef(a_shelf, dz_vel_shelf, i, j, dz_harm, &
             bbl_thick, kv_bbl, z_i, h_ml, dt, G, GV, US, CS, visc, Ustar_2d, &
-            tv, work_on_u=.true., OBC=OBC, shelf=.true.)
+            tv, work_on_u=.true., OBC=OBC, shelf=.true., &
+            has_SpV_avg=has_SpV_avg)
 
         CS%a1_shelf_u(I,j) = a_shelf(1)
       endif
@@ -1913,7 +1925,8 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
     enddo
 
     call find_coupling_coef_k(a_cpl, dz_vel, i, j, dz_harm, bbl_thick, kv_bbl, z_i, &
-        h_ml, dt, G, GV, US, CS, visc, Ustar_2d, tv, work_on_u=.false., OBC=OBC)
+        h_ml, dt, G, GV, US, CS, visc, Ustar_2d, tv, work_on_u=.false., OBC=OBC, &
+        has_SpV_avg=has_SpV_avg)
 
     if (allocated(hML_v)) hML_v(i,J) = h_ml
 
@@ -1999,7 +2012,8 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
 
         call find_coupling_coef(a_shelf, dz_vel_shelf, i, j, dz_harm, &
             bbl_thick, kv_bbl, z_i, h_ml, dt, G, GV, US, CS, visc, Ustar_2d, &
-            tv, work_on_u=.false., OBC=OBC, shelf=.true.)
+            tv, work_on_u=.false., OBC=OBC, shelf=.true., &
+            has_SpV_avg=has_SpV_avg)
 
         CS%a1_shelf_v(i,J) = a_shelf(1)
       endif
@@ -2068,7 +2082,10 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
   endif ; enddo ; enddo
 
   !$omp target exit data map(delete: z_i, z_i_gl90, dz_harm, hvel, dz_vel, a_cpl, a_cpl_gl90, &
-  !$omp& tv, varmix, hvel_shelf, dz_vel_shelf, a_shelf, hml_u, kv_u, kv_gl90_u)
+  !$omp& varmix, hvel_shelf, dz_vel_shelf, a_shelf, hml_u, kv_u, kv_gl90_u)
+  if (has_SpV_avg) then
+    !$omp target exit data map(delete: tv%SpV_avg)
+  endif
 
   ! These are used in diagnostics, so they need to be mapped back and forth
   !$omp target exit data map(from: hML_u, kv_u, kv_gl90_u )
@@ -2113,7 +2130,8 @@ end subroutine vertvisc_coef
 !! If BOTTOMDRAGLAW is defined, the minimum of Hbbl and half the adjacent
 !! layer thicknesses are used to calculate a_cpl near the bottom.
 pure subroutine find_coupling_coef_k(a_cpl, hvel, i, j, h_harm, bbl_thick, kv_bbl, z_i, h_ml, &
-                              dt, G, GV, US, CS, visc, Ustar_2d, tv, work_on_u, OBC, shelf)
+                              dt, G, GV, US, CS, visc, Ustar_2d, tv, work_on_u, OBC, shelf, &
+                              has_SpV_avg)
   !$omp declare target
   type(ocean_grid_type),     intent(in)  :: G  !< Ocean grid structure
   type(verticalGrid_type),   intent(in)  :: GV !< Ocean vertical grid structure
@@ -2149,6 +2167,8 @@ pure subroutine find_coupling_coef_k(a_cpl, hvel, i, j, h_harm, bbl_thick, kv_bb
   type(ocean_OBC_type),      pointer     :: OBC   !< Open boundary condition structure
   logical,         optional, intent(in)  :: shelf !< If present and true, use a surface boundary
                                                   !! condition appropriate for an ice shelf.
+  logical,         optional, intent(in)  :: has_SpV_avg !< If present, use instead of allocated(tv%SpV_avg)
+                                                  !! to avoid evaluating allocated() on device.
 
   real :: u_star    ! ustar at a velocity point [Z T-1 ~> m s-1]
   real :: tau_mag   ! The magnitude of the wind stress at a velocity point including gustiness [H Z T-2 ~> m2 s-2 or Pa]
@@ -2180,6 +2200,7 @@ pure subroutine find_coupling_coef_k(a_cpl, hvel, i, j, h_harm, bbl_thick, kv_bb
   real :: topfn   ! A function that is 1 at the top and small far from it [nondim]
   real :: kv_top  ! A viscosity associated with the top boundary layer [H Z T-1 ~> m2 s-1 or Pa s]
   logical :: do_shelf, do_OBCs, can_exit
+  logical :: use_SpV_avg  ! Whether tv%SpV_avg is allocated and on device
   integer :: k
   integer :: nz, max_nk
 
@@ -2197,6 +2218,7 @@ pure subroutine find_coupling_coef_k(a_cpl, hvel, i, j, h_harm, bbl_thick, kv_bb
   endif
 
   do_shelf = .false. ; if (present(shelf)) do_shelf = shelf
+  use_SpV_avg = .false. ; if (present(has_SpV_avg)) use_SpV_avg = has_SpV_avg
 
   do_OBCs = .false.
   !if (associated(OBC)) then
@@ -2381,7 +2403,7 @@ pure subroutine find_coupling_coef_k(a_cpl, hvel, i, j, h_harm, bbl_thick, kv_bb
     u_star = 0.
     tau_mag = 0.
 
-    if (allocated(tv%SpV_avg)) then
+    if (use_SpV_avg) then
       rho_av1 = 0.
 
       if (work_on_u) then
@@ -2427,7 +2449,7 @@ pure subroutine find_coupling_coef_k(a_cpl, hvel, i, j, h_harm, bbl_thick, kv_bb
       endif
 
       tau_mag = GV%RZ_to_H * rho_av1 * u_star**2
-    else ! (.not.allocated(tv%SpV_avg))
+    else ! (.not.use_SpV_avg)
       if (work_on_u) then
         u_star = 0.5 * (Ustar_2d(i,j) + Ustar_2d(i+1,j))
         absf = 0.5 * (abs(G%CoriolisBu(I,J-1)) + abs(G%CoriolisBu(I,J)))
@@ -2623,7 +2645,8 @@ end subroutine find_coupling_coef_k
 !! If BOTTOMDRAGLAW is defined, the minimum of Hbbl and half the adjacent
 !! layer thicknesses are used to calculate a_cpl near the bottom.
 subroutine find_coupling_coef(a_cpl, hvel, i, j, h_harm, bbl_thick, kv_bbl, z_i, h_ml, &
-                              dt, G, GV, US, CS, visc, Ustar_2d, tv, work_on_u, OBC, shelf)
+                              dt, G, GV, US, CS, visc, Ustar_2d, tv, work_on_u, OBC, shelf, &
+                              has_SpV_avg)
   !$omp declare target
   type(ocean_grid_type),     intent(in)  :: G  !< Ocean grid structure
   type(verticalGrid_type),   intent(in)  :: GV !< Ocean vertical grid structure
@@ -2660,6 +2683,8 @@ subroutine find_coupling_coef(a_cpl, hvel, i, j, h_harm, bbl_thick, kv_bbl, z_i,
   type(ocean_OBC_type),      pointer     :: OBC   !< Open boundary condition structure
   logical,         optional, intent(in)  :: shelf !< If present and true, use a surface boundary
                                                   !! condition appropriate for an ice shelf.
+  logical,         optional, intent(in)  :: has_SpV_avg !< If present, use instead of allocated(tv%SpV_avg)
+                                                  !! to avoid evaluating allocated() on device.
 
   ! Local variables
 
@@ -2695,6 +2720,7 @@ subroutine find_coupling_coef(a_cpl, hvel, i, j, h_harm, bbl_thick, kv_bbl, z_i,
   real :: topfn   ! A function that is 1 at the top and small far from it [nondim]
   real :: kv_top  ! A viscosity associated with the top boundary layer [H Z T-1 ~> m2 s-1 or Pa s]
   logical :: do_shelf, do_OBCs, can_exit
+  logical :: use_SpV_avg  ! Whether tv%SpV_avg is allocated and on device
   integer :: k
   integer :: nz, max_nk
 
@@ -2712,6 +2738,7 @@ subroutine find_coupling_coef(a_cpl, hvel, i, j, h_harm, bbl_thick, kv_bbl, z_i,
   endif
 
   do_shelf = .false. ; if (present(shelf)) do_shelf = shelf
+  use_SpV_avg = .false. ; if (present(has_SpV_avg)) use_SpV_avg = has_SpV_avg
 
   do_OBCs = .false.
   if (associated(OBC)) then
@@ -2896,7 +2923,7 @@ subroutine find_coupling_coef(a_cpl, hvel, i, j, h_harm, bbl_thick, kv_bbl, z_i,
     u_star = 0.   ! Zero out the friction velocity on land points.
     tau_mag = 0.  ! Zero out the friction velocity on land points.
 
-    if (allocated(tv%SpV_avg)) then
+    if (use_SpV_avg) then
       rho_av1 = 0.
 
       if (work_on_u) then
@@ -2942,7 +2969,7 @@ subroutine find_coupling_coef(a_cpl, hvel, i, j, h_harm, bbl_thick, kv_bbl, z_i,
       endif
 
       tau_mag = GV%RZ_to_H * rho_av1 * u_star**2
-    else ! (.not.allocated(tv%SpV_avg))
+    else ! (.not.use_SpV_avg)
       if (work_on_u) then
         u_star = 0.5 * (Ustar_2d(i,j) + Ustar_2d(i+1,j))
         absf = 0.5 * (abs(G%CoriolisBu(I,J-1)) + abs(G%CoriolisBu(I,J)))
@@ -3244,17 +3271,26 @@ subroutine vertvisc_limit_vel(u, v, h, ADp, CDp, forces, visc, dt, G, GV, US, CS
     endif
   else  ! Do not report accelerations leading to large velocities.
     if (CS%CFL_based_trunc) then
-      !$omp target teams loop collapse(3) map(to: h) map(tofrom: u, CS)
-      do k=1,nz ; do j=js,je ; do I=Isq,Ieq
-        if (abs(u(I,j,k)) < CS%vel_underflow) then ; u(I,j,k) = 0.0
-        elseif ((u(I,j,k) * (dt * G%dy_Cu(I,j))) * G%IareaT(i+1,j) < -CS%CFL_trunc) then
-          u(I,j,k) = (-0.9*CS%CFL_trunc) * (G%areaT(i+1,j) / (dt * G%dy_Cu(I,j)))
-          if (h(i,j,k) + h(i+1,j,k) > H_report) CS%ntrunc = CS%ntrunc + 1
-        elseif ((u(I,j,k) * (dt * G%dy_Cu(I,j))) * G%IareaT(i,j) > CS%CFL_trunc) then
-          u(I,j,k) = (0.9*CS%CFL_trunc) * (G%areaT(i,j) / (dt * G%dy_Cu(I,j)))
-          if (h(i,j,k) + h(i+1,j,k) > H_report) CS%ntrunc = CS%ntrunc + 1
-        endif
-      enddo ; enddo ; enddo
+      block
+        integer :: ntrunc_add_u
+        real    :: vel_underflow_l, CFL_trunc_l
+        vel_underflow_l = CS%vel_underflow
+        CFL_trunc_l     = CS%CFL_trunc
+        ntrunc_add_u = 0
+        !$omp target teams distribute parallel do collapse(3) &
+        !$omp&   reduction(+:ntrunc_add_u)
+        do k=1,nz ; do j=js,je ; do I=Isq,Ieq
+          if (abs(u(I,j,k)) < vel_underflow_l) then ; u(I,j,k) = 0.0
+          elseif ((u(I,j,k) * (dt * G%dy_Cu(I,j))) * G%IareaT(i+1,j) < -CFL_trunc_l) then
+            u(I,j,k) = (-0.9*CFL_trunc_l) * (G%areaT(i+1,j) / (dt * G%dy_Cu(I,j)))
+            if (h(i,j,k) + h(i+1,j,k) > H_report) ntrunc_add_u = ntrunc_add_u + 1
+          elseif ((u(I,j,k) * (dt * G%dy_Cu(I,j))) * G%IareaT(i,j) > CFL_trunc_l) then
+            u(I,j,k) = (0.9*CFL_trunc_l) * (G%areaT(i,j) / (dt * G%dy_Cu(I,j)))
+            if (h(i,j,k) + h(i+1,j,k) > H_report) ntrunc_add_u = ntrunc_add_u + 1
+          endif
+        enddo ; enddo ; enddo
+        CS%ntrunc = CS%ntrunc + ntrunc_add_u
+      end block
     else
       !$OMP parallel do default(shared)
       do k=1,nz ; do j=js,je ; do I=Isq,Ieq
@@ -3333,17 +3369,26 @@ subroutine vertvisc_limit_vel(u, v, h, ADp, CDp, forces, visc, dt, G, GV, US, CS
 
   else  ! Do not report accelerations leading to large velocities.
     if (CS%CFL_based_trunc) then
-      !$omp target teams loop collapse(3) map(to: h) map(tofrom: v)
-      do k=1,nz ; do J=Jsq,Jeq ; do i=is,ie
-        if (abs(v(i,J,k)) < CS%vel_underflow) then ; v(i,J,k) = 0.0
-        elseif ((v(i,J,k) * (dt * G%dx_Cv(i,J))) * G%IareaT(i,j+1) < -CS%CFL_trunc) then
-          v(i,J,k) = (-0.9*CS%CFL_trunc) * (G%areaT(i,j+1) / (dt * G%dx_Cv(i,J)))
-          if (h(i,j,k) + h(i,j+1,k) > H_report) CS%ntrunc = CS%ntrunc + 1
-        elseif ((v(i,J,k) * (dt * G%dx_Cv(i,J))) * G%IareaT(i,j) > CS%CFL_trunc) then
-          v(i,J,k) = (0.9*CS%CFL_trunc) * (G%areaT(i,j) / (dt * G%dx_Cv(i,J)))
-          if (h(i,j,k) + h(i,j+1,k) > H_report) CS%ntrunc = CS%ntrunc + 1
-        endif
-      enddo ; enddo ; enddo
+      block
+        integer :: ntrunc_add_v
+        real    :: vel_underflow_l, CFL_trunc_l
+        vel_underflow_l = CS%vel_underflow
+        CFL_trunc_l     = CS%CFL_trunc
+        ntrunc_add_v = 0
+        !$omp target teams distribute parallel do collapse(3) &
+        !$omp&   reduction(+:ntrunc_add_v)
+        do k=1,nz ; do J=Jsq,Jeq ; do i=is,ie
+          if (abs(v(i,J,k)) < vel_underflow_l) then ; v(i,J,k) = 0.0
+          elseif ((v(i,J,k) * (dt * G%dx_Cv(i,J))) * G%IareaT(i,j+1) < -CFL_trunc_l) then
+            v(i,J,k) = (-0.9*CFL_trunc_l) * (G%areaT(i,j+1) / (dt * G%dx_Cv(i,J)))
+            if (h(i,j,k) + h(i,j+1,k) > H_report) ntrunc_add_v = ntrunc_add_v + 1
+          elseif ((v(i,J,k) * (dt * G%dx_Cv(i,J))) * G%IareaT(i,j) > CFL_trunc_l) then
+            v(i,J,k) = (0.9*CFL_trunc_l) * (G%areaT(i,j) / (dt * G%dx_Cv(i,J)))
+            if (h(i,j,k) + h(i,j+1,k) > H_report) ntrunc_add_v = ntrunc_add_v + 1
+          endif
+        enddo ; enddo ; enddo
+        CS%ntrunc = CS%ntrunc + ntrunc_add_v
+      end block
     else
       !$OMP parallel do default(shared)
       do k=1,nz ; do J=Jsq,Jeq ; do i=is,ie

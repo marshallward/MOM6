@@ -517,6 +517,10 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
 
   call PressureForce(h, tv, CS%PFu, CS%PFv, G, GV, US, CS%PressureForce_CSp, &
                      CS%ALE_CSp, CS%ADp, p_surf, CS%pbce, CS%eta_PF)
+  ! PressureForce runs on CPU; sync the results to device for the do concurrent
+  ! assembly of u_bc_accel at line ~589. Without this, the persistent device
+  ! mapping (from init) holds stale/zero values.
+  !$omp target update to(CS%PFu, CS%PFv, CS%pbce)
 
   if (dyn_p_surf) then
     !$omp target update from(CS%eta_PF)
@@ -895,6 +899,8 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
     call cpu_clock_begin(id_clock_pres)
     call PressureForce(hp, tv, CS%PFu, CS%PFv, G, GV, US, CS%PressureForce_CSp, &
                        CS%ALE_CSp, CS%ADp, p_surf, CS%pbce, CS%eta_PF)
+    ! Sync CPU-computed pressure force to device (corrector step).
+    !$omp target update to(CS%PFu, CS%PFv, CS%pbce)
     ! Stokes shear force contribution to pressure gradient
     Use_Stokes_PGF = present(Waves)
     if (Use_Stokes_PGF) then

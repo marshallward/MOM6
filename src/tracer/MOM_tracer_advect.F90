@@ -189,43 +189,38 @@ subroutine advect_tracer(h_end, uhtr, vhtr, OBC, dt, G, GV, US, CS, Reg, x_first
 
   ! This initializes the halos of uhr and vhr because pass_vector might do
   ! calculations on them, even though they are never used.
-  do concurrent (k=1:nz)
-    do concurrent (j=jsd:jed, I=IsdB:IedB)
-      uhr(I,j,k) = 0.0
-    enddo
-    do concurrent (J=jsdB:jedB, i=Isd:Ied)
-      vhr(i,J,k) = 0.0
-    enddo
-    do concurrent (j=jsd:jed, i=Isd:Ied)
-      hprev(i,j,k) = 0.0
-    enddo
-    domore_k(k)=1
-    !  Put the remaining (total) thickness fluxes into uhr and vhr.
-    do concurrent (j=js:je, I=is-1:ie)
-      uhr(I,j,k) = uhtr(I,j,k)
-    enddo
-    do concurrent (J=js-1:je, i=is:ie)
-      vhr(i,J,k) = vhtr(i,J,k)
-    enddo
-    if (.not. present(vol_prev)) then
-    !   This loop reconstructs the thickness field the last time that the
-    ! tracers were updated, probably just after the diabatic forcing.  A useful
-    ! diagnostic could be to compare this reconstruction with that older value.
-      do concurrent (j=js:je, i=is:ie)
-        hprev(i,j,k) = max(0.0, G%areaT(i,j)*h_end(i,j,k) + &
-             ((uhr(I,j,k) - uhr(I-1,j,k)) + (vhr(i,J,k) - vhr(i,J-1,k))))
-    ! In the case that the layer is now dramatically thinner than it was previously,
-    ! add a bit of mass to avoid truncation errors.  This will lead to
-    ! non-conservation of tracers
-        hprev(i,j,k) = hprev(i,j,k) + &
-                       max(0.0, 1.0e-13*hprev(i,j,k) - G%areaT(i,j)*h_end(i,j,k))
-      enddo
-    else
-      do concurrent (j=js:je, i=is:ie)
-        hprev(i,j,k) = vol_prev(i,j,k)
-      enddo
-    endif
+  ! Flattened from nested do concurrent(k) to avoid shared-memory overflow
+  ! on device. Each block is a separate kernel launch.
+  do concurrent (k=1:nz, j=jsd:jed, I=IsdB:IedB)
+    uhr(I,j,k) = 0.0
   enddo
+  do concurrent (k=1:nz, J=jsdB:jedB, i=Isd:Ied)
+    vhr(i,J,k) = 0.0
+  enddo
+  do concurrent (k=1:nz, j=jsd:jed, i=Isd:Ied)
+    hprev(i,j,k) = 0.0
+  enddo
+  do concurrent (k=1:nz)
+    domore_k(k) = 1
+  enddo
+  do concurrent (k=1:nz, j=js:je, I=is-1:ie)
+    uhr(I,j,k) = uhtr(I,j,k)
+  enddo
+  do concurrent (k=1:nz, J=js-1:je, i=is:ie)
+    vhr(i,J,k) = vhtr(i,J,k)
+  enddo
+  if (.not. present(vol_prev)) then
+    do concurrent (k=1:nz, j=js:je, i=is:ie)
+      hprev(i,j,k) = max(0.0, G%areaT(i,j)*h_end(i,j,k) + &
+           ((uhr(I,j,k) - uhr(I-1,j,k)) + (vhr(i,J,k) - vhr(i,J-1,k))))
+      hprev(i,j,k) = hprev(i,j,k) + &
+                     max(0.0, 1.0e-13*hprev(i,j,k) - G%areaT(i,j)*h_end(i,j,k))
+    enddo
+  else
+    do concurrent (k=1:nz, j=js:je, i=is:ie)
+      hprev(i,j,k) = vol_prev(i,j,k)
+    enddo
+  endif
 
   do concurrent (j=jsd:jed, I=isd:ied-1)
     uh_neglect(I,j) = GV%H_subroundoff * MIN(G%areaT(i,j), G%areaT(i+1,j))
@@ -243,7 +238,9 @@ subroutine advect_tracer(h_end, uhtr, vhtr, OBC, dt, G, GV, US, CS, Reg, x_first
   !$ enddo
 
   ! initialize diagnostic fluxes and tendencies
-  do concurrent (m=1:ntr)
+  ! Hoist associated() checks to host — evaluating on device needs the pointer
+  ! descriptor which may not be resident.
+  do m=1,ntr
     if (associated(Reg%Tr(m)%ad_x)) then
       do concurrent (k=1:nz, j=jsd:jed, I=IsdB:IedB)
         Reg%Tr(m)%ad_x(i,j,k) = 0.0
@@ -284,7 +281,7 @@ subroutine advect_tracer(h_end, uhtr, vhtr, OBC, dt, G, GV, US, CS, Reg, x_first
       ! Reevaluate domore_u & domore_v unless the valid range is the same size as
       ! before.  Also, do this if there is Strang splitting.
       if ((nsten_halo > 1) .or. (itt==1)) then
-        do concurrent (k=1:nz, domore_k(k) > 0)
+        do k=1,nz ; if (domore_k(k) > 0) then
           do concurrent (j=jsv:jev, .not.domore_u(j,k))
             do i=isv+stencil-1,iev-stencil ; if (uhr(I,j,k) /= 0.0) then
               domore_u(j,k) = .true. ; exit
@@ -306,7 +303,7 @@ subroutine advect_tracer(h_end, uhtr, vhtr, OBC, dt, G, GV, US, CS, Reg, x_first
             domore_k(k) = 1
           enddo
 
-        enddo ! k-loop
+        endif ; enddo ! k-loop
       endif
     endif
 
@@ -771,7 +768,7 @@ subroutine advect_x(Tr, hprev, uhr, uh_neglect, OBC, domore_u, ntr, Idt, &
     endif
 
     ! update tracer concentration from i-flux and save some diagnostics
-    do concurrent (m=1:ntr)
+    do m=1,ntr
 
       ! update tracer
       do concurrent (i=is:ie)
@@ -805,10 +802,12 @@ subroutine advect_x(Tr, hprev, uhr, uh_neglect, OBC, domore_u, ntr, Idt, &
   endif ; enddo ! End of j-loop.
 
   ! Do user controlled underflow of the tracer concentrations.
-  do concurrent (m=1:ntr, Tr(m)%conc_underflow > 0.0)
-    do concurrent (j=js:je, i=is:ie)
-      if (abs(Tr(m)%t(i,j,k)) < Tr(m)%conc_underflow) Tr(m)%t(i,j,k) = 0.0
-    enddo
+  do m=1,ntr
+    if (Tr(m)%conc_underflow > 0.0) then
+      do concurrent (j=js:je, i=is:ie)
+        if (abs(Tr(m)%t(i,j,k)) < Tr(m)%conc_underflow) Tr(m)%t(i,j,k) = 0.0
+      enddo
+    endif
   enddo
 
   ! compute ad2d_x diagnostic outside above j-loop so as to make the summation ordered when OMP is active.
@@ -1204,7 +1203,7 @@ subroutine advect_y(Tr, hprev, vhr, vh_neglect, OBC, domore_v, ntr, Idt, &
     endif
 
     ! update tracer and save some diagnostics
-    do concurrent (m=1:ntr)
+    do m=1,ntr
       do concurrent (i=is:ie, do_i(i,j))
         Tr(m)%t(i,j,k) = (Tr(m)%t(i,j,k) * hlst(i) - &
                           (flux_y(i,m,J) - flux_y(i,m,J-1))) * Ihnew(i)
@@ -1224,10 +1223,12 @@ subroutine advect_y(Tr, hprev, vhr, vh_neglect, OBC, domore_v, ntr, Idt, &
   endif ; enddo ! End of j-loop.
 
   ! Do user controlled underflow of the tracer concentrations.
-  do concurrent (m=1:ntr, Tr(m)%conc_underflow > 0.0)
-    do concurrent (j=js:je, i=is:ie, abs(Tr(m)%t(i,j,k)) < Tr(m)%conc_underflow)
-      Tr(m)%t(i,j,k) = 0.0
-    enddo
+  do m=1,ntr
+    if (Tr(m)%conc_underflow > 0.0) then
+      do concurrent (j=js:je, i=is:ie)
+        if (abs(Tr(m)%t(i,j,k)) < Tr(m)%conc_underflow) Tr(m)%t(i,j,k) = 0.0
+      enddo
+    endif
   enddo
 
   ! compute ad_y and ad2d_y diagnostic outside above j-loop so as to make the summation ordered when OMP is active.

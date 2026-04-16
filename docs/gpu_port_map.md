@@ -4,6 +4,12 @@
 
 **Source of truth:** line numbers cite actual source files at the time of writing. Re-verify before relying on any single directive — the code is moving quickly.
 
+**Baseline assumptions (read before editing this doc):**
+- We build with `nvfortran -stdpar=gpu -mp=gpu`. Under that flag set, `do concurrent` is a device kernel, same as `!$omp target teams loop`. Do not describe `do concurrent` loops as "host-side" or "vectorization only" unless the enclosing build doesn't have `-stdpar=gpu`.
+- `!$omp declare target` is resolved across modules and files by current nvfortran. Cross-module callees inside a device kernel just need `declare target` on their definition — not inlining at the call site.
+- Nested derived types with allocatable/pointer components work on current nvfortran; every level has to be mapped explicitly, in the right order. That is *tedious*, not *buggy*. Avoid "known-fragile on nvfortran" language unless you have a current repro.
+- Device-descriptor failures (`CUDA_ERROR_ILLEGAL_ADDRESS` at a pointer far from any real allocation) happen for both `do concurrent` and `!$omp target` kernels. They are not evidence of a `do concurrent`-specific problem.
+
 ---
 
 ## How to read this document
@@ -233,7 +239,7 @@ Also: `SAL_CSp, tides_CSp` (55–56) are [CPU only]; if any Montgomery GPU kerne
 
 Zero target directives. Type definitions and CPU-only utilities. However, `MOM_variables.F90` defines the types (`thermo_var_ptrs, vertvisc_type, BT_cont_type, porous_barrier_type, accel_diag_ptrs, cont_diag_ptrs, ocean_internal_state, surface`) that are mapped *by other modules*. When porting consumers of these types, you inherit those modules' mapping discipline — check `MOM.F90` init and the owning module.
 
-`MOM_interface_heights.F90` has 3 `do concurrent` loops but no target wrappers — those loops run on the host today. Candidate for porting if they sit on the hot path (they're called from pressure-force and dyn_split routines).
+`MOM_interface_heights.F90` has 3 `do concurrent` loops. **Correction (per @edoyango):** under `-stdpar=gpu`, nvfortran auto-offloads these — they are GPU kernels, not host loops, even without a surrounding `!$omp target` region. The earlier "run on the host today" claim in this doc was based on the wrong premise that a `do concurrent` needs an explicit `target` wrapper. Treat every `do concurrent` in the tree as a device kernel unless proven otherwise.
 
 ---
 
@@ -305,7 +311,7 @@ This pattern repeats for `Kh` at 1203–1207, 1212–1216, 1225–1248, 1284–1
 !$omp target enter data map(alloc: ADp%dv_dt_str, ADp%du_dt_str)
 ```
 
-With some compilers, `map(to: ADp)` will create a device struct with dangling descriptors for allocatable members, then the second directive either refreshes them or conflicts. On nvfortran this is known-fragile; on ifx it's generally fine. **Worth a targeted test.**
+The pattern — `map(to: parent)` followed by `map(alloc: parent%member)` for allocatable members — is *finicky* but not compiler-buggy on current nvfortran (per @edoyango). Allocatable components of a mapped parent have to be mapped explicitly, in the right order; the compiler doesn't walk the parent descriptor for you. So "worth a targeted test" is overstated — this works reliably once you remember to list every allocatable member separately. Earlier language in this doc calling it "known-fragile" was wrong.
 
 Line 1436–1449 allocate `Ustar_2d, z_i, z_i_gl90, dz_harm, hvel, dz_vel, ...` on device with no visible matching exit in the same subroutine — exits are at 2059–2066 (~600 lines later). This is symmetric, just hard to read; consider a structured `target data` region.
 
@@ -323,7 +329,9 @@ do concurrent (i=is:ie, do_i(i,j) .and. (OBC%segnum_u(I,j) /= 0))
 enddo
 ```
 
-`cvmix_kpp_composite_Gshape` is a CPU-only external routine. Fortran 2018 allows calls inside `do concurrent` only to pure procedures, and GPU offload further demands `!$omp declare target`. Neither holds. On nvfortran with `-stdpar=gpu` or `-mp=gpu` this may compile but will execute on the host (silently losing parallelism) or crash. **Action:** either replace with inline math (cvmix `G` function is analytic and short), or hoist the loop out of `do concurrent`.
+The earlier version of this section claimed that `cvmix_kpp_composite_Gshape` is a CPU-only external routine that couldn't be called from a `do concurrent` because it lacks `!$omp declare target`, and proposed inlining the math as a fix. **Both claims are wrong** (per @edoyango): nvfortran resolves `!$omp declare target` across modules and files, so the correct fix for any cross-module callee used inside `do concurrent` / `!$omp target` is to add `declare target` to the callee's definition — not to inline the body at the call site. Retained in the doc only as a caution: don't trust compiler-capability claims in these notes without checking against the current nvfortran release.
+
+(Independently, item #5 in §"Suspected bugs" retracts the specific claim that this routine is called from `MOM_set_viscosity.F90:545–560` — it isn't.)
 
 Also: the `tv%eqn_of_state` argument passed at line 374 to `calculate_density` — this is the EOS runtime-polymorphism hazard (see §EOS).
 
@@ -358,9 +366,9 @@ enddo
 2. Index into the allocatable array `Tr(m)` on the host descriptor
 3. Find and copy the 3D array `%t` at the device
 
-Most OpenMP implementations do this incorrectly for deeply nested types. nvfortran in particular has had known bugs here. **Safer pattern:** flatten the registry once at init into a plain 4D array `tracer_conc(ntr, i, j, k)` (or pointer array of `device_ptr` with explicit `is_device_ptr` clauses), sync against it, and re-inject on exit.
+Nested derived types with pointer/allocatable components are not auto-walked by OpenMP — every level has to be mapped explicitly in the right order. This is tedious, not buggy (per @edoyango); prior language calling it "known buggy on nvfortran" was too strong. The registry flatten is still a *maintainability* win (one array vs. `Reg%Tr(m)%t` walks everywhere), and explicit `is_device_ptr` makes lifetimes obvious — but "the compiler can't handle it" is not the right reason to do it.
 
- **Line 136:** `map(to: OBC)` for a structure with nested pointer arrays (`OBC%segment(n)%tr_Reg`). Same issue — what the OpenMP spec says will work is not what current compilers actually do reliably. Audit before trusting.
+ **Line 136:** `map(to: OBC)` for a structure with nested pointer arrays (`OBC%segment(n)%tr_Reg`). Same class — every nested pointer/allocatable level has to be mapped explicitly in order; the compiler doesn't walk the parent for you. Not a correctness bug in nvfortran per se, just easy to get wrong if levels are missed.
 
  **Line 385:** `update from(domore_k)` → CPU checks an iteration flag → re-enters GPU. Breaks device persistence and turns the iteration loop into ping-pong. If the iteration count is bounded, convert to a fixed-iteration loop with early-exit on device instead.
 
@@ -372,7 +380,7 @@ Most OpenMP implementations do this incorrectly for deeply nested types. nvfortr
 
 Big module (4462 lines), minimal GPU touch. Two types: `forcing` (thermodynamic) and `mech_forcing`, both ~50 `real, pointer, dimension(:,:)` surface-flux fields.
 
-Only one target directive: `update to(U_star)` at line 1233, synced after CPU `find_ustar_fluxes`. The `do concurrent` loops at 1270–1295 are CPU-side — they are `do concurrent` for vectorization, not GPU offload (no surrounding target region).
+Only one target directive: `update to(U_star)` at line 1233, synced after CPU `find_ustar_fluxes`. The `do concurrent` loops at 1270–1295 are auto-offloaded by `-stdpar=gpu` (prior version of this doc incorrectly called them "CPU-side, vectorization only" — `do concurrent` is a device kernel under `-stdpar=gpu`, no surrounding `!$omp target` required).
 
 **Implication for porting:** surface flux fields are [CPU only] today. Any GPU code that wants `forces%taux, forces%tauy, forces%ustar` needs an explicit `update to` before the region — as `MOM.F90:672` already does at init. Flux time-evolution over a step is CPU-side; if you port routines that *consume* fluxes inside a target region, the sync is still required.
 
@@ -394,8 +402,8 @@ call EOS%type%calculate_density_array(T, S, pressure, rho, is, npts, rho_ref=rho
 `EOS%type` is `class(EOS_base), allocatable` — determined at init (`allocate(linear_EOS :: EOS%type)` or `allocate(buggy_Wright_EOS :: EOS%type)`, etc.). At runtime the call dereferences the v-table for the dynamic type and does an indirect branch.
 
 **Why this is a blocker for GPU offload:**
-- Indirect calls through a v-table require the v-table to be mapped to the device. For `class(EOS_base)` with 10 subclasses, each v-table entry points into host code. GPU runtimes do not reliably mirror v-tables; nvfortran in particular does not support this.
-- Even if the vtable were mirrored, the GPU would need all 10 implementations compiled as device code and selected at runtime per element — costly and not what any current compiler actually does.
+- Indirect calls through a v-table require the v-table to be mapped to the device, and every subclass implementation needs a device build. Per-element dynamic dispatch is expensive on GPU even when supported.
+- **Caveat (per @edoyango):** the prior "nvfortran does not support this" language reflected older nvhpc behaviour and is probably out of date against current releases. The concrete reason we refactor to static dispatch is the *cost model* (indirect per-element calls kill throughput) and the *portability envelope* (not every backend needs to be device-capable — e.g. TEOS10 via `gsw`), not a blanket compiler-support claim. When re-reading this doc, treat compiler-capability statements skeptically and test against the current nvhpc you're targeting.
 
 **Evidence this is already biting the port:** `MOM_EOS_Wright.F90` lines 106–113 contain this workaround:
 
@@ -456,7 +464,7 @@ The `select case` is cheap (branch predictable, one scalar integer) and is fully
 6. **`MOM_dynamics_split_RK2.F90:1601, 1608, 1614, 1657, 1669, 1677`** — `enter data` with no matching `exit data` in `end_dyn_split_RK2`. Orphans device memory for `taux_bot, tauy_bot, visc_rem_u/v, u/v_accel_bt, continuity_CSp, PressureForce_CSp, vertvisc_CSp, uhbt, vhbt`. One-run leak; multi-init coupled-model leak.
 7. **`MOM.F90:672`** — `forces, forces%taux, forces%tauy, forces%ustar` mapped with no matching `exit data`. Same leak class.
 8. **`MOM_barotropic.F90:1504, 1674–1676`** — conditional `update if(...) from(...)` for `uhbt0/vhbt0, eta_IC, eta_PF_1/d_eta_PF` where the `if` guard can diverge from the allocate-time guard. Latent; triggers only when the two predicates disagree.
-9. **`MOM_tracer_advect.F90:240, 400`** — polymorphic registry mapping `Reg%Tr(m)%t` across nested pointer/allocatable descriptors. Compiler-dependent; flatten registry before GPU entry.
+9. **`MOM_tracer_advect.F90:240, 400`** — registry mapping `Reg%Tr(m)%t` across nested pointer/allocatable descriptors. Correctness hinges on explicit map clauses at every nesting level, in the right order. Easy to miss a level; flattening the registry is a maintainability improvement, not a workaround for a compiler bug.
 10. **`MOM_tracer_advect.F90:136`** — `map(to: OBC)` over a structure with nested pointer arrays (`segment(n)%tr_Reg`). Same class as #9.
 
 ### Probable gaps (need code inspection to confirm)
@@ -465,7 +473,7 @@ The `select case` is cheap (branch predictable, one scalar integer) and is fully
 12. **`MOM_PressureForce_FV.F90:1283, 1297`** — `Z_0p` alloc conditional on `use_EOS`; downstream read at 1297 unconditional.
 13. **`MOM_dynamics_split_RK2.F90`** — intent(inout) args (`h, u_inst, v_inst, uh, vh`) and grid masks (`G%mask2dCu/Cv`) used inside `do concurrent` without explicit `enter data` in this file. Works today because `MOM.F90` init covers them, but couples modules invisibly.
 14. **`MOM_lateral_mixing_coeffs.F90`** — large transient workspace allocatables (`Res_fn_*, slope_x/y, ebt_struct, ...`) have no explicit mapping directives in this file. Rely on caller to map, but the contract is undocumented.
-15. **`MOM_vert_friction.F90:674–677`** — `map(to: ADp)` followed by `map(alloc: ADp%du_dt_str, ADp%dv_dt_str)`. Order-sensitive and compiler-fragile for nested allocatables.
+15. **`MOM_vert_friction.F90:674–677`** — `map(to: ADp)` followed by `map(alloc: ADp%du_dt_str, ADp%dv_dt_str)`. Order-sensitive (parent must map before allocatable members), but supported on current nvfortran. Prior "compiler-fragile" language in this doc was too strong.
 
 ### ️ Wasted roundtrips (performance, per-step)
 
@@ -567,7 +575,7 @@ To prevent them from re-appearing in future audits:
 
 - **`barotropic_CS%frhatu/frhatv`** — claimed unmapped; mapped at `MOM_barotropic.F90:6238`. Explicit `update from` also present at line 1738 (post-diag copy). Mapped.
 - **`barotropic_CS%eta_cor`** — claimed unmapped; mapped at `MOM_barotropic.F90:6239`. Written CPU-side (`set_dtbt` at 5411, 5416, filled at init 5879), then `update to` applies at 6239. Mapped.
-- **`MOM_dyn_split_RK2_CS%PFu_Stokes, PFv_Stokes`** — claimed used inside target region; **not inside a target region**. Line 537 is a CPU call to `Stokes_PGF`; lines 543–552 are plain `do` loops (not `do concurrent`). Correctly CPU-only. They sit between an `update from` (line 535) and a later `update to` that resyncs the CPU-side modified `CS%PFu/PFv`. No bug.
+- **`MOM_dyn_split_RK2_CS%PFu_Stokes, PFv_Stokes`** — claimed used inside target region; **not inside a target region and not in a `do concurrent`**. Line 537 is a CPU call to `Stokes_PGF`; lines 543–552 are plain `do` loops. Correctly CPU-only. They sit between an `update from` (line 535) and a later `update to` that resyncs the CPU-side modified `CS%PFu/PFv`. No bug. (Plain `do` is host-side; `do concurrent` under `-stdpar=gpu` is auto-offloaded — the distinction matters when auditing.)
 - **`vertvisc_type%Ray_u/Ray_v`** — claimed unmapped; conditionally mapped at `MOM_vert_friction.F90:740, 939`, released at 1106–1107.
 - **`vertvisc_type%Kv_shear, Kv_slow, TKE_turb, Kd_shear, bbl_thick_*, kv_bbl_*, ustar_BBL`** — claimed unmapped GPU-consumers. **Verified: only consumer in GPU regions is `post_data` at `MOM_vert_friction.F90:2080–2081`, which is CPU-side.** These fields are populated by `MOM_kappa_shear`, `MOM_set_diffusivity`, `MOM_set_viscosity` — none of which are yet GPU-ported. So they're correctly [CPU only] *today*; they will become [GPU persistent] when those modules are ported (Tier 2). Not a current bug; add to pre-flight list.
 
@@ -646,7 +654,7 @@ Embeds `regridCS, remapCS, vel_remapCS` — so it inherits the remapping CS fiel
 Running three agents in parallel produced overlapping coverage but also three classes of error worth recording:
 
 1. **False positives on well-mapped fields** (audit 1: `frhatu`, `frhatv`, `eta_cor`). Caused by agents searching only within a narrow line range rather than the whole file. Countermeasure: always verify an "unmapped" claim with an unconstrained grep for `enter data.*FIELD` before trusting.
-2. **False positives on CPU-only-by-design fields** (audit 1: `PFu_Stokes`, `Ray_u/v`, `Kv_shear`). Caused by agents not distinguishing `do concurrent` (GPU-eligible) from plain `do` (CPU), and not checking whether consumers are actually yet-to-be-ported. Countermeasure: for any claimed bug, verify the consumer is inside a `!$omp target` scope today.
+2. **False positives on CPU-only-by-design fields** (audit 1: `PFu_Stokes`, `Ray_u/v`, `Kv_shear`). Caused by agents not distinguishing `do concurrent` (a GPU kernel under `-stdpar=gpu`) from plain `do` (host), and not checking whether consumers are actually yet-to-be-ported. Countermeasure: for any claimed bug, verify the consumer is inside a kernel today — `!$omp target` scope *or* `do concurrent` under `-stdpar=gpu` both count.
 3. **Unit/arithmetic errors** (audit 3: reported `180×90×76×8 bytes = 87 GB`, actual ≈ 10 MB; over by 10000×). Countermeasure: sanity-check any memory-pressure claim against `n_i * n_j * n_k * 8` before citing.
 
 Confirmed findings in this section have all been grep-verified at the file:line level.
@@ -654,6 +662,60 @@ Confirmed findings in this section have all been grep-verified at the file:line 
 ---
 
 *This map reflects the state of the `dev/gpu` branch at commit `6474597b1`. Regenerate when the branch has moved more than a few hundred lines in the dynamics/parameterization areas.*
+
+---
+
+## Gaps surfaced by the `benchmark_ALE` callstack
+
+Routines that actually execute in `benchmark_ALE` per `callstack_clean.txt` but are absent or underdocumented in the per-module sections above. Each is a latent issue when its caller ports, or a clue for the current crash chase.
+
+### `src/parameterizations/vertical/MOM_geothermal.F90`
+
+Zero target directives, zero `declare target`. Two public entry points used from the diabatic chain:
+
+- `geothermal_in_place` (lines 366–539) — called CPU from `diabatic_ale_legacy` every step per `step_mom_thermo`. Contains EOS `calculate_density_derivs_array` calls (visible in callstack under `a_calculate_density_derivs_array`). **Tier-0-dependent** — needs the EOS static-dispatch path landed before this can move to device. Not mentioned in Tier 2 or Tier 3 tables above; add when Tier 0 is complete.
+- `geothermal_entraining` (56–365) — non-ALE path. Callstack doesn't exercise this in `benchmark_ALE`, but it's the analog code path.
+
+### `src/diagnostics/MOM_diagnose_KdWork.F90`
+
+Absent from the map entirely. Public entry points: `KdWork_init` (init-time), `KdWork_Diagnostics` (per-step diagnostic), `diagnoseKdWork` (the inner kernel), and their VBF alloc/dealloc helpers. Zero target directives. Writes diagnostic fields derived from `Kd`, `N2`, `Bdif_flx`. **Consumer side is diagnostic; the inputs come from `set_diffusivity` and its consumers.** If inputs end up on device via Tier-2 port, this routine needs `update from` sync envelopes around its host computation, or a direct port. Low priority (diagnostic path) but don't ignore — the `VBF` derived type carries allocatables that would need mapping if ported.
+
+### `src/ALE/PLM_functions.F90`, `PPM_functions.F90`, `regrid_edge_values.F90`, `regrid_solvers.F90`, `coord_zlike.F90`
+
+All five ALE primitive files have **zero target directives and zero `declare target`**. Every routine is a device candidate for the Tier 1 ALE port:
+
+| File | Routines seen in `benchmark_ALE` callstack | Role |
+|---|---|---|
+| `PLM_functions.F90` | `PLM_reconstruction`, `PLM_boundary_extrapolation`, `PLM_monotonized_slope`, `PLM_slope_wa` | PLM edge-value reconstruction |
+| `PPM_functions.F90` | `PPM_reconstruction`, `PPM_limiter_standard` | PPM edge-value reconstruction |
+| `regrid_edge_values.F90` | `bound_edge_values`, `check_discontinuous_edge_values`, `edge_values_implicit_h4`, `edge_values_explicit_h4`, `edge_slopes_implicit_h3/h5`, `edge_values_implicit_h6` | Implicit/explicit edge-value solvers used by remap |
+| `regrid_solvers.F90` | `solve_diag_dominant_tridiag`, `solve_tridiagonal_system`, `solve_linear_system`, `linear_solver` | Tridiagonal / linear solvers backing implicit edge routines |
+| `coord_zlike.F90` | `build_zstar_column` | z* coordinate generator |
+
+**Implication for issues #119, #120, #97:** the Tier 1 tables above list `MOM_remapping.F90`, `MOM_ALE.F90`, `MOM_regridding.F90` but don't name these callee files. They *must* be annotated in the same PR: every device-callable routine in `MOM_remapping` / `MOM_ALE` transitively depends on at least one of these. Add `!$omp declare target` to every elemental routine in these files as part of the Tier 1 port — do not inline.
+
+### `src/framework/MOM_array_transform.F90`
+
+CPU-only utility (`rotate_array_real_2d/3d`, `rotate_array_pair_*`, `allocate_rotated_array_*`). Appears in the callstack under a rotation hook. No target directives. Not a current GPU concern, but if `ROTATE_INDEX` is flipped for any benchmark, rotation happens at module boundaries and would force `update from`/CPU-rotate/`update to` roundtrips on large 3D fields. Keep as [CPU only]; flag if benchmark config enables rotation.
+
+### Tracer-path routines underplayed in the map
+
+These are mentioned in passing in the Tier 2/4 tables but are worth calling out as **live in `benchmark_ALE`**:
+
+- `MOM_tracer_diabatic.F90:applytracerboundaryfluxesinout`, `tracer_vertdiff_Eulerian`, `tracer_vertdiff` — per-step under `diabatic`. Spec-vol-derivs visible in the callstack route through here.
+- `MOM_diabatic_aux.F90:tridiagts_Eulerian`, `make_frazil`, `find_uv_at_h`, `extractFluxes1d`, `absorbRemainingSW` — all live per step.
+- `MOM_tracer_advect.F90:advect_x`, `advect_y`, `advect_tracer` — registry-polymorphism risk (map §bugs #9, #10) *is* being exercised in this benchmark. If we see ALE-step crashes post-Kv_shear fix, this is the next suspect.
+- `MOM_tracer_flow_control.F90:call_tracer_column_fns` with `ideal_age_tracer_column_physics` — ideal-age tracer callback, CPU-only today. Benchmark runs with ideal-age; unmapped writes would not crash but would silently lose GPU-side state if ported naively.
+
+### Diagnostic-remap surface
+
+- `MOM_diag_remap.F90:do_remap`, `diag_remap_do_remap`, `diag_remap_update`, `diag_update_remap_grids` — diagnostic-side remap. Mentioned in §"Structural items" (issue #96) but worth repeating here: it *runs* in `benchmark_ALE` and shares DNA with `MOM_remapping.F90`. Any `declare target` annotations added to Tier 1 primitives (PLM/PPM/edge_values) apply here for free.
+- `MOM_tracer_registry.F90:post_tracer_transport_diagnostics`, `post_tracer_diagnostics_at_sync`, `postALE_tracer_diagnostics` — CPU; need `update from` envelopes if the producers port.
+
+### Init-path files exercised by the benchmark
+
+`MOM_state_initialization.F90`, `MOM_fixed_initialization.F90`, `MOM_coord_initialization.F90`, `MOM_grid_initialize.F90`, `MOM_sum_output.F90`, `MOM_checksums.F90`, `MOM_surface_forcing.F90`, `seamount_initialization.F90` — all show up in the init callstack. None have target directives. This is correct for init (one-shot cost, no per-step sync), but worth recording so future audits don't flag them as missing.
+
 
 ---
 
