@@ -492,6 +492,7 @@ $(1).$(2): $(foreach b,$(3),$(WORK)/$(1)/$(b)/ocean.stats)
 	@cmp $$^ || !( \
 	  mkdir -p $(WORK)/results/$(1); \
 	  (diff $$^ | tee $(WORK)/results/$(1)/ocean.stats.$(2).diff | head -n 20) ; \
+	  diff $(foreach b,$(3),$(WORK)/$(1)/$(b)/std.err) ; \
 	  echo -e "$(FAIL): Solutions $(1).$(2) have changed." \
 	)
 	@echo -e "$(PASS): Solutions $(1).$(2) agree."
