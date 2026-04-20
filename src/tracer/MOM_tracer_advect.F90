@@ -826,26 +826,33 @@ subroutine advect_x(Tr, hprev, uhr, uh_neglect, OBC, domore_u, ntr, Idt, &
         endif
       enddo
 
-      ! diagnostics
-      if (associated(Tr(m)%ad_x)) then
-        do concurrent (I=is-1:ie, do_i(i,j) .or. do_i(i+1,j))
-          Tr(m)%ad_x(I,j,k) = Tr(m)%ad_x(I,j,k) + flux_x(I,j,m)*Idt
-        enddo
-      endif
-
-      ! diagnose convergence of flux_x (do not use the Ihnew(i) part of the logic).
-      ! division by areaT to get into W/m2 for heat and kg/(s*m2) for salt.
-      if (associated(Tr(m)%advection_xy)) then
-        do concurrent (i=is:ie, do_i(i,j))
-          Tr(m)%advection_xy(i,j,k) = Tr(m)%advection_xy(i,j,k) - &
-                                          (flux_x(I,j,m) - flux_x(I-1,j,m)) * &
-                                          Idt * G%IareaT(i,j)
-        enddo
-      endif
+      ! Diagnostic accumulation for ad_x and advection_xy is done outside the
+      ! kernel — see below.
 
     enddo
 
   endif ; enddo ! End of j-loop.
+
+  ! Diagnostic accumulation — moved outside the target teams loop because
+  ! Tr(m)%ad_x / advection_xy pointer descriptors within the struct are not
+  ! valid on device (map(alloc:) on the parent Reg%Tr(:) doesn't propagate
+  ! member pointers for alloc-only members). Host-side associated() checks
+  ! + do concurrent auto-offload resolves the device mapping correctly.
+  do m=1,ntr
+    if (associated(Tr(m)%ad_x)) then
+      do concurrent (j=js:je, I=is-1:ie)
+        if (domore_u(j,k) .and. (do_i(i,j) .or. do_i(i+1,j))) &
+          Tr(m)%ad_x(I,j,k) = Tr(m)%ad_x(I,j,k) + flux_x(I,j,m)*Idt
+      enddo
+    endif
+    if (associated(Tr(m)%advection_xy)) then
+      do concurrent (j=js:je, i=is:ie)
+        if (domore_u(j,k) .and. do_i(i,j)) &
+          Tr(m)%advection_xy(i,j,k) = Tr(m)%advection_xy(i,j,k) - &
+            (flux_x(I,j,m) - flux_x(I-1,j,m)) * Idt * G%IareaT(i,j)
+      enddo
+    endif
+  enddo
 
   ! Do user controlled underflow of the tracer concentrations.
   do m=1,ntr
@@ -1255,18 +1262,22 @@ subroutine advect_y(Tr, hprev, vhr, vh_neglect, OBC, domore_v, ntr, Idt, &
                           (flux_y(i,m,J) - flux_y(i,m,J-1))) * Ihnew(i)
       enddo
 
-      ! diagnose convergence of flux_y and add to convergence of flux_x.
-      ! division by areaT to get into W/m2 for heat and kg/(s*m2) for salt.
-      if (associated(Tr(m)%advection_xy)) then
-        do concurrent (i=is:ie, do_i(i,j))
-          Tr(m)%advection_xy(i,j,k) = Tr(m)%advection_xy(i,j,k) - &
-                                          (flux_y(i,m,J) - flux_y(i,m,J-1))* Idt * &
-                                          G%IareaT(i,j)
-        enddo
-      endif
+      ! Diagnostic accumulation for advection_xy is done outside the kernel.
 
     enddo
   endif ; enddo ! End of j-loop.
+
+  ! Diagnostic accumulation — moved outside the target teams loop (same
+  ! reason as advect_x: Tr(m)%advection_xy descriptor is invalid on device).
+  do m=1,ntr
+    if (associated(Tr(m)%advection_xy)) then
+      do concurrent (J=js-1:je, i=is:ie)
+        if (domore_v(J,k) .and. do_i(i,j)) &
+          Tr(m)%advection_xy(i,j,k) = Tr(m)%advection_xy(i,j,k) - &
+            (flux_y(i,m,J) - flux_y(i,m,J-1)) * Idt * G%IareaT(i,j)
+      enddo
+    endif
+  enddo
 
   ! Do user controlled underflow of the tracer concentrations.
   do m=1,ntr

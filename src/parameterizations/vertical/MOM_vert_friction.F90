@@ -2094,6 +2094,7 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
   !$omp target exit data map(delete: Ustar_2d)
 
   if (CS%debug) then
+    !$omp target update from(CS%h_u, CS%h_v, CS%a_u, CS%a_v)
     call uvchksum("loop vertvisc_coef h_[uv]", CS%h_u, CS%h_v, G%HI, haloshift=0, &
                   unscale=GV%H_to_m, scalar_pair=.true.)
     call uvchksum("vertvisc_coef a_[uv]", CS%a_u, CS%a_v, G%HI, haloshift=0, &

@@ -18,6 +18,7 @@ use MOM_variables, only : thermo_var_ptrs
 use MOM_verticalGrid, only : verticalGrid_type
 use MOM_EOS, only : calculate_density, calculate_density_derivs
 use MOM_EOS, only : query_compressible
+use MOM_checksums, only : hchksum
 
 implicit none ; private
 
@@ -682,7 +683,7 @@ subroutine Set_pbce_Bouss(e, tv, G, GV, US, Rho0, GFS_scale, pbce, rho_star)
   integer :: EOSdom(2,2)     ! The computational domain for the equation of state
   integer :: Isq, Ieq, Jsq, Jeq, nz, i, j, k
 
-  !$omp target data map(alloc: Ihtot)
+  !$omp target data map(alloc: Ihtot) map(tofrom: pbce) map(to: e)
 
   Isq = G%IscB ; Ieq = G%IecB ; Jsq = G%JscB ; Jeq = G%JecB ; nz = GV%ke
 
@@ -715,34 +716,54 @@ subroutine Set_pbce_Bouss(e, tv, G, GV, US, Rho0, GFS_scale, pbce, rho_star)
       EOSdom(1,:) = [Isq - (G%isd-1), G%iec+1 - (G%isd-1)]
       EOSdom(2,:) = [Jsq - (G%jsd-1), G%jec+1 - (G%jsd-1)]
 
-      do concurrent (j=Jsq:Jeq+1, i=Isq:Ieq+1)
+      !$omp target teams loop collapse(2) map(to: e) map(tofrom: Ihtot, press)
+      do j=Jsq,Jeq+1 ; do i=Isq,Ieq+1
         Ihtot(i,j) = GV%H_to_Z / ((e(i,j,1) - e(i,j,nz+1)) + dz_neglect)
         press(i,j) = -Rho0xG * (e(i,j,1) - G%Z_ref)
-      enddo
+      enddo ; enddo
 
+      !$omp target update from(Ihtot, e)
+      call hchksum(Ihtot, "Set_pbce_Bouss Ihtot", G%HI, haloshift=0)
+      call hchksum(e(:,:,1), "Set_pbce_Bouss e(:,:,1)", G%HI, haloshift=0, unscale=US%Z_to_m)
+      call hchksum(e(:,:,nz+1), "Set_pbce_Bouss e(:,:,nz+1)", G%HI, haloshift=0, unscale=US%Z_to_m)
+
+      ! calculate_density runs on HOST; pull device press to host first so it reads correct values
+      !$omp target update from(press)
       call calculate_density(tv%T(:,:,1), tv%S(:,:,1), press, rho_in_situ, &
                              tv%eqn_of_state, EOSdom)
+      ! Do NOT update_from rho_in_situ — it was just written on host, and the
+      ! device copy (map(alloc:) in outer target data region) is uninitialized.
+      call hchksum(rho_in_situ, "Set_pbce_Bouss rho_in_situ (host)", G%HI, haloshift=0, &
+                   unscale=US%R_to_kg_m3)
+      call hchksum(press, "Set_pbce_Bouss press (host)", G%HI, haloshift=0, &
+                   unscale=US%RL2_T2_to_Pa)
 
-      do concurrent (j=Jsq:Jeq+1, i=Isq:Ieq+1)
+      !$omp target update to(rho_in_situ)
+      !$omp target teams loop collapse(2) map(tofrom: pbce)
+      do j=Jsq,Jeq+1 ; do i=Isq,Ieq+1
         pbce(i,j,1) = G_Rho0 * (GFS_scale * rho_in_situ(i,j)) * GV%H_to_Z
-      enddo
+      enddo ; enddo
 
       do k=2,nz
-        do concurrent (j=Jsq:Jeq+1, i=Isq:Ieq+1)
+        ! T_int/S_int/press are needed on host by calculate_density_derivs
+        do j=Jsq,Jeq+1 ; do i=Isq,Ieq+1
           press(i,j) = -Rho0xG * (e(i,j,K) - G%Z_ref)
           T_int(i,j) = 0.5 * (tv%T(i,j,k-1) + tv%T(i,j,k))
           S_int(i,j) = 0.5 * (tv%S(i,j,k-1) + tv%S(i,j,k))
-        enddo
+        enddo ; enddo
 
         call calculate_density_derivs(T_int, S_int, press, dR_dT, dR_dS, &
                                       tv%eqn_of_state, EOSdom)
 
-        do concurrent (j=Jsq:Jeq+1, i=Isq:Ieq+1)
+        ! Sync host-written dR_dT/dR_dS to device before the target teams loop
+        !$omp target update to(dR_dT, dR_dS)
+        !$omp target teams loop collapse(2) map(tofrom: pbce) map(to: e, Ihtot, tv%T, tv%S)
+        do j=Jsq,Jeq+1 ; do i=Isq,Ieq+1
           pbce(i,j,k) = pbce(i,j,k-1) + G_Rho0 * &
              ((e(i,j,K) - e(i,j,nz+1)) * Ihtot(i,j)) * &
              (dR_dT(i,j) * (tv%T(i,j,k) - tv%T(i,j,k-1)) + &
               dR_dS(i,j) * (tv%S(i,j,k) - tv%S(i,j,k-1)))
-        enddo
+        enddo ; enddo
       enddo
       !$omp end target data
     endif

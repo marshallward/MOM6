@@ -517,10 +517,13 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
 
   call PressureForce(h, tv, CS%PFu, CS%PFv, G, GV, US, CS%PressureForce_CSp, &
                      CS%ALE_CSp, CS%ADp, p_surf, CS%pbce, CS%eta_PF)
-  ! PressureForce runs on CPU; sync the results to device for the do concurrent
-  ! assembly of u_bc_accel at line ~589. Without this, the persistent device
-  ! mapping (from init) holds stale/zero values.
-  !$omp target update to(CS%PFu, CS%PFv, CS%pbce)
+  if (CS%debug) then
+    !$omp target update from(CS%PFu, CS%PFv, CS%pbce)
+    call uvchksum("PFu just-returned-from-PressureForce", &
+                  CS%PFu, CS%PFv, G%HI, haloshift=0, symmetric=sym, unscale=US%L_T2_to_m_s2)
+    call hchksum(CS%pbce, "pbce just-returned-from-PressureForce", &
+                 G%HI, haloshift=0, unscale=GV%m_to_H*US%L_T_to_m_s**2)
+  endif
 
   if (dyn_p_surf) then
     !$omp target update from(CS%eta_PF)
@@ -899,8 +902,6 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
     call cpu_clock_begin(id_clock_pres)
     call PressureForce(hp, tv, CS%PFu, CS%PFv, G, GV, US, CS%PressureForce_CSp, &
                        CS%ALE_CSp, CS%ADp, p_surf, CS%pbce, CS%eta_PF)
-    ! Sync CPU-computed pressure force to device (corrector step).
-    !$omp target update to(CS%PFu, CS%PFv, CS%pbce)
     ! Stokes shear force contribution to pressure gradient
     Use_Stokes_PGF = present(Waves)
     if (Use_Stokes_PGF) then
@@ -1302,8 +1303,8 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
   if (CS%id_deta_dt > 0) call post_data(CS%id_deta_dt, deta_dt, CS%diag)
 
   if (CS%debug) then
+    !$omp target update from(u_inst, v_inst, h, uh, vh, u_av, v_av, h_av)
     call MOM_state_chksum("Corrector ", u_inst, v_inst, h, uh, vh, G, GV, US, symmetric=sym)
-    !$omp target update from(u_av, v_av)
     call uvchksum("Corrector avg [uv]", u_av, v_av, G%HI, haloshift=1, symmetric=sym, unscale=US%L_T_to_m_s)
     call hchksum(h_av, "Corrector avg h", G%HI, haloshift=1, unscale=GV%H_to_MKS)
  !  call MOM_state_chksum("Corrector avg ", u_av, v_av, h_av, uh, vh, G, GV, US)
@@ -1614,7 +1615,7 @@ subroutine initialize_dyn_split_RK2(u, v, h, tv, uh, vh, eta, Time, G, GV, US, p
   !$omp target enter data map(alloc: CS%visc_rem_u, CS%visc_rem_v)
   ALLOC_(CS%eta_PF(isd:ied,jsd:jed))          ; CS%eta_PF(:,:)       = 0.0
   ALLOC_(CS%pbce(isd:ied,jsd:jed,nz))         ; CS%pbce(:,:,:)       = 0.0
-  !$omp target enter data map(alloc: CS%pbce, CS%eta_PF)
+  !$omp target enter data map(to: CS%pbce, CS%eta_PF)
   ALLOC_(CS%u_accel_bt(IsdB:IedB,jsd:jed,nz)) ; CS%u_accel_bt(:,:,:) = 0.0
   ALLOC_(CS%v_accel_bt(isd:ied,JsdB:JedB,nz)) ; CS%v_accel_bt(:,:,:) = 0.0
   !$omp target enter data map(alloc: CS%u_accel_bt, CS%v_accel_bt)

@@ -1070,16 +1070,18 @@ subroutine btstep(U_in, V_in, eta_in, dt, bc_accel_u, bc_accel_v, forces, pbce, 
   do concurrent (J=js-1:je, i=is-1:ie+1)
     vbt_Cor(i,J) = 0.0
   enddo
-  do concurrent (j=js:je)
+  !$omp target teams loop map(tofrom: ubt_Cor) map(to: wt_u, U_Cor)
+  do j=js,je
     do k=1,nz
-      do concurrent (I=is-1:ie)
+      do I=is-1,ie
         ubt_Cor(I,j) = ubt_Cor(I,j) + wt_u(I,j,k) * U_Cor(I,j,k)
       enddo
     enddo
   enddo
-  do concurrent (J=js-1:je)
+  !$omp target teams loop map(tofrom: vbt_Cor) map(to: wt_v, V_Cor)
+  do J=js-1,je
     do k=1,nz
-      do concurrent (i=is:ie)
+      do i=is,ie
         vbt_Cor(i,J) = vbt_Cor(i,J) + wt_v(i,J,k) * V_Cor(i,J,k)
       enddo
     enddo
@@ -1726,6 +1728,7 @@ subroutine btstep(U_in, V_in, eta_in, dt, bc_accel_u, bc_accel_v, forces, pbce, 
       call hchksum(eta_PF, "BT eta_PF",CS%debug_BT_HI,haloshift=0, unscale=GV%H_to_MKS)
       call hchksum(eta_PF_in, "BT eta_PF_in",G%HI,haloshift=0, unscale=GV%H_to_MKS)
     endif
+    !$omp target update from(Cor_ref_u, Cor_ref_v, uhbt0, vhbt0)
     call uvchksum("BT Cor_ref_[uv]", Cor_ref_u, Cor_ref_v, CS%debug_BT_HI, haloshift=0, unscale=US%L_T2_to_m_s2)
     call uvchksum("BT [uv]hbt0", uhbt0, vhbt0, CS%debug_BT_HI, haloshift=0, &
                   unscale=US%L_to_m**2*US%s_to_T*GV%H_to_m)
