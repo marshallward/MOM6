@@ -800,7 +800,7 @@ subroutine set_viscous_BBL(u, v, h, tv, visc, G, GV, US, CS, pbv)
     ! When stratification dominates h_N<<h_f, and vice versa.
     !$omp target teams loop collapse(2) thread_limit(128) &
     !$omp   private(k, ustarsq, htot, dztot, Thtot, Shtot, oldfn, Dfn, Dh, Ddz, frac_used, Rhtot, &
-    !$omp   C2f, ustH, bbl_thick, Vol_bbl_chan, vol_below, D_vel, Dp, tmp, Dm, crv, slope, &
+    !$omp   C2f, ustH, bbl_thick, Vol_bbl_chan, vol_below, D_vel, D_vel_p, D_vel_m, Dp, tmp, Dm, crv, slope, &
     !$omp   max_dL_trig_itt, max_norm_err_trig, max_norm_err_iter, norm_err_trig, norm_err_iter, &
     !$omp   dL_trig_itt, vol_err_trig, L_trig, L, vol_err_iter, BBL_visc_frac, BBL_frac, &
     !$omp   cdrag_conv, h_vel_pos, Cell_width, gam, Rayleigh, v_at_u, u_at_v, kv_bbl, h_sum, &
