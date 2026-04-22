@@ -209,12 +209,12 @@ subroutine set_viscous_BBL(u, v, h, tv, visc, G, GV, US, CS, pbv)
   ! Diagnostic arrays for narrowing where the remaining u Ray [uv] ulp drift
   ! enters inside the BBL target teams loop. Only written during m=1 so the
   ! chksum reflects the u-point kernel pass (where the drift persists).
-  real :: diag_L(SZIB_(G),SZJB_(G),SZK_(GV))      ! per-cell L(K=1:nz) from find_L_open_* [nondim]
-  real :: diag_Rayleigh(SZIB_(G),SZJB_(G),SZK_(GV)) ! per-cell Rayleigh(k) before Ray_u write [H T-1 L-1]
-  real :: diag_vol_below(SZIB_(G),SZJB_(G),SZK_(GV)) ! per-cell vol_below(K=1:nz) input to find_L_open_* [Z ~> m]
-  real :: diag_Dp(SZIB_(G),SZJB_(G))              ! per-cell Dp scalar input to find_L_open_* [Z ~> m]
-  real :: diag_Dm(SZIB_(G),SZJB_(G))              ! per-cell Dm scalar input to find_L_open_* [Z ~> m]
-  real :: diag_D_vel(SZIB_(G),SZJB_(G))           ! per-cell D_vel scalar input to find_L_open_* [Z ~> m]
+  ! real :: diag_L(SZIB_(G),SZJB_(G),SZK_(GV))      ! per-cell L(K=1:nz) from find_L_open_* [nondim]
+  ! real :: diag_Rayleigh(SZIB_(G),SZJB_(G),SZK_(GV)) ! per-cell Rayleigh(k) before Ray_u write [H T-1 L-1]
+  ! real :: diag_vol_below(SZIB_(G),SZJB_(G),SZK_(GV)) ! per-cell vol_below(K=1:nz) input to find_L_open_* [Z ~> m]
+  ! real :: diag_Dp(SZIB_(G),SZJB_(G))              ! per-cell Dp scalar input to find_L_open_* [Z ~> m]
+  ! real :: diag_Dm(SZIB_(G),SZJB_(G))              ! per-cell Dm scalar input to find_L_open_* [Z ~> m]
+  ! real :: diag_D_vel(SZIB_(G),SZJB_(G))           ! per-cell D_vel scalar input to find_L_open_* [Z ~> m]
 
   real :: h_vel_pos        ! The arithmetic mean thickness at a velocity point
                            ! plus H_neglect to avoid 0 values [H ~> m or kg m-2].
@@ -378,8 +378,8 @@ subroutine set_viscous_BBL(u, v, h, tv, visc, G, GV, US, CS, pbv)
 
   !$omp target enter data map(to: tv, tv%T, tv%S, tv%p_surf, CS) map(alloc: Rml, p_ref, ustar, &
   !$omp   umag_avg, u2_bg, mask_u, mask_v, h_bbl_drag, dz_bbl_drag, do_i, dR_dS, dR_dT, D_u, D_v, &
-  !$omp   press, S_EOS, T_EOS, Rml_vel, diag_L, diag_Rayleigh, diag_vol_below, diag_Dp, diag_Dm, &
-  !$omp   diag_D_vel)
+  !$omp   press, S_EOS, T_EOS, Rml_vel)
+  ! Diagnostic arrays (commented out): diag_L, diag_Rayleigh, diag_vol_below, diag_Dp, diag_Dm, diag_D_vel
 
   if ((nkml>0) .and. .not.use_BBL_EOS) then
     EOSdom(1,1) = Isq - (G%isd-1) ;  EOSdom(1,2) = G%iec+1 - (G%isd-1)
@@ -504,16 +504,16 @@ subroutine set_viscous_BBL(u, v, h, tv, visc, G, GV, US, CS, pbv)
       dz_vel(i,j,k) = 0.0
       T_vel(i,j,k) = 0.0
       S_vel(i,j,k) = 0.0
-      diag_L(i,j,k) = 0.0
-      diag_Rayleigh(i,j,k) = 0.0
-      diag_vol_below(i,j,k) = 0.0
+      ! diag_L(i,j,k) = 0.0
+      ! diag_Rayleigh(i,j,k) = 0.0
+      ! diag_vol_below(i,j,k) = 0.0
     enddo ; enddo ; enddo
-    !$omp target teams loop collapse(2)
-    do j=G%JsdB,G%JedB ; do i=G%IsdB,G%IedB
-      diag_Dp(i,j) = 0.0
-      diag_Dm(i,j) = 0.0
-      diag_D_vel(i,j) = 0.0
-    enddo ; enddo
+    ! !$omp target teams loop collapse(2)
+    ! do j=G%JsdB,G%JedB ; do i=G%IsdB,G%IedB
+    !   diag_Dp(i,j) = 0.0
+    !   diag_Dm(i,j) = 0.0
+    !   diag_D_vel(i,j) = 0.0
+    ! enddo ; enddo
   endif
 
   do m=1,2
@@ -1009,11 +1009,11 @@ subroutine set_viscous_BBL(u, v, h, tv, visc, G, GV, US, CS, pbv)
         enddo
 
         ! Diagnostic: capture vol_below input to find_L_open_*
-        if (m == 1) then
-          do K = 1, nz
-            diag_vol_below(I,j,K) = vol_below(K)
-          enddo
-        endif
+        ! if (m == 1) then
+        !   do K = 1, nz
+        !     diag_vol_below(I,j,K) = vol_below(K)
+        !   enddo
+        ! endif
 
         !### The harmonic mean edge depths here are not invariant to offsets!
         if (m==1) then
@@ -1023,9 +1023,9 @@ subroutine set_viscous_BBL(u, v, h, tv, visc, G, GV, US, CS, pbv)
           tmp = G%mask2dCu(I,j-1) * D_u(I,j-1)
           Dm = 2.0 * D_vel * tmp / (D_vel + tmp)
           ! Diagnostic: capture the scalar inputs to find_L_open_*
-          diag_D_vel(I,j) = D_vel
-          diag_Dp(I,j) = Dp
-          diag_Dm(I,j) = Dm
+          ! diag_D_vel(I,j) = D_vel
+          ! diag_Dp(I,j) = Dp
+          ! diag_Dm(I,j) = Dm
         else
           D_vel = D_v(i,J)
           tmp = G%mask2dCv(i+1,J) * D_v(i+1,J)
@@ -1084,11 +1084,11 @@ subroutine set_viscous_BBL(u, v, h, tv, visc, G, GV, US, CS, pbv)
 
         ! Diagnostic: capture raw L(K) from find_L_open_* before the porous-barrier
         ! modification below, so chksum reveals whether drift enters here.
-        if (m == 1) then
-          do K = 1, nz
-            diag_L(I,j,K) = L(K)
-          enddo
-        endif
+        ! if (m == 1) then
+        !   do K = 1, nz
+        !     diag_L(I,j,K) = L(K)
+        !   enddo
+        ! endif
 
         ! Determine the Rayleigh drag contributions.
 
@@ -1133,7 +1133,7 @@ subroutine set_viscous_BBL(u, v, h, tv, visc, G, GV, US, CS, pbv)
           endif
 
           ! Diagnostic: capture Rayleigh before it's consumed by the Ray_u/v branch
-          if (m == 1) diag_Rayleigh(I,j,k) = Rayleigh
+          ! if (m == 1) diag_Rayleigh(I,j,k) = Rayleigh
 
           if (m==1) then
             if (Rayleigh > 0.0) then
@@ -1238,15 +1238,15 @@ subroutine set_viscous_BBL(u, v, h, tv, visc, G, GV, US, CS, pbv)
   ! to narrow further by branch). If diag_L is bitwise but diag_Rayleigh drifts,
   ! the Rayleigh formula at line ~1089 is where bits diverge. If both are bitwise
   ! but visc%Ray_u drifts, only the final sqrt/multiply remains.
-  if (CS%debug) then
-    !$omp target update from(diag_vol_below, diag_Dp, diag_Dm, diag_D_vel, diag_L, diag_Rayleigh)
-    call Bchksum(diag_vol_below, "BBL narrow in-kernel vol_below (u)", G%HI, haloshift=0)
-    call Bchksum(diag_D_vel,     "BBL narrow in-kernel D_vel (u)",     G%HI, haloshift=0)
-    call Bchksum(diag_Dp,        "BBL narrow in-kernel Dp (u)",        G%HI, haloshift=0)
-    call Bchksum(diag_Dm,        "BBL narrow in-kernel Dm (u)",        G%HI, haloshift=0)
-    call Bchksum(diag_L,         "BBL narrow in-kernel L (u)",         G%HI, haloshift=0)
-    call Bchksum(diag_Rayleigh,  "BBL narrow in-kernel Rayleigh (u)",  G%HI, haloshift=0)
-  endif
+  ! if (CS%debug) then
+  !   !$omp target update from(diag_vol_below, diag_Dp, diag_Dm, diag_D_vel, diag_L, diag_Rayleigh)
+  !   call Bchksum(diag_vol_below, "BBL narrow in-kernel vol_below (u)", G%HI, haloshift=0)
+  !   call Bchksum(diag_D_vel,     "BBL narrow in-kernel D_vel (u)",     G%HI, haloshift=0)
+  !   call Bchksum(diag_Dp,        "BBL narrow in-kernel Dp (u)",        G%HI, haloshift=0)
+  !   call Bchksum(diag_Dm,        "BBL narrow in-kernel Dm (u)",        G%HI, haloshift=0)
+  !   call Bchksum(diag_L,         "BBL narrow in-kernel L (u)",         G%HI, haloshift=0)
+  !   call Bchksum(diag_Rayleigh,  "BBL narrow in-kernel Rayleigh (u)",  G%HI, haloshift=0)
+  ! endif
 
   ! Force land/masked cells to canonical +0.0 on visc% outputs. The pre-kernel
   ! zeroing loop writes +0.0, and masked cells (do_i==.false.) skip the kernel
@@ -1294,8 +1294,8 @@ subroutine set_viscous_BBL(u, v, h, tv, visc, G, GV, US, CS, pbv)
 
   !$omp target exit data map(release: dz, tv, tv%T, tv%S, S_vel, T_vel, SpV_vel, h_vel, h_at_vel, &
   !$omp   dz_vel, dz_at_vel, Rml, Rml_vel, p_ref, ustar, umag_avg, u2_bg, mask_u, mask_v, &
-  !$omp   h_bbl_drag, dz_bbl_drag, do_i, dR_dS, dR_dT, D_u, D_v, press, S_EOS, T_EOS, tv%p_surf, CS, &
-  !$omp   diag_L, diag_Rayleigh, diag_vol_below, diag_Dp, diag_Dm, diag_D_vel)
+  !$omp   h_bbl_drag, dz_bbl_drag, do_i, dR_dS, dR_dT, D_u, D_v, press, S_EOS, T_EOS, tv%p_surf, CS)
+  ! Diagnostic arrays (commented out): diag_L, diag_Rayleigh, diag_vol_below, diag_Dp, diag_Dm, diag_D_vel
 
 ! Offer diagnostics for averaging
   if (CS%id_bbl_thick_u > 0) &
