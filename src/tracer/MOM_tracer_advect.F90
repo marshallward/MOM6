@@ -133,8 +133,14 @@ subroutine advect_tracer(h_end, uhtr, vhtr, OBC, dt, G, GV, US, CS, Reg, x_first
 
   !$omp target update to(uhtr, vhtr, h_end)
 
-  !$omp target enter data map(to: OBC) map(alloc: domore_u, domore_v, uhr, vhr, uh_neglect, &
-  !$omp   vh_neglect, hprev, domore_k, local_advect_scheme, Reg, Reg%Tr(:))
+  ! NOTE: Reg and Reg%Tr(:) go through map(to:), not map(alloc:). With map(alloc:)
+  ! nvfortran's deep-copy handling of nested pointer fields in a derived-type
+  ! array is unreliable (same class of issue Step 10 hit with %advection_xy).
+  ! map(to:) copies the record contents (including per-element pointer
+  ! descriptors) to device; the subsequent `map(to: Reg%Tr(m)%t)` at ~line 239
+  ! then correctly overrides each %t descriptor with the device-side data pointer.
+  !$omp target enter data map(to: OBC, Reg, Reg%Tr(:)) map(alloc: domore_u, domore_v, &
+  !$omp   uhr, vhr, uh_neglect, vh_neglect, hprev, domore_k, local_advect_scheme)
 
   do concurrent (k=1:nz, j=jsd:jed)
     domore_u(j,k) = .false.

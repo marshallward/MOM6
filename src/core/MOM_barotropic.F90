@@ -1741,6 +1741,11 @@ subroutine btstep(U_in, V_in, eta_in, dt, bc_accel_u, bc_accel_v, forces, pbce, 
     !$omp target update from(CS%frhatu, CS%frhatv)
     call uvchksum("BT frhat[uv]", CS%frhatu, CS%frhatv, G%HI, haloshift=0, &
                   symmetric=.true., omit_corners=.true., scalar_pair=.true.)
+    ! visc_rem_u/v has a persistent device mapping; the `do_group_pass(...,
+    ! omp_offload=.true.)` halo exchange in the caller updates device halos
+    ! but the host halos may be stale — sync before the chksum to distinguish
+    ! a real halo bug from a diagnostic-visibility artifact.
+    !$omp target update from(visc_rem_u, visc_rem_v)
     call uvchksum("BT visc_rem_[uv]", visc_rem_u, visc_rem_v, G%HI, haloshift=0, &
                   symmetric=.true., omit_corners=.true., scalar_pair=.true.)
     call uvchksum("BT bc_accel_[uv]", bc_accel_u, bc_accel_v, G%HI, haloshift=0, unscale=US%L_T2_to_m_s2)

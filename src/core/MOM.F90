@@ -1064,10 +1064,12 @@ subroutine step_MOM(forces_in, fluxes_in, sfc_state, Time_start, time_int_in, CS
     endif
 
     if (do_dyn) then
-      !$omp target update from(h)
+      !$omp target update from(h, CS%eta_av_bc)
       call cpu_clock_begin(id_clock_dynamics)
       ! Determining the time-average sea surface height is part of the algorithm.
       ! This may be eta_av if Boussinesq, or need to be diagnosed if not.
+      ! eta_av_bc is written on device by btstep's `do concurrent` under
+      ! -stdpar=gpu and consumed on host by find_eta — needs explicit sync.
       CS%time_in_cycle = CS%time_in_cycle + dt
       call find_eta(h, CS%tv, G, GV, US, ssh, CS%eta_av_bc, dZref=G%Z_ref)
       do j=js,je ; do i=is,ie

@@ -13,7 +13,7 @@ use MOM_cpu_clock,     only : cpu_clock_id, cpu_clock_begin, cpu_clock_end, CLOC
 use MOM_cvmix_conv,    only : cvmix_conv_is_used
 use MOM_CVMix_ddiff,   only : CVMix_ddiff_is_used
 use MOM_cvmix_shear,   only : cvmix_shear_is_used
-use MOM_debugging,     only : uvchksum, hchksum
+use MOM_debugging,     only : uvchksum, hchksum, Bchksum
 use MOM_diag_mediator, only : post_data, register_diag_field, safe_alloc_ptr
 use MOM_diag_mediator, only : diag_ctrl, time_type
 use MOM_domains,       only : pass_var, CORNER
@@ -206,6 +206,16 @@ subroutine set_viscous_BBL(u, v, h, tv, visc, G, GV, US, CS, pbv)
                 ! to a velocity point [R ~> kg m-3].
   real :: dz(SZI_(G),SZJ_(G),SZK_(GV)) ! Height change across layers [Z ~> m]
 
+  ! Diagnostic arrays for narrowing where the remaining u Ray [uv] ulp drift
+  ! enters inside the BBL target teams loop. Only written during m=1 so the
+  ! chksum reflects the u-point kernel pass (where the drift persists).
+  real :: diag_L(SZIB_(G),SZJB_(G),SZK_(GV))      ! per-cell L(K=1:nz) from find_L_open_* [nondim]
+  real :: diag_Rayleigh(SZIB_(G),SZJB_(G),SZK_(GV)) ! per-cell Rayleigh(k) before Ray_u write [H T-1 L-1]
+  real :: diag_vol_below(SZIB_(G),SZJB_(G),SZK_(GV)) ! per-cell vol_below(K=1:nz) input to find_L_open_* [Z ~> m]
+  real :: diag_Dp(SZIB_(G),SZJB_(G))              ! per-cell Dp scalar input to find_L_open_* [Z ~> m]
+  real :: diag_Dm(SZIB_(G),SZJB_(G))              ! per-cell Dm scalar input to find_L_open_* [Z ~> m]
+  real :: diag_D_vel(SZIB_(G),SZJB_(G))           ! per-cell D_vel scalar input to find_L_open_* [Z ~> m]
+
   real :: h_vel_pos        ! The arithmetic mean thickness at a velocity point
                            ! plus H_neglect to avoid 0 values [H ~> m or kg m-2].
   real :: ustarsq          ! 400 times the square of ustar, times
@@ -357,12 +367,19 @@ subroutine set_viscous_BBL(u, v, h, tv, visc, G, GV, US, CS, pbv)
   ! Find the vertical distances across layers.
   call thickness_to_dz(h, tv, dz, G, GV, US, halo_size=1, do_offload=.true.)
 
+  ! Narrowing where the BBL ulp drift enters between CPU and GPU builds.
+  if (CS%debug) then
+    !$omp target update from(dz)
+    call hchksum(dz, "BBL narrow post thickness_to_dz dz", G%HI, haloshift=1, unscale=US%Z_to_m)
+  endif
+
 !  With a linear drag law, the friction velocity is already known.
 !  if (CS%linear_drag) ustar(:) = cdrag_sqrt_H*CS%drag_bg_vel
 
   !$omp target enter data map(to: tv, tv%T, tv%S, tv%p_surf, CS) map(alloc: Rml, p_ref, ustar, &
   !$omp   umag_avg, u2_bg, mask_u, mask_v, h_bbl_drag, dz_bbl_drag, do_i, dR_dS, dR_dT, D_u, D_v, &
-  !$omp   press, S_EOS, T_EOS, Rml_vel)
+  !$omp   press, S_EOS, T_EOS, Rml_vel, diag_L, diag_Rayleigh, diag_vol_below, diag_Dp, diag_Dm, &
+  !$omp   diag_D_vel)
 
   if ((nkml>0) .and. .not.use_BBL_EOS) then
     EOSdom(1,1) = Isq - (G%isd-1) ;  EOSdom(1,2) = G%iec+1 - (G%isd-1)
@@ -474,6 +491,30 @@ subroutine set_viscous_BBL(u, v, h, tv, visc, G, GV, US, CS, pbv)
 
   !$omp target enter data map(alloc: S_vel, T_vel, SpV_vel, h_vel, h_at_vel, dz_vel, &
   !$omp   dz_at_vel)
+
+  ! Zero-init so that unused B-grid halo cells don't carry stack garbage on the
+  ! host build — makes the narrow-drift chksums below meaningful. Cheap compared
+  ! to the BBL column kernel.
+  if (CS%debug) then
+    !$omp target teams loop collapse(3)
+    do k=1,nz ; do j=G%JsdB,G%JedB ; do i=G%IsdB,G%IedB
+      h_at_vel(i,j,k) = 0.0
+      dz_at_vel(i,j,k) = 0.0
+      h_vel(i,j,k) = 0.0
+      dz_vel(i,j,k) = 0.0
+      T_vel(i,j,k) = 0.0
+      S_vel(i,j,k) = 0.0
+      diag_L(i,j,k) = 0.0
+      diag_Rayleigh(i,j,k) = 0.0
+      diag_vol_below(i,j,k) = 0.0
+    enddo ; enddo ; enddo
+    !$omp target teams loop collapse(2)
+    do j=G%JsdB,G%JedB ; do i=G%IsdB,G%IedB
+      diag_Dp(i,j) = 0.0
+      diag_Dm(i,j) = 0.0
+      diag_D_vel(i,j) = 0.0
+    enddo ; enddo
+  endif
 
   do m=1,2
     if (m==1) then
@@ -738,16 +779,54 @@ subroutine set_viscous_BBL(u, v, h, tv, visc, G, GV, US, CS, pbv)
           do concurrent (i=is:ie) ; press(i,j) = 0.0 ; enddo
         endif
         do concurrent (i=is:ie, .not.do_i(i,j)) ; T_EOS(i,j) = 0.0 ; S_EOS(i,j) = 0.0 ; enddo
-        do concurrent (k=1:nz, i=is:ie)
-          press(i,j) = press(i,j) + (GV%H_to_RZ*GV%g_Earth) * h_vel(i,j,k)
+        ! k is the reduction dim over press(i,j); the loop must be serial in k
+        ! per (i). Writing it as `do concurrent (k,i)` with multiple k values
+        ! racing on the same press(i,j) violates do concurrent's independence
+        ! contract — the compiler is free to pick any order, and CPU vs GPU
+        ! auto-offload picked different deterministic-but-different orders,
+        ! producing ~5% drift in press that then miscomputes dR_dT/dR_dS.
+        do concurrent (i=is:ie)
+          do k=1,nz
+            press(i,j) = press(i,j) + (GV%H_to_RZ*GV%g_Earth) * h_vel(i,j,k)
+          enddo
         enddo
       endif
     enddo ! end of j loop
 
+    ! Narrowing drift: chksum the setup outputs feeding the BBL column kernel.
+    ! Emit only on m==1 (u-points) — the first ulp drift shows on u side first.
+    if (CS%debug .and. m == 1) then
+      !$omp target update from(h_at_vel, dz_at_vel, h_vel, dz_vel)
+      call Bchksum(h_at_vel,  "BBL narrow post-setup h_at_vel (u)",  G%HI, haloshift=0)
+      call Bchksum(dz_at_vel, "BBL narrow post-setup dz_at_vel (u)", G%HI, haloshift=0)
+      call Bchksum(h_vel,     "BBL narrow post-setup h_vel (u)",     G%HI, haloshift=0)
+      call Bchksum(dz_vel,    "BBL narrow post-setup dz_vel (u)",    G%HI, haloshift=0)
+      if (use_BBL_EOS) then
+        !$omp target update from(T_vel, S_vel)
+        call Bchksum(T_vel, "BBL narrow post-setup T_vel (u)", G%HI, haloshift=0)
+        call Bchksum(S_vel, "BBL narrow post-setup S_vel (u)", G%HI, haloshift=0)
+      endif
+    endif
+
     if (use_BBL_EOS) then
       EOSdom(1,1) = is-G%IsdB+1 ; EOSdom(1,2) = ie-G%IsdB+1
       EOSdom(2,1) = jstart-G%JsdB+1 ; EOSdom(2,2) = Jeq-G%JsdB+1
+      ! T_EOS, S_EOS, press are written on device by the preceding auto-offloaded
+      ! do concurrent loops; calculate_density_derivs is a host routine. Sync
+      ! device->host first, then push the host-computed derivs back to device so
+      ! the target teams loop below sees the correct values instead of zeros
+      ! from the map(alloc:) at line 363.
+      !$omp target update from(T_EOS, S_EOS, press)
       call calculate_density_derivs(T_EOS, S_EOS, press, dR_dT, dR_dS, tv%eqn_of_state, EOSdom)
+      !$omp target update to(dR_dT, dR_dS)
+    endif
+
+    ! Narrowing drift: chksum the EOS density-derivs output (last input to the kernel).
+    if (CS%debug .and. m == 1 .and. use_BBL_EOS) then
+      !$omp target update from(dR_dT, dR_dS, press)
+      call Bchksum(dR_dT, "BBL narrow post-EOS dR_dT (u)", G%HI, haloshift=0)
+      call Bchksum(dR_dS, "BBL narrow post-EOS dR_dS (u)", G%HI, haloshift=0)
+      call Bchksum(press, "BBL narrow post-EOS press (u)", G%HI, haloshift=0)
     endif
 
     ! Find a BBL thickness given by equation 2.20 of Killworth and Edwards, 1999:
@@ -929,6 +1008,13 @@ subroutine set_viscous_BBL(u, v, h, tv, visc, G, GV, US, CS, pbv)
           vol_below(K) = vol_below(K+1) + dz_vel(i,j,k)
         enddo
 
+        ! Diagnostic: capture vol_below input to find_L_open_*
+        if (m == 1) then
+          do K = 1, nz
+            diag_vol_below(I,j,K) = vol_below(K)
+          enddo
+        endif
+
         !### The harmonic mean edge depths here are not invariant to offsets!
         if (m==1) then
           D_vel = D_u(I,j)
@@ -936,6 +1022,10 @@ subroutine set_viscous_BBL(u, v, h, tv, visc, G, GV, US, CS, pbv)
           Dp = 2.0 * D_vel * tmp / (D_vel + tmp)
           tmp = G%mask2dCu(I,j-1) * D_u(I,j-1)
           Dm = 2.0 * D_vel * tmp / (D_vel + tmp)
+          ! Diagnostic: capture the scalar inputs to find_L_open_*
+          diag_D_vel(I,j) = D_vel
+          diag_Dp(I,j) = Dp
+          diag_Dm(I,j) = Dm
         else
           D_vel = D_v(i,J)
           tmp = G%mask2dCv(i+1,J) * D_v(i+1,J)
@@ -992,6 +1082,14 @@ subroutine set_viscous_BBL(u, v, h, tv, visc, G, GV, US, CS, pbv)
           call find_L_open_convex(vol_below, D_vel, Dp, Dm, L, GV, US, CS)
         endif ! end of crv<0 cases.
 
+        ! Diagnostic: capture raw L(K) from find_L_open_* before the porous-barrier
+        ! modification below, so chksum reveals whether drift enters here.
+        if (m == 1) then
+          do K = 1, nz
+            diag_L(I,j,K) = L(K)
+          enddo
+        endif
+
         ! Determine the Rayleigh drag contributions.
 
         ! The drag within the bottommost Vol_bbl_chan is applied as a part of an enhanced bottom
@@ -1033,6 +1131,9 @@ subroutine set_viscous_BBL(u, v, h, tv, visc, G, GV, US, CS, pbv)
           else ! This layer feels no drag.
             Rayleigh = 0.0
           endif
+
+          ! Diagnostic: capture Rayleigh before it's consumed by the Ray_u/v branch
+          if (m == 1) diag_Rayleigh(I,j,k) = Rayleigh
 
           if (m==1) then
             if (Rayleigh > 0.0) then
@@ -1132,9 +1233,69 @@ subroutine set_viscous_BBL(u, v, h, tv, visc, G, GV, US, CS, pbv)
     endif ; enddo ; enddo ! end of i & j loops
   enddo ! end of m loop
 
+  ! Narrow-drift diagnostic: chksum L and Rayleigh captured inside the BBL target
+  ! teams loop for m=1. If diag_L drifts, find_L_open_* is the source (and we need
+  ! to narrow further by branch). If diag_L is bitwise but diag_Rayleigh drifts,
+  ! the Rayleigh formula at line ~1089 is where bits diverge. If both are bitwise
+  ! but visc%Ray_u drifts, only the final sqrt/multiply remains.
+  if (CS%debug) then
+    !$omp target update from(diag_vol_below, diag_Dp, diag_Dm, diag_D_vel, diag_L, diag_Rayleigh)
+    call Bchksum(diag_vol_below, "BBL narrow in-kernel vol_below (u)", G%HI, haloshift=0)
+    call Bchksum(diag_D_vel,     "BBL narrow in-kernel D_vel (u)",     G%HI, haloshift=0)
+    call Bchksum(diag_Dp,        "BBL narrow in-kernel Dp (u)",        G%HI, haloshift=0)
+    call Bchksum(diag_Dm,        "BBL narrow in-kernel Dm (u)",        G%HI, haloshift=0)
+    call Bchksum(diag_L,         "BBL narrow in-kernel L (u)",         G%HI, haloshift=0)
+    call Bchksum(diag_Rayleigh,  "BBL narrow in-kernel Rayleigh (u)",  G%HI, haloshift=0)
+  endif
+
+  ! Force land/masked cells to canonical +0.0 on visc% outputs. The pre-kernel
+  ! zeroing loop writes +0.0, and masked cells (do_i==.false.) skip the kernel
+  ! body — so masked cells should already be +0.0. But Step 11 observations
+  ! report ±0 sign-bit cosmetics on a handful of cells that differ between CPU
+  ! and GPU builds; this explicit canonicalization eliminates them and avoids
+  ! the downstream `u/v Ray [uv]`, `u/v kv_bbl_[uv]`, `u/v bbl_thick_[uv]`
+  ! c= cascade into btcalc/btstep.
+  if (allocated(visc%Ray_u)) then
+    !$omp target teams loop collapse(3)
+    do k=1,nz ; do j=G%jsd,G%jed ; do I=G%IsdB,G%IedB
+      if (G%mask2dCu(I,j) <= 0.0) visc%Ray_u(I,j,k) = 0.0
+    enddo ; enddo ; enddo
+  endif
+  if (allocated(visc%Ray_v)) then
+    !$omp target teams loop collapse(3)
+    do k=1,nz ; do J=G%JsdB,G%JedB ; do i=G%isd,G%ied
+      if (G%mask2dCv(i,J) <= 0.0) visc%Ray_v(i,J,k) = 0.0
+    enddo ; enddo ; enddo
+  endif
+  if (allocated(visc%kv_bbl_u)) then
+    !$omp target teams loop collapse(2)
+    do j=G%jsd,G%jed ; do I=G%IsdB,G%IedB
+      if (G%mask2dCu(I,j) <= 0.0) visc%kv_bbl_u(I,j) = 0.0
+    enddo ; enddo
+  endif
+  if (allocated(visc%kv_bbl_v)) then
+    !$omp target teams loop collapse(2)
+    do J=G%JsdB,G%JedB ; do i=G%isd,G%ied
+      if (G%mask2dCv(i,J) <= 0.0) visc%kv_bbl_v(i,J) = 0.0
+    enddo ; enddo
+  endif
+  if (allocated(visc%bbl_thick_u)) then
+    !$omp target teams loop collapse(2)
+    do j=G%jsd,G%jed ; do I=G%IsdB,G%IedB
+      if (G%mask2dCu(I,j) <= 0.0) visc%bbl_thick_u(I,j) = 0.0
+    enddo ; enddo
+  endif
+  if (allocated(visc%bbl_thick_v)) then
+    !$omp target teams loop collapse(2)
+    do J=G%JsdB,G%JedB ; do i=G%isd,G%ied
+      if (G%mask2dCv(i,J) <= 0.0) visc%bbl_thick_v(i,J) = 0.0
+    enddo ; enddo
+  endif
+
   !$omp target exit data map(release: dz, tv, tv%T, tv%S, S_vel, T_vel, SpV_vel, h_vel, h_at_vel, &
   !$omp   dz_vel, dz_at_vel, Rml, Rml_vel, p_ref, ustar, umag_avg, u2_bg, mask_u, mask_v, &
-  !$omp   h_bbl_drag, dz_bbl_drag, do_i, dR_dS, dR_dT, D_u, D_v, press, S_EOS, T_EOS, tv%p_surf, CS)
+  !$omp   h_bbl_drag, dz_bbl_drag, do_i, dR_dS, dR_dT, D_u, D_v, press, S_EOS, T_EOS, tv%p_surf, CS, &
+  !$omp   diag_L, diag_Rayleigh, diag_vol_below, diag_Dp, diag_Dm, diag_D_vel)
 
 ! Offer diagnostics for averaging
   if (CS%id_bbl_thick_u > 0) &
@@ -1801,11 +1962,13 @@ pure subroutine find_L_open_convex(vol_below, D_vel, Dp, Dm, L, GV, US, CS)
       L(K) = 1.0
     elseif (vol_below(K) <= Vol_direct) then
       ! Both edges of the cell are bounded by walls.
-      ! if (CS%answer_date < 20240101)) then
-        L(K) = (-0.25*C24_crv*vol_below(K))**C1_3
-      ! else
-      !   L(K) = cuberoot(-0.25*C24_crv*vol_below(K))
-      ! endif
+      ! The original `**C1_3` compiles to pow(x, 1.0/3.0) which uses a library
+      ! call that is NOT IEEE-required-correctly-rounded — CPU libm pow and GPU
+      ! CUDA pow differ in the last bit on some inputs, producing the ~3-count
+      ! c= drift on L and the cascading Ray_u drift into byte-non-identical
+      ! ocean.stats. MOM6's custom `cuberoot` (declared target, in
+      ! MOM_intrinsic_functions) is bitwise-deterministic across platforms.
+      L(K) = cuberoot(-0.25*C24_crv*vol_below(K))
     else
       ! x_R is at 1/2 but x_L is in the interior & L is found by iteratively solving
       !   vol_below(K) = 0.5*L^2*(slope + crv/3*(3-4L))

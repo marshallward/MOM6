@@ -9,7 +9,7 @@ use MOM_cpu_clock,         only : cpu_clock_id, cpu_clock_begin, cpu_clock_end
 use MOM_cpu_clock,         only : CLOCK_MODULE_DRIVER, CLOCK_MODULE, CLOCK_ROUTINE
 use MOM_diag_mediator,     only : post_data, register_diag_field, safe_alloc_ptr
 use MOM_diag_mediator,     only : diag_ctrl, time_type
-use MOM_debugging,         only : hchksum, Bchksum
+use MOM_debugging,         only : hchksum, Bchksum, uvchksum
 use MOM_error_handler,     only : MOM_error, is_root_pe, FATAL, WARNING, NOTE
 use MOM_file_parser,       only : get_param, log_version, param_file_type
 use MOM_grid,              only : ocean_grid_type
@@ -522,6 +522,14 @@ subroutine Calc_kappa_shear_vertex(u_in, v_in, h, T_in, S_in, tv, p_surf, kappa_
   ! Diagnostics that should be deleted?
   isB = G%isc-1 ; ieB = G%iecB ; jsB = G%jsc-1 ; jeB = G%jecB ; nz = GV%ke
 
+  if (CS%debug) then
+    !$omp target update from(u_in, v_in, h)
+    call uvchksum("kappa_shear_vertex [uv]_in (halo)", u_in, v_in, G%HI, haloshift=1, unscale=US%L_T_to_m_s)
+    call hchksum(h,    "kappa_shear_vertex h (halo)",    G%HI, haloshift=1, unscale=GV%H_to_m)
+    call hchksum(T_in, "kappa_shear_vertex T_in (halo)", G%HI, haloshift=1, unscale=US%C_to_degC)
+    call hchksum(S_in, "kappa_shear_vertex S_in (halo)", G%HI, haloshift=1, unscale=US%S_to_ppt)
+  endif
+
   if ((CS%id_N2_init>0) .or. CS%debug) diag_N2_init(:,:,:) = 0.0
   if ((CS%id_S2_init>0) .or. CS%debug) diag_S2_init(:,:,:) = 0.0
   if (CS%id_N2_mean>0) diag_N2_mean(:,:,:) = 0.0
@@ -566,7 +574,8 @@ subroutine Calc_kappa_shear_vertex(u_in, v_in, h, T_in, S_in, tv, p_surf, kappa_
   endif
 
 
-  !$OMP parallel do default(private) shared(jsB,jeB,isB,ieB,nz,h,u_in,v_in,use_temperature,tv,G,GV,US,CS,kappa_io, &
+  !$OMP parallel do default(private) shared(jsB,jeB,isB,ieB,nz,h,u_in,v_in,T_in,S_in,h_at_u,h_at_v,dz_3d,H_tiny, &
+  !$OMP                                     use_temperature,tv,G,GV,US,CS,kappa_io, &
   !$OMP                                     dz_massless,k0dt,p_surf,dt,tke_io,kv_io,kappa_vertex,h_vert,I_Prandtl, &
   !$OMP                                     diag_N2_init,diag_S2_init,diag_N2_mean,diag_S2_mean)
   do J=JsB,JeB
