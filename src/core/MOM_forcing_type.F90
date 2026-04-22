@@ -1237,7 +1237,7 @@ end subroutine find_ustar_fluxes
 
 !> Determine the friction velocity from the contenxts of a forcing type, perhaps
 !! using the evolving surface density.
-subroutine find_ustar_mech_forcing(forces, tv, U_star, G, GV, US, halo, H_T_units, do_offload)
+subroutine find_ustar_mech_forcing(forces, tv, U_star, G, GV, US, halo, H_T_units)
   type(ocean_grid_type),   intent(in)  :: G    !< The ocean's grid structure
   type(verticalGrid_type), intent(in)  :: GV   !< The ocean's vertical grid structure
   type(unit_scale_type),   intent(in)  :: US   !< A dimensional unit scaling type
@@ -1249,10 +1249,6 @@ subroutine find_ustar_mech_forcing(forces, tv, U_star, G, GV, US, halo, H_T_unit
   integer,       optional, intent(in)  :: halo !< The extra halo size to fill in, 0 by default
   logical,       optional, intent(in)  :: H_T_units !< If present and true, return U_star in units
                                                !! of [H T-1 ~> m s-1 or kg m-2 s-1]
-  logical,       optional, intent(in)  :: do_offload !< If present and true, run the inner loops
-                                               !! with !$omp target teams loop. Assumes that
-                                               !! U_star, forces%ustar, forces%tau_mag and
-                                               !! tv%SpV_avg are already mapped on device.
 
   ! Local variables
   real :: I_rho        ! The inverse of the reference density [R-1 ~> m3 kg-1] or in some semi-Boussinesq cases
@@ -1261,14 +1257,12 @@ subroutine find_ustar_mech_forcing(forces, tv, U_star, G, GV, US, halo, H_T_unit
   real :: scale_RZ_to_H ! Local copy of GV%RZ_to_H for device use
   logical :: Z_T_units ! If true, U_star is returned in units of [Z T-1 ~> m s-1], otherwise it is
                        ! returned in [H T-1 ~> m s-1 or kg m-2 s-1]
-  logical :: offload   ! Effective value of do_offload
   integer :: i, j, k, is, ie, js, je, hs
 
   hs = 0 ; if (present(halo)) hs = max(halo, 0)
   is = G%isc - hs ; ie = G%iec + hs ; js = G%jsc - hs ; je = G%jec + hs
 
   Z_T_units = .true. ; if (present(H_T_units)) Z_T_units = .not.H_T_units
-  offload = .false. ; if (present(do_offload)) offload = do_offload
 
   if (.not.(associated(forces%ustar) .or. associated(forces%tau_mag))) &
     call MOM_error(FATAL, "find_ustar_mech requires that either ustar or tau_mag be associated.")
@@ -1278,27 +1272,15 @@ subroutine find_ustar_mech_forcing(forces, tv, U_star, G, GV, US, halo, H_T_unit
 
   if (associated(forces%ustar) .and. (GV%Boussinesq .or. .not.associated(forces%tau_mag))) then
     if (Z_T_units) then
-      if (offload) then
         !$omp target teams loop collapse(2)
         do j=js,je ; do i=is,ie
           U_star(i,j) = forces%ustar(i,j)
         enddo ; enddo
-      else
-        do concurrent (j=js:je, i=is:ie)
-          U_star(i,j) = forces%ustar(i,j)
-        enddo
-      endif
     else
-      if (offload) then
         !$omp target teams loop collapse(2)
         do j=js,je ; do i=is,ie
           U_star(i,j) = scale_Z_to_H * forces%ustar(i,j)
         enddo ; enddo
-      else
-        do concurrent (j=js:je, i=is:ie)
-          U_star(i,j) = GV%Z_to_H * forces%ustar(i,j)
-        enddo
-      endif
     endif
   elseif (allocated(tv%SpV_avg)) then
     if (tv%valid_SpV_halo < 0) call MOM_error(FATAL, &
@@ -1306,41 +1288,23 @@ subroutine find_ustar_mech_forcing(forces, tv, U_star, G, GV, US, halo, H_T_unit
     if (tv%valid_SpV_halo < hs) call MOM_error(FATAL, &
         "find_ustar_mech called in non-Boussinesq mode with insufficient valid values of SpV_avg.")
     if (Z_T_units) then
-      if (offload) then
         !$omp target teams loop collapse(2)
         do j=js,je ; do i=is,ie
           U_star(i,j) = sqrt(forces%tau_mag(i,j) * tv%SpV_avg(i,j,1))
         enddo ; enddo
-      else
-        do concurrent (j=js:je, i=is:ie)
-          U_star(i,j) = sqrt(forces%tau_mag(i,j) * tv%SpV_avg(i,j,1))
-        enddo
-      endif
     else
-      if (offload) then
         !$omp target teams loop collapse(2)
         do j=js,je ; do i=is,ie
           U_star(i,j) = scale_RZ_to_H * sqrt(forces%tau_mag(i,j) / tv%SpV_avg(i,j,1))
         enddo ; enddo
-      else
-        do concurrent (j=js:je, i=is:ie)
-          U_star(i,j) = GV%RZ_to_H * sqrt(forces%tau_mag(i,j) / tv%SpV_avg(i,j,1))
-        enddo
-      endif
     endif
   else
     I_rho = GV%Z_to_H * GV%RZ_to_H
     if (Z_T_units) I_rho = GV%H_to_Z * GV%RZ_to_H ! == 1.0 / GV%Rho0
-    if (offload) then
       !$omp target teams loop collapse(2)
       do j=js,je ; do i=is,ie
         U_star(i,j) = sqrt(forces%tau_mag(i,j) * I_rho)
       enddo ; enddo
-    else
-      do concurrent (j=js:je, i=is:ie)
-        U_star(i,j) = sqrt(forces%tau_mag(i,j) * I_rho)
-      enddo
-    endif
   endif
 
 end subroutine find_ustar_mech_forcing

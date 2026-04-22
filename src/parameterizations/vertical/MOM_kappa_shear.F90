@@ -522,13 +522,13 @@ subroutine Calc_kappa_shear_vertex(u_in, v_in, h, T_in, S_in, tv, p_surf, kappa_
   ! Diagnostics that should be deleted?
   isB = G%isc-1 ; ieB = G%iecB ; jsB = G%jsc-1 ; jeB = G%jecB ; nz = GV%ke
 
-  if (CS%debug) then
-    !$omp target update from(u_in, v_in, h)
-    call uvchksum("kappa_shear_vertex [uv]_in (halo)", u_in, v_in, G%HI, haloshift=1, unscale=US%L_T_to_m_s)
-    call hchksum(h,    "kappa_shear_vertex h (halo)",    G%HI, haloshift=1, unscale=GV%H_to_m)
-    call hchksum(T_in, "kappa_shear_vertex T_in (halo)", G%HI, haloshift=1, unscale=US%C_to_degC)
-    call hchksum(S_in, "kappa_shear_vertex S_in (halo)", G%HI, haloshift=1, unscale=US%S_to_ppt)
-  endif
+  !if (CS%debug) then
+  !  !$omp target update from(u_in, v_in, h)
+  !  call uvchksum("kappa_shear_vertex [uv]_in (halo)", u_in, v_in, G%HI, haloshift=1, unscale=US%L_T_to_m_s)
+  !  call hchksum(h,    "kappa_shear_vertex h (halo)",    G%HI, haloshift=1, unscale=GV%H_to_m)
+  !  call hchksum(T_in, "kappa_shear_vertex T_in (halo)", G%HI, haloshift=1, unscale=US%C_to_degC)
+  !  call hchksum(S_in, "kappa_shear_vertex S_in (halo)", G%HI, haloshift=1, unscale=US%S_to_ppt)
+  !endif
 
   if ((CS%id_N2_init>0) .or. CS%debug) diag_N2_init(:,:,:) = 0.0
   if ((CS%id_S2_init>0) .or. CS%debug) diag_S2_init(:,:,:) = 0.0

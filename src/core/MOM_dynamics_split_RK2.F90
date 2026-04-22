@@ -517,13 +517,13 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
 
   call PressureForce(h, tv, CS%PFu, CS%PFv, G, GV, US, CS%PressureForce_CSp, &
                      CS%ALE_CSp, CS%ADp, p_surf, CS%pbce, CS%eta_PF)
-  if (CS%debug) then
-    !$omp target update from(CS%PFu, CS%PFv, CS%pbce)
-    call uvchksum("PFu just-returned-from-PressureForce", &
-                  CS%PFu, CS%PFv, G%HI, haloshift=0, symmetric=sym, unscale=US%L_T2_to_m_s2)
-    call hchksum(CS%pbce, "pbce just-returned-from-PressureForce", &
-                 G%HI, haloshift=0, unscale=GV%m_to_H*US%L_T_to_m_s**2)
-  endif
+  !if (CS%debug) then
+  !  !$omp target update from(CS%PFu, CS%PFv, CS%pbce)
+  !  call uvchksum("PFu just-returned-from-PressureForce", &
+  !                CS%PFu, CS%PFv, G%HI, haloshift=0, symmetric=sym, unscale=US%L_T2_to_m_s2)
+  !  call hchksum(CS%pbce, "pbce just-returned-from-PressureForce", &
+  !               G%HI, haloshift=0, unscale=GV%m_to_H*US%L_T_to_m_s**2)
+  !endif
 
   if (dyn_p_surf) then
     !$omp target update from(CS%eta_PF)
@@ -1615,6 +1615,7 @@ subroutine initialize_dyn_split_RK2(u, v, h, tv, uh, vh, eta, Time, G, GV, US, p
   !$omp target enter data map(alloc: CS%visc_rem_u, CS%visc_rem_v)
   ALLOC_(CS%eta_PF(isd:ied,jsd:jed))          ; CS%eta_PF(:,:)       = 0.0
   ALLOC_(CS%pbce(isd:ied,jsd:jed,nz))         ; CS%pbce(:,:,:)       = 0.0
+  !  JORGE TODO: this used to be alloc, but they now contain something so to
   !$omp target enter data map(to: CS%pbce, CS%eta_PF)
   ALLOC_(CS%u_accel_bt(IsdB:IedB,jsd:jed,nz)) ; CS%u_accel_bt(:,:,:) = 0.0
   ALLOC_(CS%v_accel_bt(isd:ied,JsdB:JedB,nz)) ; CS%v_accel_bt(:,:,:) = 0.0
@@ -1757,6 +1758,7 @@ subroutine initialize_dyn_split_RK2(u, v, h, tv, uh, vh, eta, Time, G, GV, US, p
           h_tmp(i,j,k) = h(i,j,k)
         enddo ; enddo ; enddo
         call continuity(CS%u_av, CS%v_av, h, h_tmp, uh, vh, dt, G, GV, US, CS%continuity_CSp, CS%OBC, pbv)
+        ! JORGE TODO: pass var is on host 
         !$omp target update from(h_tmp)
         call pass_var(h_tmp, G%Domain, clock=id_clock_pass_init)
         !$omp target update to(h_tmp)

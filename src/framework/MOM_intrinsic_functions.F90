@@ -138,23 +138,24 @@ pure subroutine rescale_cbrt(a, x, e_r, s_a)
     ! Exponent of x
   integer(kind=int64) :: e_div, e_mod
     ! Quotient and remainder of e in e = 3*(e/3) + modulo(e,3).
+  integer(kind=int64) :: q, r, sign_bit
 
   ! Pack bits of a into xb and extract its exponent and sign.
   xb = transfer(a, 1_int64)
   s_a = ibits(xb, signbit, 1)
   e_a = ibits(xb, expbit, explen) - bias
 
+  !e_mod = modulo(e_a, 3_int64)
+  !e_div = (e_a - e_mod)/3
+  ! JORGE TODO: althought this is bitwise identical (so far) we might want a compiler guard
   ! Compute terms of exponent decomposition e = 3*(e/3) + modulo(e,3).
   ! Branchless floor-division emulation, avoiding int64 modulo intrinsic
   ! (which lowers to a compiler runtime helper unavailable on device).
-  block
-    integer(kind=int64) :: q, r, sign_bit
-    q = e_a / 3_int64                      ! truncated quotient
-    r = e_a - q * 3_int64                  ! truncated remainder, sign of e_a
-    sign_bit = ishft(r, -63)               ! 1 if r < 0, else 0
-    e_mod = r + 3_int64 * sign_bit
-    e_div = q - sign_bit
-  end block
+  q = e_a / 3_int64                      ! truncated quotient
+  r = e_a - q * 3_int64                  ! truncated remainder, sign of e_a
+  sign_bit = ishft(r, -63)               ! 1 if r < 0, else 0
+  e_mod = r + 3_int64 * sign_bit
+  e_div = q - sign_bit
 
   ! Our scaling decomposes e_a into e = {3*(e/3) + 3} + {modulo(e,3) - 3}.
 

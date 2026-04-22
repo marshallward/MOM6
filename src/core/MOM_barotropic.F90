@@ -1070,6 +1070,7 @@ subroutine btstep(U_in, V_in, eta_in, dt, bc_accel_u, bc_accel_v, forces, pbce, 
   do concurrent (J=js-1:je, i=is-1:ie+1)
     vbt_Cor(i,J) = 0.0
   enddo
+  ! JORGE TODO: CHANGE BACK TO DO CONCURRENT
   !$omp target teams loop map(tofrom: ubt_Cor) map(to: wt_u, U_Cor)
   do j=js,je
     do k=1,nz

@@ -1068,9 +1068,9 @@ subroutine step_MOM(forces_in, fluxes_in, sfc_state, Time_start, time_int_in, CS
       call cpu_clock_begin(id_clock_dynamics)
       ! Determining the time-average sea surface height is part of the algorithm.
       ! This may be eta_av if Boussinesq, or need to be diagnosed if not.
-      ! eta_av_bc is written on device by btstep's `do concurrent` under
-      ! -stdpar=gpu and consumed on host by find_eta — needs explicit sync.
       CS%time_in_cycle = CS%time_in_cycle + dt
+      ! find eta is still on the host
+      ! JORGE TODO: FIX
       call find_eta(h, CS%tv, G, GV, US, ssh, CS%eta_av_bc, dZref=G%Z_ref)
       do j=js,je ; do i=is,ie
         CS%ssh_rint(i,j) = CS%ssh_rint(i,j) + dt*ssh(i,j)
@@ -1370,7 +1370,8 @@ subroutine step_MOM_dynamics(forces, p_surf_begin, p_surf_end, dt, dt_tr_adv, &
       ! Sync kappa-shear viscosity fields from CPU to device. These are computed on
       ! CPU by set_diffusivity (via diabatic_ALE) and read on GPU by vertvisc_coef's
       ! find_coupling_coef_k kernel. Without this sync the device copy (from map(alloc:)
-      ! in set_visc_register_restarts) contains zeros, disabling shear-driven mixing.
+      ! in set_visc_register_restarts) contains zeros.
+      ! JORGE TODO: FIX
       !$omp target update to(CS%visc%Kv_shear) if (associated(CS%visc%Kv_shear))
       !$omp target update to(CS%visc%Kv_shear_Bu) if (associated(CS%visc%Kv_shear_Bu))
       call step_MOM_dyn_split_RK2(u, v, h, CS%tv, CS%visc, Time_local, dt, forces, &
@@ -1505,6 +1506,7 @@ subroutine step_MOM_dynamics(forces, p_surf_begin, p_surf_end, dt, dt_tr_adv, &
     else
       !$omp target update from(h, CS%uhtr, CS%vhtr)
     endif
+    ! JORGE TODO mixedlayer_restat on host for now: fix
     call cpu_clock_begin(id_clock_ml_restrat)
     call mixedlayer_restrat(h, CS%uhtr, CS%vhtr, CS%tv, forces, dt, CS%visc%MLD, CS%visc%h_ML, &
                             CS%visc%sfc_buoy_flx, CS%VarMix, G, GV, US, CS%mixedlayer_restrat_CSp)
