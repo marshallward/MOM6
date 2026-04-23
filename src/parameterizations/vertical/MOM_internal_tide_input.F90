@@ -143,7 +143,11 @@ subroutine set_int_tide_input(u, v, h, tv, fluxes, itide, dt, G, GV, US, CS)
 
   ! Smooth the properties through massless layers.
   if (use_EOS) then
+    !$omp target enter data map(to: h, tv%T, tv%S)
+    !$omp target enter data map(alloc: T_f, S_f)
     call vert_fill_TS(h, tv%T, tv%S, CS%kappa_fill*dt, T_f, S_f, G, GV, US, larger_h_denom=.true.)
+    !$omp target exit data map(from: T_f, S_f)
+    !$omp target exit data map(release: h, tv%T, tv%S)
   endif
 
   call find_N2_bottom(G, GV, US, tv, fluxes, h, T_f, S_f, itide%h2, N2_bot, Rho_bot, h_bot, k_bot)
