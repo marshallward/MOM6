@@ -211,11 +211,15 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
   endif
 
   if (use_EOS) then
+    !$omp target enter data map(to: h, tv%T, tv%S)
+    !$omp target enter data map(alloc: T, S)
     if (present(halo)) then
       call vert_fill_TS(h, tv%T, tv%S, dt_kappa_smooth, T, S, G, GV, US, halo+1)
     else
       call vert_fill_TS(h, tv%T, tv%S, dt_kappa_smooth, T, S, G, GV, US, 1)
     endif
+    !$omp target exit data map(from: T, S)
+    !$omp target exit data map(release: h, tv%T, tv%S)
   endif
 
   if ((use_EOS .and. allocated(tv%SpV_avg) .and. (tv%valid_SpV_halo < 1)) .and. &
@@ -660,15 +664,16 @@ subroutine vert_fill_TS(h, T_in, S_in, kappa_dt, T_f, S_f, G, GV, US, halo_here,
     if (larger_h_denom) h0 = 1.0e-16*sqrt(0.5*kap_dt_x2)
   endif
 
+  !$omp target enter data map(alloc: ent, b1, d1, c1)
+
   if (kap_dt_x2 <= 0.0) then
-    !$OMP parallel do default(shared)
-    do k=1,nz ; do j=js,je ; do i=is,ie
+    do concurrent (k=1:nz , j=js:je , i=is:ie)
       T_f(i,j,k) = T_in(i,j,k) ; S_f(i,j,k) = S_in(i,j,k)
-    enddo ; enddo ; enddo
+    enddo
   else
-    !$OMP parallel do default(shared) private(ent,b1,d1,c1,h_tr)
+    !$omp target teams distribute parallel do private( ent, b1, d1, c1 )
     do j=js,je
-      do i=is,ie
+      do concurrent( i=is:ie )
         ent(i,2) = kap_dt_x2 / ((h(i,j,1)+h(i,j,2)) + h0)
         h_tr = h(i,j,1) + h_neglect
         b1(i) = 1.0 / (h_tr + ent(i,2))
@@ -676,7 +681,7 @@ subroutine vert_fill_TS(h, T_in, S_in, kappa_dt, T_f, S_f, G, GV, US, halo_here,
         T_f(i,j,1) = (b1(i)*h_tr)*T_in(i,j,1)
         S_f(i,j,1) = (b1(i)*h_tr)*S_in(i,j,1)
       enddo
-      do k=2,nz-1 ; do i=is,ie
+      do k=2,nz-1 ; do concurrent( i=is:ie )
         ent(i,K+1) = kap_dt_x2 / ((h(i,j,k)+h(i,j,k+1)) + h0)
         h_tr = h(i,j,k) + h_neglect
         c1(i,k) = ent(i,K) * b1(i)
@@ -685,19 +690,21 @@ subroutine vert_fill_TS(h, T_in, S_in, kappa_dt, T_f, S_f, G, GV, US, halo_here,
         T_f(i,j,k) = b1(i) * (h_tr*T_in(i,j,k) + ent(i,K)*T_f(i,j,k-1))
         S_f(i,j,k) = b1(i) * (h_tr*S_in(i,j,k) + ent(i,K)*S_f(i,j,k-1))
       enddo ; enddo
-      do i=is,ie
+      do concurrent( i=is:ie )
         c1(i,nz) = ent(i,nz) * b1(i)
         h_tr = h(i,j,nz) + h_neglect
         b1(i) = 1.0 / (h_tr + d1(i)*ent(i,nz))
         T_f(i,j,nz) = b1(i) * (h_tr*T_in(i,j,nz) + ent(i,nz)*T_f(i,j,nz-1))
         S_f(i,j,nz) = b1(i) * (h_tr*S_in(i,j,nz) + ent(i,nz)*S_f(i,j,nz-1))
       enddo
-      do k=nz-1,1,-1 ; do i=is,ie
+      do k=nz-1,1,-1 ; do concurrent( i=is:ie )
         T_f(i,j,k) = T_f(i,j,k) + c1(i,k+1)*T_f(i,j,k+1)
         S_f(i,j,k) = S_f(i,j,k) + c1(i,k+1)*S_f(i,j,k+1)
       enddo ; enddo
     enddo
   endif
+
+  !$omp target exit data map(delete: ent, b1, d1, c1)
 
 end subroutine vert_fill_TS
 
