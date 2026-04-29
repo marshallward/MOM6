@@ -733,7 +733,6 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
   ! and the right-hand-side is destructively updated to be d'_k
 
   !$omp target enter data map(alloc: c1)
-  !$omp target enter data map(to: visc%Ray_u) if (allocated(visc%Ray_u))
 
   !$omp target teams loop collapse(2) &
   !$omp   private(b1, c1, d1, Ray, b_denom_1)
@@ -936,8 +935,6 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
     enddo
   endif
 
-  !$omp target enter data map(to: visc%Ray_v) if (allocated(visc%Ray_v))
-
   !$omp target teams loop collapse(2) &
   !$omp   private(b1, c1, d1, Ray, b_denom_1)
   do J=Jsq,Jeq ; do i=is,ie ; if (G%mask2dCv(i,J) > 0.) then
@@ -1107,8 +1104,6 @@ subroutine vertvisc(u, v, h, forces, visc, dt, OBC, ADp, CDp, G, GV, US, CS, &
   !$omp target exit data map(from: ADp%du_dt_str, ADp%dv_dt_str)
   !$omp target exit data map(delete: ADp)
   !$omp target exit data map(delete: surface_stress)
-  !$omp target exit data map(delete: visc%Ray_u) if (allocated(visc%Ray_u))
-  !$omp target exit data map(delete: visc%Ray_v) if (allocated(visc%Ray_v))
 
   ! Here the velocities associated with open boundary conditions are applied.
   if (associated(OBC)) then
@@ -2062,6 +2057,7 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
   !$omp target exit data map(delete: Ustar_2d)
 
   if (CS%debug) then
+    !$omp target update from(CS%h_u, CS%h_v, CS%a_u, CS%a_v)
     call uvchksum("loop vertvisc_coef h_[uv]", CS%h_u, CS%h_v, G%HI, haloshift=0, &
                   unscale=GV%H_to_m, scalar_pair=.true.)
     call uvchksum("vertvisc_coef a_[uv]", CS%a_u, CS%a_v, G%HI, haloshift=0, &

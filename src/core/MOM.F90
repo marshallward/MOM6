@@ -1058,7 +1058,6 @@ subroutine step_MOM(forces_in, fluxes_in, sfc_state, Time_start, time_int_in, CS
 
     if (do_dyn) then
       !$omp target enter data map(alloc: ssh)
-
       call cpu_clock_begin(id_clock_dynamics)
       ! Determining the time-average sea surface height is part of the algorithm.
       ! This may be eta_av if Boussinesq, or need to be diagnosed if not.
@@ -1136,6 +1135,7 @@ subroutine step_MOM(forces_in, fluxes_in, sfc_state, Time_start, time_int_in, CS
       call adjust_ssh_for_p_atm(CS%tv, G, GV, US, CS%ave_ssh_ibc, fluxes%p_surf_SSH, &
                                 CS%calc_rho_for_sea_lev)
     endif
+    !$omp target exit data map(delete: ssh)
   endif
 
   if (do_dyn .and. CS%interp_p_surf) then ; do j=jsd,jed ; do i=isd,ied

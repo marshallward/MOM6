@@ -1780,15 +1780,19 @@ subroutine initialize_dyn_split_RK2(u, v, h, tv, uh, vh, eta, Time, G, GV, US, p
       if (read_uv .and. read_h2) then
         call pass_var(CS%h_av, G%Domain, clock=id_clock_pass_init)
       else
-        do concurrent (k=1:nz, j=jsd:jed, i=isd:ied)
-          h_tmp(i,j,k) = h(i,j,k)
-        enddo
+        ! JORGE TODO: NEEDS TO BE PORTED TO GPU
+        do k=1,nz ; do j=jsd,jed ; do i=isd,ied ; h_tmp(i,j,k) = h(i,j,k) ; enddo ; enddo ; enddo
+
+
         call continuity(CS%u_av, CS%v_av, h, h_tmp, uh, vh, dt, G, GV, US, CS%continuity_CSp, CS%OBC, pbv)
         call pass_var(h_tmp, G%Domain, clock=id_clock_pass_init)
-        do concurrent (k=1:nz, j=jsd:jed, i=isd:ied)
+
+        ! JORGE TODO: THIS USED TO BE DC AND IT TRICKED ME
+        do k=1,nz ; do j=jsd,jed ; do i=isd,ied
           CS%h_av(i,j,k) = 0.5*(h(i,j,k) + h_tmp(i,j,k))
-        enddo
+        enddo ; enddo ; enddo
       endif
+
       call pass_vector(CS%u_av, CS%v_av, G%Domain, halo=cor_stencil, clock=id_clock_pass_init, complete=.false.)
       call pass_vector(uh, vh, G%Domain, halo=cor_stencil, clock=id_clock_pass_init, complete=.true.)
       !$omp target update to(CS%u_av, CS%v_av, CS%h_av, uh, vh)

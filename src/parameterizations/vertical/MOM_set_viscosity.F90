@@ -779,8 +779,10 @@ subroutine set_viscous_BBL(u, v, h, tv, visc, G, GV, US, CS, pbv)
 
         do concurrent (i=is:ie, .not.do_i(i,j)) ; T_EOS(i,j) = 0.0 ; S_EOS(i,j) = 0.0 ; enddo
 
-        do concurrent (k=1:nz, i=is:ie)
-          press(i,j) = press(i,j) + (GV%H_to_RZ*GV%g_Earth) * h_vel(i,j,k)
+        do concurrent (i=is:ie)
+          do k=1,nz
+            press(i,j) = press(i,j) + (GV%H_to_RZ*GV%g_Earth) * h_vel(i,j,k)
+          enddo
         enddo
       endif
     enddo ! end of j loop
@@ -788,7 +790,9 @@ subroutine set_viscous_BBL(u, v, h, tv, visc, G, GV, US, CS, pbv)
     if (use_BBL_EOS) then
       EOSdom(1,1) = is-G%IsdB+1 ; EOSdom(1,2) = ie-G%IsdB+1
       EOSdom(2,1) = jstart-G%JsdB+1 ; EOSdom(2,2) = Jeq-G%JsdB+1
+      !$omp target update from(T_EOS, S_EOS, press)
       call calculate_density_derivs(T_EOS, S_EOS, press, dR_dT, dR_dS, tv%eqn_of_state, EOSdom)
+      !$omp target update to(dR_dT, dR_dS)
     endif
 
     ! Find a BBL thickness given by equation 2.20 of Killworth and Edwards, 1999:
@@ -1862,11 +1866,7 @@ pure subroutine find_L_open_convex(vol_below, D_vel, Dp, Dm, L, GV, US, CS)
       L(K) = 1.0
     elseif (vol_below(K) <= Vol_direct) then
       ! Both edges of the cell are bounded by walls.
-      ! if (CS%answer_date < 20240101)) then
-        L(K) = (-0.25*C24_crv*vol_below(K))**C1_3
-      ! else
-      !   L(K) = cuberoot(-0.25*C24_crv*vol_below(K))
-      ! endif
+        L(K) = cuberoot(-0.25*C24_crv*vol_below(K))
     else
       ! x_R is at 1/2 but x_L is in the interior & L is found by iteratively solving
       !   vol_below(K) = 0.5*L^2*(slope + crv/3*(3-4L))
@@ -3388,6 +3388,7 @@ subroutine set_visc_init(Time, G, GV, US, param_file, diag, visc, CS, restart_CS
   if (CS%Channel_drag .or. CS%body_force_drag) then
     allocate(visc%Ray_u(IsdB:IedB,jsd:jed,nz), source=0.0)
     allocate(visc%Ray_v(isd:ied,JsdB:JedB,nz), source=0.0)
+    !$omp target enter data map(to: visc%Ray_u, visc%Ray_v)
     CS%id_Ray_u = register_diag_field('ocean_model', 'Rayleigh_u', diag%axesCuL, &
        Time, 'Rayleigh drag velocity at u points', 'm s-1', conversion=GV%H_to_m*US%s_to_T)
     CS%id_Ray_v = register_diag_field('ocean_model', 'Rayleigh_v', diag%axesCvL, &
@@ -3424,8 +3425,14 @@ subroutine set_visc_end(visc, CS)
   if (allocated(visc%kv_bbl_v)) deallocate(visc%kv_bbl_v)
   if (allocated(CS%bbl_u)) deallocate(CS%bbl_u)
   if (allocated(CS%bbl_v)) deallocate(CS%bbl_v)
-  if (allocated(visc%Ray_u)) deallocate(visc%Ray_u)
-  if (allocated(visc%Ray_v)) deallocate(visc%Ray_v)
+  if (allocated(visc%Ray_u)) then
+    !$omp target exit data map(delete: visc%Ray_u)
+    deallocate(visc%Ray_u)
+  endif
+  if (allocated(visc%Ray_v)) then
+    !$omp target exit data map(delete: visc%Ray_v)
+    deallocate(visc%Ray_v)
+  endif
   if (allocated(visc%nkml_visc_u)) deallocate(visc%nkml_visc_u)
   if (allocated(visc%nkml_visc_v)) deallocate(visc%nkml_visc_v)
   if (associated(visc%Kd_shear)) deallocate(visc%Kd_shear)
