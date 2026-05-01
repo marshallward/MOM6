@@ -682,8 +682,7 @@ subroutine Set_pbce_Bouss(e, tv, G, GV, US, Rho0, GFS_scale, pbce, rho_star)
   integer :: EOSdom(2,2)     ! The computational domain for the equation of state
   integer :: Isq, Ieq, Jsq, Jeq, nz, i, j, k
 
-  !$omp target data map(alloc: Ihtot)
-
+  !$omp target data map(alloc: Ihtot) map(tofrom: e, pbce)
   Isq = G%IscB ; Ieq = G%IecB ; Jsq = G%JscB ; Jeq = G%JecB ; nz = GV%ke
 
   use_EOS = associated(tv%eqn_of_state)
@@ -705,6 +704,7 @@ subroutine Set_pbce_Bouss(e, tv, G, GV, US, Rho0, GFS_scale, pbce, rho_star)
         enddo
       enddo
     else
+      !! this is what is used
       !$omp target data &
       !$omp   map(alloc: EOSdom, press, T_int, S_int, rho_in_situ) &
       !$omp   map(alloc: dR_dT, dR_dS)
@@ -720,8 +720,10 @@ subroutine Set_pbce_Bouss(e, tv, G, GV, US, Rho0, GFS_scale, pbce, rho_star)
         press(i,j) = -Rho0xG * (e(i,j,1) - G%meanSL(i,j))
       enddo
 
+      !$omp target update from(Ihtot, press)
       call calculate_density(tv%T(:,:,1), tv%S(:,:,1), press, rho_in_situ, &
                              tv%eqn_of_state, EOSdom)
+      !$omp target update to(rho_in_situ)
 
       do concurrent (j=Jsq:Jeq+1, i=Isq:Ieq+1)
         pbce(i,j,1) = G_Rho0 * (GFS_scale * rho_in_situ(i,j)) * GV%H_to_Z
@@ -734,8 +736,10 @@ subroutine Set_pbce_Bouss(e, tv, G, GV, US, Rho0, GFS_scale, pbce, rho_star)
           S_int(i,j) = 0.5 * (tv%S(i,j,k-1) + tv%S(i,j,k))
         enddo
 
+        !$omp target update from(T_int, S_int, press)
         call calculate_density_derivs(T_int, S_int, press, dR_dT, dR_dS, &
                                       tv%eqn_of_state, EOSdom)
+        !$omp target update to(dR_dT, dR_dS)
 
         do concurrent (j=Jsq:Jeq+1, i=Isq:Ieq+1)
           pbce(i,j,k) = pbce(i,j,k-1) + G_Rho0 * &

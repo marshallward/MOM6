@@ -65,6 +65,7 @@ subroutine PressureForce(h, tv, PFu, PFv, G, GV, US, CS, ALE_CSp, ADp, p_atm, pb
 
   if (CS%Analytic_FV_PGF) then
     if (GV%Boussinesq) then
+      ! this is what is called in benchmark ALE
       call PressureForce_FV_Bouss(h, tv, PFu, PFv, G, GV, US, CS%PressureForce_FV, &
                                    ALE_CSp, ADp, p_atm, pbce, eta)
     else
