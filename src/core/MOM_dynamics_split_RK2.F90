@@ -524,6 +524,7 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
   if (CS%begw == 0.0) call enable_averages(dt, Time_local, CS%diag)
   call cpu_clock_begin(id_clock_pres)
 
+  ! maybe here?
   call PressureForce(h, tv, CS%PFu, CS%PFv, G, GV, US, CS%PressureForce_CSp, &
                      CS%ALE_CSp, CS%ADp, p_surf, CS%pbce, CS%eta_PF)
 
@@ -1640,7 +1641,7 @@ subroutine initialize_dyn_split_RK2(u, v, h, tv, uh, vh, eta, Time, G, GV, US, p
   !$omp target enter data map(alloc: CS%visc_rem_u, CS%visc_rem_v)
   ALLOC_(CS%eta_PF(isd:ied,jsd:jed))          ; CS%eta_PF(:,:)       = 0.0
   ALLOC_(CS%pbce(isd:ied,jsd:jed,nz))         ; CS%pbce(:,:,:)       = 0.0
-  !$omp target enter data map(alloc: CS%pbce, CS%eta_PF)
+  !$omp target enter data map(to: CS%pbce, CS%eta_PF)
   ALLOC_(CS%u_accel_bt(IsdB:IedB,jsd:jed,nz)) ; CS%u_accel_bt(:,:,:) = 0.0
   ALLOC_(CS%v_accel_bt(isd:ied,JsdB:JedB,nz)) ; CS%v_accel_bt(:,:,:) = 0.0
   !$omp target enter data map(alloc: CS%u_accel_bt, CS%v_accel_bt)
@@ -1766,6 +1767,10 @@ subroutine initialize_dyn_split_RK2(u, v, h, tv, uh, vh, eta, Time, G, GV, US, p
   endif
 
   !$omp target enter data map(alloc: h_tmp )
+
+  !$omp target teams loop collapse(3)
+  do k=1,nz ; do j=jsd,jed ; do i=isd,ied ; h_tmp(i,j,k) = 0.0 ; enddo ; enddo ; enddo
+
   if (CS%store_CAu) then
     if (query_initialized(CS%CAu_pred, "CAu", restart_CS) .and. &
         query_initialized(CS%CAv_pred, "CAv", restart_CS)) then
@@ -1781,13 +1786,22 @@ subroutine initialize_dyn_split_RK2(u, v, h, tv, uh, vh, eta, Time, G, GV, US, p
         call pass_var(CS%h_av, G%Domain, clock=id_clock_pass_init)
       else
         ! JORGE TODO: NEEDS TO BE PORTED TO GPU
+
+        !$omp target teams loop collapse(3)
         do k=1,nz ; do j=jsd,jed ; do i=isd,ied ; h_tmp(i,j,k) = h(i,j,k) ; enddo ; enddo ; enddo
 
 
+        ! so the problem ahs to be continuity
+      !$omp target update to(CS%u_av, CS%v_av, CS%h_av, uh, vh)
         call continuity(CS%u_av, CS%v_av, h, h_tmp, uh, vh, dt, G, GV, US, CS%continuity_CSp, CS%OBC, pbv)
+      !$omp target update from(CS%u_av, CS%v_av, CS%h_av, uh, vh)
+
+        !$omp target update from(h_tmp)
         call pass_var(h_tmp, G%Domain, clock=id_clock_pass_init)
+        !$omp target update to(h_tmp)
 
         ! JORGE TODO: THIS USED TO BE DC AND IT TRICKED ME
+        !$omp target teams loop collapse(3)
         do k=1,nz ; do j=jsd,jed ; do i=isd,ied
           CS%h_av(i,j,k) = 0.5*(h(i,j,k) + h_tmp(i,j,k))
         enddo ; enddo ; enddo

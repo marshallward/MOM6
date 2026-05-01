@@ -1941,6 +1941,7 @@ subroutine PressureForce_FV_Bouss(h, tv, PFu, PFv, G, GV, US, CS, ALE_CSp, ADp, 
   endif
 
   if (present(pbce)) then
+    ! assume this is called 
     call set_pbce_Bouss(e, tv_tmp, G, GV, US, rho0_set_pbce, CS%GFS_scale, pbce)
   endif
 

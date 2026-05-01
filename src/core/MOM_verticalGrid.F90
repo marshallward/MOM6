@@ -97,6 +97,7 @@ type, public :: verticalGrid_type
                         !! their internal representation into their unnscaled MKS units
                         !! (m2 s-1 or Pa s), depending on whether the model is Boussinesq
                         !! [T m2 H-1 Z-1 s-1 ~> 1] or [T Pa s H-1 Z-1 ~> 1]
+  logical :: is_init = .false. 
 
 end type verticalGrid_type
 
