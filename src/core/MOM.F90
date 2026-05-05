@@ -1120,7 +1120,6 @@ subroutine step_MOM(forces_in, fluxes_in, sfc_state, Time_start, time_int_in, CS
       ssh(i,j) = CS%ssh_rint(i,j) * I_wt_ssh
       CS%ave_ssh_ibc(i,j) = ssh(i,j)
     enddo
-    !$omp target update from(CS%ave_ssh_ibc)
 
     if (associated(CS%HA_CSp)) then
       !$omp target update from(ssh)
@@ -1174,6 +1173,7 @@ subroutine step_MOM(forces_in, fluxes_in, sfc_state, Time_start, time_int_in, CS
     endif
 
     if (CS%time_in_thermo_cycle > 0.0) then
+      !$omp target update from(CS%ave_ssh_ibc)
       call enable_averages(CS%time_in_thermo_cycle, Time_local, CS%diag)
       call post_surface_thermo_diags(CS%sfc_IDs, G, GV, US, CS%diag, CS%time_in_thermo_cycle, &
                                      sfc_state_diag, CS%tv, ssh, CS%ave_ssh_ibc)
@@ -4141,6 +4141,7 @@ subroutine adjust_ssh_for_p_atm(tv, G, GV, US, ssh, p_atm, use_EOS)
   is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec
   EOSdom(:) = EOS_domain(G%HI)
   if (associated(p_atm)) then
+    !$omp target update from(ssh)
     calc_rho = use_EOS .and. associated(tv%eqn_of_state)
     ! Correct the output sea surface height for the contribution from the ice pressure.
     do j=js,je
@@ -4158,8 +4159,8 @@ subroutine adjust_ssh_for_p_atm(tv, G, GV, US, ssh, p_atm, use_EOS)
         enddo
       endif
     enddo
+    !$omp target update to(ssh)
   endif
-
 end subroutine adjust_ssh_for_p_atm
 
 !> Set the surface (return) properties of the ocean model by
