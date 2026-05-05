@@ -1435,6 +1435,11 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
   ! These are used in diagnostics, so they need to be mapped back and forth
   !$omp target enter data map(to: hML_u, kv_u, kv_gl90_u )
   !$omp target enter data map(to: hML_v, kv_v, kv_gl90_v)
+  ! Kv_shear is persistently mapped on device via map(alloc:) in set_viscosity_init,
+  ! so map(to:) here would not copy host updates. Use target update to(...) to force
+  ! a host->device sync on every call.
+  !$omp target update to(visc%Kv_shear) if (associated(visc%Kv_shear))
+  !$omp target enter data map(to: visc%Kv_shear_Bu) if (associated(visc%Kv_shear_Bu))
 
 
   !$omp target teams distribute parallel do collapse(2) &
@@ -2049,6 +2054,8 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
 
   !$omp target exit data map(delete: z_i, z_i_gl90, dz_harm, hvel, dz_vel, a_cpl, a_cpl_gl90, &
   !$omp& tv, varmix, hvel_shelf, dz_vel_shelf, a_shelf, hml_u, kv_u, kv_gl90_u)
+  ! Kv_shear stays persistently mapped (see entry above); only release Kv_shear_Bu.
+  !$omp target exit data map(release: visc%Kv_shear_Bu) if (associated(visc%Kv_shear_Bu))
 
   ! These are used in diagnostics, so they need to be mapped back and forth
   !$omp target exit data map(from: hML_u, kv_u, kv_gl90_u )
