@@ -13,7 +13,7 @@ use MOM_cpu_clock,     only : cpu_clock_id, cpu_clock_begin, cpu_clock_end, CLOC
 use MOM_cvmix_conv,    only : cvmix_conv_is_used
 use MOM_CVMix_ddiff,   only : CVMix_ddiff_is_used
 use MOM_cvmix_shear,   only : cvmix_shear_is_used
-use MOM_debugging,     only : uvchksum, hchksum
+use MOM_debugging,     only : uvchksum, hchksum, Bchksum
 use MOM_diag_mediator, only : post_data, register_diag_field, safe_alloc_ptr
 use MOM_diag_mediator, only : diag_ctrl, time_type
 use MOM_domains,       only : pass_var, CORNER
@@ -218,6 +218,9 @@ subroutine set_viscous_BBL(u, v, h, tv, visc, G, GV, US, CS, pbv)
                 ! velocity point [R-1 ~> m3 kg-1].
     Rml_vel     ! Arithmetic mean of the layer coordinate densities adjacent
                 ! to a velocity point [R ~> kg m-3].
+  real, dimension(SZIB_(G),SZJB_(G),SZK_(GV)) :: &
+    diag_Rayleigh, & ! Per-cell Rayleigh drag coefficient (debug only).
+    diag_gam         ! gam = 1.0 - L(K+1)/L(K) (debug only).
   real :: dz(SZI_(G),SZJ_(G),SZK_(GV)) ! Height change across layers [Z ~> m]
 
   real :: h_vel_pos        ! The arithmetic mean thickness at a velocity point
@@ -384,7 +387,7 @@ subroutine set_viscous_BBL(u, v, h, tv, visc, G, GV, US, CS, pbv)
 
   !$omp target enter data map(to: tv, tv%T, tv%S, tv%p_surf, CS) map(alloc: Rml, p_ref, ustar, &
   !$omp   umag_avg, u2_bg, mask_u, mask_v, h_bbl_drag, dz_bbl_drag, do_i, dR_dS, dR_dT, D_u, D_v, &
-  !$omp   press, S_EOS, T_EOS, Rml_vel)
+  !$omp   press, S_EOS, T_EOS, Rml_vel, diag_Rayleigh, diag_gam)
 
   if ((nkml>0) .and. .not.use_BBL_EOS) then
     EOSdom(1,1) = Isq - (G%isd-1) ;  EOSdom(1,2) = G%iec+1 - (G%isd-1)
@@ -493,6 +496,34 @@ subroutine set_viscous_BBL(u, v, h, tv, visc, G, GV, US, CS, pbv)
 
   !$omp target enter data map(alloc: S_vel, T_vel, SpV_vel, h_vel, h_at_vel, dz_vel, &
   !$omp   dz_at_vel)
+
+  ! Zero-init: these arrays are only written at do_i(i,j) cells; uninit cells
+  ! make chksums diverge between CPU stack-garbage and GPU device-zero.
+  ! Plain do (not do concurrent) keeps the init on host; target update syncs
+  ! the device. Otherwise auto-offloaded `do concurrent` would only zero the
+  ! device copy, leaving host stack garbage that later host EOS calls write
+  ! back to device via `target update to`.
+  do j=G%JsdB,G%JedB ; do i=G%IsdB,G%IedB
+    ustar(i,j) = 0.0
+    umag_avg(i,j) = 0.0
+    u2_bg(i,j) = 0.0
+    h_bbl_drag(i,j) = 0.0
+    dz_bbl_drag(i,j) = 0.0
+    press(i,j) = 0.0
+    dR_dT(i,j) = 0.0
+    dR_dS(i,j) = 0.0
+    T_EOS(i,j) = 0.0
+    S_EOS(i,j) = 0.0
+  enddo ; enddo
+  do k=1,nz ; do j=G%JsdB,G%JedB ; do i=G%IsdB,G%IedB
+    h_at_vel(i,j,k) = 0.0
+    dz_at_vel(i,j,k) = 0.0
+    diag_Rayleigh(i,j,k) = 0.0
+    diag_gam(i,j,k) = 0.0
+  enddo ; enddo ; enddo
+  !$omp target update to(ustar, umag_avg, u2_bg, h_bbl_drag, dz_bbl_drag, &
+  !$omp                  press, dR_dT, dR_dS, T_EOS, S_EOS, h_at_vel, dz_at_vel, &
+  !$omp                  diag_Rayleigh, diag_gam)
 
   do m=1,2
     if (m==1) then
@@ -795,6 +826,54 @@ subroutine set_viscous_BBL(u, v, h, tv, visc, G, GV, US, CS, pbv)
       !$omp target update to(dR_dT, dR_dS)
     endif
 
+    if (CS%debug) then
+      !$omp target update from(D_u, D_v, ustar, umag_avg, u2_bg, h_bbl_drag, dz_bbl_drag, &
+      !$omp&                   h_vel, h_at_vel, dz_vel, dz_at_vel, T_vel, S_vel, dR_dT, dR_dS, press)
+      call uvchksum("BBL pre-kernel D_[uv]", D_u, D_v, G%HI, haloshift=0, &
+                    scalar_pair=.true., unscale=US%Z_to_m)
+      ! Inputs to the do concurrent at line 681: 3D B-grid arrays (only valid on m's grid).
+      if (m==1) then
+        call Bchksum(h_at_vel,  "BBL pre-kernel h_at_vel (u)",  G%HI, haloshift=0)
+        call Bchksum(dz_at_vel, "BBL pre-kernel dz_at_vel (u)", G%HI, haloshift=0)
+        call Bchksum(h_vel,     "BBL pre-kernel h_vel (u)",     G%HI, haloshift=0)
+        call Bchksum(dz_vel,    "BBL pre-kernel dz_vel (u)",    G%HI, haloshift=0)
+        call Bchksum(T_vel,     "BBL pre-kernel T_vel (u)",     G%HI, haloshift=0)
+        call Bchksum(S_vel,     "BBL pre-kernel S_vel (u)",     G%HI, haloshift=0)
+      else
+        call Bchksum(h_at_vel,  "BBL pre-kernel h_at_vel (v)",  G%HI, haloshift=0)
+        call Bchksum(dz_at_vel, "BBL pre-kernel dz_at_vel (v)", G%HI, haloshift=0)
+        call Bchksum(h_vel,     "BBL pre-kernel h_vel (v)",     G%HI, haloshift=0)
+        call Bchksum(dz_vel,    "BBL pre-kernel dz_vel (v)",    G%HI, haloshift=0)
+        call Bchksum(T_vel,     "BBL pre-kernel T_vel (v)",     G%HI, haloshift=0)
+        call Bchksum(S_vel,     "BBL pre-kernel S_vel (v)",     G%HI, haloshift=0)
+      endif
+      if (m==1) then
+        call hchksum(ustar,      "BBL pre-kernel ustar (u)",      G%HI, haloshift=0)
+        call hchksum(umag_avg,   "BBL pre-kernel umag_avg (u)",   G%HI, haloshift=0)
+        call hchksum(u2_bg,      "BBL pre-kernel u2_bg (u)",      G%HI, haloshift=0)
+        call hchksum(h_bbl_drag, "BBL pre-kernel h_bbl_drag (u)", G%HI, haloshift=0)
+        call hchksum(dz_bbl_drag,"BBL pre-kernel dz_bbl_drag (u)",G%HI, haloshift=0)
+        if (use_BBL_EOS) then
+          call hchksum(dR_dT, "BBL pre-kernel dR_dT (u)", G%HI, haloshift=0)
+          call hchksum(dR_dS, "BBL pre-kernel dR_dS (u)", G%HI, haloshift=0)
+          call hchksum(press, "BBL pre-kernel press (u)", G%HI, haloshift=0)
+        endif
+        write(0,'(A,2ES25.17)') "BBL pre-kernel scalars: channel_break_depth, Z_ref =", &
+            CS%channel_break_depth, G%Z_ref
+      else
+        call hchksum(ustar,      "BBL pre-kernel ustar (v)",      G%HI, haloshift=0)
+        call hchksum(umag_avg,   "BBL pre-kernel umag_avg (v)",   G%HI, haloshift=0)
+        call hchksum(u2_bg,      "BBL pre-kernel u2_bg (v)",      G%HI, haloshift=0)
+        call hchksum(h_bbl_drag, "BBL pre-kernel h_bbl_drag (v)", G%HI, haloshift=0)
+        call hchksum(dz_bbl_drag,"BBL pre-kernel dz_bbl_drag (v)",G%HI, haloshift=0)
+        if (use_BBL_EOS) then
+          call hchksum(dR_dT, "BBL pre-kernel dR_dT (v)", G%HI, haloshift=0)
+          call hchksum(dR_dS, "BBL pre-kernel dR_dS (v)", G%HI, haloshift=0)
+          call hchksum(press, "BBL pre-kernel press (v)", G%HI, haloshift=0)
+        endif
+      endif
+    endif
+
     ! Find a BBL thickness given by equation 2.20 of Killworth and Edwards, 1999:
     !    ( f h / Cn u* )^2 + ( N h / Ci u* ) = 1
     ! where Cn=0.5 and Ci=20 (constants suggested by Zilitinkevich and Mironov, 1996).
@@ -1095,6 +1174,11 @@ subroutine set_viscous_BBL(u, v, h, tv, visc, G, GV, US, CS, pbv)
             Rayleigh = cdrag_conv * (L(K)-L(K+1)) * (1.0-BBL_frac) * &
                 (12.0*CS%c_Smag*h_vel_pos) /  (12.0*CS%c_Smag*h_vel_pos + &
                  cdrag_conv * gam*(1.0-gam)*(1.0-1.5*gam) * L(K)**2 * Cell_width)
+            if (m==1) then
+              diag_gam(I,j,k) = gam
+            else
+              diag_gam(i,J,k) = gam
+            endif
           else ! This layer feels no drag.
             Rayleigh = 0.0
           endif
@@ -1102,11 +1186,13 @@ subroutine set_viscous_BBL(u, v, h, tv, visc, G, GV, US, CS, pbv)
           if (m==1) then
             if (Rayleigh > 0.0) then
               v_at_u = set_v_at_u(v, h, G, GV, i, j, k, mask_v, OBC)
+              diag_Rayleigh(I,j,k) = Rayleigh
               visc%Ray_u(I,j,k) = Rayleigh * sqrt(u(I,j,k)*u(I,j,k) + v_at_u*v_at_u + u2_bg(I,j))
             else ; visc%Ray_u(I,j,k) = 0.0 ; endif
           else
             if (Rayleigh > 0.0) then
               u_at_v = set_u_at_v(u, h, G, GV, i, j, k, mask_u, OBC)
+              diag_Rayleigh(i,J,k) = Rayleigh
               visc%Ray_v(i,J,k) = Rayleigh * sqrt(v(i,J,k)*v(i,J,k) + u_at_v*u_at_v + u2_bg(i,j))
             else ; visc%Ray_v(i,J,k) = 0.0 ; endif
           endif
@@ -1195,11 +1281,23 @@ subroutine set_viscous_BBL(u, v, h, tv, visc, G, GV, US, CS, pbv)
         if (allocated(visc%Kv_bbl_v)) visc%Kv_bbl_v(i,J) = kv_bbl
       endif
     endif ; enddo ; enddo ! end of i & j loops
+
+    if (CS%debug) then
+      !$omp target update from(diag_Rayleigh, diag_gam)
+      if (m==1) then
+        call Bchksum(diag_Rayleigh, "BBL kernel diag_Rayleigh (u)", G%HI, haloshift=0)
+        call Bchksum(diag_gam,      "BBL kernel diag_gam (u)",      G%HI, haloshift=0)
+      else
+        call Bchksum(diag_Rayleigh, "BBL kernel diag_Rayleigh (v)", G%HI, haloshift=0)
+        call Bchksum(diag_gam,      "BBL kernel diag_gam (v)",      G%HI, haloshift=0)
+      endif
+    endif
   enddo ! end of m loop
 
   !$omp target exit data map(release: dz, tv, tv%T, tv%S, S_vel, T_vel, SpV_vel, h_vel, h_at_vel, &
   !$omp   dz_vel, dz_at_vel, Rml, Rml_vel, p_ref, ustar, umag_avg, u2_bg, mask_u, mask_v, &
-  !$omp   h_bbl_drag, dz_bbl_drag, do_i, dR_dS, dR_dT, D_u, D_v, press, S_EOS, T_EOS, tv%p_surf, CS)
+  !$omp   h_bbl_drag, dz_bbl_drag, do_i, dR_dS, dR_dT, D_u, D_v, press, S_EOS, T_EOS, tv%p_surf, &
+  !$omp   diag_Rayleigh, diag_gam, CS)
 
 ! Offer diagnostics for averaging
   if (CS%id_bbl_thick_u > 0) &
