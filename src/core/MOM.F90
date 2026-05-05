@@ -996,12 +996,10 @@ subroutine step_MOM(forces_in, fluxes_in, sfc_state, Time_start, time_int_in, CS
       endif
 
       if (do_advection) then ! Do advective transport and lateral tracer mixing.
-        !$omp target update from(h, CS%uhtr, CS%vhtr)
         call step_MOM_tracer_dyn(CS, G, GV, US, h, Time_local)
         if (CS%diabatic_first .and. abs(CS%t_dyn_rel_thermo) > 1e-6*dt) call MOM_error(FATAL, &
                 "step_MOM: Mismatch between the dynamics and diabatic times "//&
                 "with DIABATIC_FIRST.")
-        !$omp target update to(CS%uhtr, CS%vhtr)
       endif
     endif ! end of (do_dyn)
 
@@ -1606,9 +1604,12 @@ subroutine step_MOM_tracer_dyn(CS, G, GV, US, h, Time_local)
   integer :: halo_sz ! The size of a halo where data must be valid.
   logical :: x_first ! If true, advect tracers first in the x-direction, then y.
   logical :: showCallTree
+  integer :: i, j, k
+
   showCallTree = callTree_showQuery()
 
   if (CS%debug) then
+    !$omp target update from(h, CS%uhtr, CS%vhtr)
     call cpu_clock_begin(id_clock_other)
     call hchksum(h,"Pre-advection h", G%HI, haloshift=1, unscale=GV%H_to_MKS)
     call uvchksum("Pre-advection uhtr", CS%uhtr, CS%vhtr, G%HI, &
@@ -1627,11 +1628,11 @@ subroutine step_MOM_tracer_dyn(CS, G, GV, US, h, Time_local)
   call enable_averages(CS%t_dyn_rel_adv, Time_local, CS%diag)
 
   if (CS%use_particles .and. CS%use_uh_particles .and. (.not. CS%uh_particles_bug)) then
+    !$omp target update from(CS%uhtr, CS%vhtr, CS%h)
     ! Run particles using thickness-weighted velocity
     call particles_run(CS%particles, Time_local, CS%uhtr, CS%vhtr, CS%h, &
                        CS%tv, CS%t_dyn_rel_adv, CS%use_uh_particles)
   endif
-
 
   if (CS%alternate_first_direction) then
     ! This calculation of the value of G%first_direction from the start of the accumulation of
@@ -1650,9 +1651,11 @@ subroutine step_MOM_tracer_dyn(CS, G, GV, US, h, Time_local)
   if (CS%debug) call MOM_tracer_chksum("Post-diffuse ", CS%tracer_Reg, G)
   if (showCallTree) call callTree_waypoint("finished tracer advection/diffusion (step_MOM)")
   if (associated(CS%OBC)) then
+    !$omp target update from(CS%uhtr, CS%vhtr)
     call pass_vector(CS%uhtr, CS%vhtr, G%Domain)
     call update_segment_tracer_reservoirs(G, GV, CS%uhtr, CS%vhtr, h, CS%OBC, &
                      CS%tracer_Reg)
+    !$omp target update to(CS%uhtr, CS%vhtr)
   endif
   call cpu_clock_end(id_clock_tracer) ; call cpu_clock_end(id_clock_thermo)
 
@@ -1669,8 +1672,14 @@ subroutine step_MOM_tracer_dyn(CS, G, GV, US, h, Time_local)
   ! Reset the accumulated transports to 0 and record that the dynamics
   ! and advective times now agree.
   call cpu_clock_begin(id_clock_thermo) ; call cpu_clock_begin(id_clock_tracer)
-  CS%uhtr(:,:,:) = 0.0
-  CS%vhtr(:,:,:) = 0.0
+
+  do concurrent (k=1:GV%ke, j=G%jsd:G%jed, I=G%IsdB:G%IedB)
+    CS%uhtr(I,j,k) = 0.
+  enddo
+  do concurrent (k=1:GV%ke, J=G%JsdB:G%JedB, i=G%isd:G%ied)
+    CS%vhtr(i,J,k) = 0.
+  enddo
+
   CS%n_dyn_steps_in_adv = 0
   CS%t_dyn_rel_adv = 0.0
   call cpu_clock_end(id_clock_tracer) ; call cpu_clock_end(id_clock_thermo)
@@ -1704,6 +1713,7 @@ subroutine step_MOM_tracer_dyn(CS, G, GV, US, h, Time_local)
 
     ! Update derived thermodynamic quantities.
     if (allocated(CS%tv%SpV_avg)) then
+      !$omp target update from(h)
       call calc_derived_thermo(CS%tv, h, G, GV, US, halo=halo_sz, debug=CS%debug)
     endif
   endif

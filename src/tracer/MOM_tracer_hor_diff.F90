@@ -427,6 +427,7 @@ subroutine tracer_hordiff(h, dt, MEKE, VarMix, visc, G, GV, US, CS, Reg, tv, do_
   enddo
 
   if (CS%use_hor_bnd_diffusion) then
+    !$omp target update from(h)
 
     if (CS%show_call_tree) call callTree_waypoint("Calling horizontal boundary diffusion (tracer_hordiff)")
     !$omp target update from(khdt_x, khdt_y)
@@ -495,6 +496,7 @@ subroutine tracer_hordiff(h, dt, MEKE, VarMix, visc, G, GV, US, CS, Reg, tv, do_
   endif
 
   if (CS%use_neutral_diffusion) then
+    !$omp target update from(h)
 
     if (CS%show_call_tree) call callTree_waypoint("Calling neutral diffusion coeffs (tracer_hordiff)")
 
@@ -915,7 +917,7 @@ subroutine tracer_epipycnal_ML_diff(h, dt, Tr, ntr, khdt_epi_x, khdt_epi_y, G, &
   if (PEmax_kRho > nz) PEmax_kRho = nz ! PEmax_kRho could have been nz+1.
 
   h_exclude = 10.0*(GV%Angstrom_H + GV%H_subroundoff)
-  !$omp target update to(h)
+
   do concurrent (j=js-1:je+1) DO_LOCALITY(local(k, ns))
     do k=1,nkmb ; do concurrent (i=is-1:ie+1, G%mask2dT(i,j) > 0.0) DO_LOCALITY(local(ns))
       if (h(i,j,k) > h_exclude) then

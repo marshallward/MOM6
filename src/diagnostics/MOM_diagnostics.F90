@@ -1822,6 +1822,10 @@ subroutine post_transport_diagnostics(G, GV, US, uhtr, vhtr, h, IDs, diag_pre_dy
   call diag_save_grids(diag)
   call diag_copy_storage_to_diag(diag, diag_pre_dyn)
 
+  !$omp target update from(uhtr) if (any([IDs%id_umo_2d, IDs%id_umo, IDs%id_uhtr] > 0))
+  !$omp target update from(vhtr) if (any([IDs%id_vmo_2d, IDs%id_vmo, IDs%id_vhtr] > 0))
+  !$omp target update from(h) if (IDs%id_dynamics_h_tendency > 0)
+
   if (IDs%id_umo_2d > 0) then
     umo2d(:,:) = 0.0
     do k=1,nz ; do j=js,je ; do I=is-1,ie
