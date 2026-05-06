@@ -779,10 +779,10 @@ subroutine set_viscous_BBL(u, v, h, tv, visc, G, GV, US, CS, pbv)
 
         do concurrent (i=is:ie, .not.do_i(i,j)) ; T_EOS(i,j) = 0.0 ; S_EOS(i,j) = 0.0 ; enddo
 
-        do concurrent (i=is:ie)
-          do k=1,nz
+        do concurrent (k=1:nz, i=is:ie)
+          !do k=1,nz
             press(i,j) = press(i,j) + (GV%H_to_RZ*GV%g_Earth) * h_vel(i,j,k)
-          enddo
+          !enddo
         enddo
       endif
     enddo ! end of j loop
@@ -1866,7 +1866,8 @@ pure subroutine find_L_open_convex(vol_below, D_vel, Dp, Dm, L, GV, US, CS)
       L(K) = 1.0
     elseif (vol_below(K) <= Vol_direct) then
       ! Both edges of the cell are bounded by walls.
-        L(K) = cuberoot(-0.25*C24_crv*vol_below(K))
+        !L(K) = cuberoot(-0.25*C24_crv*vol_below(K))
+        L(K) = (-0.25*C24_crv*vol_below(K))**C1_3
     else
       ! x_R is at 1/2 but x_L is in the interior & L is found by iteratively solving
       !   vol_below(K) = 0.5*L^2*(slope + crv/3*(3-4L))
