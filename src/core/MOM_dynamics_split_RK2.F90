@@ -524,7 +524,6 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
   if (CS%begw == 0.0) call enable_averages(dt, Time_local, CS%diag)
   call cpu_clock_begin(id_clock_pres)
 
-  ! maybe here?
   call PressureForce(h, tv, CS%PFu, CS%PFv, G, GV, US, CS%PressureForce_CSp, &
                      CS%ALE_CSp, CS%ADp, p_surf, CS%pbce, CS%eta_PF)
 
@@ -1768,8 +1767,8 @@ subroutine initialize_dyn_split_RK2(u, v, h, tv, uh, vh, eta, Time, G, GV, US, p
 
   !$omp target enter data map(alloc: h_tmp )
 
-  !$omp target teams loop collapse(3)
-  do k=1,nz ; do j=jsd,jed ; do i=isd,ied ; h_tmp(i,j,k) = 0.0 ; enddo ; enddo ; enddo
+  !!$omp target teams loop collapse(3)
+  !do k=1,nz ; do j=jsd,jed ; do i=isd,ied ; h_tmp(i,j,k) = 0.0 ; enddo ; enddo ; enddo
 
   if (CS%store_CAu) then
     if (query_initialized(CS%CAu_pred, "CAu", restart_CS) .and. &
