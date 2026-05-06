@@ -1429,6 +1429,7 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
 
   ! First do u-points
 
+  ! TODO: tv and VarMix probably should be conditionally transferred (if at all)
   !$omp target enter data map(alloc: z_i, z_i_gl90, dz_harm, hvel, dz_vel, a_cpl, a_cpl_gl90, &
   !$omp& tv, varmix, hvel_shelf, dz_vel_shelf, a_shelf)
 
@@ -1440,7 +1441,6 @@ subroutine vertvisc_coef(u, v, h, dz, forces, visc, tv, dt, G, GV, US, CS, OBC, 
   ! a host->device sync on every call.
   !$omp target update to(visc%Kv_shear) if (associated(visc%Kv_shear))
   !$omp target enter data map(to: visc%Kv_shear_Bu) if (associated(visc%Kv_shear_Bu))
-
 
   !$omp target teams distribute parallel do collapse(2) &
   !$omp   private(z_i, z_i_gl90, dz_harm, hvel, dz_vel, a_cpl, a_cpl_gl90, &

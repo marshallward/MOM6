@@ -1815,8 +1815,10 @@ subroutine btstep(U_in, V_in, eta_in, dt, bc_accel_u, bc_accel_v, forces, pbce, 
       call hchksum(eta_PF_in, "BT eta_PF_in", G%HI, haloshift=0, unscale=GV%H_to_MKS)
     endif
     if (CS%linearized_BT_PV) then
+      !$omp target update from(CS%q_D)
       call Bchksum(CS%q_D, "BT PV (q_D)", CS%debug_BT_HI, haloshift=0, symmetric=.true., unscale=US%s_to_T/GV%H_to_MKS)
     else
+      !$omp target update from(q)
       call Bchksum(q, "BT PV (q)", CS%debug_BT_HI, haloshift=0, symmetric=.true., unscale=US%s_to_T/GV%H_to_MKS)
     endif
     !$omp target update from(DCor_u, DCor_v)
@@ -1839,7 +1841,9 @@ subroutine btstep(U_in, V_in, eta_in, dt, bc_accel_u, bc_accel_v, forces, pbce, 
     !$omp target update from(visc_rem_u, visc_rem_v)
     call uvchksum("BT visc_rem_[uv]", visc_rem_u, visc_rem_v, G%HI, haloshift=0, &
                   symmetric=.true., omit_corners=.true., scalar_pair=.true.)
+    !$omp target update from(bc_accel_u, bc_accel_v)
     call uvchksum("BT bc_accel_[uv]", bc_accel_u, bc_accel_v, G%HI, haloshift=0, unscale=US%L_T2_to_m_s2)
+    !$omp target update from(CS%IDatu, CS%IDatv)
     call uvchksum("BT IDat[uv]", CS%IDatu, CS%IDatv, G%HI, haloshift=0, &
                   unscale=GV%m_to_H, scalar_pair=.true.)
     call uvchksum("BT visc_rem_[uv]", visc_rem_u, visc_rem_v, G%HI, &
