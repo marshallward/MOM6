@@ -322,14 +322,12 @@ function diag_buffer_unit_tests_2d(verbose) result(fail)
     logical :: local_fail !< True if any of the unit tests fail
     integer, parameter :: is=1, ie=2, js=3, je=6
     real, parameter :: fill_value = -123.456
-    integer :: i
 
 
     local_fail = .false.
 
     call buffer%set_horizontal_extents(is=is, ie=ie, js=js, je=je)
     call buffer%set_fill_value(fill_value)
-    ! Grow the buffer 3 times
     call buffer%grow()
     if (any(buffer%buffer(1)%field(:,:) /= fill_value)) local_fail = .true.
     if (verbose) write(stdout,*) "fill_value_2d: ", local_fail
@@ -461,14 +459,12 @@ function diag_buffer_unit_tests_3d(verbose) result(fail)
     logical :: local_fail !< True if any of the unit tests fail
     integer, parameter :: is=1, ie=2, js=3, je=6, ks=1, ke=10
     real, parameter :: fill_value = -123.456
-    integer :: i
 
     local_fail = .false.
 
     call buffer%set_horizontal_extents(is=is, ie=ie, js=js, je=je)
     call buffer%set_vertical_extent(ks=ks, ke=ke)
     call buffer%set_fill_value(fill_value)
-    ! Grow the buffer 3 times
     call buffer%grow()
     if (any(buffer%buffer(1)%field(:,:,:) /= fill_value)) local_fail = .true.
     if (verbose) write(stdout,*) "fill_value_3d: ", local_fail
