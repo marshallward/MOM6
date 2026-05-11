@@ -136,6 +136,14 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
   integer :: is, ie, js, je, nz, IsdB
   integer :: i, j, k
 
+  ! For now, push tv sub arrays to device
+  ! TODO: This should be done outside of this routine
+  !$omp target enter data map(to: h, tv%T, tv%S, e)
+  !$omp target enter data map(to: tv%SpV_avg) if (allocated(tv%SpV_avg))
+
+  ! Allocate locals on device
+  !$omp target enter data map(alloc: T, S)
+
   if (present(halo)) then
     is = G%isc-halo ; ie = G%iec+halo ; js = G%jsc-halo ; je = G%jec+halo
     EOSdom_h1(:) = EOS_domain(G%HI, halo=halo+1)
@@ -204,15 +212,11 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
   endif
 
   if (use_EOS) then
-    !$omp target enter data map(to: h, tv%T, tv%S)
-    !$omp target enter data map(alloc: T, S)
     if (present(halo)) then
       call vert_fill_TS(h, tv%T, tv%S, dt_kappa_smooth, T, S, G, GV, US, halo+1)
     else
       call vert_fill_TS(h, tv%T, tv%S, dt_kappa_smooth, T, S, G, GV, US, 1)
     endif
-    !$omp target exit data map(from: T, S)
-    !$omp target exit data map(release: h, tv%T, tv%S)
   endif
 
   if ((use_EOS .and. allocated(tv%SpV_avg) .and. (tv%valid_SpV_halo < 1)) .and. &
@@ -262,7 +266,7 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
     ! UMW TODO: Add OBC and GxSpV logic
 
     ! Get density derivatives with i slices of T, S, and P at u points.
-    ! UMW TODO: Does this still have to be over I? 
+    ! UMW TODO: Does this still have to be over I?
     do j=js,je ; do k=nz,2,-1
       call calculate_density_derivs(T_uvh(:,j,k), S_uvh(:,j,k), pres_uvh(:,j,k), drho_dT(:,j,k), &
                                   drho_dS(:,j,k), tv%eqn_of_state, EOSdom_u)
@@ -294,7 +298,14 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
     drdkL = GV%Rlay(k)-GV%Rlay(k-1) ; drdkR = GV%Rlay(k)-GV%Rlay(k-1)
   endif
 
-  do j=js,je ; do K=nz,2,-1 ; do I=is-1,ie
+  ! Push derivatives to device
+  !$omp target enter data map(to: drho_dT, drho_dS)
+  !$omp target enter data map(to: drho_dT_dT_h) if (use_stanley)
+
+  !UMW: untested
+  !$omp target enter data map(alloc: GxSpV_u) if (present_N2_u .or. present(dzSxN))
+
+  do concurrent( j=js:je , K=nz:2 , I=is-1:ie )
     ! UMW: Since stanley parameterization requies EOS anyways, I'm putting
     ! the use_stanley loop inside of the use_EOS loop for clarity
     if (use_EOS) then
@@ -399,7 +410,7 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
                                               + (wtR * ( dzaR * drdkR ))) / (wtL + wtR) ) & ! dz * N
                       * abs(slope) * G%mask2dCu(I,j) ! x-direction contribution to S^2
 
-  enddo ; enddo ; enddo ! end of j-loop
+  enddo ! end of do zonal concurrent
 
   do i=is,ie
     GxSpV_v(i) = G_Rho0  !This will be changed if both use_EOS and allocated(tv%SpV_avg) are true
@@ -456,7 +467,14 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
     drdkL = GV%Rlay(k)-GV%Rlay(k-1) ; drdkR = GV%Rlay(k)-GV%Rlay(k-1)
   endif
 
-  do J=js-1,je ; do K=nz,2,-1 ; do i=is,ie
+  ! Push derivatives to device
+  !$omp target update to (drho_dT, drho_dS)
+  !$omp target update to (drho_dT_dT_h) if (use_stanley)
+
+  !UMW: untested
+  !$omp target enter data map(alloc: GxSpV_v) if (present_N2_v .or. present(dzSyN))
+
+  do concurrent(J=js-1:je, K=nz:2, i=is:ie)
 
     if (use_EOS) then
       ! Estimate the horizontal density gradients along layers.
@@ -560,7 +578,22 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
                                               + (wtR * ( dzaR * drdkR ))) / (wtL + wtR) ) & ! dz * N
                       * abs(slope) * G%mask2dCv(i,J) ! x-direction contribution to S^2
 
-  enddo ; enddo ; enddo ! end of j-loop
+  enddo ! end of meridional do concurrent
+
+  ! Delete derivatives from device
+  !$omp target exit data map(delete: drho_dT, drho_dS)
+  !$omp target exit data map(delete: drho_dT_dT_h) if (use_stanley)
+
+  !$omp target exit data map(delete: GxSpV_u) if (present_N2_u .or. present(dzSxN))
+  !$omp target exit data map(delete: GxSpV_v) if (present_N2_v .or. present(dzSyN))
+
+  ! For now, release tv types in subroutine
+  ! TODO: Move this outside of subroutine
+  !$omp target exit data map(release: h, tv%T, tv%S, e)
+  !$omp target exit data map(from: tv%SpV_avg) if (allocated(tv%SpV_avg))
+
+  ! Delete locals from device
+  !$omp target exit data map(delete: T, S)
 
 end subroutine calc_isoneutral_slopes
 
