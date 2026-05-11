@@ -79,33 +79,26 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
                   ! set there but will be ignored, it is used simultaneously with four different
                   ! inconsistent units of [R S-1 C-1 ~> kg m-3 degC-1 ppt-1], [R S-2 ~> kg m-3 ppt-2],
                   ! [T2 S-1 L-2 ~> kg m-3 ppt-1 Pa-1] and [T2 C-1 L-2 ~> kg m-3 degC-1 Pa-1].
-  real, dimension(SZIB_(G)) :: &
-    drho_dT_u, &  ! The derivative of density with temperature at u points [R C-1 ~> kg m-3 degC-1].
-    drho_dS_u     ! The derivative of density with salinity at u points [R S-1 ~> kg m-3 ppt-1].
-  real, dimension(SZI_(G)) :: &
-    drho_dT_v, &  ! The derivative of density with temperature at v points [R C-1 ~> kg m-3 degC-1].
-    drho_dS_v, &  ! The derivative of density with salinity at v points [R S-1 ~> kg m-3 ppt-1].
-    drho_dT_dT_h, & ! The second derivative of density with temperature at h points [R C-2 ~> kg m-3 degC-2]
-    drho_dT_dT_hr ! The second derivative of density with temperature at h (+1) points [R C-2 ~> kg m-3 degC-2]
-  real, dimension(SZIB_(G)) :: &
-    T_u, &        ! Temperature on the interface at the u-point [C ~> degC].
-    S_u, &        ! Salinity on the interface at the u-point [S ~> ppt].
-    GxSpV_u, &    ! Gravitiational acceleration times the specific volume at an interface
+  !UMW Test: Promote to 3d to factor out calculate_density_derivs() calls
+  !UMW TODO: What are the best indices to use for these new 3d arrays?
+  real, dimension(SZIB_(G)) :: GxSpV_u  ! Gravitational acceleration times the specific volume at an interface
                   ! at the u-points [L2 Z-1 T-2 R-1 ~> m4 s-2 kg-1]
-    pres_u        ! Pressure on the interface at the u-point [R L2 T-2 ~> Pa].
-  real, dimension(SZI_(G)) :: &
-    T_v, &        ! Temperature on the interface at the v-point [C ~> degC].
-    S_v, &        ! Salinity on the interface at the v-point [S ~> ppt].
-    GxSpV_v, &    ! Gravitiational acceleration times the specific volume at an interface
+  real, dimension(SZI_(G)) :: GxSpV_v  ! Gravitational acceleration times the specific volume at an interface
                   ! at the v-points [L2 Z-1 T-2 R-1 ~> m4 s-2 kg-1]
-    pres_v        ! Pressure on the interface at the v-point [R L2 T-2 ~> Pa].
-  real, dimension(SZI_(G)) :: &
-    T_h, &        ! Temperature on the interface at the h-point [C ~> degC].
-    S_h, &        ! Salinity on the interface at the h-point [S ~> ppt]
-    pres_h, &     ! Pressure on the interface at the h-point [R L2 T-2 ~> Pa].
-    T_hr, &       ! Temperature on the interface at the h (+1) point [C ~> degC].
-    S_hr, &       ! Salinity on the interface at the h (+1) point [S ~> ppt]
-    pres_hr       ! Pressure on the interface at the h (+1) point [R L2 T-2 ~> Pa].
+  real, dimension(SZIB_(G), SZJB_(G), SZK_(GV)) :: &
+    drho_dT, &  ! The derivative of density with temperature calculated at  
+                ! both u and v points [R C-1 ~> kg m-3 degC-1].
+    drho_dS     ! The derivative of density with salinity calculated at
+                ! both u and v points [R S-1 ~> kg m-3 ppt-1].
+  !UMW TODO: Find better name for these variables
+  real, dimension(SZIB_(G), SZJB_(G), SZK_(GV)) :: &
+    drho_dT_dT_h, & ! The second derivative of density with temperature at h points [R C-2 ~> kg m-3 degC-2]
+    T_uvh, &        ! Array used to hold temperature at the u,v or h-points for derivative calculations[C ~> degC].
+    S_uvh, &        ! Array used to hold salinity at the u,v or h-points for derivative calculations[S ~> ppt].
+    ! UMW TODO: figure out best way to integrate this array. 
+    ! GxSpV_uvh, &    ! Gravitiational acceleration times the specific volume at an interface
+                  ! at the u-points [L2 Z-1 T-2 R-1 ~> m4 s-2 kg-1]
+    pres_uvh        ! Array used to hold pressure on the interface at the u,v or h-points [R L2 T-2 ~> Pa].
   real :: drdiA, drdiB  ! Along layer zonal potential density  gradients in the layers above (A)
                         ! and below (B) the interface times the grid spacing [R ~> kg m-3].
   real :: drdjA, drdjB  ! Along layer meridional potential density  gradients in the layers above (A)
@@ -255,361 +248,319 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
   do I=is-1,ie
     GxSpV_u(I) = G_Rho0  ! This will be changed if both use_EOS and allocated(tv%SpV_avg) are true
   enddo
-  !$OMP parallel do default(none) shared(nz,is,ie,js,je,IsdB,use_EOS,G,GV,US,pres,T,S,tv,h,e, &
-  !$OMP                                  h_neglect,dz_neglect,h_neglect2, &
-  !$OMP                                  present_N2_u,G_Rho0,N2_u,slope_x,dzSxN,EOSdom_u,EOSdom_h1, &
-  !$OMP                                  local_open_u_BC,dzu,OBC,use_stanley,OBC_friendly) &
-  !$OMP                          private(drdiA,drdiB,drdkL,drdkR,pres_u,T_u,S_u,      &
-  !$OMP                                  drho_dT_u,drho_dS_u,hg2A,hg2B,hg2L,hg2R,haA, &
-  !$OMP                                  drho_dT_dT_h,scrap,pres_h,T_h,S_h, &
-  !$OMP                                  haB,haL,haR,dzaL,dzaR,wtA,wtB,wtL,wtR,drdz,  &
-  !$OMP                                  drdx,mag_grad2,slope) &
-  !$OMP                          firstprivate(GxSpV_u)
-  do j=js,je ; do K=nz,2,-1
-    if (.not.(use_EOS)) then
-      drdiA = 0.0 ; drdiB = 0.0
-      drdkL = GV%Rlay(k)-GV%Rlay(k-1) ; drdkR = GV%Rlay(k)-GV%Rlay(k-1)
-    endif
 
-    ! Calculate the zonal isopycnal slope.
-    if (use_EOS) then
-      do I=is-1,ie
-        pres_u(I) = 0.5*(pres(i,j,K) + pres(i+1,j,K))
-        T_u(I) = 0.25*((T(i,j,k) + T(i+1,j,k)) + (T(i,j,k-1) + T(i+1,j,k-1)))
-        S_u(I) = 0.25*((S(i,j,k) + S(i+1,j,k)) + (S(i,j,k-1) + S(i+1,j,k-1)))
-      enddo
-      if (OBC_friendly) then
-        if (OBC%u_E_OBCs_on_PE .and. (j>=OBC%js_u_E_obc) .and. (j<=OBC%je_u_E_obc)) then
-          do I = max(is-1, OBC%Is_u_E_obc), min(ie, OBC%Ie_u_E_obc)
-            if (OBC%segnum_u(I,j) > 0) then !  OBC_DIRECTION_E
-              pres_u(I) = pres(i,j,K)
-              T_u(I) = 0.5*(T(i,j,k) + T(i,j,k-1))
-              S_u(I) = 0.5*(S(i,j,k) + S(i,j,k-1))
-            endif
-          enddo
-        endif
-        if (OBC%u_W_OBCs_on_PE .and. (j>=OBC%js_u_W_obc) .and. (j<=OBC%je_u_W_obc)) then
-          do I = max(is-1, OBC%Is_u_W_obc), min(ie, OBC%Ie_u_W_obc)
-            if (OBC%segnum_u(I,j) < 0) then !  OBC_DIRECTION_W
-              pres_u(I) = pres(i+1,j,K)
-              T_u(I) = 0.5*(T(i+1,j,k) + T(i+1,j,k-1))
-              S_u(I) = 0.5*(S(i+1,j,k) + S(i+1,j,k-1))
-            endif
-          enddo
-        endif
-      endif
-      call calculate_density_derivs(T_u, S_u, pres_u, drho_dT_u, drho_dS_u, &
-                                    tv%eqn_of_state, EOSdom_u)
-      if (present_N2_u .or. (present(dzSxN))) then
-        if (allocated(tv%SpV_avg)) then
-          do I=is-1,ie
-            GxSpV_u(I) = GV%g_Earth *  0.25* ((tv%SpV_avg(i,j,k) + tv%SpV_avg(i+1,j,k)) + &
-                                              (tv%SpV_avg(i,j,k-1) + tv%SpV_avg(i+1,j,k-1)))
-          enddo
-        endif
-      endif
-    endif
+  ! Calculate density derviatves outside of slope calculation since
+  ! deferred EOS subroutines cannot be called on the GPU
+  if (use_EOS) then
+    ! Calculate density derivatives using T,S,and P at u points. 
+    do j=js,je ; do K=nz,2,-1 ; do I=is-1,ie
+      pres_uvh(I,j,K) = 0.5*(pres(i,j,K) + pres(i+1,j,K))
+      T_uvh(I,j,K) = 0.25*((T(i,j,k) + T(i+1,j,k)) + (T(i,j,k-1) + T(i+1,j,k-1)))
+      S_uvh(I,j,K) = 0.25*((S(i,j,k) + S(i+1,j,k)) + (S(i,j,k-1) + S(i+1,j,k-1)))
+    enddo ; enddo ; enddo
+
+    ! UMW TODO: Add OBC and GxSpV logic
+
+    ! Get density derivatives with i slices of T, S, and P at u points.
+    ! UMW TODO: Does this still have to be over I? 
+    do j=js,je ; do k=nz,2,-1
+      call calculate_density_derivs(T_uvh(:,j,k), S_uvh(:,j,k), pres_uvh(:,j,k), drho_dT(:,j,k), &
+                                  drho_dS(:,j,k), tv%eqn_of_state, EOSdom_u)
+    enddo ; enddo
 
     if (use_stanley) then
-      do i=is-1,ie+1
-        pres_h(i) = pres(i,j,K)
-        T_h(i) = 0.5*(T(i,j,k) + T(i,j,k-1))
-        S_h(i) = 0.5*(S(i,j,k) + S(i,j,k-1))
-      enddo
+      ! Recalculate T, S, and press at h-points for the second derivative calculation.
+      do j=js,je ; do K=nz,2,-1 ; do i=is-1,ie+1
+        pres_uvh(i,j,K) = pres(i,j,K)
+        T_uvh(i,j,K) = 0.5*(T(i,j,K) + T(i,j,K-1))
+        S_uvh(i,j,K) = 0.5*(S(i,j,K) + S(i,j,K-1))
+      enddo ; enddo ; enddo
+
       ! The second line below would correspond to arguments
       !            drho_dS_dS, drho_dS_dT, drho_dT_dT, drho_dS_dP, drho_dT_dP, &
-      call calculate_density_second_derivs(T_h, S_h, pres_h, &
-                   scrap, scrap, drho_dT_dT_h, scrap, scrap, &
+      ! UMW: Currently doing this over i slices, for simplicity - will eventually combine
+      ! with above
+      do j=js,je ; do K=nz,2,-1
+        call calculate_density_second_derivs(T_uvh(:,j,K), S_uvh(:,j,K), pres_uvh(:,j,K), &
+                   scrap, scrap, drho_dT_dT_h(:,j,K), scrap, scrap, &
                    tv%eqn_of_state, dom=EOSdom_h1)
-    endif
+      enddo ; enddo
+    
+    endif ! end use_stanley
 
-    do I=is-1,ie
-      if (use_EOS) then
-        ! Estimate the horizontal density gradients along layers.
-        drdiA = drho_dT_u(I) * (T(i+1,j,k-1)-T(i,j,k-1)) + &
-                drho_dS_u(I) * (S(i+1,j,k-1)-S(i,j,k-1))
-        drdiB = drho_dT_u(I) * (T(i+1,j,k)-T(i,j,k)) + &
-                drho_dS_u(I) * (S(i+1,j,k)-S(i,j,k))
+  ! If not using EOS, just set gradients to zero
+  else
+    drdiA = 0.0 ; drdiB = 0.0
+    drdkL = GV%Rlay(k)-GV%Rlay(k-1) ; drdkR = GV%Rlay(k)-GV%Rlay(k-1)
+  endif
 
-        ! Estimate the vertical density gradients times the grid spacing.
-        drdkL = (drho_dT_u(I) * (T(i,j,k)-T(i,j,k-1)) + &
-                 drho_dS_u(I) * (S(i,j,k)-S(i,j,k-1)))
-        drdkR = (drho_dT_u(I) * (T(i+1,j,k)-T(i+1,j,k-1)) + &
-                 drho_dS_u(I) * (S(i+1,j,k)-S(i+1,j,k-1)))
-      endif
+  do j=js,je ; do K=nz,2,-1 ; do I=is-1,ie
+    ! UMW: Since stanley parameterization requies EOS anyways, I'm putting
+    ! the use_stanley loop inside of the use_EOS loop for clarity
+    if (use_EOS) then
+      ! Estimate the horizontal density gradients along layers.
+      drdiA = drho_dT(I,j,K) * (T(i+1,j,k-1)-T(i,j,k-1)) + &
+              drho_dS(I,j,K) * (S(i+1,j,k-1)-S(i,j,k-1))
+      drdiB = drho_dT(I,j,K) * (T(i+1,j,k)-T(i,j,k)) + &
+              drho_dS(I,j,K) * (S(i+1,j,k)-S(i,j,k))
+
+      ! Estimate the vertical density gradients times the grid spacing.
+      drdkL = (drho_dT(I,j,K) * (T(i,j,k)-T(i,j,k-1)) + &
+                drho_dS(I,j,K) * (S(i,j,k)-S(i,j,k-1)))
+      drdkR = (drho_dT(I,j,K) * (T(i+1,j,k)-T(i+1,j,k-1)) + &
+                drho_dS(I,j,K) * (S(i+1,j,k)-S(i+1,j,k-1)))
+
       if (use_stanley) then
         ! Correction to the horizontal density gradient due to nonlinearity in
         ! the EOS rectifying SGS temperature anomalies
-        drdiA = drdiA + 0.5 * ((drho_dT_dT_h(i+1) * tv%varT(i+1,j,k-1)) - &
-                              (drho_dT_dT_h(i) * tv%varT(i,j,k-1)) )
-        drdiB = drdiB + 0.5 * ((drho_dT_dT_h(i+1) * tv%varT(i+1,j,k)) - &
-                              (drho_dT_dT_h(i) * tv%varT(i,j,k)) )
+        drdiA = drdiA + 0.5 * ((drho_dT_dT_h(i+1,j,K) * tv%varT(i+1,j,K-1)) - &
+                              (drho_dT_dT_h(i,j,K) * tv%varT(i,j,K-1)) )
+        drdiB = drdiB + 0.5 * ((drho_dT_dT_h(i+1,j,K) * tv%varT(i+1,j,K)) - &
+                              (drho_dT_dT_h(i,j,K) * tv%varT(i,j,K)) )
       endif
+    endif
 
-      hg2A = h(i,j,k-1)*h(i+1,j,k-1) + h_neglect2
-      hg2B = h(i,j,k)*h(i+1,j,k) + h_neglect2
-      hg2L = h(i,j,k-1)*h(i,j,k) + h_neglect2
-      hg2R = h(i+1,j,k-1)*h(i+1,j,k) + h_neglect2
-      haA = 0.5*(h(i,j,k-1) + h(i+1,j,k-1)) + h_neglect
-      haB = 0.5*(h(i,j,k) + h(i+1,j,k)) + h_neglect
-      haL = 0.5*(h(i,j,k-1) + h(i,j,k)) + h_neglect
-      haR = 0.5*(h(i+1,j,k-1) + h(i+1,j,k)) + h_neglect
-      if (GV%Boussinesq) then
-        dzaL = haL * GV%H_to_Z ; dzaR = haR * GV%H_to_Z
-      else
-        dzaL = 0.5*(e(i,j,K-1) - e(i,j,K+1)) + dz_neglect
-        dzaR = 0.5*(e(i+1,j,K-1) - e(i+1,j,K+1)) + dz_neglect
-      endif
-      if (present(dzu)) dzu(I,j,K) = 0.5*( dzaL + dzaR )
-      ! Use the harmonic mean thicknesses to weight the horizontal gradients.
-      ! These unnormalized weights have been rearranged to minimize divisions.
-      wtA = hg2A*haB ; wtB = hg2B*haA
-      wtL = hg2L*(haR*dzaR) ; wtR = hg2R*(haL*dzaL)
+    hg2A = h(i,j,k-1)*h(i+1,j,k-1) + h_neglect2
+    hg2B = h(i,j,k)*h(i+1,j,k) + h_neglect2
+    hg2L = h(i,j,k-1)*h(i,j,k) + h_neglect2
+    hg2R = h(i+1,j,k-1)*h(i+1,j,k) + h_neglect2
+    haA = 0.5*(h(i,j,k-1) + h(i+1,j,k-1)) + h_neglect
+    haB = 0.5*(h(i,j,k) + h(i+1,j,k)) + h_neglect
+    haL = 0.5*(h(i,j,k-1) + h(i,j,k)) + h_neglect
+    haR = 0.5*(h(i+1,j,k-1) + h(i+1,j,k)) + h_neglect
+    if (GV%Boussinesq) then
+      dzaL = haL * GV%H_to_Z ; dzaR = haR * GV%H_to_Z
+    else
+      dzaL = 0.5*(e(i,j,K-1) - e(i,j,K+1)) + dz_neglect
+      dzaR = 0.5*(e(i+1,j,K-1) - e(i+1,j,K+1)) + dz_neglect
+    endif
+    if (present(dzu)) dzu(I,j,K) = 0.5*( dzaL + dzaR )
+    ! Use the harmonic mean thicknesses to weight the horizontal gradients.
+    ! These unnormalized weights have been rearranged to minimize divisions.
+    wtA = hg2A*haB ; wtB = hg2B*haA
+    wtL = hg2L*(haR*dzaR) ; wtR = hg2R*(haL*dzaL)
 
-      drdz = ((wtL * drdkL) + (wtR * drdkR)) / ((dzaL*wtL) + (dzaR*wtR))
-      ! The expression for drdz above is mathematically equivalent to:
-      !   drdz = ((hg2L/haL) * drdkL/dzaL + (hg2R/haR) * drdkR/dzaR) / &
-      !          ((hg2L/haL) + (hg2R/haR))
-      ! which is an estimate of the gradient of density across geopotentials.
-      if (present_N2_u) then
-        if (OBC_friendly) then ; if (OBC%segnum_u(I,j) /= 0) then
-          if (OBC%segnum_u(I,j) > 0) then !  OBC_DIRECTION_E
-            drdz = drdkL / dzaL  ! Note that drdz is not used for slopes at OBC faces.
-            if (use_EOS .and. allocated(tv%SpV_avg)) &
-              GxSpV_u(I) = GV%g_Earth * 0.5 * (tv%SpV_avg(i,j,k) + tv%SpV_avg(i,j,k-1))
-          elseif (OBC%segnum_u(I,j) < 0) then !  OBC_DIRECTION_W
-            drdz = drdkR / dzaR
-            if (use_EOS .and. allocated(tv%SpV_avg)) &
-              GxSpV_u(I) = GV%g_Earth * 0.5 * (tv%SpV_avg(i+1,j,k) + tv%SpV_avg(i+1,j,k-1))
-          endif
-        endif ; endif
-
-        N2_u(I,j,K) = GxSpV_u(I) * drdz * G%mask2dCu(I,j) ! Square of buoyancy freq. [L2 Z-2 T-2 ~> s-2]
-      endif
-
-      if (use_EOS) then
-        drdx = ((wtA * drdiA + wtB * drdiB) / (wtA + wtB) - &
-                drdz * (e(i,j,K)-e(i+1,j,K))) * G%IdxCu(I,j)
-
-        ! This estimate of slope is accurate for small slopes, but bounded
-        ! to be between -1 and 1.
-        mag_grad2 = (US%Z_to_L*drdx)**2 + drdz**2
-        if (mag_grad2 > 0.0) then
-          slope = drdx / sqrt(mag_grad2)
-        else ! Just in case mag_grad2 = 0 ever.
-          slope = 0.0
+    drdz = ((wtL * drdkL) + (wtR * drdkR)) / ((dzaL*wtL) + (dzaR*wtR))
+    ! The expression for drdz above is mathematically equivalent to:
+    !   drdz = ((hg2L/haL) * drdkL/dzaL + (hg2R/haR) * drdkR/dzaR) / &
+    !          ((hg2L/haL) + (hg2R/haR))
+    ! which is an estimate of the gradient of density across geopotentials.
+    if (present_N2_u) then
+      if (OBC_friendly) then ; if (OBC%segnum_u(I,j) /= 0) then
+        if (OBC%segnum_u(I,j) > 0) then !  OBC_DIRECTION_E
+          drdz = drdkL / dzaL  ! Note that drdz is not used for slopes at OBC faces.
+          if (use_EOS .and. allocated(tv%SpV_avg)) &
+            GxSpV_u(I) = GV%g_Earth * 0.5 * (tv%SpV_avg(i,j,k) + tv%SpV_avg(i,j,k-1))
+        elseif (OBC%segnum_u(I,j) < 0) then !  OBC_DIRECTION_W
+          drdz = drdkR / dzaR
+          if (use_EOS .and. allocated(tv%SpV_avg)) &
+            GxSpV_u(I) = GV%g_Earth * 0.5 * (tv%SpV_avg(i+1,j,k) + tv%SpV_avg(i+1,j,k-1))
         endif
-      else ! With .not.use_EOS, the layers are constant density.
-        slope = (e(i+1,j,K)-e(i,j,K)) * G%IdxCu(I,j)
-      endif
+      endif ; endif
 
-      if (local_open_u_BC) then
-        if (OBC%segnum_u(I,j) /= 0) then
-          if (OBC%segment(abs(OBC%segnum_u(I,j)))%open) then
-            slope = 0.
-            ! This and/or the masking code below is to make slopes match inside
-            ! land mask. Might not be necessary except for DEBUG output.
+      N2_u(I,j,K) = GxSpV_u(I) * drdz * G%mask2dCu(I,j) ! Square of buoyancy freq. [L2 Z-2 T-2 ~> s-2]
+    endif
+
+    if (use_EOS) then
+      drdx = ((wtA * drdiA + wtB * drdiB) / (wtA + wtB) - &
+              drdz * (e(i,j,K)-e(i+1,j,K))) * G%IdxCu(I,j)
+
+      ! This estimate of slope is accurate for small slopes, but bounded
+      ! to be between -1 and 1.
+      mag_grad2 = (US%Z_to_L*drdx)**2 + drdz**2
+      if (mag_grad2 > 0.0) then
+        slope = drdx / sqrt(mag_grad2)
+      else ! Just in case mag_grad2 = 0 ever.
+        slope = 0.0
+      endif
+    else ! With .not.use_EOS, the layers are constant density.
+      slope = (e(i+1,j,K)-e(i,j,K)) * G%IdxCu(I,j)
+    endif
+
+    if (local_open_u_BC) then
+      if (OBC%segnum_u(I,j) /= 0) then
+        if (OBC%segment(abs(OBC%segnum_u(I,j)))%open) then
+          slope = 0.
+          ! This and/or the masking code below is to make slopes match inside
+          ! land mask. Might not be necessary except for DEBUG output.
 !           if (OBC%segnum_u(I,j) > 0) then !  OBC_DIRECTION_E
 !             slope_x(I+1,j,K) = 0.
 !           else
 !             slope_x(I-1,j,K) = 0.
 !           endif
-          endif
         endif
-        slope = slope * max(G%mask2dT(i,j), G%mask2dT(i+1,j))
       endif
+      slope = slope * max(G%mask2dT(i,j), G%mask2dT(i+1,j))
+    endif
 
-      slope_x(I,j,K) = slope
-      if (present(dzSxN)) &
-        dzSxN(I,j,K) = sqrt( GxSpV_u(I) * max(0., (wtL * ( dzaL * drdkL )) &
-                                                + (wtR * ( dzaR * drdkR ))) / (wtL + wtR) ) & ! dz * N
-                       * abs(slope) * G%mask2dCu(I,j) ! x-direction contribution to S^2
+    slope_x(I,j,K) = slope
+    if (present(dzSxN)) &
+      dzSxN(I,j,K) = sqrt( GxSpV_u(I) * max(0., (wtL * ( dzaL * drdkL )) &
+                                              + (wtR * ( dzaR * drdkR ))) / (wtL + wtR) ) & ! dz * N
+                      * abs(slope) * G%mask2dCu(I,j) ! x-direction contribution to S^2
 
-    enddo ! I
-  enddo ; enddo ! end of j-loop
+  enddo ; enddo ; enddo ! end of j-loop
 
   do i=is,ie
     GxSpV_v(i) = G_Rho0  !This will be changed if both use_EOS and allocated(tv%SpV_avg) are true
   enddo
   ! Calculate the meridional isopycnal slope.
-  !$OMP parallel do default(none) shared(nz,is,ie,js,je,IsdB,use_EOS,G,GV,US,pres,T,S,tv, &
-  !$OMP                                  h,h_neglect,e,dz_neglect, &
-  !$OMP                                  h_neglect2,present_N2_v,G_Rho0,N2_v,slope_y,dzSyN,EOSdom_v, &
-  !$OMP                                  dzv,local_open_v_BC,OBC,use_stanley,OBC_friendly) &
-  !$OMP                          private(drdjA,drdjB,drdkL,drdkR,pres_v,T_v,S_v,      &
-  !$OMP                                  drho_dT_v,drho_dS_v,hg2A,hg2B,hg2L,hg2R,haA, &
-  !$OMP                                  drho_dT_dT_h,scrap,pres_h,T_h,S_h, &
-  !$OMP                                  drho_dT_dT_hr,pres_hr,T_hr,S_hr,             &
-  !$OMP                                  haB,haL,haR,dzaL,dzaR,wtA,wtB,wtL,wtR,drdz,  &
-  !$OMP                                  drdy,mag_grad2,slope) &
-  !$OMP                          firstprivate(GxSpV_v)
-  do J=js-1,je ; do K=nz,2,-1
-    if (.not.(use_EOS)) then
-      drdjA = 0.0 ; drdjB = 0.0
-      drdkL = GV%Rlay(k)-GV%Rlay(k-1) ; drdkR = GV%Rlay(k)-GV%Rlay(k-1)
-    endif
 
-    if (use_EOS) then
-      do i=is,ie
-        pres_v(i) = 0.5*(pres(i,j,K) + pres(i,j+1,K))
-        T_v(i) = 0.25*((T(i,j,k) + T(i,j+1,k)) + (T(i,j,k-1) + T(i,j+1,k-1)))
-        S_v(i) = 0.25*((S(i,j,k) + S(i,j+1,k)) + (S(i,j,k-1) + S(i,j+1,k-1)))
-      enddo
-      if (OBC_friendly) then
-        if (OBC%v_N_OBCs_on_PE .and. (J>=OBC%Js_v_N_obc) .and. (J<=OBC%Je_v_N_obc)) then
-          do i = max(is, OBC%is_v_N_obc), min(ie, OBC%ie_v_N_obc)
-            if (OBC%segnum_v(i,J) > 0) then !  OBC_DIRECTION_N
-              pres_v(i) = pres(i,j,K)
-              T_v(i) = 0.5*(T(i,j,k) + T(i,j,k-1))
-              S_v(i) = 0.5*(S(i,j,k) + S(i,j,k-1))
-            endif
-          enddo
-        endif
-        if (OBC%v_S_OBCs_on_PE .and. (J>=OBC%Js_v_S_obc) .and. (J<=OBC%Je_v_S_obc)) then
-          do i = max(is, OBC%is_v_S_obc), min(ie, OBC%ie_v_S_obc)
-            if (OBC%segnum_v(i,J) < 0) then !  OBC_DIRECTION_S
-              pres_v(i) = pres(i,j+1,K)
-              T_v(i) = 0.5*(T(i,j+1,k) + T(i,j+1,k-1))
-              S_v(i) = 0.5*(S(i,j+1,k) + S(i,j+1,k-1))
-            endif
-          enddo
-        endif
-      endif
-      call calculate_density_derivs(T_v, S_v, pres_v, drho_dT_v, drho_dS_v, &
-                                    tv%eqn_of_state, EOSdom_v)
+  ! As before, calculate density derviatves outside of slope calculation since
+  ! deferred EOS subroutines cannot be called on the GPU, but this time in the
+  ! meridional direciton
+  if (use_EOS) then
+    ! Calculate density derivatives using T,S,and P at v points. 
+    do J=js-1,je ; do K=nz,2,-1 ; do i=is,ie
+      pres_uvh(i,J,K) = 0.5*(pres(i,j,K) + pres(i,j+1,K))
+      T_uvh(i,J,K) = 0.25*((T(i,j,K) + T(i,j+1,K)) + (T(i,j,K-1) + T(i,j+1,K-1)))
+      S_uvh(i,J,K) = 0.25*((S(i,j,K) + S(i,j+1,K)) + (S(i,j,K-1) + S(i,j+1,K-1)))
+    enddo ; enddo ; enddo
 
-      if ((present_N2_v) .or. (present(dzSyN))) then
-        if (allocated(tv%SpV_avg)) then
-          do i=is,ie
-            GxSpV_v(i) = GV%g_Earth *  0.25* ((tv%SpV_avg(i,j,k) + tv%SpV_avg(i,j+1,k)) + &
-                                              (tv%SpV_avg(i,j,k-1) + tv%SpV_avg(i,j+1,k-1)))
-          enddo
-        endif
-      endif
-    endif
+    ! UMW TODO: Add OBC and GxSpV logic
+
+    ! Get density derivatives with i slices of T, S, and P at u points.
+    ! UMW TODO: Does this still have to be over I? 
+    do J=js-1,je ; do K=nz,2,-1
+      call calculate_density_derivs(T_uvh(:,J,K), S_uvh(:,J,K), pres_uvh(:,J,K), drho_dT(:,J,K), &
+                                  drho_dS(:,J,K), tv%eqn_of_state, EOSdom_v)
+    enddo ; enddo
 
     if (use_stanley) then
-      do i=is,ie
-        pres_h(i) = pres(i,j,K)
-        T_h(i) = 0.5*(T(i,j,k) + T(i,j,k-1))
-        S_h(i) = 0.5*(S(i,j,k) + S(i,j,k-1))
+      ! Recalculate T, S, and press at h-points for the second derivative calculation.
+      do J=js-1,je ; do K=nz,2,-1 ; do i=is,ie
+        pres_uvh(i,J,K) = pres(i,j,K)
+        T_uvh(i,J,K) = 0.5*(T(i,j,K) + T(i,j,K-1))
+        S_uvh(i,J,K) = 0.5*(S(i,j,K) + S(i,j,K-1))
+      enddo ; enddo ; enddo
 
-        pres_hr(i) = pres(i,j+1,K)
-        T_hr(i) = 0.5*(T(i,j+1,k) + T(i,j+1,k-1))
-        S_hr(i) = 0.5*(S(i,j+1,k) + S(i,j+1,k-1))
-      enddo
       ! The second line below would correspond to arguments
       !            drho_dS_dS, drho_dS_dT, drho_dT_dT, drho_dS_dP, drho_dT_dP, &
-      call calculate_density_second_derivs(T_h, S_h, pres_h, &
-                   scrap, scrap, drho_dT_dT_h, scrap, scrap, &
-                   tv%eqn_of_state, dom=EOSdom_v)
-      call calculate_density_second_derivs(T_hr, S_hr, pres_hr, &
-                   scrap, scrap, drho_dT_dT_hr, scrap, scrap, &
-                   tv%eqn_of_state, dom=EOSdom_v)
-    endif
-    do i=is,ie
-      if (use_EOS) then
-        ! Estimate the horizontal density gradients along layers.
-        drdjA = drho_dT_v(i) * (T(i,j+1,k-1)-T(i,j,k-1)) + &
-                drho_dS_v(i) * (S(i,j+1,k-1)-S(i,j,k-1))
-        drdjB = drho_dT_v(i) * (T(i,j+1,k)-T(i,j,k)) + &
-                drho_dS_v(i) * (S(i,j+1,k)-S(i,j,k))
+      ! UMW: Currently doing this over i slices, for simplicity - will eventually combine
+      ! with above
+      ! UMW NOTE: changed J bounds to js-1:je+1 to account for extra J acces below
+      ! when calculate drdj 
+      do J=js-1,je+1 ; do K=nz,2,-1
+        call calculate_density_second_derivs(T_uvh(:,J,K), S_uvh(:,J,K), pres_uvh(:,J,K), &
+                   scrap, scrap, drho_dT_dT_h(:,J,K), scrap, scrap, &
+                   tv%eqn_of_state, dom=EOSdom_h1)
+      enddo ; enddo
+    
+    endif ! end use_stanley
 
-        ! Estimate the vertical density gradients times the grid spacing.
-        drdkL = (drho_dT_v(i) * (T(i,j,k)-T(i,j,k-1)) + &
-                 drho_dS_v(i) * (S(i,j,k)-S(i,j,k-1)))
-        drdkR = (drho_dT_v(i) * (T(i,j+1,k)-T(i,j+1,k-1)) + &
-                 drho_dS_v(i) * (S(i,j+1,k)-S(i,j+1,k-1)))
-      endif
+  ! If not using EOS, just set gradients to zero
+  ! UMW TODO: I think I could technically remove this, since 
+  ! they were set above
+  else
+    drdiA = 0.0 ; drdiB = 0.0
+    drdkL = GV%Rlay(k)-GV%Rlay(k-1) ; drdkR = GV%Rlay(k)-GV%Rlay(k-1)
+  endif
+
+  do J=js-1,je ; do K=nz,2,-1 ; do i=is,ie
+
+    if (use_EOS) then
+      ! Estimate the horizontal density gradients along layers.
+      drdjA = drho_dT(i,J,K) * (T(i,j+1,k-1)-T(i,j,k-1)) + &
+              drho_dS(i,J,K) * (S(i,j+1,k-1)-S(i,j,k-1))
+      drdjB = drho_dT(i,J,K) * (T(i,j+1,k)-T(i,j,k)) + &
+              drho_dS(i,J,K) * (S(i,j+1,k)-S(i,j,k))
+
+      ! Estimate the vertical density gradients times the grid spacing.
+      drdkL = (drho_dT(i,J,K) * (T(i,j,K)-T(i,j,K-1)) + &
+                drho_dS(i,J,K) * (S(i,j,K)-S(i,j,K-1)))
+      drdkR = (drho_dT(i,J,K) * (T(i,j+1,K)-T(i,j+1,K-1)) + &
+                drho_dS(i,J,K) * (S(i,j+1,K)-S(i,j+1,K-1)))
+
       if (use_stanley) then
         ! Correction to the horizontal density gradient due to nonlinearity in
         ! the EOS rectifying SGS temperature anomalies
-        drdjA = drdjA + 0.5 * ((drho_dT_dT_hr(i) * tv%varT(i,j+1,k-1)) - &
-                              (drho_dT_dT_h(i) * tv%varT(i,j,k-1)) )
-        drdjB = drdjB + 0.5 * ((drho_dT_dT_hr(i) * tv%varT(i,j+1,k)) - &
-                              (drho_dT_dT_h(i) * tv%varT(i,j,k)) )
+        ! UMW NOTE: drho_dT_DT replaced with J+1 index in 3d array
+        drdjA = drdjA + 0.5 * ((drho_dT_dT_h(i,J+1,K) * tv%varT(i,j+1,K-1)) - &
+                              (drho_dT_dT_h(i,J,K) * tv%varT(i,j,K-1)) )
+        drdjB = drdjB + 0.5 * ((drho_dT_dT_h(i,J+1,K) * tv%varT(i,j+1,K)) - &
+                              (drho_dT_dT_h(i,J,K) * tv%varT(i,j,K)) )
       endif
+    endif
 
-      hg2A = h(i,j,k-1)*h(i,j+1,k-1) + h_neglect2
-      hg2B = h(i,j,k)*h(i,j+1,k) + h_neglect2
-      hg2L = h(i,j,k-1)*h(i,j,k) + h_neglect2
-      hg2R = h(i,j+1,k-1)*h(i,j+1,k) + h_neglect2
-      haA = 0.5*(h(i,j,k-1) + h(i,j+1,k-1)) + h_neglect
-      haB = 0.5*(h(i,j,k) + h(i,j+1,k)) + h_neglect
-      haL = 0.5*(h(i,j,k-1) + h(i,j,k)) + h_neglect
-      haR = 0.5*(h(i,j+1,k-1) + h(i,j+1,k)) + h_neglect
-      if (GV%Boussinesq) then
-        dzaL = haL * GV%H_to_Z ; dzaR = haR * GV%H_to_Z
-      else
-        dzaL = 0.5*(e(i,j,K-1) - e(i,j,K+1)) + dz_neglect
-        dzaR = 0.5*(e(i,j+1,K-1) - e(i,j+1,K+1)) + dz_neglect
-      endif
-      if (present(dzv)) dzv(i,J,K) = 0.5*( dzaL + dzaR )
-      ! Use the harmonic mean thicknesses to weight the horizontal gradients.
-      ! These unnormalized weights have been rearranged to minimize divisions.
-      wtA = hg2A*haB ; wtB = hg2B*haA
-      wtL = hg2L*(haR*dzaR) ; wtR = hg2R*(haL*dzaL)
+    hg2A = h(i,j,k-1)*h(i,j+1,k-1) + h_neglect2
+    hg2B = h(i,j,k)*h(i,j+1,k) + h_neglect2
+    hg2L = h(i,j,k-1)*h(i,j,k) + h_neglect2
+    hg2R = h(i,j+1,k-1)*h(i,j+1,k) + h_neglect2
+    haA = 0.5*(h(i,j,k-1) + h(i,j+1,k-1)) + h_neglect
+    haB = 0.5*(h(i,j,k) + h(i,j+1,k)) + h_neglect
+    haL = 0.5*(h(i,j,k-1) + h(i,j,k)) + h_neglect
+    haR = 0.5*(h(i,j+1,k-1) + h(i,j+1,k)) + h_neglect
+    if (GV%Boussinesq) then
+      dzaL = haL * GV%H_to_Z ; dzaR = haR * GV%H_to_Z
+    else
+      dzaL = 0.5*(e(i,j,K-1) - e(i,j,K+1)) + dz_neglect
+      dzaR = 0.5*(e(i,j+1,K-1) - e(i,j+1,K+1)) + dz_neglect
+    endif
+    if (present(dzv)) dzv(i,J,K) = 0.5*( dzaL + dzaR )
+    ! Use the harmonic mean thicknesses to weight the horizontal gradients.
+    ! These unnormalized weights have been rearranged to minimize divisions.
+    wtA = hg2A*haB ; wtB = hg2B*haA
+    wtL = hg2L*(haR*dzaR) ; wtR = hg2R*(haL*dzaL)
 
-      drdz = ((wtL * drdkL) + (wtR * drdkR)) / ((dzaL*wtL) + (dzaR*wtR))
-      ! The expression for drdz above is mathematically equivalent to:
-      !   drdz = ((hg2L/haL) * drdkL/dzaL + (hg2R/haR) * drdkR/dzaR) / &
-      !          ((hg2L/haL) + (hg2R/haR))
-      ! which is an estimate of the gradient of density across geopotentials.
-      if (present_N2_v) then
-        if (OBC_friendly) then ; if (OBC%segnum_v(i,J) /= 0) then
-          if (OBC%segnum_v(i,J) > 0) then !  OBC_DIRECTION_N
-            drdz = drdkL / dzaL  ! Note that drdz is not used for slopes at OBC faces.
-            if (use_EOS .and. allocated(tv%SpV_avg)) &
-              GxSpV_v(i) = GV%g_Earth * 0.5 * (tv%SpV_avg(i,j,k) + tv%SpV_avg(i,j,k-1))
-          elseif (OBC%segnum_v(i,J) < 0) then !  OBC_DIRECTION_S
-            drdz = drdkL / dzaL
-            if (use_EOS .and. allocated(tv%SpV_avg)) &
-              GxSpV_v(i) = GV%g_Earth * 0.5 * (tv%SpV_avg(i,j+1,k) + tv%SpV_avg(i,j+1,k-1))
-          endif
-        endif ; endif
-
-        N2_v(i,J,K) = GxSpV_v(i) * drdz * G%mask2dCv(i,J) ! Square of buoyancy freq. [L2 Z-2 T-2 ~> s-2]
-      endif
-
-      if (use_EOS) then
-        drdy = ((wtA * drdjA + wtB * drdjB) / (wtA + wtB) - &
-                drdz * (e(i,j,K)-e(i,j+1,K))) * G%IdyCv(i,J)
-
-        ! This estimate of slope is accurate for small slopes, but bounded
-        ! to be between -1 and 1.
-        mag_grad2 = (US%Z_to_L*drdy)**2 + drdz**2
-        if (mag_grad2 > 0.0) then
-          slope = drdy / sqrt(mag_grad2)
-        else ! Just in case mag_grad2 = 0 ever.
-          slope = 0.0
+    drdz = ((wtL * drdkL) + (wtR * drdkR)) / ((dzaL*wtL) + (dzaR*wtR))
+    ! The expression for drdz above is mathematically equivalent to:
+    !   drdz = ((hg2L/haL) * drdkL/dzaL + (hg2R/haR) * drdkR/dzaR) / &
+    !          ((hg2L/haL) + (hg2R/haR))
+    ! which is an estimate of the gradient of density across geopotentials.
+    if (present_N2_v) then
+      if (OBC_friendly) then ; if (OBC%segnum_v(i,J) /= 0) then
+        if (OBC%segnum_v(i,J) > 0) then !  OBC_DIRECTION_N
+          drdz = drdkL / dzaL  ! Note that drdz is not used for slopes at OBC faces.
+          if (use_EOS .and. allocated(tv%SpV_avg)) &
+            GxSpV_v(i) = GV%g_Earth * 0.5 * (tv%SpV_avg(i,j,k) + tv%SpV_avg(i,j,k-1))
+        elseif (OBC%segnum_v(i,J) < 0) then !  OBC_DIRECTION_S
+          drdz = drdkL / dzaL
+          if (use_EOS .and. allocated(tv%SpV_avg)) &
+            GxSpV_v(i) = GV%g_Earth * 0.5 * (tv%SpV_avg(i,j+1,k) + tv%SpV_avg(i,j+1,k-1))
         endif
-      else ! With .not.use_EOS, the layers are constant density.
-        slope = (e(i,j+1,K)-e(i,j,K)) * G%IdyCv(i,J)
-      endif
+      endif ; endif
 
-      if (local_open_v_BC) then
-        if (OBC%segnum_v(i,J) /= 0) then
-          if (OBC%segment(abs(OBC%segnum_v(i,J)))%open) then
-            slope = 0.
-            ! This and/or the masking code below is to make slopes match inside
-            ! land mask. Might not be necessary except for DEBUG output.
+      N2_v(i,J,K) = GxSpV_v(i) * drdz * G%mask2dCv(i,J) ! Square of buoyancy freq. [L2 Z-2 T-2 ~> s-2]
+    endif
+
+    if (use_EOS) then
+      drdy = ((wtA * drdjA + wtB * drdjB) / (wtA + wtB) - &
+              drdz * (e(i,j,K)-e(i,j+1,K))) * G%IdyCv(i,J)
+
+      ! This estimate of slope is accurate for small slopes, but bounded
+      ! to be between -1 and 1.
+      mag_grad2 = (US%Z_to_L*drdy)**2 + drdz**2
+      if (mag_grad2 > 0.0) then
+        slope = drdy / sqrt(mag_grad2)
+      else ! Just in case mag_grad2 = 0 ever.
+        slope = 0.0
+      endif
+    else ! With .not.use_EOS, the layers are constant density.
+      slope = (e(i,j+1,K)-e(i,j,K)) * G%IdyCv(i,J)
+    endif
+
+    if (local_open_v_BC) then
+      if (OBC%segnum_v(i,J) /= 0) then
+        if (OBC%segment(abs(OBC%segnum_v(i,J)))%open) then
+          slope = 0.
+          ! This and/or the masking code below is to make slopes match inside
+          ! land mask. Might not be necessary except for DEBUG output.
 !           if (OBC%segnum_v(i,J)) > 0) then ! OBC_DIRECTION_N
 !             slope_y(i,J+1,K) = 0.
 !           else
 !             slope_y(i,J-1,K) = 0.
 !           endif
-          endif
         endif
-        slope = slope * max(G%mask2dT(i,j), G%mask2dT(i,j+1))
       endif
-      slope_y(i,J,K) = slope
-      if (present(dzSyN)) &
-        dzSyN(i,J,K) = sqrt( GxSpV_v(i) * max(0., (wtL * ( dzaL * drdkL )) &
-                                                + (wtR * ( dzaR * drdkR ))) / (wtL + wtR) ) & ! dz * N
-                        * abs(slope) * G%mask2dCv(i,J) ! x-direction contribution to S^2
+      slope = slope * max(G%mask2dT(i,j), G%mask2dT(i,j+1))
+    endif
+    slope_y(i,J,K) = slope
+    if (present(dzSyN)) &
+      dzSyN(i,J,K) = sqrt( GxSpV_v(i) * max(0., (wtL * ( dzaL * drdkL )) &
+                                              + (wtR * ( dzaR * drdkR ))) / (wtL + wtR) ) & ! dz * N
+                      * abs(slope) * G%mask2dCv(i,J) ! x-direction contribution to S^2
 
-    enddo ! i
-  enddo ; enddo ! end of j-loop
+  enddo ; enddo ; enddo ! end of j-loop
 
 end subroutine calc_isoneutral_slopes
 
