@@ -644,10 +644,10 @@ subroutine tracer_hordiff(h, dt, MEKE, VarMix, visc, G, GV, US, CS, Reg, tv, do_
   endif
   ! does this loOP? nah right yuou ned omp too (??) oh wow no it doe slop interesting, I think question mark
   !$ do m = 1, Reg%ntr
-    !$omp target exit data map(release: Reg%Tr(m)%t, Reg%Tr(m)%df_x, Reg%Tr(m)%df_y, &
+    !$omp target exit data map(from: Reg%Tr(m)%t, Reg%Tr(m)%df_x, Reg%Tr(m)%df_y, &
     !$omp   Reg%Tr(m)%df2d_x, Reg%tr(m)%df2d_y)  ! TEST: was map(from:) — this fixed it
   !$ enddo
-  !$omp target exit data map(release: Reg%Tr(:), Reg)
+  !$omp target exit data map(release: Reg%Tr, Reg)
 
   if (CS%debug) call MOM_tracer_chksum("After tracer diffusion ", Reg, G)
 
