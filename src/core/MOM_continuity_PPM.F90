@@ -820,7 +820,7 @@ subroutine zonal_mass_flux(u, h_in, h_W, h_E, uh, dt, G, GV, US, CS, OBC, por_fa
       if (present(uhbt) .or. set_BT_cont) then
         if (local_specified_BC .or. local_Flather_OBC) then
           ! TODO: restore serial any_simple_OBC compute?
-          do concurrent (j=j_start:j_end, I=i_start:i_end) reduce(.or.:any_simple_OBC)
+          do concurrent (j=j_start:j_end, I=i_start:i_end)
             ii=I-i_start+1 ; jj=j-j_start+1
             l_seg = abs(OBC%segnum_u(I,j))
 
@@ -1861,7 +1861,7 @@ subroutine meridional_mass_flux(v, h_in, h_S, h_N, vh, dt, G, GV, US, CS, OBC, p
       if (present(vhbt) .or. set_BT_cont) then
         if (local_specified_BC .or. local_Flather_OBC) then
           ! TODO: restore any_simple_OBC compute
-          do concurrent (J=J_start:J_end, i=i_start:i_end) reduce(.or.:any_simple_OBC)
+          do concurrent (J=J_start:J_end, i=i_start:i_end)
             ii=i-i_start+1 ; jj=J-j_start+1
             l_seg = abs(OBC%segnum_v(i,J))
 
