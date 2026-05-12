@@ -16,8 +16,6 @@ use MOM_unit_scaling, only : unit_scale_type
 use MOM_variables, only : BT_cont_type, porous_barrier_type
 use MOM_verticalGrid, only : verticalGrid_type
 
-!$ use omp_lib, only: omp_get_num_devices
-
 implicit none ; private
 
 #include <MOM_memory.h>
@@ -181,17 +179,10 @@ subroutine continuity_PPM(u, v, hin, h, uh, vh, dt, G, GV, US, CS, OBC, pbv, uhb
       "MOM_continuity_PPM: Either both visc_rem_u and visc_rem_v or neither "// &
       "one must be present in call to continuity_PPM.")
 
-  !$omp target enter data map(alloc: h_W, h_E, h_S, h_N)
-
   if (x_first) then
 
     !  First advect zonally, with loop bounds that accomodate the subsequent meridional advection.
     LB = set_continuity_loop_bounds(G, CS, i_stencil=.false., j_stencil=.true.)
-    ! set default block sizes for OpenMP offload
-    !$ if (omp_get_num_devices() > 0) then
-      !$ if (CS%niblock == 0) niblock = LB%ieh-LB%ish+2
-      !$ if (CS%njblock == 0) njblock = LB%jeh-LB%jsh+1
-    !$ endif
 
     call zonal_edge_thickness(hin, h_W, h_E, G, GV, US, CS, OBC, LB)
     call zonal_mass_flux(u, hin, h_W, h_E, uh, dt, G, GV, US, CS, OBC, pbv%por_face_areaU, &
@@ -200,11 +191,6 @@ subroutine continuity_PPM(u, v, hin, h, uh, vh, dt, G, GV, US, CS, OBC, pbv, uhb
 
     !  Now advect meridionally, using the updated thicknesses to determine the fluxes.
     LB = set_continuity_loop_bounds(G, CS, i_stencil=.false., j_stencil=.false.)
-
-    !$ if (omp_get_num_devices() > 0) then
-      !$ if (CS%niblock == 0) niblock = LB%ieh-LB%ish+1
-      !$ if (CS%njblock == 0) njblock = LB%jeh-LB%jsh+2
-    !$ endif
 
     call meridional_edge_thickness(h, h_S, h_N, G, GV, US, CS, OBC, LB)
     call meridional_mass_flux(v, h, h_S, h_N, vh, dt, G, GV, US, CS, OBC, pbv%por_face_areaV, &
@@ -215,10 +201,7 @@ subroutine continuity_PPM(u, v, hin, h, uh, vh, dt, G, GV, US, CS, OBC, pbv, uhb
 
     !  First advect meridionally, with loop bounds that accomodate the subsequent zonal advection.
     LB = set_continuity_loop_bounds(G, CS, i_stencil=.true., j_stencil=.false.)
-    !$ if (omp_get_num_devices() > 0) then
-      !$ if (CS%niblock == 0) niblock = LB%ieh-LB%ish+1
-      !$ if (CS%njblock == 0) njblock = LB%jeh-LB%jsh+2
-    !$ endif
+
     call meridional_edge_thickness(hin, h_S, h_N, G, GV, US, CS, OBC, LB)
     call meridional_mass_flux(v, hin, h_S, h_N, vh, dt, G, GV, US, CS, OBC, pbv%por_face_areaV, &
                               niblock, njblock, LB, vhbt, visc_rem_v, v_cor, BT_cont, dv_cor)
@@ -226,18 +209,12 @@ subroutine continuity_PPM(u, v, hin, h, uh, vh, dt, G, GV, US, CS, OBC, pbv, uhb
 
     !  Now advect zonally, using the updated thicknesses to determine the fluxes.
     LB = set_continuity_loop_bounds(G, CS, i_stencil=.false., j_stencil=.false.)
-    !$ if (omp_get_num_devices() > 0) then
-      !$ if (CS%niblock == 0) niblock = LB%ieh-LB%ish+2
-      !$ if (CS%njblock == 0) njblock = LB%jeh-LB%jsh+1
-    !$ endif
+
     call zonal_edge_thickness(h, h_W, h_E, G, GV, US, CS, OBC, LB)
     call zonal_mass_flux(u, h, h_W, h_E, uh, dt, G, GV, US, CS, OBC, pbv%por_face_areaU, &
                          niblock, njblock, LB, uhbt, visc_rem_u, u_cor, BT_cont, du_cor)
     call continuity_zonal_convergence(h, uh, dt, G, GV, LB, hmin=h_min)
   endif
-
-  !$omp target exit data map(delete: h_W, h_E, h_S, h_N)
-
 end subroutine continuity_PPM
 
 !> Finds the thickness fluxes from the continuity solver without actually updating the
@@ -279,18 +256,10 @@ subroutine continuity_3d_fluxes(u, v, h, uh, vh, dt, G, GV, US, CS, OBC, pbv)
   if (njblock == 0) njblock = default_njblock
 
   call zonal_edge_thickness(h, h_W, h_E, G, GV, US, CS, OBC)
-  !$ if (omp_get_num_devices() > 0) then
-    !$ if (CS%niblock == 0) niblock = G%iec-G%isc+2
-    !$ if (CS%njblock == 0) njblock = G%jec-G%jsc+1
-  !$ endif
   call zonal_mass_flux(u, h, h_W, h_E, uh, dt, G, GV, US, CS, OBC, pbv%por_face_areaU, &
                        niblock=niblock, njblock=njblock)
 
   call meridional_edge_thickness(h, h_S, h_N, G, GV, US, CS, OBC)
-  !$ if (omp_get_num_devices() > 0) then
-    !$ if (CS%niblock == 0) niblock = G%iec-G%isc+1
-    !$ if (CS%njblock == 0) njblock = G%jec-G%jsc+2
-  !$ endif
   call meridional_mass_flux(v, h, h_S, h_N, vh, dt, G, GV, US, CS, OBC, pbv%por_face_areaV, &
                             niblock=niblock, njblock=njblock)
 
@@ -405,19 +374,11 @@ subroutine continuity_adjust_vel(u, v, h, dt, G, GV, US, CS, OBC, pbv, uhbt, vhb
   v_in(:,:,:) = v(:,:,:)
 
   call zonal_edge_thickness(h, h_W, h_E, G, GV, US, CS, OBC)
-  !$ if (omp_get_num_devices() > 0) then
-    !$ if (CS%niblock == 0) niblock = G%iec-G%isc+2
-    !$ if (CS%njblock == 0) njblock = G%jec-G%jsc+1
-  !$ endif
   call zonal_mass_flux(u_in, h, h_W, h_E, uh, dt, G, GV, US, CS, OBC, pbv%por_face_areaU, &
                        niblock=niblock, njblock=njblock, &
                        uhbt=uhbt, visc_rem_u=visc_rem_u, u_cor=u)
 
   call meridional_edge_thickness(h, h_S, h_N, G, GV, US, CS, OBC)
-  !$ if (omp_get_num_devices() > 0) then
-    !$ if (CS%niblock == 0) niblock = G%iec-G%isc+1
-    !$ if (CS%njblock == 0) njblock = G%jec-G%jsc+2
-  !$ endif
   call meridional_mass_flux(v_in, h, h_S, h_N, vh, dt, G, GV, US, CS, OBC, pbv%por_face_areaV, &
                             niblock=niblock, njblock=njblock, &
                             vhbt=vhbt, visc_rem_v=visc_rem_v, v_cor=v)
@@ -674,10 +635,6 @@ subroutine zonal_mass_flux(u, h_in, h_W, h_E, uh, dt, G, GV, US, CS, OBC, por_fa
 
   call cpu_clock_begin(id_clock_correct)
 
-  !$omp target enter data &
-  !$omp   map(alloc:uhbt_t,uh_t,duhdu,du,du_min_CFL,du_max_CFL,duhdu_tot_0,uh_tot_0, &
-  !$omp     visc_rem_max,do_I,visc_rem,simple_OBC_pt)
-
   use_visc_rem = present(visc_rem_u)
 
   set_BT_cont = .false. ; if (present(BT_cont)) set_BT_cont = (associated(BT_cont))
@@ -716,23 +673,18 @@ subroutine zonal_mass_flux(u, h_in, h_W, h_E, uh, dt, G, GV, US, CS, OBC, por_fa
     i_end = min(i_start+niblock-1,ieh)
     j_end = min(j_start+njblock-1,jeh)
 
-    ! calculate number of teams
-    !$ nteams = ceiling(real((j_end-j_start+1)*(i_end-i_start+1))/128.)
-
     do jj=1,j_end-j_start+1 ; do ii=1,i_end-i_start+1
       do_I(ii,jj) = .true.
     enddo ; enddo
     ! Set uh and duhdu.
-    !$omp target teams num_teams(nteams)
     do k=1,nz
       if (use_visc_rem) then
-        !$omp loop collapse(2) private(ii,jj)
         do j=j_start,j_end ; do I=i_start,i_end
           ii=I-i_start+1 ; jj=j-j_start+1
           visc_rem(ii,jj,k) = visc_rem_u(I,j,k)
         enddo ; enddo
       endif
-      !$omp loop collapse(2) private(ii,jj)
+
       do j=j_start,j_end ; do i=i_start,i_end
         ii=i-i_start+1 ; jj=j-j_start+1
         call flux_elem(u(i,j,k),h_in(i,j,k),h_in(i+1,j,k),h_W(i,j,k),h_W(i+1,j,k),h_E(i,j,k),&
@@ -745,31 +697,26 @@ subroutine zonal_mass_flux(u, h_in, h_W, h_E, uh, dt, G, GV, US, CS, OBC, por_fa
                              OBC%segnum_u(i,j))
       enddo ; enddo
       if (local_specified_BC) then
-        !$omp loop collapse(2) private(l_seg)
         do j=j_start,j_end ; do i=i_start,i_end ; if (OBC%segnum_u(I,j) /= 0) then
           l_seg = abs(OBC%segnum_u(I,j))
           if (OBC%segment(l_seg)%specified) uh_t(I-i_start+1,j-j_start+1,k) = OBC%segment(l_seg)%normal_trans(I,j,k)
         endif ; enddo ; enddo
       endif
     enddo
-    !$omp end target teams
 
     if (present(uhbt) .or. set_BT_cont) then
       if (use_visc_rem .and. CS%use_visc_rem_max) then
-        !$omp target
-        !$omp loop collapse(2) private(ii,jj)
         do j=j_start,j_end ; do i=i_start,i_end
           ii=i-i_start+1 ; jj=j-j_start+1
           visc_rem_max(ii,jj) = 0.0
         enddo ; enddo
+
         do k=1,nz
-          !$omp loop collapse(2) private(ii,jj)
           do j=j_start,j_end ; do i=i_start,i_end
             ii=i-i_start+1 ; jj=j-j_start+1
             visc_rem_max(ii,jj) = max(visc_rem_max(ii,jj), visc_rem(ii,jj,k))
           enddo ; enddo
         enddo
-        !$omp end target
       else
         do jj=1,j_end-j_start+1 ; do ii=1,i_end-i_start+1
           visc_rem_max(ii,jj) = 1.0
@@ -777,8 +724,6 @@ subroutine zonal_mass_flux(u, h_in, h_W, h_E, uh, dt, G, GV, US, CS, OBC, por_fa
       endif
       !   Set limits on du that will keep the CFL number between -1 and 1.
       ! This should be adequate to keep the root bracketed in all cases.
-      !$omp target
-      !$omp loop collapse(2) private(ii,jj,I_vrm,dx_W,dx_E)
       do j=j_start,j_end ; do I=i_start,i_end
         ii=I-i_start+1 ; jj=j-j_start+1
         I_vrm = 0.0
@@ -791,20 +736,18 @@ subroutine zonal_mass_flux(u, h_in, h_W, h_E, uh, dt, G, GV, US, CS, OBC, por_fa
         du_min_CFL(ii,jj) = -2.0 * (CFL_dt * dx_E) * I_vrm
         uh_tot_0(ii,jj) = 0.0 ; duhdu_tot_0(ii,jj) = 0.0
       enddo ; enddo
+
       do k=1,nz
-        !$omp loop collapse(2) private(ii,jj)
         do j=j_start,j_end ; do I=i_start,i_end
           ii=I-i_start+1 ; jj=j-j_start+1
           duhdu_tot_0(ii,jj) = duhdu_tot_0(ii,jj) + duhdu(ii,jj,k)
           uh_tot_0(ii,jj) = uh_tot_0(ii,jj) + uh_t(ii,jj,k)
         enddo
       enddo ; enddo
-      !$omp end target
+
       if (use_visc_rem) then
         if (CS%aggress_adjust) then
-          !$omp target
           do k=1,nz
-            !$omp loop collapse(2) private(ii,jj,dx_W,dx_E,du_lim)
             do j=j_start,j_end ; do I=i_start,i_end
               ii=I-i_start+1 ; jj=j-j_start+1
               if (CS%vol_CFL) then
@@ -821,11 +764,8 @@ subroutine zonal_mass_flux(u, h_in, h_W, h_E, uh, dt, G, GV, US, CS, OBC, por_fa
                 du_min_CFL(ii,jj) = du_lim / visc_rem(ii,jj,k)
             enddo ; enddo
           enddo
-          !$omp end target
         else
-          !$omp target
           do k=1,nz
-            !$omp loop collapse(2) private(ii,jj,dx_E,dx_W)
             do j=j_start,j_end ; do I=i_start,i_end
               ii=I-i_start+1 ; jj=j-j_start+1
               if (CS%vol_CFL) then
@@ -839,13 +779,10 @@ subroutine zonal_mass_flux(u, h_in, h_W, h_E, uh, dt, G, GV, US, CS, OBC, por_fa
                 du_min_CFL(ii,jj) = -(dx_E*CFL_dt + u(I,j,k)) / visc_rem(ii,jj,k)
             enddo ; enddo
           enddo
-          !$omp end target
         endif
       else
         if (CS%aggress_adjust) then
-          !$omp target
           do k=1,nz
-            !$omp loop collapse(2) private(ii,jj,dx_W,dx_E)
             do j=j_start,j_end ; do I=i_start,i_end
               ii=I-i_start+1 ; jj=j-j_start+1
               if (CS%vol_CFL) then
@@ -859,11 +796,8 @@ subroutine zonal_mass_flux(u, h_in, h_W, h_E, uh, dt, G, GV, US, CS, OBC, por_fa
                           ((-dx_E*I_dt - u(I,j,k)) + MAX(0.0,u(I+1,j,k))) )
             enddo ; enddo
           enddo
-          !$omp end target
         else
-          !$omp target
           do k=1,nz
-            !$omp loop collapse(2) private(ii,jj,dx_W,dx_E)
             do j=j_start,j_end ; do I=i_start,i_end
               ii=I-i_start+1 ; jj=j-j_start+1
               if (CS%vol_CFL) then
@@ -875,7 +809,6 @@ subroutine zonal_mass_flux(u, h_in, h_W, h_E, uh, dt, G, GV, US, CS, OBC, por_fa
               du_min_CFL(ii,jj) = MAX(du_min_CFL(ii,jj), -(dx_E*CFL_dt + u(I,j,k)))
             enddo ; enddo
           enddo
-          !$omp end target
         endif
       endif
       do jj=1,j_end-j_start+1 ; do ii=1,i_end-i_start+1
@@ -939,15 +872,13 @@ subroutine zonal_mass_flux(u, h_in, h_W, h_E, uh, dt, G, GV, US, CS, OBC, por_fa
                               visc_rem_max, i_start, i_end, j_start, j_end, do_I, &
                               por_face_areaU, niblock, njblock)
         if (any_simple_OBC) then
-          !$omp target
-          !$omp loop collapse(2) private(ii,jj)
           do j=j_start,j_end ; do I=i_start,i_end
             ii=i-i_start+1 ; jj=j-j_start+1
             if (simple_OBC_pt(II,jj)) FAuI(II,jj) = GV%H_subroundoff*G%dy_Cu(I,j)
           enddo ; enddo
+
           ! NOTE: simple_OBC_pt should prevent access to segment OBC_NONE
           do k=1,nz
-            !$omp loop collapse(2) private(ii,jj,l_seg)
             do j=j_start,j_end ; do I=i_start,i_end
               ii=i-i_start+1 ; jj=j-j_start+1
               if (simple_OBC_pt(II,jj)) then
@@ -959,7 +890,7 @@ subroutine zonal_mass_flux(u, h_in, h_W, h_E, uh, dt, G, GV, US, CS, OBC, por_fa
               endif
             enddo ; enddo
           enddo
-          !$omp loop collapse(2) private(ii,jj)
+
           do j=j_start,j_end ; do I=i_start,i_end
             ii=i-i_start+1 ; jj=j-j_start+1
             if (simple_OBC_pt(ii,jj)) then
@@ -968,21 +899,14 @@ subroutine zonal_mass_flux(u, h_in, h_W, h_E, uh, dt, G, GV, US, CS, OBC, por_fa
               BT_cont%uBT_WW(I,j) = 0.0 ; BT_cont%uBT_EE(I,j) = 0.0
             endif
           enddo ; enddo
-          !$omp end target
         endif
       endif ! set_BT_cont
-
     endif ! present(uhbt) or set_BT_cont
 
     do k=1,nz ; do j=j_start,j_end ; do I=i_start,i_end
       uh(I,j,k) = uh_t(I-i_start+1,j-j_start+1,k)
     enddo ; enddo ; enddo
-
   enddo ; enddo ! ij block loop
-
-  !$omp target exit data &
-  !$omp   map(release:uhbt_t,uh_t,duhdu,du,du_min_CFL,du_max_CFL,duhdu_tot_0,uh_tot_0,&
-  !$omp     visc_rem_max,do_I,visc_rem,simple_OBC_pt)
 
   if (local_open_BC .and. set_BT_cont) then
     do n = 1, OBC%number_of_segments
@@ -1389,18 +1313,12 @@ subroutine zonal_flux_adjust(u, h_in, h_W, h_E, uhbt, uh_tot_0, duhdu_tot_0, &
   logical :: local_open_BC ! True if there are open OBC points on this PE [nondim].
   integer, parameter :: max_itts = 20
 
-  !$omp target enter data &
-  !$omp   map(alloc: uh_err,uh_err_best,duhdu_tot,du_min,du_max,do_I)
-
   nz = GV%ke
   local_open_BC = .false.
   if (present(OBC)) then ; if (associated(OBC)) local_open_BC = OBC%open_u_BCs_exist_globally ; endif
 
   tol_vel = CS%tol_vel
 
-  !$omp target
-
-  !$omp loop collapse(2) private(ii,jj)
   do j=j_start,j_end ; do I=i_start,i_end
     ii=I-i_start+1 ; jj=j-j_start+1
     du(ii,jj) = 0.0 ; do_I(ii,jj) = do_I_in(ii,jj)
@@ -1417,17 +1335,14 @@ subroutine zonal_flux_adjust(u, h_in, h_W, h_E, uhbt, uh_tot_0, duhdu_tot_0, &
       case default ; tol_eta = CS%tol_eta
     end select
 
-    !$omp loop collapse(2) private(ii,jj)
     do j=j_start,j_end ; do I=i_start,i_end
       ii=I-i_start+1 ; jj=j-j_start+1
       if (uh_err(ii,jj) > 0.0) then ; du_max(ii,jj) = du(ii,jj)
       elseif (uh_err(ii,jj) < 0.0) then ; du_min(ii,jj) = du(ii,jj)
       else ; do_I(ii,jj) = .false. ; endif
     enddo ; enddo
-#ifndef __NVCOMPILER_OPENMP_GPU
+
     domore = .false.
-#endif
-    !$omp loop collapse(2) private(ii,jj,ddu,du_prev)
     do j=j_start,j_end ; do I=i_start,i_end
       ii=I-i_start+1 ; jj=j-j_start+1
       if (do_I(ii,jj)) then
@@ -1452,25 +1367,21 @@ subroutine zonal_flux_adjust(u, h_in, h_W, h_E, uhbt, uh_tot_0, duhdu_tot_0, &
               if (du_prev - du_min(ii,jj) < 1.0e-15*abs(du(ii,jj))) do_I(ii,jj) = .false.
             endif
           endif
-#ifndef __NVCOMPILER_OPENMP_GPU
           if (do_I(ii,jj)) domore = .true.
-#endif
         else
           do_I(ii,jj) = .false.
         endif
       endif
     enddo ; enddo
-#ifndef __NVCOMPILER_OPENMP_GPU
-    if (.not.domore) exit
-#endif
 
-    !$omp loop collapse(2) private(ii,jj)
+    if (.not.domore) exit
+
     do j=j_start,j_end ; do I=i_start,i_end
       ii=I-i_start+1 ; jj=j-j_start+1
       uh_err(ii,jj) = -uhbt(ii,jj) ; duhdu_tot(ii,jj) = 0.0
     enddo ; enddo
+
     do k=1,nz
-      !$omp loop collapse(2) private(ii,jj,duhdu,u_new)
       do j=j_start,j_end ; do i=i_start,i_end
         ii=i-i_start+1 ; jj=j-j_start+1
         if (do_I(ii,jj)) then
@@ -1488,7 +1399,7 @@ subroutine zonal_flux_adjust(u, h_in, h_W, h_E, uhbt, uh_tot_0, duhdu_tot_0, &
         endif
       enddo ; enddo
     enddo
-    !$omp loop collapse(2) private(ii,jj)
+
     do j=j_start,j_end ; do I=i_start,i_end
       ii=I-i_start+1 ; jj=j-j_start+1
       uh_err_best(ii,jj) = min(uh_err_best(ii,jj), abs(uh_err(ii,jj)))
@@ -1497,10 +1408,6 @@ subroutine zonal_flux_adjust(u, h_in, h_W, h_E, uhbt, uh_tot_0, duhdu_tot_0, &
   ! If there are any faces which have not converged to within the tolerance,
   ! so-be-it, or else use a final upwind correction?
   ! This never seems to happen with 20 iterations as max_itt.
-  !$omp end target
-
-  !$omp target exit data &
-  !$omp   map(release: uh_err,uh_err_best,duhdu_tot,du_min,du_max,do_I)
 
 end subroutine zonal_flux_adjust
 
@@ -1586,9 +1493,6 @@ subroutine set_zonal_BT_cont(u, h_in, h_W, h_E, BT_cont, uh_tot_0, duhdu_tot_0, 
   integer :: i, j, k, nz, ii, jj !< Tile loop indices [nondim].
   real, dimension(niblock,njblock,SZK_(GV)) :: uh_tmp
 
-  !$omp target enter data &
-  !$omp   map(alloc: du0,duL,duR,du_CFL,FAmt_L,FAmt_R,FAmt_0,uhtot_L,uhtot_R,zeros,uh_tmp)
-
   nz = GV%ke ; Idt = 1.0 / dt
   min_visc_rem = 0.1 ; CFL_min = 1e-6
 
@@ -1603,8 +1507,6 @@ subroutine set_zonal_BT_cont(u, h_in, h_W, h_E, BT_cont, uh_tot_0, duhdu_tot_0, 
   ! Determine the westerly- and easterly- fluxes.  Choose a sufficiently
   ! negative velocity correction for the easterly-flux, and a sufficiently
   ! positive correction for the westerly-flux.
-  !$omp target
-  !$omp loop collapse(2) private(ii,jj)
   do j=j_start,j_end ; do i=i_start,i_end
     ii=i-i_start+1 ; jj=j-j_start+1
     du_CFL(ii,jj) = (CFL_min * Idt) * G%dxCu(i,j)
@@ -1615,7 +1517,6 @@ subroutine set_zonal_BT_cont(u, h_in, h_W, h_E, BT_cont, uh_tot_0, duhdu_tot_0, 
   enddo ; enddo
 
   do k=1,nz
-    !$omp loop collapse(2) private(ii,jj,visc_rem_lim)
     do j=j_start,j_end ; do i=i_start,i_end
       ii=i-i_start+1 ; jj=j-j_start+1
       if (do_I(ii,jj)) then
@@ -1629,11 +1530,8 @@ subroutine set_zonal_BT_cont(u, h_in, h_W, h_E, BT_cont, uh_tot_0, duhdu_tot_0, 
       endif
     enddo ; enddo
   enddo
-  !$omp end target
 
-  !$omp target
   do k=1,nz
-    !$omp loop collapse(2) private(ii,jj,u_L,u_R,u_0,duhdu_0,duhdu_L,duhdu_R,uh_L,uh_R)
     do j=j_start,j_end ; do i=i_start,i_end
       ii=i-i_start+1 ; jj=j-j_start+1
       if (do_I(ii,jj)) then
@@ -1660,7 +1558,7 @@ subroutine set_zonal_BT_cont(u, h_in, h_W, h_E, BT_cont, uh_tot_0, duhdu_tot_0, 
       endif
     enddo ; enddo
   enddo
-  !$omp loop collapse(2) private(ii,jj,FA_0,FA_avg)
+
   do j=j_start,j_end ; do i=i_start,i_end
     ii=i-i_start+1 ; jj=j-j_start+1
     if (do_I(ii,jj)) then
@@ -1693,11 +1591,6 @@ subroutine set_zonal_BT_cont(u, h_in, h_W, h_E, BT_cont, uh_tot_0, duhdu_tot_0, 
       BT_cont%uBT_WW(i,j) = 0.0 ; BT_cont%uBT_EE(i,j) = 0.0
     endif
   enddo ; enddo
-  !$omp end target
-
-  !$omp target exit data &
-  !$omp   map(release: du0,duL,duR,du_CFL,FAmt_L,FAmt_R,FAmt_0,uhtot_L,uhtot_R,zeros,uh_tmp)
-
 end subroutine set_zonal_BT_cont
 
 !> Calculates the mass or volume fluxes through the meridional faces, and other related quantities.
@@ -1783,10 +1676,6 @@ subroutine meridional_mass_flux(v, h_in, h_S, h_N, vh, dt, G, GV, US, CS, OBC, p
 
   call cpu_clock_begin(id_clock_correct)
 
-  !$omp target enter data &
-  !$omp   map(alloc:vhbt_t,vh_t,dvhdv,dv,dv_min_CFL,dv_max_CFL,dvhdv_tot_0,vh_tot_0, &
-  !$omp     visc_rem_max,do_I,visc_rem,simple_OBC_pt)
-
   use_visc_rem = present(visc_rem_v)
 
   set_BT_cont = .false. ; if (present(BT_cont)) set_BT_cont = (associated(BT_cont))
@@ -1824,21 +1713,20 @@ subroutine meridional_mass_flux(v, h_in, h_S, h_N, vh, dt, G, GV, US, CS, OBC, p
   do j_start = jsh-1,jeh,njblock ; do i_start = ish,ieh,niblock
     j_end = min(j_start + njblock-1, jeh)
     i_end = min(i_start + niblock-1, ieh)
-    !$ nteams = ceiling(real((j_end-j_start+1)*(i_end-i_start+1))/128.)
+
     do jj=1,j_end-j_start+1 ; do ii=1,i_end-i_start+1
       do_I(ii,JJ) = .true.
     enddo ; enddo
+
     ! This sets vh and dvhdv.
-    !$omp target teams num_teams(nteams)
     do k=1,nz
       if (use_visc_rem) then
-        !$omp loop collapse(2) private(ii,jj)
         do J=j_start,j_end ; do i=i_start,i_end
           ii=i-i_start+1 ; jj=j-j_start+1
           visc_rem(ii,JJ,k) = visc_rem_v(i,J,k)
         enddo ; enddo
       endif
-      !$omp loop collapse(2) private(ii,JJ)
+
       do J=j_start,j_end ; do i=i_start,i_end
         ii=i-i_start+1 ; jj=j-j_start+1
         call flux_elem(v(i,J,k),h_in(i,J,k),h_in(i,J+1,k),h_S(i,J,k),h_S(i,J+1,k),&
@@ -1851,40 +1739,34 @@ subroutine meridional_mass_flux(v, h_in, h_S, h_N, vh, dt, G, GV, US, CS, OBC, p
                              OBC%segnum_v(i,J))
       enddo ; enddo
       if (local_specified_BC) then
-        !$omp loop collapse(2) private(l_seg)
         do J=J_start,J_end ; do i=i_start,i_end ; if (OBC%segnum_v(i,J) /= 0) then
           l_seg = abs(OBC%segnum_v(i,J))
           if (OBC%segment(l_seg)%specified) vh_t(i-i_start+1,J-J_start+1,k) = OBC%segment(l_seg)%normal_trans(i,J,k)
         endif ; enddo ; enddo
       endif
     enddo ! k-loop
-    !$omp end target teams
 
     if (present(vhbt) .or. set_BT_cont) then
       if (use_visc_rem .and. CS%use_visc_rem_max) then
-        !$omp target
-        !$omp loop collapse(2) private(ii,jj)
         do j=j_start,j_end ; do i=i_start,i_end
           ii=i-i_start+1 ; jj=j-j_start+1
           visc_rem_max(ii,JJ) = 0.0
         enddo ; enddo
+
         do k=1,nz
-          !$omp loop collapse(2) private(ii,jj)
           do j=j_start,j_end ; do i=i_start,i_end
             ii=i-i_start+1 ; jj=j-j_start+1
             visc_rem_max(ii,JJ) = max(visc_rem_max(ii,JJ), visc_rem(ii,JJ,k))
           enddo ; enddo
         enddo
-        !$omp end target
       else
         do jj=1,j_end-j_start+1 ; do ii=1,i_end-i_start+1
           visc_rem_max(ii,JJ) = 1.0
         enddo ; enddo
       endif
+
       !   Set limits on dv that will keep the CFL number between -1 and 1.
       ! This should be adequate to keep the root bracketed in all cases.
-      !$omp target
-      !$omp loop collapse(2) private(ii,jj,I_vrm,dy_S,dy_N)
       do J=J_start,J_end ; do i=i_start,i_end
         ii=i-i_start+1 ; jj=j-j_start+1
         I_vrm = 0.0
@@ -1897,21 +1779,18 @@ subroutine meridional_mass_flux(v, h_in, h_S, h_N, vh, dt, G, GV, US, CS, OBC, p
         dv_min_CFL(ii,JJ) = -2.0 * (CFL_dt * dy_N) * I_vrm
         vh_tot_0(ii,JJ) = 0.0 ; dvhdv_tot_0(ii,JJ) = 0.0
       enddo ; enddo
+
       do k=1,nz
-        !$omp loop collapse(2) private(ii,jj)
         do J=J_start,J_end ; do i=i_start,i_end
           ii=i-i_start+1 ; jj=j-j_start+1
           dvhdv_tot_0(ii,JJ) = dvhdv_tot_0(ii,JJ) + dvhdv(ii,jj,k)
           vh_tot_0(ii,JJ) = vh_tot_0(ii,JJ) + vh_t(ii,JJ,k)
         enddo
       enddo ; enddo
-      !$omp end target
 
       if (use_visc_rem) then
         if (CS%aggress_adjust) then
-          !$omp target
           do k=1,nz
-            !$omp loop collapse(2) private(ii,jj,dy_S,dy_N,dv_lim)
             do J=J_start,J_end ; do i=i_start,i_end
               ii=i-i_start+1 ; jj=j-j_start+1
               if (CS%vol_CFL) then
@@ -1927,11 +1806,8 @@ subroutine meridional_mass_flux(v, h_in, h_S, h_N, vh, dt, G, GV, US, CS, OBC, p
                 dv_min_CFL(ii,JJ) = dv_lim / visc_rem(ii,JJ,k)
             enddo
           enddo ; enddo
-          !$omp end target
         else
-          !$omp target
           do k=1,nz
-            !$omp loop collapse(2) private(ii,jj,dy_S,dy_N)
             do J=J_start,J_end ; do i=i_start,i_end
               ii=i-i_start+1 ; jj=j-j_start+1
               if (CS%vol_CFL) then
@@ -1946,13 +1822,10 @@ subroutine meridional_mass_flux(v, h_in, h_S, h_N, vh, dt, G, GV, US, CS, OBC, p
                 dv_min_CFL(ii,JJ) = -(dy_N*CFL_dt + v(i,J,k)) / visc_rem(ii,JJ,k)
             enddo ; enddo
           enddo
-          !$omp end target
         endif
       else
         if (CS%aggress_adjust) then
-          !$omp target
           do k=1,nz
-            !$omp loop collapse(2) private(ii,jj,dy_S,dy_N)
             do J=J_start,J_end ; do i=i_start,i_end
               ii=i-i_start+1 ; jj=j-j_start+1
               if (CS%vol_CFL) then
@@ -1965,11 +1838,8 @@ subroutine meridional_mass_flux(v, h_in, h_S, h_N, vh, dt, G, GV, US, CS, OBC, p
                           ((-dy_N*I_dt - v(i,J,k)) + MAX(0.0,v(i,J+1,k))) )
             enddo ; enddo
           enddo
-          !$omp end target
         else
-          !$omp target
           do k=1,nz
-            !$omp loop collapse(2) private(ii,jj,dy_S,dy_N)
             do J=J_start,J_end ; do i=i_start,i_end
               ii=i-i_start+1 ; jj=j-j_start+1
               if (CS%vol_CFL) then
@@ -1980,7 +1850,6 @@ subroutine meridional_mass_flux(v, h_in, h_S, h_N, vh, dt, G, GV, US, CS, OBC, p
               dv_min_CFL(ii,JJ) = max(dv_min_CFL(ii,JJ), -(dy_N*CFL_dt + v(i,J,k)))
             enddo ; enddo
           enddo
-          !$omp end target
         endif
       endif
       do jj=1,j_end-j_start+1 ; do ii=1,i_end-i_start+1
@@ -2044,15 +1913,13 @@ subroutine meridional_mass_flux(v, h_in, h_S, h_N, vh, dt, G, GV, US, CS, OBC, p
                                visc_rem_max, i_start, i_end, j_start, j_end, do_I, &
                                por_face_areaV, niblock, njblock)
         if (any_simple_OBC) then
-          !$omp target
-          !$omp loop collapse(2) private(ii,jj)
           do J=J_start,J_end ; do i=i_start,i_end
             ii=i-i_start+1 ; jj=j-j_start+1
             if (simple_OBC_pt(ii,JJ)) FAvi(ii,JJ) = GV%H_subroundoff*G%dx_Cv(i,J)
           enddo ; enddo
+
           ! NOTE: simple_OBC_pt should prevent access to segment OBC_NONE
           do k=1,nz
-            !$omp loop collapse(2) private(ii,jj,l_seg)
             do J=J_start,J_end ; do i=i_start,i_end
               ii=i-i_start+1 ; jj=j-j_start+1
               if (simple_OBC_pt(ii,JJ)) then
@@ -2064,7 +1931,7 @@ subroutine meridional_mass_flux(v, h_in, h_S, h_N, vh, dt, G, GV, US, CS, OBC, p
               endif
             enddo ; enddo
           enddo
-          !$omp loop collapse(2) private(ii,jj)
+
           do J=J_start,J_end ; do i=i_start,i_end
             ii=i-i_start+1 ; jj=j-j_start+1
             if (simple_OBC_pt(ii,jj)) then
@@ -2073,7 +1940,6 @@ subroutine meridional_mass_flux(v, h_in, h_S, h_N, vh, dt, G, GV, US, CS, OBC, p
               BT_cont%vBT_SS(i,J) = 0.0 ; BT_cont%vBT_NN(i,J) = 0.0
             endif
           enddo ; enddo
-          !$omp end target
         endif
       endif ! set_BT_cont
 
@@ -2085,10 +1951,6 @@ subroutine meridional_mass_flux(v, h_in, h_S, h_N, vh, dt, G, GV, US, CS, OBC, p
     enddo ; enddo ; enddo
 
   enddo ; enddo ! ij block loops
-
-  !$omp target exit data &
-  !$omp   map(release:vhbt_t,vh_t,dvhdv,dv,dv_min_CFL,dv_max_CFL,dvhdv_tot_0,vh_tot_0,&
-  !$omp     visc_rem_max,do_I,visc_rem,simple_OBC_pt)
 
   if (local_open_BC .and. set_BT_cont) then
     do n = 1, OBC%number_of_segments
@@ -2400,9 +2262,6 @@ subroutine meridional_flux_adjust(v, h_in, h_S, h_N, vhbt, vh_tot_0, dvhdv_tot_0
   logical :: domore, do_I(niblock,njblock), local_open_BC
   integer, parameter :: max_itts = 20
 
-  !$omp target enter data &
-  !$omp   map(alloc:vh_err,vh_err_best,dvhdv_tot,dv_min,dv_max,do_I)
-
   local_open_BC = .false.
   if (present(OBC)) then ; if (associated(OBC)) then
     local_open_BC = OBC%open_v_BCs_exist_globally
@@ -2411,9 +2270,6 @@ subroutine meridional_flux_adjust(v, h_in, h_S, h_N, vhbt, vh_tot_0, dvhdv_tot_0
   nz = GV%ke
   tol_vel = CS%tol_vel
 
-  !$omp target
-
-  !$omp loop collapse(2) private(ii,jj)
   do J=J_start,J_end ; do i=i_start,i_end
     ii=i-i_start+1 ; jj=j-j_start+1
     dv(ii,JJ) = 0.0 ; do_I(ii,JJ) = do_I_in(ii,JJ)
@@ -2430,17 +2286,14 @@ subroutine meridional_flux_adjust(v, h_in, h_S, h_N, vhbt, vh_tot_0, dvhdv_tot_0
       case default ; tol_eta = CS%tol_eta
     end select
 
-    !$omp loop collapse(2) private(ii,jj)
     do j=j_start,j_end ; do i=i_start,i_end
       ii=i-i_start+1 ; jj=j-j_start+1
       if (vh_err(ii,JJ) > 0.0) then ; dv_max(ii,JJ) = dv(ii,JJ)
       elseif (vh_err(ii,JJ) < 0.0) then ; dv_min(ii,JJ) = dv(ii,JJ)
       else ; do_I(ii,JJ) = .false. ; endif
     enddo ; enddo
-#ifndef __NVCOMPILER_OPENMP_GPU
+
     domore = .false.
-#endif
-    !$omp loop collapse(2) private(ii,jj,ddv,dv_prev)
     do J=J_start,J_end ; do i=i_start,i_end
       ii=i-i_start+1 ; jj=j-j_start+1 ; if (do_I(ii,JJ)) then
       if ((dt * min(G%IareaT(i,j),G%IareaT(i,j+1))*abs(vh_err(ii,JJ)) > tol_eta) .or. &
@@ -2464,23 +2317,19 @@ subroutine meridional_flux_adjust(v, h_in, h_S, h_N, vhbt, vh_tot_0, dvhdv_tot_0
             if (dv_prev - dv_min(ii,JJ) < 1.0e-15*abs(dv(ii,JJ))) do_I(ii,JJ) = .false.
           endif
         endif
-#ifndef __NVCOMPILER_OPENMP_GPU
         if (do_I(ii,JJ)) domore = .true.
-#endif
       else
         do_I(ii,JJ) = .false.
       endif
     endif ; enddo ; enddo
-#ifndef __NVCOMPILER_OPENMP_GPU
+
     if (.not.domore) exit
-#endif
-    !$omp loop collapse(2) private(ii,jj)
+
     do J=J_start,J_end ; do i=i_start,i_end
       ii=i-i_start+1 ; jj=J-j_start+1
       vh_err(ii,JJ) = -vhbt(ii,JJ) ; dvhdv_tot(ii,JJ) = 0.0
     enddo ; enddo
     do k=1,nz
-      !$omp loop collapse(2) private(ii,jj,dvhdv,v_new)
       do J=J_start,J_end ; do i=i_start,i_end
         ii=i-i_start+1 ; jj=j-j_start+1
         if (do_I(ii,JJ)) then
@@ -2498,7 +2347,7 @@ subroutine meridional_flux_adjust(v, h_in, h_S, h_N, vhbt, vh_tot_0, dvhdv_tot_0
         endif
       enddo ; enddo
     enddo
-    !$omp loop collapse(2) private(ii,jj)
+
     do J=J_start,J_end ; do i=i_start,i_end
       ii=i-i_start+1 ; jj=J-j_start+1
       vh_err_best(ii,JJ) = min(vh_err_best(ii,JJ), abs(vh_err(ii,JJ)))
@@ -2507,10 +2356,6 @@ subroutine meridional_flux_adjust(v, h_in, h_S, h_N, vhbt, vh_tot_0, dvhdv_tot_0
   ! If there are any faces which have not converged to within the tolerance,
   ! so-be-it, or else use a final upwind correction?
   ! This never seems to happen with 20 iterations as max_itt.
-  !$omp end target
-
-  !$omp target exit data &
-  !$omp   map(release:vh_err,vh_err_best,dvhdv_tot,dv_min,dv_max,do_I)
 
 end subroutine meridional_flux_adjust
 
@@ -2598,9 +2443,6 @@ subroutine set_merid_BT_cont(v, h_in, h_S, h_N, BT_cont, vh_tot_0, dvhdv_tot_0, 
   integer :: i, j, k, nz, ii, jj
   real :: vh_tmp(niblock,njblock,SZK_(GV))
 
-  !$omp target enter data &
-  !$omp   map(alloc:dv0,dvL,dvR,dv_CFL,FAmt_L,FAmt_R,FAmt_0,vhtot_L,vhtot_R,zeros,vh_tmp)
-
   nz = GV%ke ; Idt = 1.0 / dt
   min_visc_rem = 0.1 ; CFL_min = 1e-6
 
@@ -2617,8 +2459,6 @@ subroutine set_merid_BT_cont(v, h_in, h_S, h_N, BT_cont, vh_tot_0, dvhdv_tot_0, 
   !   Determine the southerly- and northerly- fluxes.  Choose a sufficiently
   ! negative velocity correction for the northerly-flux, and a sufficiently
   ! positive correction for the southerly-flux.
-  !$omp target
-  !$omp loop collapse(2) private(ii,jj)
   do J=J_start,J_end ; do i=i_start,i_end
     ii=i-i_start+1 ; jj=j-j_start+1
     dv_CFL(ii,JJ) = (CFL_min * Idt) * G%dyCv(i,J)
@@ -2629,7 +2469,6 @@ subroutine set_merid_BT_cont(v, h_in, h_S, h_N, BT_cont, vh_tot_0, dvhdv_tot_0, 
   enddo ; enddo
 
   do k=1,nz
-    !$omp loop collapse(2) private(ii,jj,visc_rem_lim)
     do J=J_start,J_end ; do i=i_start,i_end
       ii=i-i_start+1 ; jj=j-j_start+1
       if (do_I(ii,jj)) then
@@ -2643,10 +2482,8 @@ subroutine set_merid_BT_cont(v, h_in, h_S, h_N, BT_cont, vh_tot_0, dvhdv_tot_0, 
       endif
     enddo ; enddo
   enddo
-  !$omp end target
-  !$omp target
+
   do k=1,nz
-    !$omp loop collapse(2) private(ii,jj,v_L,v_R,v_0,dvhdv_0,dvhdv_L,dvhdv_R,vh_0,vh_L,vh_R)
     do J=J_start,J_end ; do i=i_start,i_end
       ii=i-i_start+1 ; jj=j-j_start+1
       if (do_I(ii,jj)) then
@@ -2670,7 +2507,7 @@ subroutine set_merid_BT_cont(v, h_in, h_S, h_N, BT_cont, vh_tot_0, dvhdv_tot_0, 
       endif
     enddo ; enddo
   enddo
-  !$omp loop collapse(2) private(ii,jj,FA_0,FA_avg)
+
   do J=J_start,J_end ; do i=i_start,i_end
     ii=i-i_start+1 ; jj=j-j_start+1
     if (do_I(ii,JJ)) then
@@ -2700,11 +2537,6 @@ subroutine set_merid_BT_cont(v, h_in, h_S, h_N, BT_cont, vh_tot_0, dvhdv_tot_0, 
     BT_cont%FA_v_N0(i,J) = 0.0 ; BT_cont%FA_v_NN(i,J) = 0.0
     BT_cont%vBT_SS(i,J) = 0.0 ; BT_cont%vBT_NN(i,J) = 0.0
   endif ; enddo ; enddo
-  !$omp end target
-
-  !$omp target exit data &
-  !$omp   map(release:dv0,dvL,dvR,dv_CFL,FAmt_L,FAmt_R,FAmt_0,vhtot_L,vhtot_R,zeros,vh_tmp)
-
 end subroutine set_merid_BT_cont
 
 !> Calculates left/right edge values for PPM reconstruction.
@@ -2761,8 +2593,6 @@ subroutine PPM_reconstruction_x(h_in, h_W, h_E, G, GV, LB, h_min, monotonic, sim
                max(G%jsd-jsl,jel-G%jed)
     call MOM_error(FATAL,mesg)
   endif
-
-  !$omp target enter data map(alloc: slp)
 
   if (simple_2nd) then
     ! untested
@@ -2846,9 +2676,6 @@ subroutine PPM_reconstruction_x(h_in, h_W, h_E, G, GV, LB, h_min, monotonic, sim
   else
     call PPM_limit_pos(h_in, h_W, h_E, h_min, G, GV, isl, iel, jsl, jel, nz)
   endif
-
-  !$omp target exit data map(release: slp)
-
 end subroutine PPM_reconstruction_x
 
 !> Calculates left/right edge values for PPM reconstruction.
@@ -2905,8 +2732,6 @@ subroutine PPM_reconstruction_y(h_in, h_S, h_N, G, GV, LB, h_min, monotonic, sim
                  stencil + max(G%jsd-jsl,jel-G%jed)
     call MOM_error(FATAL,mesg)
   endif
-
-  !$omp target enter data map(alloc: slp)
 
   if (simple_2nd) then
     ! untested
@@ -2988,9 +2813,6 @@ subroutine PPM_reconstruction_y(h_in, h_S, h_N, G, GV, LB, h_min, monotonic, sim
   else
     call PPM_limit_pos(h_in, h_S, h_N, h_min, G, GV, isl, iel, jsl, jel, nz)
   endif
-
-  !$omp target exit data map(release: slp)
-
 end subroutine PPM_reconstruction_y
 
 !> This subroutine limits the left/right edge values of the PPM reconstruction
@@ -3202,7 +3024,6 @@ subroutine continuity_PPM_init(Time, G, GV, US, param_file, diag, CS, OBC)
                  "running with OpenMP offload, in which case the full computational "//&
                  "domain height is used.", default=0)
   CS%diag => diag
-  !$omp target update to(CS)
 
   id_clock_reconstruct = cpu_clock_id('(Ocean continuity reconstruction)', grain=CLOCK_ROUTINE)
   id_clock_update = cpu_clock_id('(Ocean continuity update)', grain=CLOCK_ROUTINE)
@@ -3226,7 +3047,6 @@ subroutine continuity_PPM_init(Time, G, GV, US, param_file, diag, CS, OBC)
       endif
     enddo
   endif
-
 end subroutine continuity_PPM_init
 
 !> continuity_PPM_stencil returns the continuity solver stencil size
