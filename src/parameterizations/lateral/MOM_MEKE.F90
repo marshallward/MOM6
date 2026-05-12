@@ -144,6 +144,7 @@ type, public :: MEKE_CS ; private
   type(external_field) :: eke_handle   !< Handle for reading in EKE from a file
   ! Infrastructure
   integer :: id_clock_pass !< Clock for group pass calls
+  integer :: id_clock_isoneutral_slopes !< Clock for calc_isoneutral_slopes calls
   type(group_pass_type) :: pass_MEKE !< Group halo pass handle for MEKE%MEKE and maybe MEKE%Kh_diff
   type(group_pass_type) :: pass_Kh   !< Group halo pass handle for MEKE%Kh, MEKE%Ku, and/or MEKE%Au
 
@@ -1715,6 +1716,7 @@ logical function MEKE_init(Time, G, GV, US, param_file, diag, dbcomms_CS, CS, ME
   endif
 
   CS%id_clock_pass = cpu_clock_id('(Ocean continuity halo updates)', grain=CLOCK_ROUTINE)
+  CS%id_clock_isoneutral_slopes = cpu_clock_id('(MEKE isoneutral slopes)', grain=CLOCK_ROUTINE)
 
 
   ! Detect whether this instance of MEKE_init() is at the beginning of a run
@@ -1879,11 +1881,13 @@ subroutine ML_MEKE_calculate_features(G, GV, US, CS, Rd_dx_h, u, v, tv, h, dt, f
   !$omp target enter data map(alloc: e)
   call find_eta(h, tv, G, GV, US, e, halo_size=2)
   ! Note the hard-coded dimenisional constant in the following line.
+  call cpu_clock_begin(CS%id_clock_isoneutral_slopes)
   !$omp target enter data map(to: tv%T, tv%S)
   !$omp target enter data map(to: tv%SpV_avg) if (allocated(tv%SpV_avg))
   call calc_isoneutral_slopes(G, GV, US, h, e, tv, dt*1.e-7*GV%m2_s_to_HZ_T, .false., slope_x, slope_y)
   !$omp target exit data map(release: tv%T, tv%S, e)
   !$omp target exit data map(release: tv%SpV_avg) if (allocated(tv%SpV_avg))
+  call cpu_clock_end(CS%id_clock_isoneutral_slopes)
   call pass_vector(slope_x, slope_y, G%Domain)
   do j=js-1,je+1 ; do i=is-1,ie+1
     slope_x_vert_avg(I,j) = vertical_average_interface(slope_x(i,j,:), h_u(i,j,:), GV%H_subroundoff)
