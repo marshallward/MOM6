@@ -450,14 +450,14 @@ subroutine continuity_zonal_convergence(h, uh, dt, G, GV, LB, hin, hmin)
   ish = LB%ish ; ieh = LB%ieh ; jsh = LB%jsh ; jeh = LB%jeh ; nz = GV%ke
 
   if (present(hin)) then
-    do concurrent (k=1:nz, j=jsh:jeh, i=ish:ieh)
+    do k=1,nz ; do j=jsh,jeh ; do i=ish,ieh
       h(i,j,k) = max( hin(i,j,k) - dt * G%IareaT(i,j) * (uh(I,j,k) - uh(I-1,j,k)), h_min )
-    enddo
+    enddo ; enddo ; enddo
   else
     ! untested
-    do concurrent (k=1:nz, j=jsh:jeh, i=ish:ieh)
+    do k=1,nz ; do j=jsh,jeh ; do i=ish,ieh
       h(i,j,k) = max( h(i,j,k) - dt * G%IareaT(i,j) * (uh(I,j,k) - uh(I-1,j,k)), h_min )
-    enddo
+    enddo ; enddo ; enddo
   endif
 
   call cpu_clock_end(id_clock_update)
@@ -490,13 +490,13 @@ subroutine continuity_merdional_convergence(h, vh, dt, G, GV, LB, hin, hmin)
 
   if (present(hin)) then
     ! untested
-    do concurrent (k=1:nz, j=jsh:jeh, i=ish:ieh)
+    do k=1,nz ; do j=jsh,jeh ; do i=ish,ieh
       h(i,j,k) = max( hin(i,j,k) - dt * G%IareaT(i,j) * (vh(i,J,k) - vh(i,J-1,k)), h_min )
-    enddo
+    enddo ; enddo ; enddo
   else
-    do concurrent (k=1:nz, j=jsh:jeh, i=ish:ieh)
+    do k=1,nz ; do j=jsh,jeh ; do i=ish,ieh
       h(i,j,k) = max( h(i,j,k) - dt * G%IareaT(i,j) * (vh(i,J,k) - vh(i,J-1,k)), h_min )
-    enddo
+    enddo ; enddo ; enddo
   endif
 
   call cpu_clock_end(id_clock_update)
@@ -534,9 +534,9 @@ subroutine zonal_edge_thickness(h_in, h_W, h_E, G, GV, US, CS, OBC, LB_in)
   ish = LB%ish ; ieh = LB%ieh ; jsh = LB%jsh ; jeh = LB%jeh ; nz = GV%ke
 
   if (CS%upwind_1st) then
-    do concurrent (k=1:nz, j=jsh:jeh, i=ish-1:ieh+1)
+    do k=1,nz ; do j=jsh,jeh ; do i=ish-1,ieh+1
       h_W(i,j,k) = h_in(i,j,k) ; h_E(i,j,k) = h_in(i,j,k)
-    enddo
+    enddo ; enddo ; enddo
   else
     call PPM_reconstruction_x(h_in, h_W, h_E, G, GV, LB, &
                               2.0*GV%Angstrom_H, CS%monotonic, CS%simple_2nd, OBC)
@@ -578,9 +578,9 @@ subroutine meridional_edge_thickness(h_in, h_S, h_N, G, GV, US, CS, OBC, LB_in)
 
   if (CS%upwind_1st) then
     ! untested
-    do concurrent (k=1:nz, j=jsh-1:jeh+1, i=ish:ieh)
+    do k=1,nz ; do j=jsh-1,jeh+1 ; do i=ish,ieh
       h_S(i,j,k) = h_in(i,j,k) ; h_N(i,j,k) = h_in(i,j,k)
-    enddo
+    enddo ; enddo ; enddo
   else
     call PPM_reconstruction_y(h_in, h_S, h_N, G, GV, LB, &
                               2.0*GV%Angstrom_H, CS%monotonic, CS%simple_2nd, OBC)
@@ -690,9 +690,9 @@ subroutine zonal_mass_flux(u, h_in, h_W, h_E, uh, dt, G, GV, US, CS, OBC, por_fa
   endif ; endif
 
   if (present(du_cor)) then
-    do concurrent (j=G%jsd:G%jed, I=G%IsdB:G%IedB)
+    do j=G%jsd,G%jed ; do I=G%IsdB,G%IedB
       du_cor(I,j) = 0.0
-    enddo
+    enddo ; enddo
   endif
 
   if (present(LB_in)) then
@@ -707,9 +707,9 @@ subroutine zonal_mass_flux(u, h_in, h_W, h_E, uh, dt, G, GV, US, CS, OBC, por_fa
   if (CS%aggress_adjust) CFL_dt = I_dt
 
   if (.not.use_visc_rem) then
-    do concurrent (k=1:nz, jj=1:njblock, ii=1:niblock)
+    do k=1,nz ; do jj=1,njblock ; do ii=1,niblock
       visc_rem(ii,jj,k) = 1.0
-    enddo
+    enddo ; enddo ; enddo
   endif
 
   do j_start=jsh,jeh,njblock ; do i_start=ish-1,ieh,niblock
@@ -719,9 +719,9 @@ subroutine zonal_mass_flux(u, h_in, h_W, h_E, uh, dt, G, GV, US, CS, OBC, por_fa
     ! calculate number of teams
     !$ nteams = ceiling(real((j_end-j_start+1)*(i_end-i_start+1))/128.)
 
-    do concurrent (jj=1:j_end-j_start+1, ii=1:i_end-i_start+1)
+    do jj=1,j_end-j_start+1 ; do ii=1,i_end-i_start+1
       do_I(ii,jj) = .true.
-    enddo
+    enddo ; enddo
     ! Set uh and duhdu.
     !$omp target teams num_teams(nteams)
     do k=1,nz
@@ -771,9 +771,9 @@ subroutine zonal_mass_flux(u, h_in, h_W, h_E, uh, dt, G, GV, US, CS, OBC, por_fa
         enddo
         !$omp end target
       else
-        do concurrent (jj=1:j_end-j_start+1, ii=1:i_end-i_start+1)
+        do jj=1,j_end-j_start+1 ; do ii=1,i_end-i_start+1
           visc_rem_max(ii,jj) = 1.0
-        enddo
+        enddo ; enddo
       endif
       !   Set limits on du that will keep the CFL number between -1 and 1.
       ! This should be adequate to keep the root bracketed in all cases.
@@ -878,14 +878,15 @@ subroutine zonal_mass_flux(u, h_in, h_W, h_E, uh, dt, G, GV, US, CS, OBC, por_fa
           !$omp end target
         endif
       endif
-      do concurrent (jj=1:j_end-j_start+1, ii=1:i_end-i_start+1)
+      do jj=1,j_end-j_start+1 ; do ii=1,i_end-i_start+1
         du_max_CFL(ii,jj) = max(du_max_CFL(ii,jj),0.0)
         du_min_CFL(ii,jj) = min(du_min_CFL(ii,jj),0.0)
-      enddo
+      enddo ; enddo
 
       any_simple_OBC = .false.
       if (present(uhbt) .or. set_BT_cont) then
         if (local_specified_BC .or. local_Flather_OBC) then
+          ! TODO: restore serial any_simple_OBC compute?
           do concurrent (j=j_start:j_end, I=i_start:i_end) reduce(.or.:any_simple_OBC)
             ii=I-i_start+1 ; jj=j-j_start+1
             l_seg = abs(OBC%segnum_u(I,j))
@@ -895,16 +896,18 @@ subroutine zonal_mass_flux(u, h_in, h_W, h_E, uh, dt, G, GV, US, CS, OBC, por_fa
             if (l_seg /= OBC_NONE) simple_OBC_pt(ii,jj) = OBC%segment(l_seg)%specified
             do_I(ii,jj) = .not.simple_OBC_pt(ii,jj)
             any_simple_OBC = any_simple_OBC .or. simple_OBC_pt(ii,jj)
-          enddo ; else
-          do concurrent (jj=1:j_end-j_start+1, II=1:i_end-i_start+1)
+          enddo
+        else
+          do jj=1,j_end-j_start+1 ; do II=1,i_end-i_start+1
             do_I(II,jj) = .true.
-          enddo ; endif
+          enddo ; enddo
+        endif
       endif
 
       if (present(uhbt)) then
-        do concurrent (j=j_start:j_end, I=i_start:i_end)
+        do j=j_start,j_end ; do I=i_start,i_end
           uhbt_t(I-i_start+1,j-j_start+1) = uhbt(I,j)
-        enddo
+        enddo ; enddo
         ! Find du and uh.
         call zonal_flux_adjust(u, h_in, h_W, h_E, uhbt_t, uh_tot_0, duhdu_tot_0, du, &
                               du_max_CFL, du_min_CFL, dt, G, GV, US, CS, visc_rem, &
@@ -912,20 +915,20 @@ subroutine zonal_mass_flux(u, h_in, h_W, h_E, uh, dt, G, GV, US, CS, OBC, por_fa
                               uh_t, OBC=OBC)
 
         if (present(u_cor)) then
-          do concurrent (k=1:nz, j=j_start:j_end, I=i_start:i_end)
+          do k=1,nz ; do j=j_start,j_end ; do I=i_start,i_end
             ii=I-i_start+1 ; jj=j-j_start+1
             u_cor(I,j,k) = u(I,j,k) + du(ii,jj) * visc_rem(ii,jj,k)
             if (any_simple_OBC) then ; if (simple_OBC_pt(ii,jj)) then
               u_cor(I,j,k) = OBC%segment(abs(OBC%segnum_u(I,j)))%normal_vel(I,j,k)
             endif ; endif
-          enddo
+          enddo ; enddo ; enddo
         endif ! u-corrected
 
         if (present(du_cor)) then
-          do concurrent (j=j_start:j_end, I=i_start:i_end)
+          do j=j_start,j_end ; do I=i_start,i_end
             ii=I-i_start+1 ; jj=j-j_start+1
             du_cor(I,j) = du(ii,jj)
-          enddo
+          enddo ; enddo
         endif
 
       endif
@@ -971,9 +974,9 @@ subroutine zonal_mass_flux(u, h_in, h_W, h_E, uh, dt, G, GV, US, CS, OBC, por_fa
 
     endif ! present(uhbt) or set_BT_cont
 
-    do concurrent (k=1:nz, j=j_start:j_end, I=i_start:i_end)
+    do k=1,nz ; do j=j_start,j_end ; do I=i_start,i_end
       uh(I,j,k) = uh_t(I-i_start+1,j-j_start+1,k)
-    enddo
+    enddo ; enddo ; enddo
 
   enddo ; enddo ! ij block loop
 
@@ -1075,7 +1078,7 @@ subroutine zonal_BT_mass_flux(u, h_in, h_W, h_E, uhbt, dt, G, GV, US, CS, OBC, p
   endif
 
   ! This sets uh and duhdu.
-  do concurrent (k=1:nz, j=jsh:jeh, I=ish-1:ieh)
+  do k=1,nz ; do j=jsh,jeh ; do I=ish-1,ieh
     call flux_elem(u(I,j,k), h_in(I,j,k), h_in(I+1,j,k), h_W(I,j,k), h_W(I+1,j,k), h_E(I,j,k), &
                    h_E(I+1,j,k), uh(I,j,k), duhdu(I,j,k), 1.0, G%dy_Cu(I,j), G%IareaT(I,j), &
                    G%IareaT(I+1,j), G%IdxT(I,j), G%IdxT(I+1,j), dt, CS%vol_CFL, &
@@ -1083,7 +1086,7 @@ subroutine zonal_BT_mass_flux(u, h_in, h_W, h_E, uhbt, dt, G, GV, US, CS, OBC, p
     if (local_specified_BC) &
       call flux_elem_OBC(u(I,j,k), h_in(I,j,k), h_in(I+1,j,k), uh(I,j,k), duhdu(I,j,k), 1.0, &
                          por_face_areaU(I,j,k), G%dy_Cu(I,j), OBC, OBC%segnum_u(I,j))
-  enddo
+  enddo ; enddo ; enddo
 
   do k=1,nz ; do j=jsh,jeh ; do i=ish-1,ieh
     if (OBC_in_row(j) .and. OBC%segnum_u(I,j) /= 0) then
@@ -1246,7 +1249,7 @@ subroutine zonal_flux_thickness(u, h, h_W, h_E, h_u, dt, G, GV, US, LB, vol_CFL,
   real :: dh
   ish = LB%ish ; ieh = LB%ieh ; jsh = LB%jsh ; jeh = LB%jeh ; nz = GV%ke
 
-  do concurrent (k=1:nz, j=jsh:jeh, I=ish-1:ieh)
+  do k=1,nz ; do j=jsh,jeh ; do I=ish-1,ieh
     if (u(I,j,k) > 0.0) then
       if (vol_CFL) then ; CFL = (u(I,j,k) * dt) * (G%dy_Cu(I,j) * G%IareaT(i,j))
       else ; CFL = u(I,j,k) * dt * G%IdxT(i,j) ; endif
@@ -1283,7 +1286,7 @@ subroutine zonal_flux_thickness(u, h, h_W, h_E, h_u, dt, G, GV, US, LB, vol_CFL,
     else
       h_u(I,j,k) = h_u(I,j,k) * por_face_areaU(I,j,k)
     endif
-  enddo
+  enddo ; enddo ; enddo
 
   local_open_BC = .false.
   if (associated(OBC)) local_open_BC = OBC%open_u_BCs_exist_globally
@@ -1294,29 +1297,28 @@ subroutine zonal_flux_thickness(u, h, h_W, h_E, h_u, dt, G, GV, US, LB, vol_CFL,
         I = OBC%segment(n)%HI%IsdB
         if (OBC%segment(n)%direction == OBC_DIRECTION_E) then
           if (present(visc_rem_u)) then
-            do concurrent (k=1:nz, j = OBC%segment(n)%HI%jsd:OBC%segment(n)%HI%jed)
+            do k=1,nz ; do j = OBC%segment(n)%HI%jsd,OBC%segment(n)%HI%jed
               h_u(I,j,k) = h(i,j,k) * (visc_rem_u(I,j,k) * por_face_areaU(I,j,k))
-            enddo
+            enddo ; enddo
           else
-            do concurrent (k=1:nz, j = OBC%segment(n)%HI%jsd:OBC%segment(n)%HI%jed)
+            do k=1,nz ; do j = OBC%segment(n)%HI%jsd,OBC%segment(n)%HI%jed
               h_u(I,j,k) = h(i,j,k) * por_face_areaU(I,j,k)
-            enddo
+            enddo ; enddo
           endif
         else
           if (present(visc_rem_u)) then
-            do concurrent (k=1:nz, j = OBC%segment(n)%HI%jsd:OBC%segment(n)%HI%jed)
+            do k=1,nz ; do j = OBC%segment(n)%HI%jsd,OBC%segment(n)%HI%jed
               h_u(I,j,k) = h(i+1,j,k) * (visc_rem_u(I,j,k) * por_face_areaU(I,j,k))
-            enddo
+            enddo ; enddo
           else
-            do concurrent (k=1:nz, j = OBC%segment(n)%HI%jsd:OBC%segment(n)%HI%jed)
+            do k=1,nz ; do j = OBC%segment(n)%HI%jsd,OBC%segment(n)%HI%jed
               h_u(I,j,k) = h(i+1,j,k) * por_face_areaU(I,j,k)
-            enddo
+            enddo ; enddo
           endif
         endif
       endif
     enddo
   endif
-
 end subroutine zonal_flux_thickness
 
 !> Returns the barotropic velocity adjustment that gives the
@@ -1591,9 +1593,9 @@ subroutine set_zonal_BT_cont(u, h_in, h_W, h_E, BT_cont, uh_tot_0, duhdu_tot_0, 
   min_visc_rem = 0.1 ; CFL_min = 1e-6
 
  ! Diagnose the zero-transport correction, du0.
-  do concurrent (jj=1:j_end-j_start+1, ii=1:i_end-i_start+1)
+  do jj=1,j_end-j_start+1 ; do ii=1,i_end-i_start+1
     zeros(ii,jj) = 0.0
-  enddo
+  enddo ; enddo
   call zonal_flux_adjust(u, h_in, h_W, h_E, zeros, uh_tot_0, duhdu_tot_0, du0, &
                         du_max_CFL, du_min_CFL, dt, G, GV, US, CS, visc_rem, &
                         i_start, i_end, j_start, j_end, do_I, por_face_areaU, niblock, njblock, uh_tmp)
@@ -1797,9 +1799,9 @@ subroutine meridional_mass_flux(v, h_in, h_S, h_N, vh, dt, G, GV, US, CS, OBC, p
   endif ; endif
 
   if (present(dv_cor)) then
-    do concurrent (jj=G%jsdB:G%jedB, ii=G%isd:G%ied)
+    do jj=G%jsdB,G%jedB ; do ii=G%isd,G%ied
       dv_cor(ii,jj) = 0.0
-    enddo
+    enddo ; enddo
   endif
 
   if (present(LB_in)) then
@@ -1814,18 +1816,18 @@ subroutine meridional_mass_flux(v, h_in, h_S, h_N, vh, dt, G, GV, US, CS, OBC, p
   if (CS%aggress_adjust) CFL_dt = I_dt
 
   if (.not.use_visc_rem) then
-    do concurrent (k=1:nz, jj=1:njblock, ii=1:niblock)
+    do k=1,nz ; do jj=1,njblock ; do ii=1,niblock
       visc_rem(ii,jj,k) = 1.0
-    enddo
+    enddo ; enddo ; enddo
   endif
 
-  do j_start = jsh-1, jeh, njblock ; do i_start = ish, ieh, niblock
+  do j_start = jsh-1,jeh,njblock ; do i_start = ish,ieh,niblock
     j_end = min(j_start + njblock-1, jeh)
     i_end = min(i_start + niblock-1, ieh)
     !$ nteams = ceiling(real((j_end-j_start+1)*(i_end-i_start+1))/128.)
-    do concurrent (jj=1:j_end-j_start+1, ii=1:i_end-i_start+1)
+    do jj=1,j_end-j_start+1 ; do ii=1,i_end-i_start+1
       do_I(ii,JJ) = .true.
-    enddo
+    enddo ; enddo
     ! This sets vh and dvhdv.
     !$omp target teams num_teams(nteams)
     do k=1,nz
@@ -1875,9 +1877,9 @@ subroutine meridional_mass_flux(v, h_in, h_S, h_N, vh, dt, G, GV, US, CS, OBC, p
         enddo
         !$omp end target
       else
-        do concurrent (jj=1:j_end-j_start+1, ii=1:i_end-i_start+1)
+        do jj=1,j_end-j_start+1 ; do ii=1,i_end-i_start+1
           visc_rem_max(ii,JJ) = 1.0
-        enddo
+        enddo ; enddo
       endif
       !   Set limits on dv that will keep the CFL number between -1 and 1.
       ! This should be adequate to keep the root bracketed in all cases.
@@ -1981,14 +1983,15 @@ subroutine meridional_mass_flux(v, h_in, h_S, h_N, vh, dt, G, GV, US, CS, OBC, p
           !$omp end target
         endif
       endif
-      do concurrent (jj=1:j_end-j_start+1, ii=1:i_end-i_start+1)
+      do jj=1,j_end-j_start+1 ; do ii=1,i_end-i_start+1
         dv_max_CFL(ii,JJ) = max(dv_max_CFL(ii,JJ),0.0)
         dv_min_CFL(ii,JJ) = min(dv_min_CFL(ii,JJ),0.0)
-      enddo
+      enddo ; enddo
 
       any_simple_OBC = .false.
       if (present(vhbt) .or. set_BT_cont) then
         if (local_specified_BC .or. local_Flather_OBC) then
+          ! TODO: restore any_simple_OBC compute
           do concurrent (J=J_start:J_end, i=i_start:i_end) reduce(.or.:any_simple_OBC)
             ii=i-i_start+1 ; jj=J-j_start+1
             l_seg = abs(OBC%segnum_v(i,J))
@@ -1998,17 +2001,19 @@ subroutine meridional_mass_flux(v, h_in, h_S, h_N, vh, dt, G, GV, US, CS, OBC, p
             if (l_seg /= 0) simple_OBC_pt(ii,jj) = OBC%segment(l_seg)%specified
             do_I(ii,jj) = .not.simple_OBC_pt(ii,jj)
             any_simple_OBC = any_simple_OBC .or. simple_OBC_pt(ii,jj)
-          enddo ; else
-          do concurrent (JJ=1:J_end-J_start+1, ii=1:i_end-i_start+1)
+          enddo
+        else
+          do JJ=1,J_end-J_start+1 ; do ii=1,i_end-i_start+1
             do_I(ii,JJ) = .true.
-          enddo ; endif
+          enddo ; enddo
+        endif
       endif
 
       if (present(vhbt)) then
-        do concurrent (j=j_start:j_end, i=i_start:i_end)
+        do j=j_start,j_end ; do i=i_start,i_end
           ii=i-i_start+1 ; jj=j-j_start+1
           vhbt_t(ii,Jj) = vhbt(i,j)
-        enddo
+        enddo ; enddo
         ! Find dv and vh.
         call meridional_flux_adjust(v, h_in, h_S, h_N, vhbt_t, vh_tot_0, dvhdv_tot_0, dv, &
                                          dv_max_CFL, dv_min_CFL, dt, G, GV, US, CS, visc_rem, &
@@ -2016,20 +2021,20 @@ subroutine meridional_mass_flux(v, h_in, h_S, h_N, vh, dt, G, GV, US, CS, OBC, p
                                          niblock, njblock, vh_t, OBC)
 
         if (present(v_cor)) then
-          do concurrent (k=1:nz, J=J_start:J_end, i=i_start:i_end)
+          do k=1,nz ; do J=J_start,J_end ; do i=i_start,i_end
             ii=i-i_start+1 ; jj=j-j_start+1
             v_cor(i,J,k) = v(i,J,k) + dv(ii,JJ) * visc_rem(ii,JJ,k)
             if (any_simple_OBC) then ; if (simple_OBC_pt(ii,jj)) then
               v_cor(i,J,k) = OBC%segment(abs(OBC%segnum_v(i,J)))%normal_vel(i,J,k)
             endif ; endif
-          enddo
+          enddo ; enddo ; enddo
         endif ! v-corrected
 
         if (present(dv_cor)) then
-          do concurrent (J=J_start:J_end, i=i_start:i_end)
+          do J=J_start,J_end ; do i=i_start,i_end
             ii=i-i_start+1 ; jj=j-j_start+1
             dv_cor(i,J) = dv(ii,JJ)
-          enddo
+          enddo ; enddo
         endif
       endif
 
@@ -2074,10 +2079,10 @@ subroutine meridional_mass_flux(v, h_in, h_S, h_N, vh, dt, G, GV, US, CS, OBC, p
 
     endif ! present(vhbt) or set_BT_cont
 
-    do concurrent (k=1:nz, j=j_start:j_end, i=i_start:i_end)
+    do k=1,nz ; do j=j_start,j_end ; do i=i_start,i_end
       jj=j-j_start+1 ; ii=i-i_start+1
       vh(i,j,k) = vh_t(ii,jj,k)
-    enddo
+    enddo ; enddo ; enddo
 
   enddo ; enddo ! ij block loops
 
@@ -2177,7 +2182,7 @@ subroutine meridional_BT_mass_flux(v, h_in, h_S, h_N, vhbt, dt, G, GV, US, CS, O
   endif
 
   ! This sets vh and dvhdv.
-  do concurrent (k=1:nz, J=jsh-1:jeh, i=ish:ieh)
+  do k=1,nz ; do J=jsh-1,jeh ; do i=ish,ieh
     call flux_elem(v(i,J,k), h_in(i,J,k), h_in(i,J+1,k), h_S(i,J,k), h_S(i,J+1,k), &
                    h_N(i,J,k), h_N(i,J+1,k), vh(i,J,k), dvhdv(i,J,k), 1.0, G%dx_Cv(I,j), &
                    G%IareaT(i,J), G%IareaT(i,J+1), G%IdyT(i,J), G%IdyT(i,J+1), dt, &
@@ -2185,7 +2190,7 @@ subroutine meridional_BT_mass_flux(v, h_in, h_S, h_N, vhbt, dt, G, GV, US, CS, O
     if (local_specified_BC) &
       call flux_elem_OBC(v(i,J,k), h_in(i,J,k), h_in(i,J+1,k), vh(i,J,k), dvhdv(i,J,k), 1.0, &
                          por_face_areaV(i,J,k), G%dx_Cv(i,J), OBC, OBC%segnum_v(i,J))
-  enddo
+  enddo ; enddo ; enddo
 
   do k=1,nz ; do j=jsh-1,jeh ; do i=ish,ieh
     if (OBC_in_row(j) .and. OBC%segnum_v(i,J) /= 0) then
@@ -2249,7 +2254,7 @@ subroutine meridional_flux_thickness(v, h, h_S, h_N, h_v, dt, G, GV, US, LB, vol
   real :: dh
   ish = LB%ish ; ieh = LB%ieh ; jsh = LB%jsh ; jeh = LB%jeh ; nz = GV%ke
 
-  do concurrent (k=1:nz, J=jsh-1:jeh, i=ish:ieh)
+  do k=1,nz ; do J=jsh-1,jeh ; do i=ish,ieh
     if (v(i,J,k) > 0.0) then
       if (vol_CFL) then ; CFL = (v(i,J,k) * dt) * (G%dx_Cv(i,J) * G%IareaT(i,j))
       else ; CFL = v(i,J,k) * dt * G%IdyT(i,j) ; endif
@@ -2286,7 +2291,7 @@ subroutine meridional_flux_thickness(v, h, h_S, h_N, h_v, dt, G, GV, US, LB, vol
     else
       h_v(i,J,k) = h_v(i,J,k) * por_face_areaV(i,J,k)
     endif
-  enddo
+  enddo ; enddo ; enddo
 
   local_open_BC = .false.
   if (associated(OBC)) local_open_BC = OBC%open_v_BCs_exist_globally
@@ -2297,23 +2302,23 @@ subroutine meridional_flux_thickness(v, h, h_S, h_N, h_v, dt, G, GV, US, LB, vol
         J = OBC%segment(n)%HI%JsdB
         if (OBC%segment(n)%direction == OBC_DIRECTION_N) then
           if (present(visc_rem_v)) then
-            do concurrent (k=1:nz, i = OBC%segment(n)%HI%isd:OBC%segment(n)%HI%ied)
+            do k=1,nz ; do i = OBC%segment(n)%HI%isd,OBC%segment(n)%HI%ied
               h_v(i,J,k) = h(i,J,k) * (visc_rem_v(i,J,k) * por_face_areaV(i,J,k))
-            enddo
+            enddo ; enddo
           else
-            do concurrent (k=1:nz, i = OBC%segment(n)%HI%isd:OBC%segment(n)%HI%ied)
+            do k=1,nz ; do i = OBC%segment(n)%HI%isd,OBC%segment(n)%HI%ied
               h_v(i,J,k) = h(i,J,k) * por_face_areaV(i,J,k)
-            enddo
+            enddo ; enddo
           endif
         else
           if (present(visc_rem_v)) then
-            do concurrent (k=1:nz, i = OBC%segment(n)%HI%isd:OBC%segment(n)%HI%ied)
+            do k=1,nz ; do i = OBC%segment(n)%HI%isd,OBC%segment(n)%HI%ied
               h_v(i,J,k) = h(i,J+1,k) * (visc_rem_v(i,J,k) * por_face_areaV(i,J,k))
-            enddo
+            enddo ; enddo
           else
-            do concurrent (k=1:nz, i = OBC%segment(n)%HI%isd:OBC%segment(n)%HI%ied)
+            do k=1,nz ; do i = OBC%segment(n)%HI%isd,OBC%segment(n)%HI%ied
               h_v(i,J,k) = h(i,J+1,k) * por_face_areaV(i,J,k)
-            enddo
+            enddo ; enddo
           endif
         endif
       endif
@@ -2600,9 +2605,10 @@ subroutine set_merid_BT_cont(v, h_in, h_S, h_N, BT_cont, vh_tot_0, dvhdv_tot_0, 
   min_visc_rem = 0.1 ; CFL_min = 1e-6
 
  ! Diagnose the zero-transport correction, dv0.
-  do concurrent (jj=1:j_end-j_start+1, ii=1:i_end-i_start+1)
+  do jj=1,j_end-j_start+1 ; do ii=1,i_end-i_start+1
     zeros(ii,JJ) = 0.0
-  enddo
+  enddo ; enddo
+
   call meridional_flux_adjust(v, h_in, h_S, h_N, zeros, vh_tot_0, dvhdv_tot_0, dv0, &
                               dv_max_CFL, dv_min_CFL, dt, G, GV, US, CS, visc_rem, &
                               i_start, i_end, j_start, j_end, do_I, por_face_areaV, &
@@ -2625,16 +2631,18 @@ subroutine set_merid_BT_cont(v, h_in, h_S, h_N, BT_cont, vh_tot_0, dvhdv_tot_0, 
   do k=1,nz
     !$omp loop collapse(2) private(ii,jj,visc_rem_lim)
     do J=J_start,J_end ; do i=i_start,i_end
-    ii=i-i_start+1 ; jj=j-j_start+1
-    if (do_I(ii,jj)) then
-      visc_rem_lim = max(visc_rem(ii,JJ,k), min_visc_rem*visc_rem_max(ii,JJ))
-      if (visc_rem_lim > 0.0) then ! This is almost always true for ocean points.
-        if (v(i,J,k) + dvR(ii,JJ)*visc_rem_lim > -dv_CFL(ii,JJ)*visc_rem(ii,JJ,k)) &
-          dvR(ii,JJ) = -(v(i,J,k) + dv_CFL(ii,JJ)*visc_rem(ii,JJ,k)) / visc_rem_lim
-        if (v(i,J,k) + dvL(ii,JJ)*visc_rem_lim < dv_CFL(ii,JJ)*visc_rem(ii,JJ,k)) &
-          dvL(ii,JJ) = -(v(i,J,k) - dv_CFL(ii,JJ)*visc_rem(ii,JJ,k)) / visc_rem_lim
-    endif
-  endif ; enddo ; enddo ; enddo
+      ii=i-i_start+1 ; jj=j-j_start+1
+      if (do_I(ii,jj)) then
+        visc_rem_lim = max(visc_rem(ii,JJ,k), min_visc_rem*visc_rem_max(ii,JJ))
+        if (visc_rem_lim > 0.0) then ! This is almost always true for ocean points.
+          if (v(i,J,k) + dvR(ii,JJ)*visc_rem_lim > -dv_CFL(ii,JJ)*visc_rem(ii,JJ,k)) &
+            dvR(ii,JJ) = -(v(i,J,k) + dv_CFL(ii,JJ)*visc_rem(ii,JJ,k)) / visc_rem_lim
+          if (v(i,J,k) + dvL(ii,JJ)*visc_rem_lim < dv_CFL(ii,JJ)*visc_rem(ii,JJ,k)) &
+            dvL(ii,JJ) = -(v(i,J,k) - dv_CFL(ii,JJ)*visc_rem(ii,JJ,k)) / visc_rem_lim
+        endif
+      endif
+    enddo ; enddo
+  enddo
   !$omp end target
   !$omp target
   do k=1,nz
@@ -2758,14 +2766,14 @@ subroutine PPM_reconstruction_x(h_in, h_W, h_E, G, GV, LB, h_min, monotonic, sim
 
   if (simple_2nd) then
     ! untested
-    do concurrent (k =1:nz, j=jsl:jel, i=isl:iel)
+    do k =1,nz ; do j=jsl,jel ; do i=isl,iel
       h_im1 = G%mask2dT(i-1,j) * h_in(i-1,j,k) + (1.0-G%mask2dT(i-1,j)) * h_in(i,j,k)
       h_ip1 = G%mask2dT(i+1,j) * h_in(i+1,j,k) + (1.0-G%mask2dT(i+1,j)) * h_in(i,j,k)
       h_W(i,j,k) = 0.5*( h_im1 + h_in(i,j,k) )
       h_E(i,j,k) = 0.5*( h_ip1 + h_in(i,j,k) )
-    enddo
+    enddo ; enddo ; enddo
   else
-    do concurrent (k=1:nz, j=jsl:jel, i=isl-1:iel+1)
+    do k=1,nz ; do j=jsl,jel ; do i=isl-1,iel+1
       if ((G%mask2dT(i-1,j) * G%mask2dT(i,j) * G%mask2dT(i+1,j)) == 0.0) then
         slp(i,j,k) = 0.0
       else
@@ -2777,7 +2785,7 @@ subroutine PPM_reconstruction_x(h_in, h_W, h_E, G, GV, LB, h_min, monotonic, sim
         slp(i,j,k) = sign(1.,slp(i,j,k)) * min(abs(slp(i,j,k)), 2. * min(dMx, dMn))
                 ! * (G%mask2dT(i-1,j) * G%mask2dT(i,j) * G%mask2dT(i+1,j))
       endif
-    enddo
+    enddo ; enddo ; enddo
 
     if (local_open_BC) then
       ! untested
@@ -2786,15 +2794,15 @@ subroutine PPM_reconstruction_x(h_in, h_W, h_E, G, GV, LB, h_min, monotonic, sim
         if (.not. segment%on_pe) cycle
         if (segment%is_E_or_W) then
           I=segment%HI%IsdB
-          do concurrent (k=1:nz, j=segment%HI%jsd:segment%HI%jed)
+          do k=1,nz ; do j=segment%HI%jsd,segment%HI%jed
             slp(i+1,j,k) = 0.0
             slp(i,j,k) = 0.0
-          enddo
+          enddo ; enddo
         endif
       enddo
     endif
 
-    do concurrent (k=1:nz, j=jsl:jel, i=isl:iel)
+    do k=1,nz ; do j=jsl,jel ; do i=isl,iel
       ! Neighboring values should take into account any boundaries.  The 3
       ! following sets of expressions are equivalent.
     ! h_im1 = h_in(i-1,j,k) ; if (G%mask2dT(i-1,j) < 0.5) h_im1 = h_in(i,j)
@@ -2804,7 +2812,7 @@ subroutine PPM_reconstruction_x(h_in, h_W, h_E, G, GV, LB, h_min, monotonic, sim
       ! Left/right values following Eq. B2 in Lin 1994, MWR (132)
       h_W(i,j,k) = 0.5*( h_im1 + h_in(i,j,k) ) + oneSixth*( slp(i-1,j,k) - slp(i,j,k) )
       h_E(i,j,k) = 0.5*( h_ip1 + h_in(i,j,k) ) + oneSixth*( slp(i,j,k) - slp(i+1,j,k) )
-    enddo
+    enddo ; enddo ; enddo
   endif
 
   if (local_open_BC) then
@@ -2814,20 +2822,20 @@ subroutine PPM_reconstruction_x(h_in, h_W, h_E, G, GV, LB, h_min, monotonic, sim
       if (.not. segment%on_pe) cycle
       if (segment%direction == OBC_DIRECTION_E) then
         I=segment%HI%IsdB
-        do concurrent (k=1:nz, j=segment%HI%jsd:segment%HI%jed)
+        do k=1,nz ; do j=segment%HI%jsd,segment%HI%jed
           h_W(i+1,j,k) = h_in(i,j,k)
           h_E(i+1,j,k) = h_in(i,j,k)
           h_W(i,j,k) = h_in(i,j,k)
           h_E(i,j,k) = h_in(i,j,k)
-        enddo
+        enddo ; enddo
       elseif (segment%direction == OBC_DIRECTION_W) then
         I=segment%HI%IsdB
-        do concurrent (k=1:nz, j=segment%HI%jsd:segment%HI%jed)
+        do k=1,nz ; do j=segment%HI%jsd,segment%HI%jed
           h_W(i,j,k) = h_in(i+1,j,k)
           h_E(i,j,k) = h_in(i+1,j,k)
           h_W(i+1,j,k) = h_in(i+1,j,k)
           h_E(i+1,j,k) = h_in(i+1,j,k)
-        enddo
+        enddo ; enddo
       endif
     enddo
   endif
@@ -2902,14 +2910,14 @@ subroutine PPM_reconstruction_y(h_in, h_S, h_N, G, GV, LB, h_min, monotonic, sim
 
   if (simple_2nd) then
     ! untested
-    do concurrent (k=1:nz, j=jsl:jel, i=isl:iel)
+    do k=1,nz ; do j=jsl,jel ; do i=isl,iel
       h_jm1 = G%mask2dT(i,j-1) * h_in(i,j-1,k) + (1.0-G%mask2dT(i,j-1)) * h_in(i,j,k)
       h_jp1 = G%mask2dT(i,j+1) * h_in(i,j+1,k) + (1.0-G%mask2dT(i,j+1)) * h_in(i,j,k)
       h_S(i,j,k) = 0.5*( h_jm1 + h_in(i,j,k) )
       h_N(i,j,k) = 0.5*( h_jp1 + h_in(i,j,k) )
-    enddo
+    enddo ; enddo ; enddo
   else
-    do concurrent (k=1:nz, j=jsl-1:jel+1, i=isl:iel)
+    do k=1,nz ; do j=jsl-1,jel+1 ; do i=isl,iel
       if ((G%mask2dT(i,j-1) * G%mask2dT(i,j) * G%mask2dT(i,j+1)) == 0.0) then
         slp(i,j,k) = 0.0
       else
@@ -2921,7 +2929,7 @@ subroutine PPM_reconstruction_y(h_in, h_S, h_N, G, GV, LB, h_min, monotonic, sim
         slp(i,j,k) = sign(1.,slp(i,j,k)) * min(abs(slp(i,j,k)), 2. * min(dMx, dMn))
                 ! * (G%mask2dT(i,j-1) * G%mask2dT(i,j) * G%mask2dT(i,j+1))
       endif
-    enddo
+    enddo ; enddo ; enddo
 
     if (local_open_BC) then
       ! untested
@@ -2930,15 +2938,15 @@ subroutine PPM_reconstruction_y(h_in, h_S, h_N, G, GV, LB, h_min, monotonic, sim
         if (.not. segment%on_pe) cycle
         if (segment%is_N_or_S) then
           J=segment%HI%JsdB
-          do concurrent (k=1:nz, i=segment%HI%isd:segment%HI%ied)
+          do k=1,nz ; do i=segment%HI%isd,segment%HI%ied
             slp(i,j+1,k) = 0.0
             slp(i,j,k) = 0.0
-          enddo
+          enddo ; enddo
         endif
       enddo
     endif
 
-    do concurrent (k=1:nz, j=jsl:jel, i=isl:iel)
+    do k=1,nz ; do j=jsl,jel ; do i=isl,iel
       ! Neighboring values should take into account any boundaries.  The 3
       ! following sets of expressions are equivalent.
       h_jm1 = G%mask2dT(i,j-1) * h_in(i,j-1,k) + (1.0-G%mask2dT(i,j-1)) * h_in(i,j,k)
@@ -2946,7 +2954,7 @@ subroutine PPM_reconstruction_y(h_in, h_S, h_N, G, GV, LB, h_min, monotonic, sim
       ! Left/right values following Eq. B2 in Lin 1994, MWR (132)
       h_S(i,j,k) = 0.5*( h_jm1 + h_in(i,j,k) ) + oneSixth*( slp(i,j-1,k) - slp(i,j,k) )
       h_N(i,j,k) = 0.5*( h_jp1 + h_in(i,j,k) ) + oneSixth*( slp(i,j,k) - slp(i,j+1,k) )
-    enddo
+    enddo ; enddo ; enddo
   endif
 
   if (local_open_BC) then
@@ -2956,20 +2964,20 @@ subroutine PPM_reconstruction_y(h_in, h_S, h_N, G, GV, LB, h_min, monotonic, sim
       if (.not. segment%on_pe) cycle
       if (segment%direction == OBC_DIRECTION_N) then
         J=segment%HI%JsdB
-        do concurrent (k=1:nz, i=segment%HI%isd:segment%HI%ied)
+        do k=1,nz ; do i=segment%HI%isd,segment%HI%ied
           h_S(i,j+1,k) = h_in(i,j,k)
           h_N(i,j+1,k) = h_in(i,j,k)
           h_S(i,j,k) = h_in(i,j,k)
           h_N(i,j,k) = h_in(i,j,k)
-        enddo
+        enddo ; enddo
       elseif (segment%direction == OBC_DIRECTION_S) then
         J=segment%HI%JsdB
-        do concurrent (k=1:nz, i=segment%HI%isd:segment%HI%ied)
+        do k=1,nz ; do i=segment%HI%isd,segment%HI%ied
           h_S(i,j,k) = h_in(i,j+1,k)
           h_N(i,j,k) = h_in(i,j+1,k)
           h_S(i,j+1,k) = h_in(i,j+1,k)
           h_N(i,j+1,k) = h_in(i,j+1,k)
-        enddo
+        enddo ; enddo
       endif
     enddo
   endif
@@ -3012,7 +3020,7 @@ subroutine PPM_limit_pos(h_in, h_L, h_R, h_min, G, GV, iis, iie, jis, jie, nz)
   real    :: scale ! A scaling factor to reduce the curvature of the fit               [nondim]
   integer :: i,j,k
 
-  do concurrent (k=1:nz, j=jis:jie, i=iis:iie)
+  do k=1,nz ; do j=jis,jie ; do i=iis,iie
     ! This limiter prevents undershooting minima within the domain with
     ! values less than h_min.
     curv = 3.0*((h_L(i,j,k) + h_R(i,j,k)) - 2.0*h_in(i,j,k))
@@ -3030,7 +3038,7 @@ subroutine PPM_limit_pos(h_in, h_L, h_R, h_min, G, GV, iis, iie, jis, jie, nz)
         endif
       endif
     endif
-  enddo
+  enddo ; enddo ; enddo
 
 end subroutine PPM_limit_pos
 
@@ -3059,7 +3067,7 @@ subroutine PPM_limit_CW84(h_in, h_L, h_R, G, GV, iis, iie, jis, jie, nz)
   integer :: i, j, k
 
   ! untested
-  do concurrent (k=1:nz, j=jis:jie, i=iis:iie)
+  do k=1,nz ; do j=jis,jie ; do i=iis,iie
     ! This limiter monotonizes the parabola following
     ! Colella and Woodward, 1984, Eq. 1.10
     h_i = h_in(i,j,k)
@@ -3073,8 +3081,7 @@ subroutine PPM_limit_CW84(h_in, h_L, h_R, G, GV, iis, iie, jis, jie, nz)
       if ( FunFac >  RLdiff2 ) h_L(i,j,k) = 3. * h_i - 2. * h_R(i,j,k)
       if ( FunFac < -RLdiff2 ) h_R(i,j,k) = 3. * h_i - 2. * h_L(i,j,k)
     endif
-  enddo
-
+  enddo ; enddo ; enddo
 end subroutine PPM_limit_CW84
 
 !> Return the maximum ratio of a/b or maxrat.
