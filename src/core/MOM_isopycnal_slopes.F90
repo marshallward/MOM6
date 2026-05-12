@@ -247,7 +247,7 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
   ! deferred EOS subroutines cannot be called on the GPU
   if (use_EOS) then
     ! Calculate density derivatives using T,S,and P at u points. 
-    do concurrent(j=js:je, K=nz:2, I=is-1:ie)
+    do concurrent(j=js:je, K=2:nz, I=is-1:ie)
       pres_uvh(I,j,K) = 0.5*(pres(i,j,K) + pres(i+1,j,K))
       T_uvh(I,j,K) = 0.25*((T(i,j,k) + T(i+1,j,k)) + (T(i,j,k-1) + T(i+1,j,k-1)))
       S_uvh(I,j,K) = 0.25*((S(i,j,k) + S(i+1,j,k)) + (S(i,j,k-1) + S(i+1,j,k-1)))
@@ -267,7 +267,7 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
 
     if (use_stanley) then
       ! Recalculate T, S, and press at h-points for the second derivative calculation.
-      do concurrent(j=js:je, K=nz:2, i=is-1:ie+1)
+      do concurrent(j=js:je, K=2:nz, i=is-1:ie+1)
         pres_uvh(i,j,K) = pres(i,j,K)
         T_uvh(i,j,K) = 0.5*(T(i,j,K) + T(i,j,K-1))
         S_uvh(i,j,K) = 0.5*(S(i,j,K) + S(i,j,K-1))
@@ -301,7 +301,7 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
   !UMW: untested
   !$omp target enter data map(alloc: GxSpV_u) if (present_N2_u .or. present(dzSxN))
 
-  do concurrent( j=js:je , K=nz:2 , I=is-1:ie )
+  do concurrent( j=js:je , K=2:nz , I=is-1:ie ) local(drdkL, drdkR, drdiA, drdiB)
     ! UMW: Since stanley parameterization requies EOS anyways, I'm putting
     ! the use_stanley loop inside of the use_EOS loop for clarity
     if (use_EOS) then
@@ -418,7 +418,7 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
   ! meridional direciton
   if (use_EOS) then
     ! Calculate density derivatives using T,S,and P at v points. 
-    do concurrent(J=js-1:je, K=nz:2, i=is:ie)
+    do concurrent(J=js-1:je, K=2:nz, i=is:ie)
       pres_uvh(i,J,K) = 0.5*(pres(i,j,K) + pres(i,j+1,K))
       T_uvh(i,J,K) = 0.25*((T(i,j,K) + T(i,j+1,K)) + (T(i,j,K-1) + T(i,j+1,K-1)))
       S_uvh(i,J,K) = 0.25*((S(i,j,K) + S(i,j+1,K)) + (S(i,j,K-1) + S(i,j+1,K-1)))
@@ -438,7 +438,7 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
 
     if (use_stanley) then
       ! Recalculate T, S, and press at h-points for the second derivative calculation.
-      do concurrent(J=js-1:je, K=nz:2, i=is:ie)
+      do concurrent(J=js-1:je, K=2:nz, i=is:ie)
         pres_uvh(i,J,K) = pres(i,j,K)
         T_uvh(i,J,K) = 0.5*(T(i,j,K) + T(i,j,K-1))
         S_uvh(i,J,K) = 0.5*(S(i,j,K) + S(i,j,K-1))
@@ -476,7 +476,7 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
   !UMW: untested
   !$omp target enter data map(alloc: GxSpV_v) if (present_N2_v .or. present(dzSyN))
 
-  do concurrent(J=js-1:je, K=nz:2, i=is:ie)
+  do concurrent(J=js-1:je, K=2:nz, i=is:ie) local(drdkL, drdkR, drdjA, drdjB)
 
     if (use_EOS) then
       ! Estimate the horizontal density gradients along layers.
