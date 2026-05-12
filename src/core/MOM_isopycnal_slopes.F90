@@ -137,7 +137,7 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
   integer :: i, j, k
 
   ! Allocate locals on device
-  !$omp target enter data map(alloc: T, S)
+  !$omp target enter data map(alloc: T, S, pres, T_uvh, S_uvh, pres_uvh)
 
   if (present(halo)) then
     is = G%isc-halo ; ie = G%iec+halo ; js = G%jsc-halo ; je = G%jec+halo
@@ -212,8 +212,6 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
     else
       call vert_fill_TS(h, tv%T, tv%S, dt_kappa_smooth, T, S, G, GV, US, 1)
     endif
-    ! Bring T and S back from device
-    !$omp target update from(T, S)
   endif
 
   if ((use_EOS .and. allocated(tv%SpV_avg) .and. (tv%valid_SpV_halo < 1)) .and. &
@@ -229,21 +227,16 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
 
   ! Find the maximum and minimum permitted streamfunction.
   if (associated(tv%p_surf)) then
-    !$OMP parallel do default(shared)
-    do j=js-1,je+1 ; do i=is-1,ie+1
+    do concurrent (j=js-1:je+1, i=is-1:ie+1)
       pres(i,j,1) = tv%p_surf(i,j)
-    enddo ; enddo
+    enddo
   else
-    !$OMP parallel do default(shared)
-    do j=js-1,je+1 ; do i=is-1,ie+1
+    do concurrent (j=js-1:je+1, i=is-1:ie+1)
       pres(i,j,1) = 0.0
-    enddo ; enddo
+    enddo
   endif
-  !$OMP parallel do default(shared)
-  do j=js-1,je+1
-    do k=1,nz ; do i=is-1,ie+1
-      pres(i,j,K+1) = pres(i,j,K) + GV%g_Earth * GV%H_to_RZ * h(i,j,k)
-    enddo ; enddo
+  do concurrent( j=js-1:je+1, k=1:nz, i=is-1:ie+1 )
+      pres(i,j,k+1) = pres(i,j,k) + GV%g_Earth * GV%H_to_RZ * h(i,j,k)
   enddo
 
   do I=is-1,ie
@@ -254,11 +247,14 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
   ! deferred EOS subroutines cannot be called on the GPU
   if (use_EOS) then
     ! Calculate density derivatives using T,S,and P at u points. 
-    do j=js,je ; do K=nz,2,-1 ; do I=is-1,ie
+    do concurrent(j=js:je, K=nz:2, I=is-1:ie)
       pres_uvh(I,j,K) = 0.5*(pres(i,j,K) + pres(i+1,j,K))
       T_uvh(I,j,K) = 0.25*((T(i,j,k) + T(i+1,j,k)) + (T(i,j,k-1) + T(i+1,j,k-1)))
       S_uvh(I,j,K) = 0.25*((S(i,j,k) + S(i+1,j,k)) + (S(i,j,k-1) + S(i+1,j,k-1)))
-    enddo ; enddo ; enddo
+    enddo
+
+    ! Bring T, S, and press back from device for density deriv calc
+    !$omp target update from(T_uvh, S_uvh, pres_uvh)
 
     ! UMW TODO: Add OBC and GxSpV logic
 
@@ -271,11 +267,14 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
 
     if (use_stanley) then
       ! Recalculate T, S, and press at h-points for the second derivative calculation.
-      do j=js,je ; do K=nz,2,-1 ; do i=is-1,ie+1
+      do concurrent(j=js:je, K=nz:2, i=is-1:ie+1)
         pres_uvh(i,j,K) = pres(i,j,K)
         T_uvh(i,j,K) = 0.5*(T(i,j,K) + T(i,j,K-1))
         S_uvh(i,j,K) = 0.5*(S(i,j,K) + S(i,j,K-1))
-      enddo ; enddo ; enddo
+      enddo
+
+      ! Bring T, S, and press back from device for density deriv calc
+      !$omp target update from(T_uvh, S_uvh, pres_uvh)
 
       ! The second line below would correspond to arguments
       !            drho_dS_dS, drho_dS_dT, drho_dT_dT, drho_dS_dP, drho_dT_dP, &
@@ -419,11 +418,14 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
   ! meridional direciton
   if (use_EOS) then
     ! Calculate density derivatives using T,S,and P at v points. 
-    do J=js-1,je ; do K=nz,2,-1 ; do i=is,ie
+    do concurrent(J=js-1:je, K=nz:2, i=is:ie)
       pres_uvh(i,J,K) = 0.5*(pres(i,j,K) + pres(i,j+1,K))
       T_uvh(i,J,K) = 0.25*((T(i,j,K) + T(i,j+1,K)) + (T(i,j,K-1) + T(i,j+1,K-1)))
       S_uvh(i,J,K) = 0.25*((S(i,j,K) + S(i,j+1,K)) + (S(i,j,K-1) + S(i,j+1,K-1)))
-    enddo ; enddo ; enddo
+    enddo
+
+    ! Bring T, S, and press back from device for density deriv calc
+    !$omp target update from(T_uvh, S_uvh, pres_uvh)
 
     ! UMW TODO: Add OBC and GxSpV logic
 
@@ -436,11 +438,14 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
 
     if (use_stanley) then
       ! Recalculate T, S, and press at h-points for the second derivative calculation.
-      do J=js-1,je ; do K=nz,2,-1 ; do i=is,ie
+      do concurrent(J=js-1:je, K=nz:2, i=is:ie)
         pres_uvh(i,J,K) = pres(i,j,K)
         T_uvh(i,J,K) = 0.5*(T(i,j,K) + T(i,j,K-1))
         S_uvh(i,J,K) = 0.5*(S(i,j,K) + S(i,j,K-1))
-      enddo ; enddo ; enddo
+      enddo
+
+      ! Bring T, S, and press back from device for density deriv calc
+      !$omp target update from(T_uvh, S_uvh, pres_uvh)
 
       ! The second line below would correspond to arguments
       !            drho_dS_dS, drho_dS_dT, drho_dT_dT, drho_dS_dP, drho_dT_dP, &
@@ -585,7 +590,7 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
   !$omp target exit data map(delete: GxSpV_v) if (present_N2_v .or. present(dzSyN))
 
   ! Delete locals from device
-  !$omp target exit data map(delete: T, S)
+  !$omp target exit data map(delete: T, S, pres, T_uvh, S_uvh, pres_uvh)
 
 end subroutine calc_isoneutral_slopes
 
