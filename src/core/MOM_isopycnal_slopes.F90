@@ -288,10 +288,7 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
     
     endif ! end use_stanley
 
-  ! If not using EOS, just set gradients to zero
-  else
-    drdiA = 0.0 ; drdiB = 0.0
-    drdkL = GV%Rlay(k)-GV%Rlay(k-1) ; drdkR = GV%Rlay(k)-GV%Rlay(k-1)
+  ! If not using EOS, gradients are handled inside the do concurrent loop below
   endif
 
   ! Push derivatives to device
@@ -325,6 +322,9 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
         drdiB = drdiB + 0.5 * ((drho_dT_dT_h(i+1,j,K) * tv%varT(i+1,j,K)) - &
                               (drho_dT_dT_h(i,j,K) * tv%varT(i,j,K)) )
       endif
+    else ! .not. use_EOS: layers are constant density
+      drdiA = 0.0 ; drdiB = 0.0
+      drdkL = GV%Rlay(K)-GV%Rlay(K-1) ; drdkR = drdkL
     endif
 
     hg2A = h(i,j,k-1)*h(i+1,j,k-1) + h_neglect2
@@ -461,12 +461,7 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
     
     endif ! end use_stanley
 
-  ! If not using EOS, just set gradients to zero
-  ! UMW TODO: I think I could technically remove this, since 
-  ! they were set above
-  else
-    drdiA = 0.0 ; drdiB = 0.0
-    drdkL = GV%Rlay(k)-GV%Rlay(k-1) ; drdkR = GV%Rlay(k)-GV%Rlay(k-1)
+  ! If not using EOS, gradients are handled inside the do concurrent loop below
   endif
 
   ! Push derivatives to device
@@ -500,6 +495,9 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
         drdjB = drdjB + 0.5 * ((drho_dT_dT_h(i,J+1,K) * tv%varT(i,j+1,K)) - &
                               (drho_dT_dT_h(i,J,K) * tv%varT(i,j,K)) )
       endif
+    else ! .not. use_EOS: layers are constant density
+      drdjA = 0.0 ; drdjB = 0.0
+      drdkL = GV%Rlay(K)-GV%Rlay(K-1) ; drdkR = drdkL
     endif
 
     hg2A = h(i,j,k-1)*h(i,j+1,k-1) + h_neglect2
