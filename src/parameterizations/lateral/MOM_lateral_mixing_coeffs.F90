@@ -690,11 +690,13 @@ subroutine calc_sqg_struct(h, tv, G, GV, US, CS, dt, MEKE, OBC)
       call cpu_clock_begin(CS%id_clock_isoneutral_slopes)
       !$omp target enter data map(to: tv, tv%T, tv%S, N2_u, N2_v, dzu, dzv, dzSxN, dzSyN)
       !$omp target enter data map(to: tv%SpV_avg) if (allocated(tv%SpV_avg))
+      !$omp target enter data map(to: tv%p_surf) if (allocated(tv%p_surf))
       call calc_isoneutral_slopes(G, GV, US, h, e, tv, dt*CS%kappa_smooth, CS%use_stanley_iso, &
                                   CS%slope_x, CS%slope_y, N2_u=N2_u, N2_v=N2_v, dzu=dzu, dzv=dzv, &
                                   dzSxN=dzSxN, dzSyN=dzSyN, halo=1, OBC=OBC, OBC_N2=CS%OBC_friendly)
       !$omp target exit data map(release: tv%T, tv%S, e)
       !$omp target exit data map(release: tv%SpV_avg) if (allocated(tv%SpV_avg))
+      !$omp target exit data map(release: tv%p_surf) if (allocated(tv%p_surf))
       !$omp target exit data map(from: N2_u, N2_v, dzu, dzv, dzSxN, dzSyN)
       call cpu_clock_end(CS%id_clock_isoneutral_slopes)
       do k=2,nz ; do j=js,je ; do i=is,ie
@@ -797,6 +799,7 @@ subroutine calc_slope_functions(h, tv, dt, G, GV, US, CS, OBC)
     !$omp target enter data map(to: tv, tv%T, tv%S, N2_u, N2_v, dzu, dzv, dzSxN, dzSyN, &
     !$omp & CS%slope_x, CS%slope_y)
     !$omp target enter data map(to: tv%SpV_avg) if (allocated(tv%SpV_avg))
+    !$omp target enter data map(to: tv%p_surf) if (allocated(tv%p_surf))
     if (CS%use_simpler_Eady_growth_rate) then
       call calc_isoneutral_slopes(G, GV, US, h, e, tv, dt*CS%kappa_smooth, CS%use_stanley_iso, &
                                   CS%slope_x, CS%slope_y, N2_u=N2_u, N2_v=N2_v, dzu=dzu, dzv=dzv, &
@@ -816,6 +819,7 @@ subroutine calc_slope_functions(h, tv, dt, G, GV, US, CS, OBC)
     !$omp target exit data map(release: tv, tv%T, tv%S, e, N2_u, N2_v, dzu, dzv, dzSxN, dzSyN, &
     !$omp & CS%slope_x, CS%slope_y)
     !$omp target exit data map(release: tv%SpV_avg) if (allocated(tv%SpV_avg))
+    !$omp target exit data map(release: tv%p_surf) if (allocated(tv%p_surf))
     call cpu_clock_end(CS%id_clock_isoneutral_slopes)
   endif
 
@@ -1398,10 +1402,12 @@ subroutine calc_QG_slopes(h, tv, dt, G, GV, US, slope_x, slope_y, CS, OBC)
   call cpu_clock_begin(CS%id_clock_isoneutral_slopes)
   !$omp target enter data map(to: tv%T, tv%S)
   !$omp target enter data map(to: tv%SpV_avg) if (allocated(tv%SpV_avg))
+  !$omp target enter data map(to: tv%p_surf) if (allocated(tv%p_surf))
   call calc_isoneutral_slopes(G, GV, US, h, e, tv, dt*CS%kappa_smooth, CS%use_stanley_iso, &
                               slope_x, slope_y, halo=2, OBC=OBC, OBC_N2=CS%OBC_friendly)
   !$omp target exit data map(release: tv%T, tv%S, e)
   !$omp target exit data map(release: tv%SpV_avg) if (allocated(tv%SpV_avg))
+  !$omp target exit data map(release: tv%p_surf) if (allocated(tv%p_surf))
   call cpu_clock_end(CS%id_clock_isoneutral_slopes)
 
 end subroutine calc_QG_slopes
