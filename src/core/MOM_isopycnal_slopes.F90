@@ -136,11 +136,6 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
   integer :: is, ie, js, je, nz, IsdB
   integer :: i, j, k
 
-  ! For now, push tv sub arrays to device
-  ! TODO: This should be done outside of this routine
-  !$omp target enter data map(to: h, tv%T, tv%S, e)
-  !$omp target enter data map(to: tv%SpV_avg) if (allocated(tv%SpV_avg))
-
   ! Allocate locals on device
   !$omp target enter data map(alloc: T, S)
 
@@ -217,6 +212,8 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
     else
       call vert_fill_TS(h, tv%T, tv%S, dt_kappa_smooth, T, S, G, GV, US, 1)
     endif
+    ! Bring T and S back from device
+    !$omp target update from(T, S)
   endif
 
   if ((use_EOS .and. allocated(tv%SpV_avg) .and. (tv%valid_SpV_halo < 1)) .and. &
@@ -586,11 +583,6 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
 
   !$omp target exit data map(delete: GxSpV_u) if (present_N2_u .or. present(dzSxN))
   !$omp target exit data map(delete: GxSpV_v) if (present_N2_v .or. present(dzSyN))
-
-  ! For now, release tv types in subroutine
-  ! TODO: Move this outside of subroutine
-  !$omp target exit data map(release: h, tv%T, tv%S, e)
-  !$omp target exit data map(from: tv%SpV_avg) if (allocated(tv%SpV_avg))
 
   ! Delete locals from device
   !$omp target exit data map(delete: T, S)
