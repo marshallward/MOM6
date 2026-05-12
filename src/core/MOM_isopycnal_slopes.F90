@@ -80,24 +80,17 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
                   ! inconsistent units of [R S-1 C-1 ~> kg m-3 degC-1 ppt-1], [R S-2 ~> kg m-3 ppt-2],
                   ! [T2 S-1 L-2 ~> kg m-3 ppt-1 Pa-1] and [T2 C-1 L-2 ~> kg m-3 degC-1 Pa-1].
   !UMW Test: Promote to 3d to factor out calculate_density_derivs() calls
-  !UMW TODO: What are the best indices to use for these new 3d arrays?
-  real, dimension(SZIB_(G)) :: GxSpV_u  ! Gravitational acceleration times the specific volume at an interface
-                  ! at the u-points [L2 Z-1 T-2 R-1 ~> m4 s-2 kg-1]
-  real, dimension(SZI_(G)) :: GxSpV_v  ! Gravitational acceleration times the specific volume at an interface
-                  ! at the v-points [L2 Z-1 T-2 R-1 ~> m4 s-2 kg-1]
   real, dimension(SZIB_(G), SZJB_(G), SZK_(GV)) :: &
-    drho_dT, &  ! The derivative of density with temperature calculated at  
-                ! both u and v points [R C-1 ~> kg m-3 degC-1].
-    drho_dS     ! The derivative of density with salinity calculated at
-                ! both u and v points [R S-1 ~> kg m-3 ppt-1].
+    drho_dT, &      ! The derivative of density with temperature calculated at  
+                    ! both u and v points [R C-1 ~> kg m-3 degC-1].
+    drho_dS, &      ! The derivative of density with salinity calculated at
+                    ! both u and v points [R S-1 ~> kg m-3 ppt-1].
   !UMW TODO: Find better name for these variables
-  real, dimension(SZIB_(G), SZJB_(G), SZK_(GV)) :: &
     drho_dT_dT_h, & ! The second derivative of density with temperature at h points [R C-2 ~> kg m-3 degC-2]
     T_uvh, &        ! Array used to hold temperature at the u,v or h-points for derivative calculations[C ~> degC].
     S_uvh, &        ! Array used to hold salinity at the u,v or h-points for derivative calculations[S ~> ppt].
-    ! UMW TODO: figure out best way to integrate this array. 
-    ! GxSpV_uvh, &    ! Gravitiational acceleration times the specific volume at an interface
-                  ! at the u-points [L2 Z-1 T-2 R-1 ~> m4 s-2 kg-1]
+    GxSpV_uvh, &    ! Gravitiational acceleration times the specific volume at an interface
+                    ! at the u-points [L2 Z-1 T-2 R-1 ~> m4 s-2 kg-1]
     pres_uvh        ! Array used to hold pressure on the interface at the u,v or h-points [R L2 T-2 ~> Pa].
   real :: drdiA, drdiB  ! Along layer zonal potential density  gradients in the layers above (A)
                         ! and below (B) the interface times the grid spacing [R ~> kg m-3].
@@ -137,7 +130,7 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
   integer :: i, j, k
 
   ! Allocate locals on device
-  !$omp target enter data map(alloc: T, S, pres, T_uvh, S_uvh, pres_uvh)
+  !$omp target enter data map(alloc: T, S, pres, T_uvh, S_uvh, pres_uvh, GxSpV_uvh)
 
   if (present(halo)) then
     is = G%isc-halo ; ie = G%iec+halo ; js = G%jsc-halo ; je = G%jec+halo
@@ -239,8 +232,9 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
       pres(i,j,k+1) = pres(i,j,k) + GV%g_Earth * GV%H_to_RZ * h(i,j,k)
   enddo
 
-  do I=is-1,ie
-    GxSpV_u(I) = G_Rho0  ! This will be changed if both use_EOS and allocated(tv%SpV_avg) are true
+  ! UMW TODO: Merge with above once I figure out how I want to handle indexing
+  do concurrent( I=is-1:ie, J=js-1:je, k=1:nz )
+    GxSpV_uvh(I,J,k) = G_Rho0  ! This will be changed if both use_EOS and allocated(tv%SpV_avg) are true
   enddo
 
   ! Calculate density derviatves outside of slope calculation since
@@ -296,9 +290,6 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
   ! UMW TODO: This transfer should only be happening if (use_stanely),
   ! but for some reason that just causes per row transfers, so doing it unconditionally for now.
   !$omp target enter data map(to: drho_dT_dT_h)
-
-  !UMW: untested
-  !$omp target enter data map(alloc: GxSpV_u) if (present_N2_u .or. present(dzSxN))
 
   do concurrent( j=js:je , K=2:nz , I=is-1:ie ) local(drdkL, drdkR, drdiA, drdiB)
     ! UMW: Since stanley parameterization requies EOS anyways, I'm putting
@@ -359,15 +350,15 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
         if (OBC%segnum_u(I,j) > 0) then !  OBC_DIRECTION_E
           drdz = drdkL / dzaL  ! Note that drdz is not used for slopes at OBC faces.
           if (use_EOS .and. allocated(tv%SpV_avg)) &
-            GxSpV_u(I) = GV%g_Earth * 0.5 * (tv%SpV_avg(i,j,k) + tv%SpV_avg(i,j,k-1))
+            GxSpV_uvh(i,j,k) = GV%g_Earth * 0.5 * (tv%SpV_avg(i,j,k) + tv%SpV_avg(i,j,k-1))
         elseif (OBC%segnum_u(I,j) < 0) then !  OBC_DIRECTION_W
           drdz = drdkR / dzaR
           if (use_EOS .and. allocated(tv%SpV_avg)) &
-            GxSpV_u(I) = GV%g_Earth * 0.5 * (tv%SpV_avg(i+1,j,k) + tv%SpV_avg(i+1,j,k-1))
+            GxSpV_uvh(i,j,k) = GV%g_Earth * 0.5 * (tv%SpV_avg(i+1,j,k) + tv%SpV_avg(i+1,j,k-1))
         endif
       endif ; endif
 
-      N2_u(I,j,K) = GxSpV_u(I) * drdz * G%mask2dCu(I,j) ! Square of buoyancy freq. [L2 Z-2 T-2 ~> s-2]
+      N2_u(I,j,K) = GxSpV_uvh(i,j,k) * drdz * G%mask2dCu(I,j) ! Square of buoyancy freq. [L2 Z-2 T-2 ~> s-2]
     endif
 
     if (use_EOS) then
@@ -404,14 +395,15 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
 
     slope_x(I,j,K) = slope
     if (present(dzSxN)) &
-      dzSxN(I,j,K) = sqrt( GxSpV_u(I) * max(0., (wtL * ( dzaL * drdkL )) &
+      dzSxN(I,j,K) = sqrt( GxSpV_uvh(i,j,k) * max(0., (wtL * ( dzaL * drdkL )) &
                                               + (wtR * ( dzaR * drdkR ))) / (wtL + wtR) ) & ! dz * N
                       * abs(slope) * G%mask2dCu(I,j) ! x-direction contribution to S^2
 
   enddo ! end of do zonal concurrent
 
-  do i=is,ie
-    GxSpV_v(i) = G_Rho0  !This will be changed if both use_EOS and allocated(tv%SpV_avg) are true
+  !UMW TODO: Is this still necessary?
+  do concurrent( I=is-1:ie, J=js-1:je, k=1:nz )
+    GxSpV_uvh(I,J,k) = G_Rho0  ! This will be changed if both use_EOS and allocated(tv%SpV_avg) are true
   enddo
   ! Calculate the meridional isopycnal slope.
 
@@ -472,9 +464,6 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
   ! but for some reason that just causes per row transfers, so doing it unconditionally for now
   !$omp target update to (drho_dT_dT_h)
 
-  !UMW: untested
-  !$omp target enter data map(alloc: GxSpV_v) if (present_N2_v .or. present(dzSyN))
-
   do concurrent(J=js-1:je, K=2:nz, i=is:ie) local(drdkL, drdkR, drdjA, drdjB)
 
     if (use_EOS) then
@@ -534,15 +523,15 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
         if (OBC%segnum_v(i,J) > 0) then !  OBC_DIRECTION_N
           drdz = drdkL / dzaL  ! Note that drdz is not used for slopes at OBC faces.
           if (use_EOS .and. allocated(tv%SpV_avg)) &
-            GxSpV_v(i) = GV%g_Earth * 0.5 * (tv%SpV_avg(i,j,k) + tv%SpV_avg(i,j,k-1))
+            GxSpV_uvh(i,j,k) = GV%g_Earth * 0.5 * (tv%SpV_avg(i,j,k) + tv%SpV_avg(i,j,k-1))
         elseif (OBC%segnum_v(i,J) < 0) then !  OBC_DIRECTION_S
           drdz = drdkL / dzaL
           if (use_EOS .and. allocated(tv%SpV_avg)) &
-            GxSpV_v(i) = GV%g_Earth * 0.5 * (tv%SpV_avg(i,j+1,k) + tv%SpV_avg(i,j+1,k-1))
+            GxSpV_uvh(i,j,k) = GV%g_Earth * 0.5 * (tv%SpV_avg(i,j+1,k) + tv%SpV_avg(i,j+1,k-1))
         endif
       endif ; endif
 
-      N2_v(i,J,K) = GxSpV_v(i) * drdz * G%mask2dCv(i,J) ! Square of buoyancy freq. [L2 Z-2 T-2 ~> s-2]
+      N2_v(i,J,K) = GxSpV_uvh(i,j,k) * drdz * G%mask2dCv(i,J) ! Square of buoyancy freq. [L2 Z-2 T-2 ~> s-2]
     endif
 
     if (use_EOS) then
@@ -578,7 +567,7 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
     endif
     slope_y(i,J,K) = slope
     if (present(dzSyN)) &
-      dzSyN(i,J,K) = sqrt( GxSpV_v(i) * max(0., (wtL * ( dzaL * drdkL )) &
+      dzSyN(i,J,K) = sqrt( GxSpV_uvh(i,j,k) * max(0., (wtL * ( dzaL * drdkL )) &
                                               + (wtR * ( dzaR * drdkR ))) / (wtL + wtR) ) & ! dz * N
                       * abs(slope) * G%mask2dCv(i,J) ! x-direction contribution to S^2
 
@@ -588,11 +577,8 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
   !$omp target exit data map(delete: drho_dT, drho_dS)
   !$omp target exit data map(delete: drho_dT_dT_h)
 
-  !$omp target exit data map(delete: GxSpV_u) if (present_N2_u .or. present(dzSxN))
-  !$omp target exit data map(delete: GxSpV_v) if (present_N2_v .or. present(dzSyN))
-
   ! Delete locals from device
-  !$omp target exit data map(delete: T, S, pres, T_uvh, S_uvh, pres_uvh)
+  !$omp target exit data map(delete: T, S, pres, T_uvh, S_uvh, pres_uvh, GxSpV_uvh)
 
 end subroutine calc_isoneutral_slopes
 
