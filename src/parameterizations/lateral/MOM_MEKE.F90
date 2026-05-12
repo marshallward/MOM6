@@ -1878,9 +1878,12 @@ subroutine ML_MEKE_calculate_features(G, GV, US, CS, Rd_dx_h, u, v, tv, h, dt, f
   !$omp target update to(h)
   !$omp target enter data map(alloc: e)
   call find_eta(h, tv, G, GV, US, e, halo_size=2)
-  !$omp target exit data map(from: e)
   ! Note the hard-coded dimenisional constant in the following line.
+  !$omp target enter data map(to: tv%T, tv%S)
+  !$omp target enter data map(to: tv%SpV_avg) if (allocated(tv%SpV_avg))
   call calc_isoneutral_slopes(G, GV, US, h, e, tv, dt*1.e-7*GV%m2_s_to_HZ_T, .false., slope_x, slope_y)
+  !$omp target exit data map(release: tv%T, tv%S, e)
+  !$omp target exit data map(release: tv%SpV_avg) if (allocated(tv%SpV_avg))
   call pass_vector(slope_x, slope_y, G%Domain)
   do j=js-1,je+1 ; do i=is-1,ie+1
     slope_x_vert_avg(I,j) = vertical_average_interface(slope_x(i,j,:), h_u(i,j,:), GV%H_subroundoff)
