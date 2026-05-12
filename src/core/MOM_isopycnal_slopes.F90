@@ -247,13 +247,65 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
       S_uvh(I,j,K) = 0.25*((S(i,j,k) + S(i+1,j,k)) + (S(i,j,k-1) + S(i+1,j,k-1)))
     enddo
 
-    ! Bring T, S, and press back from device for density deriv calc
+    ! Bring T, S, and press back from device for deriv and OBC calcs
     !$omp target update from(T_uvh, S_uvh, pres_uvh)
 
-    ! UMW TODO: Add OBC and GxSpV logic
+    ! UMW NOTE: Vibe-coded and untested.
+    ! Apply OBC overrides to T_uvh, S_uvh, and pres_uvh at u-points before the density
+    ! derivative calculation. At open boundary faces the EOS inputs must be one-sided
+    ! (using only the interior cell's T/S/P) rather than the two-cell average filled in
+    ! the do concurrent above. East-facing OBCs (OBC_DIRECTION_E) use the interior (i)
+    ! cell; west-facing OBCs (OBC_DIRECTION_W) use the exterior (i+1) cell. This loop
+    ! runs on the CPU since it requires access to OBC%segnum_u, a derived-type component
+    ! that is not mapped to the device.
+    if (OBC_friendly) then
+      ! East-facing open boundaries: interior cell is at i, so use pres/T/S(i,j,K)
+      if (OBC%u_E_OBCs_on_PE) then
+        do j = max(js, OBC%js_u_E_obc), min(je, OBC%je_u_E_obc)
+          do K = nz, 2, -1
+            do I = max(is-1, OBC%Is_u_E_obc), min(ie, OBC%Ie_u_E_obc)
+              if (OBC%segnum_u(I,j) > 0) then ! OBC_DIRECTION_E
+                pres_uvh(I,j,K) = pres(i,j,K)
+                T_uvh(I,j,K) = 0.5*(T(i,j,K) + T(i,j,K-1))
+                S_uvh(I,j,K) = 0.5*(S(i,j,K) + S(i,j,K-1))
+              endif
+            enddo
+          enddo
+        enddo
+      endif
+      ! West-facing open boundaries: interior cell is at i+1, so use pres/T/S(i+1,j,K)
+      if (OBC%u_W_OBCs_on_PE) then
+        do j = max(js, OBC%js_u_W_obc), min(je, OBC%je_u_W_obc)
+          do K = nz, 2, -1
+            do I = max(is-1, OBC%Is_u_W_obc), min(ie, OBC%Ie_u_W_obc)
+              if (OBC%segnum_u(I,j) < 0) then ! OBC_DIRECTION_W
+                pres_uvh(I,j,K) = pres(i+1,j,K)
+                T_uvh(I,j,K) = 0.5*(T(i+1,j,K) + T(i+1,j,K-1))
+                S_uvh(I,j,K) = 0.5*(S(i+1,j,K) + S(i+1,j,K-1))
+              endif
+            enddo
+          enddo
+        enddo
+      endif
+    endif
 
-    ! Get density derivatives with i slices of T, S, and P at u points.
-    ! UMW TODO: Does this still have to be over I?
+    ! Pre-fill GxSpV_uvh at u-points with the specific-volume-weighted buoyancy factor.
+    ! This four-cell average over layers k and k-1 on both sides i and i+1 of each u-face
+    ! replaces the G_Rho0 default set earlier. It is only needed when N2_u or dzSxN are
+    ! requested; otherwise GxSpV_uvh retains its G_Rho0 default throughout the slope loop.
+    ! Individual OBC faces will override their entries further inside the slope compute loop.
+    if (present_N2_u .or. present(dzSxN)) then
+      if (allocated(tv%SpV_avg)) then
+        do concurrent( j = js:je , K = 2:nz, i = is-1:ie )
+            GxSpV_uvh(i,j,K) = GV%g_Earth * 0.25 * ((tv%SpV_avg(i,j,K) + tv%SpV_avg(i+1,j,K)) + &
+                                                      (tv%SpV_avg(i,j,K-1) + tv%SpV_avg(i+1,j,K-1)))
+        enddo
+      endif
+    endif
+
+    ! calculate_density_derivs expects 1D slices over the i dimension. The loop over j and K
+    ! is necessary because EOSdom_u encodes a 1D index offset (shifted by IsdB-1) that maps
+    ! the SZIB_-based first dimension of T_uvh to the EOS routine's internal indexing.
     do j=js,je ; do k=nz,2,-1
       call calculate_density_derivs(T_uvh(:,j,k), S_uvh(:,j,k), pres_uvh(:,j,k), drho_dT(:,j,k), &
                                   drho_dS(:,j,k), tv%eqn_of_state, EOSdom_u)
@@ -353,6 +405,9 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
             GxSpV_uvh(i,j,k) = GV%g_Earth * 0.5 * (tv%SpV_avg(i,j,k) + tv%SpV_avg(i,j,k-1))
         elseif (OBC%segnum_u(I,j) < 0) then !  OBC_DIRECTION_W
           drdz = drdkR / dzaR
+          ! UMW NOTE: vibe-coded and untested.
+          ! OBC_DIRECTION_W: the interior cell is at i+1 but N2_u reads GxSpV_uvh(i,j,k),
+          ! so override the (i,j,k) entry using SpV_avg from i+1, not i+1 as the array index.
           if (use_EOS .and. allocated(tv%SpV_avg)) &
             GxSpV_uvh(i,j,k) = GV%g_Earth * 0.5 * (tv%SpV_avg(i+1,j,k) + tv%SpV_avg(i+1,j,k-1))
         endif
@@ -421,10 +476,60 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
     ! Bring T, S, and press back from device for density deriv calc
     !$omp target update from(T_uvh, S_uvh, pres_uvh)
 
-    ! UMW TODO: Add OBC and GxSpV logic
+    ! UMW NOTE: Vibe-coded and untested.
+    ! Apply OBC overrides to T_uvh, S_uvh, and pres_uvh at v-points before the density
+    ! derivative calculation. Analogous to the zonal OBC block above: north-facing OBCs
+    ! (OBC_DIRECTION_N) use only the interior (j) cell's T/S/P; south-facing OBCs
+    ! (OBC_DIRECTION_S) use only the exterior (j+1) cell's T/S/P. This loop runs on
+    ! the CPU since it requires access to OBC%segnum_v.
+    if (OBC_friendly) then
+      ! North-facing open boundaries: interior cell is at j, so use pres/T/S(i,j,K)
+      if (OBC%v_N_OBCs_on_PE) then
+        do J = max(js-1, OBC%Js_v_N_obc), min(je, OBC%Je_v_N_obc)
+          do K = nz, 2, -1
+            do i = max(is, OBC%is_v_N_obc), min(ie, OBC%ie_v_N_obc)
+              if (OBC%segnum_v(i,J) > 0) then ! OBC_DIRECTION_N
+                pres_uvh(i,J,K) = pres(i,j,K)
+                T_uvh(i,J,K) = 0.5*(T(i,j,K) + T(i,j,K-1))
+                S_uvh(i,J,K) = 0.5*(S(i,j,K) + S(i,j,K-1))
+              endif
+            enddo
+          enddo
+        enddo
+      endif
+      ! South-facing open boundaries: interior cell is at j+1, so use pres/T/S(i,j+1,K)
+      if (OBC%v_S_OBCs_on_PE) then
+        do J = max(js-1, OBC%Js_v_S_obc), min(je, OBC%Je_v_S_obc)
+          do K = nz, 2, -1
+            do i = max(is, OBC%is_v_S_obc), min(ie, OBC%ie_v_S_obc)
+              if (OBC%segnum_v(i,J) < 0) then ! OBC_DIRECTION_S
+                pres_uvh(i,J,K) = pres(i,j+1,K)
+                T_uvh(i,J,K) = 0.5*(T(i,j+1,K) + T(i,j+1,K-1))
+                S_uvh(i,J,K) = 0.5*(S(i,j+1,K) + S(i,j+1,K-1))
+              endif
+            enddo
+          enddo
+        enddo
+      endif
+    endif
 
-    ! Get density derivatives with i slices of T, S, and P at u points.
-    ! UMW TODO: Does this still have to be over I? 
+    ! Pre-fill GxSpV_uvh at v-points with the specific-volume-weighted buoyancy factor.
+    ! The v-face at J lies between h-rows j=J and j+1=J+1, so the four-cell average spans
+    ! both rows and both vertical layers (k and k-1). This differs from the u-point fill
+    ! above (which averaged over i and i+1). Individual OBC faces will override their
+    ! entries further inside the slope compute loop.
+    if (present_N2_v .or. present(dzSyN)) then
+      if (allocated(tv%SpV_avg)) then
+        do concurrent( J = js-1:je, K = 2:nz, i = is:ie)
+            GxSpV_uvh(i,J,K) = GV%g_Earth * 0.25 * ((tv%SpV_avg(i,j,K) + tv%SpV_avg(i,j+1,K)) + &
+                                                      (tv%SpV_avg(i,j,K-1) + tv%SpV_avg(i,j+1,K-1)))
+        end do
+      endif
+    endif
+
+    ! As with the zonal loop, calculate_density_derivs is called with 1D J-slices because
+    ! EOSdom_v encodes a 1D i-offset. The J loop runs from js-1 to je to cover v-faces,
+    ! which are staggered one half-cell south of the h-point j-rows.
     do J=js-1,je ; do K=nz,2,-1
       call calculate_density_derivs(T_uvh(:,J,K), S_uvh(:,J,K), pres_uvh(:,J,K), drho_dT(:,J,K), &
                                   drho_dS(:,J,K), tv%eqn_of_state, EOSdom_v)
@@ -526,6 +631,9 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
             GxSpV_uvh(i,j,k) = GV%g_Earth * 0.5 * (tv%SpV_avg(i,j,k) + tv%SpV_avg(i,j,k-1))
         elseif (OBC%segnum_v(i,J) < 0) then !  OBC_DIRECTION_S
           drdz = drdkL / dzaL
+          ! UMW NOTE: vibe-coded and untested.
+          ! OBC_DIRECTION_S: the interior cell is at j+1 but N2_v reads GxSpV_uvh(i,j,k),
+          ! so override the (i,j,k) entry using SpV_avg from j+1, not j+1 as the array index.
           if (use_EOS .and. allocated(tv%SpV_avg)) &
             GxSpV_uvh(i,j,k) = GV%g_Earth * 0.5 * (tv%SpV_avg(i,j+1,k) + tv%SpV_avg(i,j+1,k-1))
         endif
