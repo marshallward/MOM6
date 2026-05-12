@@ -293,7 +293,9 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
 
   ! Push derivatives to device
   !$omp target enter data map(to: drho_dT, drho_dS)
-  !$omp target enter data map(to: drho_dT_dT_h) if (use_stanley)
+  ! UMW TODO: This transfer should only be happening if (use_stanely),
+  ! but for some reason that just causes per row transfers, so doing it unconditionally for now.
+  !$omp target enter data map(to: drho_dT_dT_h)
 
   !UMW: untested
   !$omp target enter data map(alloc: GxSpV_u) if (present_N2_u .or. present(dzSxN))
@@ -466,7 +468,9 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
 
   ! Push derivatives to device
   !$omp target update to (drho_dT, drho_dS)
-  !$omp target update to (drho_dT_dT_h) if (use_stanley)
+  ! UMW TODO: This transfer should only be happening if (use_stanely),
+  ! but for some reason that just causes per row transfers, so doing it unconditionally for now
+  !$omp target update to (drho_dT_dT_h)
 
   !UMW: untested
   !$omp target enter data map(alloc: GxSpV_v) if (present_N2_v .or. present(dzSyN))
@@ -582,7 +586,7 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
 
   ! Delete derivatives from device
   !$omp target exit data map(delete: drho_dT, drho_dS)
-  !$omp target exit data map(delete: drho_dT_dT_h) if (use_stanley)
+  !$omp target exit data map(delete: drho_dT_dT_h)
 
   !$omp target exit data map(delete: GxSpV_u) if (present_N2_u .or. present(dzSxN))
   !$omp target exit data map(delete: GxSpV_v) if (present_N2_v .or. present(dzSyN))
