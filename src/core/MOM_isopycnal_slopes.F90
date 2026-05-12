@@ -170,40 +170,40 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
   present_N2_v = PRESENT(N2_v)
   G_Rho0 = GV%g_Earth / GV%Rho0
   if (present_N2_u) then
-    do j=js,je ; do I=is-1,ie
+    do concurrent (j=js:je, I=is-1:ie)
       N2_u(I,j,1) = 0.
       N2_u(I,j,nz+1) = 0.
-    enddo ; enddo
+    enddo
   endif
   if (present_N2_v) then
-    do J=js-1,je ; do i=is,ie
+    do concurrent (J=js-1:je, i=is:ie)
       N2_v(i,J,1) = 0.
       N2_v(i,J,nz+1) = 0.
-    enddo ; enddo
+    enddo
   endif
   if (present(dzu)) then
-    do j=js,je ; do I=is-1,ie
+    do concurrent (j=js:je, I=is-1:ie)
       dzu(I,j,1) = 0.
       dzu(I,j,nz+1) = 0.
-    enddo ; enddo
+    enddo
   endif
   if (present(dzv)) then
-    do J=js-1,je ; do i=is,ie
+    do concurrent (J=js-1:je, i=is:ie)
       dzv(i,J,1) = 0.
       dzv(i,J,nz+1) = 0.
-    enddo ; enddo
+    enddo
   endif
   if (present(dzSxN)) then
-    do j=js,je ; do I=is-1,ie
+    do concurrent (j=js:je, I=is-1:ie)
       dzSxN(I,j,1) = 0.
       dzSxN(I,j,nz+1) = 0.
-    enddo ; enddo
+    enddo
   endif
   if (present(dzSyN)) then
-    do J=js-1,je ; do i=is,ie
+    do concurrent (J=js-1:je, i=is:ie)
       dzSyN(i,J,1) = 0.
       dzSyN(i,J,nz+1) = 0.
-    enddo ; enddo
+    enddo
   endif
 
   if (use_EOS) then
