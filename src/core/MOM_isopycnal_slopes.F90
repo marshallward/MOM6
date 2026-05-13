@@ -228,8 +228,11 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
       pres(i,j,1) = 0.0
     enddo
   endif
-  do concurrent( j=js-1:je+1, k=1:nz, i=is-1:ie+1 )
-      pres(i,j,k+1) = pres(i,j,k) + GV%g_Earth * GV%H_to_RZ * h(i,j,k)
+  ! UMW NOTE: K must be serial
+  do concurrent( j=js-1:je+1, i=is-1:ie+1 )
+    do k=1,nz
+      pres(i,j,K+1) = pres(i,j,K) + GV%g_Earth * GV%H_to_RZ * h(i,j,k)
+    enddo
   enddo
 
   ! UMW TODO: Merge with above once I figure out how I want to handle indexing
