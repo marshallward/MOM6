@@ -1883,7 +1883,7 @@ subroutine ML_MEKE_calculate_features(G, GV, US, CS, Rd_dx_h, u, v, tv, h, dt, f
   ! Note the hard-coded dimenisional constant in the following line.
   call cpu_clock_begin(CS%id_clock_isoneutral_slopes)
   ! UMW: Below is untested
-  !$omp target enter data map(to: tv, tv%T, tv%S, slope_x, slope_y, e))
+  !$omp target enter data map(to: tv, tv%T, tv%S, slope_x, slope_y, e)
   !$omp target enter data map(to: tv%SpV_avg) if (allocated(tv%SpV_avg))
   !$omp target enter data map(to: tv%p_surf) if (allocated(tv%p_surf))
   call calc_isoneutral_slopes(G, GV, US, h, e, tv, dt*1.e-7*GV%m2_s_to_HZ_T, .false., slope_x, slope_y)

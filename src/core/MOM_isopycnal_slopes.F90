@@ -85,12 +85,11 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
                     ! both u and v points [R C-1 ~> kg m-3 degC-1].
     drho_dS, &      ! The derivative of density with salinity calculated at
                     ! both u and v points [R S-1 ~> kg m-3 ppt-1].
-  !UMW TODO: Find better name for these variables
     drho_dT_dT_h, & ! The second derivative of density with temperature at h points [R C-2 ~> kg m-3 degC-2]
-    T_uvh, &        ! Array used to hold temperature at the u,v or h-points for derivative calculations[C ~> degC].
-    S_uvh, &        ! Array used to hold salinity at the u,v or h-points for derivative calculations[S ~> ppt].
+    T_uvh, &        ! Array used to hold temperature at the u,v or h-points for derivative calculations [C ~> degC].
+    S_uvh, &        ! Array used to hold salinity at the u,v or h-points for derivative calculations [S ~> ppt].
     GxSpV_uvh, &    ! Gravitiational acceleration times the specific volume at an interface
-                    ! at the u-points [L2 Z-1 T-2 R-1 ~> m4 s-2 kg-1]
+                    ! at u and v points [L2 Z-1 T-2 R-1 ~> m4 s-2 kg-1]
     pres_uvh        ! Array used to hold pressure on the interface at the u,v or h-points [R L2 T-2 ~> Pa].
   real :: drdiA, drdiB  ! Along layer zonal potential density  gradients in the layers above (A)
                         ! and below (B) the interface times the grid spacing [R ~> kg m-3].
@@ -235,7 +234,6 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
     enddo
   enddo
 
-  ! UMW TODO: Merge with above once I figure out how I want to handle indexing
   do concurrent( I=is-1:ie, J=js-1:je, k=1:nz )
     GxSpV_uvh(I,J,k) = G_Rho0  ! This will be changed if both use_EOS and allocated(tv%SpV_avg) are true
   enddo
@@ -254,13 +252,6 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
     !$omp target update from(T_uvh, S_uvh, pres_uvh)
 
     ! UMW NOTE: Vibe-coded and untested.
-    ! Apply OBC overrides to T_uvh, S_uvh, and pres_uvh at u-points before the density
-    ! derivative calculation. At open boundary faces the EOS inputs must be one-sided
-    ! (using only the interior cell's T/S/P) rather than the two-cell average filled in
-    ! the do concurrent above. East-facing OBCs (OBC_DIRECTION_E) use the interior (i)
-    ! cell; west-facing OBCs (OBC_DIRECTION_W) use the exterior (i+1) cell. This loop
-    ! runs on the CPU since it requires access to OBC%segnum_u, a derived-type component
-    ! that is not mapped to the device.
     if (OBC_friendly) then
       ! East-facing open boundaries: interior cell is at i, so use pres/T/S(i,j,K)
       if (OBC%u_E_OBCs_on_PE) then
@@ -292,11 +283,6 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
       endif
     endif
 
-    ! Pre-fill GxSpV_uvh at u-points with the specific-volume-weighted buoyancy factor.
-    ! This four-cell average over layers k and k-1 on both sides i and i+1 of each u-face
-    ! replaces the G_Rho0 default set earlier. It is only needed when N2_u or dzSxN are
-    ! requested; otherwise GxSpV_uvh retains its G_Rho0 default throughout the slope loop.
-    ! Individual OBC faces will override their entries further inside the slope compute loop.
     if (present_N2_u .or. present(dzSxN)) then
       if (allocated(tv%SpV_avg)) then
         do concurrent( j = js:je , K = 2:nz, i = is-1:ie )
@@ -306,9 +292,6 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
       endif
     endif
 
-    ! calculate_density_derivs expects 1D slices over the i dimension. The loop over j and K
-    ! is necessary because EOSdom_u encodes a 1D index offset (shifted by IsdB-1) that maps
-    ! the SZIB_-based first dimension of T_uvh to the EOS routine's internal indexing.
     do j=js,je ; do k=nz,2,-1
       call calculate_density_derivs(T_uvh(:,j,k), S_uvh(:,j,k), pres_uvh(:,j,k), drho_dT(:,j,k), &
                                   drho_dS(:,j,k), tv%eqn_of_state, EOSdom_u)
@@ -327,8 +310,6 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
 
       ! The second line below would correspond to arguments
       !            drho_dS_dS, drho_dS_dT, drho_dT_dT, drho_dS_dP, drho_dT_dP, &
-      ! UMW: Currently doing this over i slices, for simplicity - will eventually combine
-      ! with above
       do j=js,je ; do K=nz,2,-1
         call calculate_density_second_derivs(T_uvh(:,j,K), S_uvh(:,j,K), pres_uvh(:,j,K), &
                    scrap, scrap, drho_dT_dT_h(:,j,K), scrap, scrap, &
@@ -347,8 +328,8 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
   !$omp target enter data map(to: drho_dT_dT_h)
 
   do concurrent( j=js:je , K=2:nz , I=is-1:ie ) local(drdkL, drdkR, drdiA, drdiB)
-    ! UMW: Since stanley parameterization requies EOS anyways, I'm putting
-    ! the use_stanley loop inside of the use_EOS loop for clarity
+    ! UMW: Since stanley parameterization requies EOS anyways, putting
+    ! the use_stanley loop inside of the use_EOS loop
     if (use_EOS) then
       ! Estimate the horizontal density gradients along layers.
       drdiA = drho_dT(I,j,K) * (T(i+1,j,k-1)-T(i,j,k-1)) + &
@@ -402,15 +383,13 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
     ! which is an estimate of the gradient of density across geopotentials.
     if (present_N2_u) then
       if (OBC_friendly) then ; if (OBC%segnum_u(I,j) /= 0) then
+        ! UMW NOTE: vibe-coded and untested.
         if (OBC%segnum_u(I,j) > 0) then !  OBC_DIRECTION_E
           drdz = drdkL / dzaL  ! Note that drdz is not used for slopes at OBC faces.
           if (use_EOS .and. allocated(tv%SpV_avg)) &
             GxSpV_uvh(i,j,k) = GV%g_Earth * 0.5 * (tv%SpV_avg(i,j,k) + tv%SpV_avg(i,j,k-1))
         elseif (OBC%segnum_u(I,j) < 0) then !  OBC_DIRECTION_W
           drdz = drdkR / dzaR
-          ! UMW NOTE: vibe-coded and untested.
-          ! OBC_DIRECTION_W: the interior cell is at i+1 but N2_u reads GxSpV_uvh(i,j,k),
-          ! so override the (i,j,k) entry using SpV_avg from i+1, not i+1 as the array index.
           if (use_EOS .and. allocated(tv%SpV_avg)) &
             GxSpV_uvh(i,j,k) = GV%g_Earth * 0.5 * (tv%SpV_avg(i+1,j,k) + tv%SpV_avg(i+1,j,k-1))
         endif
@@ -480,11 +459,6 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
     !$omp target update from(T_uvh, S_uvh, pres_uvh)
 
     ! UMW NOTE: Vibe-coded and untested.
-    ! Apply OBC overrides to T_uvh, S_uvh, and pres_uvh at v-points before the density
-    ! derivative calculation. Analogous to the zonal OBC block above: north-facing OBCs
-    ! (OBC_DIRECTION_N) use only the interior (j) cell's T/S/P; south-facing OBCs
-    ! (OBC_DIRECTION_S) use only the exterior (j+1) cell's T/S/P. This loop runs on
-    ! the CPU since it requires access to OBC%segnum_v.
     if (OBC_friendly) then
       ! North-facing open boundaries: interior cell is at j, so use pres/T/S(i,j,K)
       if (OBC%v_N_OBCs_on_PE) then
@@ -516,11 +490,6 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
       endif
     endif
 
-    ! Pre-fill GxSpV_uvh at v-points with the specific-volume-weighted buoyancy factor.
-    ! The v-face at J lies between h-rows j=J and j+1=J+1, so the four-cell average spans
-    ! both rows and both vertical layers (k and k-1). This differs from the u-point fill
-    ! above (which averaged over i and i+1). Individual OBC faces will override their
-    ! entries further inside the slope compute loop.
     if (present_N2_v .or. present(dzSyN)) then
       if (allocated(tv%SpV_avg)) then
         do concurrent( J = js-1:je, K = 2:nz, i = is:ie)
@@ -530,9 +499,6 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
       endif
     endif
 
-    ! As with the zonal loop, calculate_density_derivs is called with 1D J-slices because
-    ! EOSdom_v encodes a 1D i-offset. The J loop runs from js-1 to je to cover v-faces,
-    ! which are staggered one half-cell south of the h-point j-rows.
     do J=js-1,je ; do K=nz,2,-1
       call calculate_density_derivs(T_uvh(:,J,K), S_uvh(:,J,K), pres_uvh(:,J,K), drho_dT(:,J,K), &
                                   drho_dS(:,J,K), tv%eqn_of_state, EOSdom_v)
@@ -551,9 +517,7 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
 
       ! The second line below would correspond to arguments
       !            drho_dS_dS, drho_dS_dT, drho_dT_dT, drho_dS_dP, drho_dT_dP, &
-      ! UMW: Currently doing this over i slices, for simplicity - will eventually combine
-      ! with above
-      ! UMW NOTE: changed J bounds to js-1:je+1 to account for extra J acces below
+      ! UMW NOTE: changed J bounds from js-1:je to js-1:je+1 to account for extra J access below
       ! when calculate drdj 
       do J=js-1,je+1 ; do K=nz,2,-1
         call calculate_density_second_derivs(T_uvh(:,J,K), S_uvh(:,J,K), pres_uvh(:,J,K), &
@@ -628,15 +592,13 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
     ! which is an estimate of the gradient of density across geopotentials.
     if (present_N2_v) then
       if (OBC_friendly) then ; if (OBC%segnum_v(i,J) /= 0) then
+        ! UMW NOTE: vibe-coded and untested.
         if (OBC%segnum_v(i,J) > 0) then !  OBC_DIRECTION_N
           drdz = drdkL / dzaL  ! Note that drdz is not used for slopes at OBC faces.
           if (use_EOS .and. allocated(tv%SpV_avg)) &
             GxSpV_uvh(i,j,k) = GV%g_Earth * 0.5 * (tv%SpV_avg(i,j,k) + tv%SpV_avg(i,j,k-1))
         elseif (OBC%segnum_v(i,J) < 0) then !  OBC_DIRECTION_S
           drdz = drdkL / dzaL
-          ! UMW NOTE: vibe-coded and untested.
-          ! OBC_DIRECTION_S: the interior cell is at j+1 but N2_v reads GxSpV_uvh(i,j,k),
-          ! so override the (i,j,k) entry using SpV_avg from j+1, not j+1 as the array index.
           if (use_EOS .and. allocated(tv%SpV_avg)) &
             GxSpV_uvh(i,j,k) = GV%g_Earth * 0.5 * (tv%SpV_avg(i,j+1,k) + tv%SpV_avg(i,j+1,k-1))
         endif
@@ -684,11 +646,9 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
 
   enddo ! end of meridional do concurrent
 
-  ! Delete derivatives from device
+  ! Delete variables from device
   !$omp target exit data map(delete: drho_dT, drho_dS)
   !$omp target exit data map(delete: drho_dT_dT_h)
-
-  ! Delete locals from device
   !$omp target exit data map(delete: T, S, pres, T_uvh, S_uvh, pres_uvh, GxSpV_uvh)
 
 end subroutine calc_isoneutral_slopes
