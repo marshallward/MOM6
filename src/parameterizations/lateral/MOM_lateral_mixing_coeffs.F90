@@ -786,6 +786,8 @@ subroutine calc_slope_functions(h, tv, dt, G, GV, US, CS, OBC)
     !$omp target enter data map(alloc: e)
     call find_eta(h, tv, G, GV, US, e, halo_size=2)
     !$omp target exit data map(from: e)
+    ! ! BISECT (disabled): localize slope drift — does e itself differ between CPU and GPU?
+    ! if (CS%debug) call hchksum(e, "post-find_eta e (calc_slope_functions)", G%HI, haloshift=1, unscale=US%Z_to_m)
     if (CS%use_simpler_Eady_growth_rate) then
       call calc_isoneutral_slopes(G, GV, US, h, e, tv, dt*CS%kappa_smooth, CS%use_stanley_iso, &
                                   CS%slope_x, CS%slope_y, N2_u=N2_u, N2_v=N2_v, dzu=dzu, dzv=dzv, &

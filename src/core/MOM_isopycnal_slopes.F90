@@ -106,6 +106,13 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
     T_hr, &       ! Temperature on the interface at the h (+1) point [C ~> degC].
     S_hr, &       ! Salinity on the interface at the h (+1) point [S ~> ppt]
     pres_hr       ! Pressure on the interface at the h (+1) point [R L2 T-2 ~> Pa].
+  ! BISECT-DBG: 3D capture of per-cell EOS derivative output to chksum after the
+  ! parallel region. Tests whether calculate_density_derivs (the EOS dispatcher
+  ! via declare-target Roquet_rho_loc) produces bit-identical results across builds.
+  real, dimension(SZIB_(G),SZJ_(G),SZK_(GV)+1) :: dbg_drho_dT_u, dbg_drho_dS_u
+  ! BISECT-DBG: capture intermediate slope-arithmetic vars to localize where the
+  ! 5.3e-9 host-codegen drift originates between EOS call and slope_x assignment.
+  real, dimension(SZIB_(G),SZJ_(G),SZK_(GV)+1) :: dbg_drdz_u, dbg_drdx_u
   real :: drdiA, drdiB  ! Along layer zonal potential density  gradients in the layers above (A)
                         ! and below (B) the interface times the grid spacing [R ~> kg m-3].
   real :: drdjA, drdjB  ! Along layer meridional potential density  gradients in the layers above (A)
@@ -251,10 +258,14 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
   do I=is-1,ie
     GxSpV_u(I) = G_Rho0  ! This will be changed if both use_EOS and allocated(tv%SpV_avg) are true
   enddo
+  ! BISECT-DBG: zero the EOS-derivative capture arrays so chksum sees clean data
+  dbg_drho_dT_u(:,:,:) = 0.0 ; dbg_drho_dS_u(:,:,:) = 0.0
+  dbg_drdz_u(:,:,:) = 0.0    ; dbg_drdx_u(:,:,:) = 0.0
   !$OMP parallel do default(none) shared(nz,is,ie,js,je,IsdB,use_EOS,G,GV,US,pres,T,S,tv,h,e, &
   !$OMP                                  h_neglect,dz_neglect,h_neglect2, &
   !$OMP                                  present_N2_u,G_Rho0,N2_u,slope_x,dzSxN,EOSdom_u,EOSdom_h1, &
-  !$OMP                                  local_open_u_BC,dzu,OBC,use_stanley,OBC_friendly) &
+  !$OMP                                  local_open_u_BC,dzu,OBC,use_stanley,OBC_friendly, &
+  !$OMP                                  dbg_drho_dT_u,dbg_drho_dS_u,dbg_drdz_u,dbg_drdx_u) &
   !$OMP                          private(drdiA,drdiB,drdkL,drdkR,pres_u,T_u,S_u,      &
   !$OMP                                  drho_dT_u,drho_dS_u,hg2A,hg2B,hg2L,hg2R,haA, &
   !$OMP                                  drho_dT_dT_h,scrap,pres_h,T_h,S_h, &
@@ -296,6 +307,11 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
       endif
       call calculate_density_derivs(T_u, S_u, pres_u, drho_dT_u, drho_dS_u, &
                                     tv%eqn_of_state, EOSdom_u)
+      ! ! BISECT-DBG (disabled): capture per-(I,j,K) EOS derivative output for post-region chksum
+      ! do I=is-1,ie
+      !   dbg_drho_dT_u(I,j,K) = drho_dT_u(I)
+      !   dbg_drho_dS_u(I,j,K) = drho_dS_u(I)
+      ! enddo
       if (present_N2_u .or. (present(dzSxN))) then
         if (allocated(tv%SpV_avg)) then
           do I=is-1,ie
@@ -363,6 +379,7 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
       wtL = hg2L*(haR*dzaR) ; wtR = hg2R*(haL*dzaL)
 
       drdz = ((wtL * drdkL) + (wtR * drdkR)) / ((dzaL*wtL) + (dzaR*wtR))
+      ! dbg_drdz_u(I,j,K) = drdz   ! BISECT-DBG (disabled): capture drdz immediately after the divide
       ! The expression for drdz above is mathematically equivalent to:
       !   drdz = ((hg2L/haL) * drdkL/dzaL + (hg2R/haR) * drdkR/dzaR) / &
       !          ((hg2L/haL) + (hg2R/haR))
@@ -386,6 +403,7 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
       if (use_EOS) then
         drdx = ((wtA * drdiA + wtB * drdiB) / (wtA + wtB) - &
                 drdz * (e(i,j,K)-e(i+1,j,K))) * G%IdxCu(I,j)
+        ! dbg_drdx_u(I,j,K) = drdx   ! BISECT-DBG (disabled): capture drdx immediately after computation
 
         ! This estimate of slope is accurate for small slopes, but bounded
         ! to be between -1 and 1.
@@ -423,6 +441,15 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
 
     enddo ! I
   enddo ; enddo ! end of j-loop
+
+  ! ! BISECT-DBG (disabled): chksum the per-cell EOS derivative output captured in the u-slope
+  ! ! parallel region. If this diverges between CPU and GPU, the EOS dispatcher
+  ! ! itself (via declare-target Roquet_rho_loc) has codegen-sensitive math.
+  ! call hchksum(dbg_drho_dT_u, "dbg_drho_dT_u after calc_isoneutral_slopes u-loop", G%HI, haloshift=0)
+  ! call hchksum(dbg_drho_dS_u, "dbg_drho_dS_u after calc_isoneutral_slopes u-loop", G%HI, haloshift=0)
+  ! ! BISECT-DBG (disabled): chksum intermediate slope-arithmetic values to localize drift between EOS and slope_x.
+  ! call hchksum(dbg_drdz_u,    "dbg_drdz_u after calc_isoneutral_slopes u-loop",    G%HI, haloshift=0)
+  ! call hchksum(dbg_drdx_u,    "dbg_drdx_u after calc_isoneutral_slopes u-loop",    G%HI, haloshift=0)
 
   do i=is,ie
     GxSpV_v(i) = G_Rho0  !This will be changed if both use_EOS and allocated(tv%SpV_avg) are true
