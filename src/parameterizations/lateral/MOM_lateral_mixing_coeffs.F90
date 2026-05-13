@@ -688,9 +688,10 @@ subroutine calc_sqg_struct(h, tv, G, GV, US, CS, dt, MEKE, OBC)
       !$omp target enter data map(alloc: e)
       call find_eta(h, tv, G, GV, US, e, halo_size=2)  !### Could be halo_size=1?
       call cpu_clock_begin(CS%id_clock_isoneutral_slopes)
-      !$omp target enter data map(to: tv, tv%T, tv%S, N2_u, N2_v, dzu, dzv, dzSxN, dzSyN)
+      !$omp target enter data map(to: tv, tv%T, tv%S)
       !$omp target enter data map(to: tv%SpV_avg) if (allocated(tv%SpV_avg))
       !$omp target enter data map(to: tv%p_surf) if (allocated(tv%p_surf))
+      !$omp target enter data map(alloc: N2_u, N2_v, dzu, dzv, dzSxN, dzSyN)
       call calc_isoneutral_slopes(G, GV, US, h, e, tv, dt*CS%kappa_smooth, CS%use_stanley_iso, &
                                   CS%slope_x, CS%slope_y, N2_u=N2_u, N2_v=N2_v, dzu=dzu, dzv=dzv, &
                                   dzSxN=dzSxN, dzSyN=dzSyN, halo=1, OBC=OBC, OBC_N2=CS%OBC_friendly)
@@ -796,10 +797,10 @@ subroutine calc_slope_functions(h, tv, dt, G, GV, US, CS, OBC)
     !$omp target enter data map(alloc: e)
     call find_eta(h, tv, G, GV, US, e, halo_size=2)
     call cpu_clock_begin(CS%id_clock_isoneutral_slopes)
-    !$omp target enter data map(to: tv, tv%T, tv%S, N2_u, N2_v, dzu, dzv, dzSxN, dzSyN, &
-    !$omp & CS%slope_x, CS%slope_y)
+    !$omp target enter data map(to: tv, tv%T, tv%S, CS%slope_x, CS%slope_y)
     !$omp target enter data map(to: tv%SpV_avg) if (allocated(tv%SpV_avg))
     !$omp target enter data map(to: tv%p_surf) if (allocated(tv%p_surf))
+    !$omp target enter data map(alloc: N2_u, N2_v, dzu, dzv, dzSxN, dzSyN)
     if (CS%use_simpler_Eady_growth_rate) then
       call calc_isoneutral_slopes(G, GV, US, h, e, tv, dt*CS%kappa_smooth, CS%use_stanley_iso, &
                                   CS%slope_x, CS%slope_y, N2_u=N2_u, N2_v=N2_v, dzu=dzu, dzv=dzv, &
@@ -816,10 +817,11 @@ subroutine calc_slope_functions(h, tv, dt, G, GV, US, CS, OBC)
       !$omp target exit data map(from: e)
       call calc_slope_functions_using_just_e(h, G, GV, US, CS, e)
     endif
-    !$omp target exit data map(release: tv, tv%T, tv%S, e, N2_u, N2_v, dzu, dzv, dzSxN, dzSyN, &
+    !$omp target exit data map(release: tv, tv%T, tv%S,  &
     !$omp & CS%slope_x, CS%slope_y)
     !$omp target exit data map(release: tv%SpV_avg) if (allocated(tv%SpV_avg))
     !$omp target exit data map(release: tv%p_surf) if (allocated(tv%p_surf))
+    !$omp target exit data map(delete: e, N2_u, N2_v, dzu, dzv, dzSxN, dzSyN)
     call cpu_clock_end(CS%id_clock_isoneutral_slopes)
   endif
 
