@@ -644,10 +644,10 @@ subroutine tracer_hordiff(h, dt, MEKE, VarMix, visc, G, GV, US, CS, Reg, tv, do_
   endif
   ! does this loOP? nah right yuou ned omp too (??) oh wow no it doe slop interesting, I think question mark
   !$ do m = 1, Reg%ntr
-    !$omp target exit data map(from: Reg%Tr(m)%t, Reg%Tr(m)%df_x, Reg%Tr(m)%df_y, &
-    !$omp   Reg%Tr(m)%df2d_x, Reg%tr(m)%df2d_y)  ! TEST: was map(from:) — this fixed it
+    !$omp target exit data map(release: Reg%Tr(m)%t, Reg%Tr(m)%df_x, Reg%Tr(m)%df_y, &
+    !$omp   Reg%Tr(m)%df2d_x, Reg%tr(m)%df2d_y)  ! Re-applied 2026-05-12: map(from:) clobbers managed memory
   !$ enddo
-  !$omp target exit data map(release: Reg%Tr, Reg)
+  !$omp target exit data map(release: Reg%Tr(:), Reg)
 
   if (CS%debug) call MOM_tracer_chksum("After tracer diffusion ", Reg, G)
 
@@ -709,8 +709,10 @@ subroutine tracer_hordiff(h, dt, MEKE, VarMix, visc, G, GV, US, CS, Reg, tv, do_
     call post_data(CS%id_KhTr_h, Kh_h, CS%diag)
   endif
 
-  !$omp target exit data map(from: khdt_x, khdt_y) if(CS%debug .or. CS%id_khdt_x>0 .or. CS%id_khdt_y>0)
-  !$omp target exit data map(delete: khdt_x, khdt_y, Kh_u, Kh_v) map(release: CS)
+  ! BISECT-F: was map(from:); switching to update from + map(release:) per
+  ! [[feedback_map_from_clobbers_managed]] — map(from:) can clobber managed mem
+  !$omp target update from(khdt_x, khdt_y) if(CS%debug .or. CS%id_khdt_x>0 .or. CS%id_khdt_y>0)
+  !$omp target exit data map(release: khdt_x, khdt_y, Kh_u, Kh_v) map(release: CS)
 
   if (CS%debug) then
     call uvchksum("After tracer diffusion khdt_[xy]", khdt_x, khdt_y, &

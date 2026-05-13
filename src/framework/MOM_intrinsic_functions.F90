@@ -11,7 +11,7 @@ use iso_fortran_env, only : int64, real64
 
 implicit none ; private
 
-public :: invcosh, cuberoot
+public :: invcosh, cuberoot, nth_root
 public :: intrinsic_functions_unit_tests
 
 ! Floating point model, if bit layout from high to low is (sign, exp, frac)
@@ -115,6 +115,61 @@ elemental function cuberoot(x) result(root)
     root = descale(root_asx, e_x, s_x)
   endif
 end function cuberoot
+
+
+!> Bit-stable n-th root of x for x in (0, +inf) and integer n >= 1, suitable
+!! for evaluation inside `!$omp target` / `do concurrent` offloaded regions.
+!!
+!! Lowering `x**(1.0/n)` via the compiler produces `exp((1.0/n)*log(x))` — two
+!! transcendentals whose last-bit rounding differs between host libm and CUDA
+!! libdevice. This routine avoids that path entirely: it uses fixed-iteration
+!! Newton on y^n - x = 0, with y^(n-1) evaluated as repeated multiplication,
+!! and one bit-precision-polishing iteration at the end.
+!!
+!! For x in [0, 1] (the case in `MOM_barotropic.F90`'s `bt_rem = av_rem**Instep`)
+!! convergence is rapid because the linear initial guess y0 = 1 - (1-x)/n is
+!! already within a few percent of the true root.
+elemental function nth_root(x, n) result(root)
+  !$omp declare target
+  real,    intent(in) :: x  !< Argument, x >= 0 [arbitrary]
+  integer, intent(in) :: n  !< Root index, n >= 1
+  real :: root              !< x**(1/n) in the same units as x
+
+  integer, parameter :: maxitt = 20  ! Fixed (deterministic) iteration count
+  real    :: y, ypow_nm1
+  real    :: x_n_r, x_nm1_r
+  integer :: itt, k
+
+  ! Trivial cases — return early to keep loop tight and avoid 0/0 below.
+  if (n <= 1) then
+    root = x
+    return
+  endif
+  if (x == 0.0) then
+    root = 0.0
+    return
+  endif
+
+  x_n_r   = real(n)
+  x_nm1_r = real(n - 1)
+
+  ! Linear initial guess valid for x in [0, 1] and decent for moderate x > 1.
+  ! For our caller (av_rem in [0, 1], typically near 1), this is within ~1%.
+  y = 1.0 - (1.0 - x) / x_n_r
+
+  ! Newton iteration:  y_{k+1} = ((n-1)*y_k + x / y_k^{n-1}) / n
+  ! All ops are *, +, /. Integer power y^{n-1} is repeated multiplication,
+  ! so there is no `pow`/`exp/log` lowering anywhere in the iteration.
+  do itt = 1, maxitt
+    ypow_nm1 = 1.0
+    do k = 1, n - 1
+      ypow_nm1 = ypow_nm1 * y
+    enddo
+    y = (x_nm1_r * y + x / ypow_nm1) / x_n_r
+  enddo
+
+  root = y
+end function nth_root
 
 
 !> Rescale `a` to the range [0.125, 1) and compute its cube-root exponent.
