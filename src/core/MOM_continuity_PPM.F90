@@ -1089,7 +1089,6 @@ elemental subroutine flux_elem(u, h, h_p1, h_L, h_L_p1, h_R, h_R_p1, uh, duhdu, 
     h_marg = 0.5 * (h_L_p1 + h_R)
   endif
   duhdu = tmp * h_marg * visc_rem
-
 end subroutine flux_elem
 
 !NVF$ INLINE
@@ -1550,9 +1549,10 @@ subroutine set_zonal_BT_cont(u, h_in, h_W, h_E, BT_cont, uh_tot_0, duhdu_tot_0, 
                        h_E(i+1,j,k),uh_R,duhdu_R,visc_rem(ii,jj,k),G%dy_Cu(i,j),&
                        G%IareaT(i,j),G%IareaT(i+1,j),G%IdxT(i,j),G%IdxT(i+1,j),dt,CS%vol_CFL,&
                        por_face_areaU(i,j,k))
-        FAmt_0(ii,jj) = FAmt_0(ii,jj) + duhdu_0
-        FAmt_L(ii,jj) = FAmt_L(ii,jj) + duhdu_L
-        FAmt_R(ii,jj) = FAmt_R(ii,jj) + duhdu_R
+        ! XXX: Bracket duhdu to suppress FMA optimization
+        FAmt_0(ii,jj) = FAmt_0(ii,jj) + (duhdu_0)
+        FAmt_L(ii,jj) = FAmt_L(ii,jj) + (duhdu_L)
+        FAmt_R(ii,jj) = FAmt_R(ii,jj) + (duhdu_R)
         uhtot_L(ii,jj) = uhtot_L(ii,jj) + uh_L
         uhtot_R(ii,jj) = uhtot_R(ii,jj) + uh_R
       endif
@@ -2487,23 +2487,24 @@ subroutine set_merid_BT_cont(v, h_in, h_S, h_N, BT_cont, vh_tot_0, dvhdv_tot_0, 
     do J=J_start,J_end ; do i=i_start,i_end
       ii=i-i_start+1 ; jj=j-j_start+1
       if (do_I(ii,jj)) then
-      v_L = v(i,J,k) + dvL(ii,JJ) * visc_rem(ii,JJ,k)
-      v_R = v(i,J,k) + dvR(ii,JJ) * visc_rem(ii,JJ,k)
-      v_0 = v(i,J,k) + dv0(ii,JJ) * visc_rem(ii,JJ,k)
-      call flux_elem(v_0,h_in(i,J,k),h_in(i,J+1,k),h_S(i,J,k),h_S(i,J+1,k),h_N(i,J,k),&
-                      h_N(i,J+1,k),vh_0,dvhdv_0,visc_rem(ii,JJ,k),G%dx_Cv(i,J),G%IareaT(i,J),&
-                      G%IareaT(i,J+1),G%IdyT(i,J),G%IdyT(i,J+1),dt,CS%vol_CFL,por_face_areaV(i,J,k))
-      call flux_elem(v_L,h_in(i,J,k),h_in(i,J+1,k),h_S(i,J,k),h_S(i,J+1,k),h_N(i,J,k),&
-                      h_N(i,J+1,k),vh_L,dvhdv_L,visc_rem(ii,JJ,k),G%dx_Cv(i,J),G%IareaT(i,J),&
-                      G%IareaT(i,J+1),G%IdyT(i,J),G%IdyT(i,J+1),dt,CS%vol_CFL,por_face_areaV(i,J,k))
-      call flux_elem(v_R,h_in(i,J,k),h_in(i,J+1,k),h_S(i,J,k),h_S(i,J+1,k),h_N(i,J,k),&
-                      h_N(i,J+1,k),vh_R,dvhdv_R,visc_rem(ii,JJ,k),G%dx_Cv(i,J),G%IareaT(i,J),&
-                      G%IareaT(i,J+1),G%IdyT(i,J),G%IdyT(i,J+1),dt,CS%vol_CFL,por_face_areaV(i,J,k))
-      FAmt_0(ii,JJ) = FAmt_0(ii,JJ) + dvhdv_0
-      FAmt_L(ii,JJ) = FAmt_L(ii,JJ) + dvhdv_L
-      FAmt_R(ii,JJ) = FAmt_R(ii,JJ) + dvhdv_R
-      vhtot_L(ii,JJ) = vhtot_L(ii,JJ) + vh_L
-      vhtot_R(ii,JJ) = vhtot_R(ii,JJ) + vh_R
+        v_L = v(i,J,k) + dvL(ii,JJ) * visc_rem(ii,JJ,k)
+        v_R = v(i,J,k) + dvR(ii,JJ) * visc_rem(ii,JJ,k)
+        v_0 = v(i,J,k) + dv0(ii,JJ) * visc_rem(ii,JJ,k)
+        call flux_elem(v_0,h_in(i,J,k),h_in(i,J+1,k),h_S(i,J,k),h_S(i,J+1,k),h_N(i,J,k),&
+                        h_N(i,J+1,k),vh_0,dvhdv_0,visc_rem(ii,JJ,k),G%dx_Cv(i,J),G%IareaT(i,J),&
+                        G%IareaT(i,J+1),G%IdyT(i,J),G%IdyT(i,J+1),dt,CS%vol_CFL,por_face_areaV(i,J,k))
+        call flux_elem(v_L,h_in(i,J,k),h_in(i,J+1,k),h_S(i,J,k),h_S(i,J+1,k),h_N(i,J,k),&
+                        h_N(i,J+1,k),vh_L,dvhdv_L,visc_rem(ii,JJ,k),G%dx_Cv(i,J),G%IareaT(i,J),&
+                        G%IareaT(i,J+1),G%IdyT(i,J),G%IdyT(i,J+1),dt,CS%vol_CFL,por_face_areaV(i,J,k))
+        call flux_elem(v_R,h_in(i,J,k),h_in(i,J+1,k),h_S(i,J,k),h_S(i,J+1,k),h_N(i,J,k),&
+                        h_N(i,J+1,k),vh_R,dvhdv_R,visc_rem(ii,JJ,k),G%dx_Cv(i,J),G%IareaT(i,J),&
+                        G%IareaT(i,J+1),G%IdyT(i,J),G%IdyT(i,J+1),dt,CS%vol_CFL,por_face_areaV(i,J,k))
+        ! XXX: Bracket duhdu to suppress FMA optimization
+        FAmt_0(ii,JJ) = FAmt_0(ii,JJ) + (dvhdv_0)
+        FAmt_L(ii,JJ) = FAmt_L(ii,JJ) + (dvhdv_L)
+        FAmt_R(ii,JJ) = FAmt_R(ii,JJ) + (dvhdv_R)
+        vhtot_L(ii,JJ) = vhtot_L(ii,JJ) + vh_L
+        vhtot_R(ii,JJ) = vhtot_R(ii,JJ) + vh_R
       endif
     enddo ; enddo
   enddo
