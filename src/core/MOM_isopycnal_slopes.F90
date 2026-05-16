@@ -87,7 +87,7 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
   ! the Stanley h-point fills (which need one extra column/row beyond the u/v tile extent)
   ! fit without a separate buffer. drho_dT and drho_dS only ever need niblock x njblock,
   ! but are dimensioned +1 for alignment with the rest.
-  real, dimension(niblock+1, njblock+1, SZK_(GV)) :: &
+  real, dimension(default_niblock+1, default_njblock+1, SZK_(GV)) :: &
     drho_dT, &      ! The derivative of density with temperature [R C-1 ~> kg m-3 degC-1].
     drho_dS, &      ! The derivative of density with salinity [R S-1 ~> kg m-3 ppt-1].
     drho_dT_dT_h, & ! The second derivative of density with temperature at h points [R C-2 ~> kg m-3 degC-2]
@@ -95,7 +95,7 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
     S_uvh, &        ! Salinity at the u, v or h-points for derivative calculations [S ~> ppt].
     GxSpV_uvh, &    ! g * specific volume at u/v-point interfaces [L2 Z-1 T-2 R-1 ~> m4 s-2 kg-1]
     pres_uvh        ! Pressure at the u, v or h-points [R L2 T-2 ~> Pa].
-  real, dimension(niblock+1) :: scrap ! Ignored output from calculate_density_second_derivs()
+  real, dimension(default_niblock+1) :: scrap ! Ignored output from calculate_density_second_derivs()
 
   real :: drdiA, drdiB  ! Along layer zonal potential density  gradients in the layers above (A)
                         ! and below (B) the interface times the grid spacing [R ~> kg m-3].
@@ -384,7 +384,7 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
 
     ! Zonal slope compute over the tile
     do concurrent( jj=1:jend-jstart+1, K=2:nz, ii=1:iend-istart+1 ) &
-        local(drdkL, drdkR, drdiA, drdiB, I, j, i)
+        local(drdkL, drdkR, drdiA, drdiB, I, j)
       I = istart + ii - 1  ! global I (u-face)
       j = jstart + jj - 1  ! global j (h-point)
       i = I                 ! i = I for C-grid u-faces
@@ -579,7 +579,7 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
 
     ! Meridional slope compute over the tile
     do concurrent( jj=1:jend-jstart+1, K=2:nz, ii=1:iend-istart+1 ) &
-        local(drdkL, drdkR, drdjA, drdjB, i, j, J)
+        local(drdkL, drdkR, drdjA, drdjB, i, J)
       i = istart + ii - 1  ! global i (h-point)
       J = jstart + jj - 1  ! global J (v-face)
       j = J                 ! j = J for C-grid v-faces
