@@ -11,6 +11,7 @@ use MOM_checksums,        only : hchksum, uchksum, vchksum, Bchksum
 use MOM_coms,             only : PE_here
 use MOM_cpu_clock,        only : cpu_clock_id, cpu_clock_begin, cpu_clock_end
 use MOM_cpu_clock,        only : CLOCK_MODULE, CLOCK_ROUTINE
+use MOM_diag_buffers,     only : diag_buffer_2d!, diag_buffer_3d
 use MOM_diag_manager_infra, only : MOM_diag_manager_init, MOM_diag_manager_end
 use MOM_diag_manager_infra, only : diag_axis_init=>MOM_diag_axis_init, get_MOM_diag_axis_name
 use MOM_diag_manager_infra, only : send_data_infra, MOM_diag_field_add_attribute, EAST, NORTH
@@ -45,6 +46,7 @@ implicit none ; private
 #define MAX_DSAMP_LEV 2
 
 public set_axes_info, post_data, register_diag_field, time_type
+public post_data_3d_by_column, post_data_3d_final
 public post_product_u, post_product_sum_u, post_product_v, post_product_sum_v
 public set_masks_for_axes
 ! post_data_1d_k is a deprecated interface that can be replaced by a call to post_data, but
@@ -58,6 +60,7 @@ public diag_mediator_close_registration, get_diag_time_end
 public diag_axis_init, ocean_register_diag, register_static_field
 public register_scalar_field
 public define_axes_group, diag_masks_set
+public set_piecemeal_extents
 public diag_register_area_ids
 public register_cell_measure, diag_associate_volume_cell_measure
 public diag_get_volume_cell_measure_dm_id
@@ -136,6 +139,10 @@ type, public :: axes_grp
   real, pointer, dimension(:,:)   :: mask2d => null() !< Mask for 2d (x-y) axes [nondim]
   real, pointer, dimension(:,:,:) :: mask3d => null() !< Mask for 3d axes [nondim]
   type(diag_dsamp), dimension(2:MAX_DSAMP_LEV) :: dsamp !< Downsample container
+
+  ! For diagnostics posted piecemeal
+  type(diag_buffer_2d) :: piecemeal_2d !< A dynamically reallocated buffer for 2d piecemeal diagnostics
+  !*!type(diag_buffer_3d) :: piecemeal_3d !< A dynamically reallocated buffer for 3d piecemeal diagnostics
 end type axes_grp
 
 !> Contains an array to store a diagnostic target grid
@@ -487,6 +494,9 @@ subroutine set_axes_info(G, GV, US, param_file, diag_cs, set_vertical)
        x_cell_method='point', y_cell_method='mean', is_u_point=.true.)
   call define_axes_group(diag_cs, (/ id_xh, id_yq /), diag_cs%axesCv1, &
        x_cell_method='mean', y_cell_method='point', is_v_point=.true.)
+
+  ! Define array extents for all piecemeal buffers
+  call set_piecemeal_extents(diag_cs)
 
   ! Axis group for special null axis from diag manager.
   id_null = diag_axis_init('scalar_axis', (/0./), 'none', 'N', 'none', null_axis=.true.)
@@ -1121,6 +1131,7 @@ subroutine define_axes_group(diag_cs, handles, axes, nz, vertical_coordinate_num
       if (axes%is_q_point) axes%mask3d => diag_cs%mask3dBi
     endif
   endif
+
 
 end subroutine define_axes_group
 
@@ -1910,6 +1921,61 @@ subroutine post_data_3d_low(diag, field, diag_cs, is_static, mask)
     deallocate( locfield )
 
 end subroutine post_data_3d_low
+
+!> Put data into the buffer for a diagnostic one column at a time
+subroutine post_data_3d_by_column(diag_field_id, field, diag_cs, i, j)
+  integer,            intent(in) :: diag_field_id !< The id for an output variable returned by a
+                                                  !! previous call to register_diag_field.
+  real, dimension(:), intent(in) :: field         !< 3-d array being offered for output or averaging
+                                                  !! in internally scaled arbitrary units [A ~> a]
+  type(diag_ctrl), target, intent(in) :: diag_CS  !< Structure used to regulate diagnostic output
+  integer,            intent(in) :: i             !< The i-index to post the data in the buffer
+  integer,            intent(in) :: j             !< The j-index to post the data in the buffer
+
+  type(diag_type), pointer :: diag => null()
+  integer :: buffer_slot
+
+  diag => diag_cs%diags(diag_field_id)
+  !*!buffer_slot = diag%axes%piecemeal_3d%check_capacity_by_id(diag_field_id)
+  !*!diag%axes%piecemeal_3d%buffer(buffer_slot)%field(i,j,:) = field(:)
+end subroutine post_data_3d_by_column
+
+!> Put data into the buffer for a diagnostic one point at a time
+subroutine post_data_3d_by_point(diag_field_id, field, diag_cs, i, j, k)
+  integer,           intent(in) :: diag_field_id !< The id for an output variable returned by a
+                                                 !! previous call to register_diag_field.
+  real,              intent(in) :: field         !< 3-d array being offered for output or averaging
+                                                 !! in internally scaled arbitrary units [A ~> a]
+  type(diag_ctrl), target, intent(in) :: diag_CS !< Structure used to regulate diagnostic output
+  integer,           intent(in) :: i             !< The i-index to post the data in the buffer
+  integer,           intent(in) :: j             !< The j-index to post the data in the buffer
+  integer,           intent(in) :: k             !< The k-index to post the data in the buffer
+
+  type(diag_type), pointer :: diag => null()
+  integer :: buffer_slot
+
+  diag => diag_cs%diags(diag_field_id)
+  !*!buffer_slot = diag%axes%piecemeal_3d%check_capacity_by_id(diag_field_id)
+  !*!diag%axes%piecemeal_3d%buffer(buffer_slot)%field(i,j,k) = field
+end subroutine post_data_3d_by_point
+
+!> Post the final buffer using the standard post_data interface
+subroutine post_data_3d_final(diag_field_id, diag_cs)
+  integer,           intent(in) :: diag_field_id !< The id for an output variable returned by a
+                                                 !! previous call to register_diag_field.
+  type(diag_ctrl), target, intent(in) :: diag_CS !< Structure used to regulate diagnostic output
+
+  type(diag_type), pointer :: diag => null()
+  integer :: buffer_slot
+
+  diag => diag_cs%diags(diag_field_id)
+  !*!buffer_slot = diag%axes%piecemeal_3d%find_buffer_slot(diag_field_id)
+  ! Only perform an action if the buffer slot was actually used
+  if (buffer_slot>0) then
+    !*!call post_data(diag_field_id, diag%axes%piecemeal_3d%buffer(buffer_slot)%field(:,:,:), diag_CS)
+    !*!call diag%axes%piecemeal_3d%mark_available(diag_field_id)
+  endif
+end subroutine post_data_3d_final
 
 !> Calculate and write out diagnostics that are the product of two 3-d arrays at u-points
 subroutine post_product_u(id, u_a, u_b, G, nz, diag, mask, alt_h)
@@ -3678,6 +3744,29 @@ subroutine diag_masks_set(G, nz, diag_cs)
   call downsample_diag_masks_set(G, nz, diag_cs)
 
 end subroutine diag_masks_set
+
+!> Set the extents and fill values for the piecemeal buffers for all axes
+subroutine set_piecemeal_extents(diag_cs)
+  type(diag_ctrl), intent(inout) :: diag_cs !< A pointer to a type with many variables
+                                                       !! used for diagnostics
+
+  !**!! Piecemeal buffers for 2d axes
+  !**!call diag_cs%axesT1%piecemeal_2d%set_extents_from_array(diag_cs%mask2dT, diag_cs%missing_value)
+  !**!call diag_cs%axesB1%piecemeal_2d%set_extents_from_array(diag_cs%mask2dBu, diag_cs%missing_value)
+  !**!call diag_cs%axesCu1%piecemeal_2d%set_extents_from_array(diag_cs%mask2dCu, diag_cs%missing_value)
+  !**!call diag_cs%axesCv1%piecemeal_2d%set_extents_from_array(diag_cs%mask2dCv, diag_cs%missing_value)
+
+  !**!! Piecemeal buffers for 3d axes
+  !**!call diag_cs%axesTL%piecemeal_3d%set_extents_from_array(diag_cs%mask3dTL, diag_cs%missing_value)
+  !**!call diag_cs%axesBL%piecemeal_3d%set_extents_from_array(diag_cs%mask3dBL, diag_cs%missing_value)
+  !**!call diag_cs%axesCuL%piecemeal_3d%set_extents_from_array(diag_cs%mask3dCuL, diag_cs%missing_value)
+  !**!call diag_cs%axesCvL%piecemeal_3d%set_extents_from_array(diag_cs%mask3dCvL, diag_cs%missing_value)
+  !**!call diag_cs%axesTi%piecemeal_3d%set_extents_from_array(diag_cs%mask3dTi, diag_cs%missing_value)
+  !**!call diag_cs%axesBi%piecemeal_3d%set_extents_from_array(diag_cs%mask3dBi, diag_cs%missing_value)
+  !**!call diag_cs%axesCui%piecemeal_3d%set_extents_from_array(diag_cs%mask3dCui, diag_cs%missing_value)
+  !**!call diag_cs%axesCvi%piecemeal_3d%set_extents_from_array(diag_cs%mask3dCvi, diag_cs%missing_value)
+
+end subroutine set_piecemeal_extents
 
 subroutine diag_mediator_close_registration(diag_CS)
   type(diag_ctrl), intent(inout) :: diag_CS !< Structure used to regulate diagnostic output
