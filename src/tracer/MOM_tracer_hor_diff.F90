@@ -189,6 +189,8 @@ subroutine tracer_hordiff(h, dt, MEKE, VarMix, visc, G, GV, US, CS, Reg, tv, do_
   real :: Res_Fn     ! The local value of the resolution function [nondim].
   real :: Rd_dx      ! The local value of deformation radius over grid-spacing [nondim].
   real :: normalize  ! normalization used for diagnostic Kh_h [nondim]; diffusivity averaged to h-points.
+  real :: conc_underflow_loc ! [FIX hoist] local copy of Reg%Tr(m)%conc_underflow for the do_concurrent mask
+  real :: MEKE_KhTr_fac_loc
 
   is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec ; nz = GV%ke
 
@@ -245,13 +247,14 @@ subroutine tracer_hordiff(h, dt, MEKE, VarMix, visc, G, GV, US, CS, Reg, tv, do_
 
   if (do_online) then
     if (use_VarMix) then
+      MEKE_KhTr_fac_loc = MEKE%KhTr_fac
       !$omp target enter data map(to: VarMix, VarMix%SN_u, VarMix%L2u, VarMix%Res_fn_h, &
       !$omp   VarMix%Rd_dx_h, MEKE, MEKE%Kh)
       do concurrent (j=js:je, I=is-1:ie)
         Kh_loc = CS%KhTr
         if (use_Eady) Kh_loc = Kh_loc + CS%KhTr_Slope_Cff*VarMix%L2u(I,j)*VarMix%SN_u(I,j)
         if (allocated(MEKE%Kh)) &
-          Kh_loc = Kh_loc + MEKE%KhTr_fac*sqrt(MEKE%Kh(i,j)*MEKE%Kh(i+1,j))
+          Kh_loc = Kh_loc + MEKE_KhTr_fac_loc*sqrt(MEKE%Kh(i,j)*MEKE%Kh(i+1,j))
         if (CS%KhTr_max > 0.) Kh_loc = min(Kh_loc, CS%KhTr_max)
         if (Resoln_scaled) &
           Kh_loc = Kh_loc * 0.5*(VarMix%Res_fn_h(i,j) + VarMix%Res_fn_h(i+1,j))
@@ -267,7 +270,7 @@ subroutine tracer_hordiff(h, dt, MEKE, VarMix, visc, G, GV, US, CS, Reg, tv, do_
         Kh_loc = CS%KhTr
         if (use_Eady) Kh_loc = Kh_loc + CS%KhTr_Slope_Cff*VarMix%L2v(i,J)*VarMix%SN_v(i,J)
         if (allocated(MEKE%Kh)) &
-          Kh_loc = Kh_loc + MEKE%KhTr_fac*sqrt(MEKE%Kh(i,j)*MEKE%Kh(i,j+1))
+          Kh_loc = Kh_loc + MEKE_KhTr_fac_loc*sqrt(MEKE%Kh(i,j)*MEKE%Kh(i,j+1))
         if (CS%KhTr_max > 0.) Kh_loc = min(Kh_loc, CS%KhTr_max)
         if (Resoln_scaled) &
           Kh_loc = Kh_loc * 0.5*(VarMix%Res_fn_h(i,j) + VarMix%Res_fn_h(i,j+1))
@@ -621,17 +624,20 @@ subroutine tracer_hordiff(h, dt, MEKE, VarMix, visc, G, GV, US, CS, Reg, tv, do_
       enddo ! End of k loop.
 
       ! Do user controlled underflow of the tracer concentrations.
-      do m=1,ntr ; if (Reg%Tr(m)%conc_underflow > 0.0) then
-        do concurrent (k=1:nz, j=js:je, i=is:ie, abs(Reg%Tr(m)%t(i,j,k)) < Reg%Tr(m)%conc_underflow)
-          Reg%Tr(m)%t(i,j,k) = 0.0
-        enddo
-      endif ; enddo
+      ! this helped at some point, no idea if this is needed anymore
+      do m=1,ntr
+        conc_underflow_loc = Reg%Tr(m)%conc_underflow
+        if (conc_underflow_loc > 0.0) then
+          do concurrent (k=1:nz, j=js:je, i=is:ie, abs(Reg%Tr(m)%t(i,j,k)) < conc_underflow_loc)
+            Reg%Tr(m)%t(i,j,k) = 0.0
+          enddo
+        endif
+      enddo
 
     enddo ! End of "while" loop.
     !$omp target exit data map(release: dTr, Ihdxdy, Coef_x, Coef_y)
   endif   ! endif for CS%use_neutral_diffusion
   call cpu_clock_end(id_clock_diffuse)
-
 
   if (CS%Diffuse_ML_interior) then
     if (CS%show_call_tree) call callTree_waypoint("Calling epipycnal_ML_diff (tracer_hordiff)")
@@ -642,10 +648,16 @@ subroutine tracer_hordiff(h, dt, MEKE, VarMix, visc, G, GV, US, CS, Reg, tv, do_
                                   CS, tv, num_itts)
     call cpu_clock_end(id_clock_epimix)
   endif
-  ! does this loOP? nah right yuou ned omp too (??) oh wow no it doe slop interesting, I think question mark
+
+  ! Per-tracer exit: `map(from:)` copies the diffused `t` back to host (needed
+  ! when tracer_epipycnal_ML_diff has updated it on device in benchmark mode);
+  ! the df_* fields just need releasing.
   !$ do m = 1, Reg%ntr
-    !$omp target exit data map(release: Reg%Tr(m)%t, Reg%Tr(m)%df_x, Reg%Tr(m)%df_y, &
-    !$omp   Reg%Tr(m)%df2d_x, Reg%tr(m)%df2d_y)  ! Re-applied 2026-05-12: map(from:) clobbers managed memory
+    !$omp target exit data map(from: Reg%Tr(m)%t)
+  !$ enddo
+  !$ do m = 1, Reg%ntr
+    !$omp target exit data map(release: Reg%Tr(m)%df_x, Reg%Tr(m)%df_y, &
+    !$omp   Reg%Tr(m)%df2d_x, Reg%tr(m)%df2d_y)
   !$ enddo
   !$omp target exit data map(release: Reg%Tr(:), Reg)
 
