@@ -36,7 +36,7 @@ dnl
 AC_DEFUN([MOM6_FC_CHECK_LIB],[
   AS_VAR_PUSHDEF([mom6_fc_Lib], [mom6_fc_cv_lib_$1_$2])
   m4_ifval([$9],
-    [mom6_fc_lib_msg_LDFLAGS=" with $9"],
+    [mom6_fc_lib_msg_LDFLAGS=" with m4_normalize([$9])"],
     [mom6_fc_lib_msg_LDFLAGS=""]
   )
   AC_CACHE_CHECK(
