@@ -309,33 +309,20 @@ $(BUILD)/opt_target: | $(TARGET_CODEBASE)
 .PHONY: FORCE
 
 
-## Use autoconf to construct the Makefile for each target
-# TODO: This could all be moved to a top-level MOM6 Makefile
-.PRECIOUS: $(BUILD)/%/Makefile
-.PRECIOUS: $(BUILD)/%/Makefile.in
-.PRECIOUS: $(BUILD)/%/configure
-.PRECIOUS: $(BUILD)/%/config.status
-.PRECIOUS: $(BUILD)/%/configure.ac
-.PRECIOUS: $(BUILD)/%/m4/
+# Use autoconf to construct the Makefile for each target
 
-$(BUILD)/%/Makefile: $(BUILD)/%/Makefile.in $(BUILD)/%/config.status
+.PRECIOUS: $(BUILD)/%/Makefile
+.PRECIOUS: $(BUILD)/%/config.status
+
+$(BUILD)/%/Makefile: $(BUILD)/%/config.status
 	cd $(@D) && ./config.status
 
-$(BUILD)/%/config.status: $(BUILD)/%/configure $(DEPS)/lib/libFMS.a $(DEPS)/lib/libgsw.a $(DEPS)/lib/libcvmix.a
-	cd $(@D) && $(MOM_ENV) ./configure -n --srcdir=$(CODEBASE) $(MOM_ACFLAGS) \
+$(BUILD)/%/config.status: $(DEPS)/lib/libFMS.a
+$(BUILD)/%/config.status: $(DEPS)/lib/libgsw.a
+$(BUILD)/%/config.status: $(DEPS)/lib/libcvmix.a
+$(BUILD)/%/config.status: | $(BUILD)/%/
+	cd $(@D) && $(MOM_ENV) ../../../configure -n $(MOM_ACFLAGS) \
 	 || (cat config.log && false)
-
-$(BUILD)/%/Makefile.in: ../ac/Makefile.in | $(BUILD)/%/
-	cp ../ac/Makefile.in $(@D)
-
-$(BUILD)/%/configure: $(BUILD)/%/configure.ac $(BUILD)/%/m4/
-	autoreconf -if $(@D)
-
-$(BUILD)/%/configure.ac: ../ac/configure.ac | $(BUILD)/%/
-	cp ../ac/configure.ac $(@D)
-
-$(BUILD)/%/m4/: ../ac/m4/ | $(BUILD)/%/
-	cp -r ../ac/m4 $(@D)
 
 ALL_EXECS = symmetric asymmetric repro openmp opt opt_target coupled nuopc \
   cov unit timing
