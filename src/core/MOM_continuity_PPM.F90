@@ -2743,7 +2743,7 @@ subroutine PPM_reconstruction_x(h_in, h_W, h_E, G, GV, LB, nkblock, h_min, monot
   real :: dMx, dMn     ! The difference between the local thickness and the maximum (dMx) or
                        ! minimum (dMn) of the surrounding values [H ~> m or kg m-2]
   character(len=256) :: mesg
-  integer :: i, j, isl, iel, jsl, jel, nz, n, stencil, ks, ke, nkblock_use
+  integer :: i, j, isl, iel, jsl, jel, nz, n, stencil, ks, ke
   logical :: local_open_BC
   type(OBC_segment_type), pointer :: segment => NULL()
 
@@ -2772,9 +2772,8 @@ subroutine PPM_reconstruction_x(h_in, h_W, h_E, G, GV, LB, nkblock, h_min, monot
 
   !$omp target enter data map(alloc: slp)
 
-  nkblock_use = max(1, nkblock)
-  do ks = 1, nz, nkblock_use
-    ke = min(ks + nkblock_use - 1, nz)
+  do ks = 1, nz, nkblock
+    ke = min(ks + nkblock - 1, nz)
 
     if (simple_2nd) then
       ! untested
@@ -2899,7 +2898,7 @@ subroutine PPM_reconstruction_y(h_in, h_S, h_N, G, GV, LB, nkblock, h_min, monot
   real :: dMx, dMn     ! The difference between the local thickness and the maximum (dMx) or
                        ! minimum (dMn) of the surrounding values [H ~> m or kg m-2]
   character(len=256) :: mesg
-  integer :: i, j, isl, iel, jsl, jel, nz, n, stencil, ks, ke, nkblock_use
+  integer :: i, j, isl, iel, jsl, jel, nz, n, stencil, ks, ke
   logical :: local_open_BC
   type(OBC_segment_type), pointer :: segment => NULL()
 
@@ -2928,9 +2927,8 @@ subroutine PPM_reconstruction_y(h_in, h_S, h_N, G, GV, LB, nkblock, h_min, monot
 
   !$omp target enter data map(alloc: slp)
 
-  nkblock_use = max(1, nkblock)
-  do ks = 1, nz, nkblock_use
-    ke = min(ks + nkblock_use - 1, nz)
+  do ks = 1, nz, nkblock
+    ke = min(ks + nkblock - 1, nz)
 
     if (simple_2nd) then
       ! untested
@@ -3240,6 +3238,15 @@ subroutine continuity_PPM_init(Time, G, GV, US, param_file, diag, CS, OBC)
                  "If 0, defaults to "//trim(nkblock_dflt_str)//", except when "//&
                  "running with OpenMP offload, in which case the full vertical "//&
                  "column is used.", default=0)
+  if (CS%niblock < 0) &
+    call MOM_error(FATAL, "CONTINUITY_NIBLOCK must be nonnegative; "//&
+                          "use 0 to select the default block size.")
+  if (CS%njblock < 0) &
+    call MOM_error(FATAL, "CONTINUITY_NJBLOCK must be nonnegative; "//&
+                          "use 0 to select the default block size.")
+  if (CS%nkblock < 0) &
+    call MOM_error(FATAL, "CONTINUITY_NKBLOCK must be nonnegative; "//&
+                          "use 0 to select the default block size.")
   CS%diag => diag
   !$omp target update to(CS)
 
