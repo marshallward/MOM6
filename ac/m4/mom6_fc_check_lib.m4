@@ -1,3 +1,7 @@
+dnl This file is part of MOM6, the Modular Ocean Model version 6.
+dnl See the LICENSE file for licensing information.
+dnl SPDX-License-Identifier: Apache-2.0
+dnl
 dnl MOM6_FC_CHECK_LIB(LIBRARY, PROCEDURE,
 dnl                   [MODULE], [ARGS], [FUNC-RESULT], [DECLS],
 dnl                   [ACTION-IF-FOUND], [ACTION-IF-NOT-FOUND],
