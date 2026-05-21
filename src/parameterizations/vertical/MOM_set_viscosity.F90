@@ -3435,7 +3435,6 @@ subroutine set_visc_init(Time, G, GV, US, param_file, diag, visc, CS, restart_CS
   if (CS%Channel_drag .or. CS%body_force_drag) then
     allocate(visc%Ray_u(IsdB:IedB,jsd:jed,nz), source=0.0)
     allocate(visc%Ray_v(isd:ied,JsdB:JedB,nz), source=0.0)
-    print *, " am I called" 
     !$omp target enter data map(to: visc%Ray_u, visc%Ray_v)
     CS%id_Ray_u = register_diag_field('ocean_model', 'Rayleigh_u', diag%axesCuL, &
        Time, 'Rayleigh drag velocity at u points', 'm s-1', conversion=GV%H_to_m*US%s_to_T)
