@@ -127,7 +127,9 @@ AX_FC_CHECK_MODULE([netcdf], [], [
   AS_UNSET([ax_fc_cv_mod_netcdf])
   AC_PATH_PROG([NF_CONFIG], [nf-config])
   AS_IF([test -n "$NF_CONFIG"], [
-    AC_SUBST([FCFLAGS], ["$FCFLAGS -I$($NF_CONFIG --includedir)"])
+    nf_incdir="$($NF_CONFIG --includedir)"
+    NETCDF_FCFLAGS="-I${nf_incdir}"
+    FCFLAGS="$FCFLAGS -I${nf_incdir}"
     ], [AC_MSG_ERROR([Could not find nf-config.])]
   )
   AX_FC_CHECK_MODULE([netcdf], [], [
@@ -140,7 +142,9 @@ AX_FC_CHECK_C_LIB([netcdf], [nc_create], [], [
   AS_UNSET([ax_fc_cv_c_lib_netcdf_nc_create])
   AC_PATH_PROG([NC_CONFIG], [nc-config])
   AS_IF([test -n "$NC_CONFIG"], [
-    AC_SUBST([LDFLAGS], ["$LDFLAGS -L$($NC_CONFIG --libdir)"])
+    nc_libdir="$($NC_CONFIG --libdir)"
+    NETCDF_LDFLAGS="-L$nc_libdir"
+    LDFLAGS="$LDFLAGS -L$nc_libdir"
   ], [
     AC_MSG_ERROR([Could not find nc-config.])
   ])
@@ -158,9 +162,9 @@ MOM6_FC_CHECK_LIB([netcdff], [nf90_create], [netcdf], [path,cmode,ncid], [rc], [
     AS_UNSET([mom6_fc_cv_lib_netcdff_nf90_create])
     AC_PATH_PROG([NF_CONFIG], [nf-config])
     AS_IF([test -n "$NF_CONFIG"], [
-      AC_SUBST([LDFLAGS],
-        ["$LDFLAGS $($NF_CONFIG --flibs | xargs -n1 | grep "^-L" | sort -u | xargs)"]
-      )
+      nf_libdir="$($NF_CONFIG --flibs | xargs -n1 | grep "^-L" | sort -u | xargs)"
+      NETCDF_LDFLAGS="$NETCDF_LDFLAGS $nf_libdir"
+      LDFLAGS="$LDFLAGS $nf_libdir"
     ], [
       AC_MSG_ERROR([Could not find nf-config.])
     ])
@@ -173,6 +177,12 @@ MOM6_FC_CHECK_LIB([netcdff], [nf90_create], [netcdf], [path,cmode,ncid], [rc], [
     )
   ]
 )
+
+# Cache the netCDF configuration
+NETCDF_LIBS="$LIBS"
+AC_SUBST([NETCDF_FCFLAGS])
+AC_SUBST([NETCDF_LDFLAGS])
+AC_SUBST([NETCDF_LIBS])
 
 
 # Force 8-byte reals
@@ -386,6 +396,11 @@ AC_LANG_POP([C])
 
 
 # Prepare output
+# NOTE: This also configures the testing tc4 Makefile, which avoids the need
+# for a second configure script.
 AC_SUBST([CPPFLAGS])
-AC_CONFIG_FILES([Makefile:ac/Makefile.in])
+AC_CONFIG_FILES([
+  Makefile:ac/Makefile.in
+  ${srcdir}/.testing/tc4/Makefile:.testing/tc4/Makefile.in
+])
 AC_OUTPUT

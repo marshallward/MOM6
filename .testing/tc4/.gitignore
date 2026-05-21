@@ -1,17 +1,13 @@
 # Autoconf
-aclocal.m4
-autom4te.cache/
-config.log
-config.status
-configure
-configure~
-Makefile
+/config.status
+/config.log
+/Makefile
 
 # Output
-gen_grid
-ocean_hgrid.nc
-topog.nc
+/gen_grid
+/ocean_hgrid.nc
+/topog.nc
 
-gen_data
-sponge.nc
-temp_salt_ic.nc
+/gen_data
+/sponge.nc
+/temp_salt_ic.nc
