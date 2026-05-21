@@ -33,11 +33,6 @@ public zonal_flux_thickness, meridional_flux_thickness
 public zonal_BT_mass_flux, meridional_BT_mass_flux
 public set_continuity_loop_bounds
 
-! These were found to give best performance in limited tests.
-integer, parameter :: default_niblock = 32 !< Default i block size for array calculations [nondim].
-integer, parameter :: default_njblock = 4  !< Default j block size for array calculations [nondim].
-integer, parameter :: default_nkblock = 1  !< Default k block size for reconstruction calculations [nondim].
-
 !>@{ CPU time clock IDs
 integer :: id_clock_reconstruct, id_clock_update, id_clock_correct
 !>@}
@@ -171,8 +166,6 @@ subroutine continuity_PPM(u, v, hin, h, uh, vh, dt, G, GV, US, CS, OBC, pbv, uhb
 
   niblock = CS%niblock
   njblock = CS%njblock
-  if (niblock == 0) niblock = default_niblock
-  if (njblock == 0) njblock = default_njblock
 
   h_min = GV%Angstrom_H
 
@@ -191,11 +184,9 @@ subroutine continuity_PPM(u, v, hin, h, uh, vh, dt, G, GV, US, CS, OBC, pbv, uhb
 
     !  First advect zonally, with loop bounds that accomodate the subsequent meridional advection.
     LB = set_continuity_loop_bounds(G, CS, i_stencil=.false., j_stencil=.true.)
-    ! set default block sizes for OpenMP offload
-    !$ if (omp_get_num_devices() > 0) then
-      !$ if (CS%niblock == 0) niblock = LB%ieh-LB%ish+2
-      !$ if (CS%njblock == 0) njblock = LB%jeh-LB%jsh+1
-    !$ endif
+    ! set whole-domain block sizes when ni/jblock is 0
+    if (niblock == 0) niblock = LB%ieh-LB%ish+2
+    if (njblock == 0) njblock = LB%jeh-LB%jsh+1
 
     call zonal_edge_thickness(hin, h_W, h_E, G, GV, US, CS, OBC, LB)
     call zonal_mass_flux(u, hin, h_W, h_E, uh, dt, G, GV, US, CS, OBC, pbv%por_face_areaU, &
@@ -205,10 +196,8 @@ subroutine continuity_PPM(u, v, hin, h, uh, vh, dt, G, GV, US, CS, OBC, pbv, uhb
     !  Now advect meridionally, using the updated thicknesses to determine the fluxes.
     LB = set_continuity_loop_bounds(G, CS, i_stencil=.false., j_stencil=.false.)
 
-    !$ if (omp_get_num_devices() > 0) then
-      !$ if (CS%niblock == 0) niblock = LB%ieh-LB%ish+1
-      !$ if (CS%njblock == 0) njblock = LB%jeh-LB%jsh+2
-    !$ endif
+    if (niblock == 0) niblock = LB%ieh-LB%ish+1
+    if (njblock == 0) njblock = LB%jeh-LB%jsh+2
 
     call meridional_edge_thickness(h, h_S, h_N, G, GV, US, CS, OBC, LB)
     call meridional_mass_flux(v, h, h_S, h_N, vh, dt, G, GV, US, CS, OBC, pbv%por_face_areaV, &
@@ -219,10 +208,8 @@ subroutine continuity_PPM(u, v, hin, h, uh, vh, dt, G, GV, US, CS, OBC, pbv, uhb
 
     !  First advect meridionally, with loop bounds that accomodate the subsequent zonal advection.
     LB = set_continuity_loop_bounds(G, CS, i_stencil=.true., j_stencil=.false.)
-    !$ if (omp_get_num_devices() > 0) then
-      !$ if (CS%niblock == 0) niblock = LB%ieh-LB%ish+1
-      !$ if (CS%njblock == 0) njblock = LB%jeh-LB%jsh+2
-    !$ endif
+    if (niblock == 0) niblock = LB%ieh-LB%ish+1
+    if (njblock == 0) njblock = LB%jeh-LB%jsh+2
     call meridional_edge_thickness(hin, h_S, h_N, G, GV, US, CS, OBC, LB)
     call meridional_mass_flux(v, hin, h_S, h_N, vh, dt, G, GV, US, CS, OBC, pbv%por_face_areaV, &
                               niblock, njblock, LB, vhbt, visc_rem_v, v_cor, BT_cont, dv_cor)
@@ -230,10 +217,8 @@ subroutine continuity_PPM(u, v, hin, h, uh, vh, dt, G, GV, US, CS, OBC, pbv, uhb
 
     !  Now advect zonally, using the updated thicknesses to determine the fluxes.
     LB = set_continuity_loop_bounds(G, CS, i_stencil=.false., j_stencil=.false.)
-    !$ if (omp_get_num_devices() > 0) then
-      !$ if (CS%niblock == 0) niblock = LB%ieh-LB%ish+2
-      !$ if (CS%njblock == 0) njblock = LB%jeh-LB%jsh+1
-    !$ endif
+    if (niblock == 0) niblock = LB%ieh-LB%ish+2
+    if (njblock == 0) njblock = LB%jeh-LB%jsh+1
     call zonal_edge_thickness(h, h_W, h_E, G, GV, US, CS, OBC, LB)
     call zonal_mass_flux(u, h, h_W, h_E, uh, dt, G, GV, US, CS, OBC, pbv%por_face_areaU, &
                          niblock, njblock, LB, uhbt, visc_rem_u, u_cor, BT_cont, du_cor)
@@ -279,22 +264,16 @@ subroutine continuity_3d_fluxes(u, v, h, uh, vh, dt, G, GV, US, CS, OBC, pbv)
 
   niblock = CS%niblock
   njblock = CS%njblock
-  if (niblock == 0) niblock = default_niblock
-  if (njblock == 0) njblock = default_njblock
 
   call zonal_edge_thickness(h, h_W, h_E, G, GV, US, CS, OBC)
-  !$ if (omp_get_num_devices() > 0) then
-    !$ if (CS%niblock == 0) niblock = G%iec-G%isc+2
-    !$ if (CS%njblock == 0) njblock = G%jec-G%jsc+1
-  !$ endif
+  if (niblock == 0) niblock = G%iec-G%isc+2
+  if (njblock == 0) njblock = G%jec-G%jsc+1
   call zonal_mass_flux(u, h, h_W, h_E, uh, dt, G, GV, US, CS, OBC, pbv%por_face_areaU, &
                        niblock=niblock, njblock=njblock)
 
   call meridional_edge_thickness(h, h_S, h_N, G, GV, US, CS, OBC)
-  !$ if (omp_get_num_devices() > 0) then
-    !$ if (CS%niblock == 0) niblock = G%iec-G%isc+1
-    !$ if (CS%njblock == 0) njblock = G%jec-G%jsc+2
-  !$ endif
+  if (niblock == 0) niblock = G%iec-G%isc+1
+  if (njblock == 0) njblock = G%jec-G%jsc+2
   call meridional_mass_flux(v, h, h_S, h_N, vh, dt, G, GV, US, CS, OBC, pbv%por_face_areaV, &
                             niblock=niblock, njblock=njblock)
 
@@ -400,8 +379,6 @@ subroutine continuity_adjust_vel(u, v, h, dt, G, GV, US, CS, OBC, pbv, uhbt, vhb
 
   niblock = CS%niblock
   njblock = CS%njblock
-  if (niblock == 0) niblock = default_niblock
-  if (njblock == 0) njblock = default_njblock
 
   ! It might not be necessary to separate the input velocity array from the adjusted velocities,
   ! but it seems safer to do so, even if it might be less efficient.
@@ -409,19 +386,15 @@ subroutine continuity_adjust_vel(u, v, h, dt, G, GV, US, CS, OBC, pbv, uhbt, vhb
   v_in(:,:,:) = v(:,:,:)
 
   call zonal_edge_thickness(h, h_W, h_E, G, GV, US, CS, OBC)
-  !$ if (omp_get_num_devices() > 0) then
-    !$ if (CS%niblock == 0) niblock = G%iec-G%isc+2
-    !$ if (CS%njblock == 0) njblock = G%jec-G%jsc+1
-  !$ endif
+  if (niblock == 0) niblock = G%iec-G%isc+2
+  if (njblock == 0) njblock = G%jec-G%jsc+1
   call zonal_mass_flux(u_in, h, h_W, h_E, uh, dt, G, GV, US, CS, OBC, pbv%por_face_areaU, &
                        niblock=niblock, njblock=njblock, &
                        uhbt=uhbt, visc_rem_u=visc_rem_u, u_cor=u)
 
   call meridional_edge_thickness(h, h_S, h_N, G, GV, US, CS, OBC)
-  !$ if (omp_get_num_devices() > 0) then
-    !$ if (CS%niblock == 0) niblock = G%iec-G%isc+1
-    !$ if (CS%njblock == 0) njblock = G%jec-G%jsc+2
-  !$ endif
+  if (niblock == 0) niblock = G%iec-G%isc+1
+  if (njblock == 0) njblock = G%jec-G%jsc+2
   call meridional_mass_flux(v_in, h, h_S, h_N, vh, dt, G, GV, US, CS, OBC, pbv%por_face_areaV, &
                             niblock=niblock, njblock=njblock, &
                             vhbt=vhbt, visc_rem_v=visc_rem_v, v_cor=v)
@@ -537,10 +510,7 @@ subroutine zonal_edge_thickness(h_in, h_W, h_E, G, GV, US, CS, OBC, LB_in)
   endif
   ish = LB%ish ; ieh = LB%ieh ; jsh = LB%jsh ; jeh = LB%jeh ; nz = GV%ke
   nkblock = CS%nkblock
-  if (nkblock == 0) nkblock = default_nkblock
-  !$ if (omp_get_num_devices() > 0) then
-    !$ if (CS%nkblock == 0) nkblock = nz
-  !$ endif
+  if (nkblock == 0) nkblock = nz
 
   if (CS%upwind_1st) then
     do concurrent (k=1:nz, j=jsh:jeh, i=ish-1:ieh+1)
@@ -585,10 +555,7 @@ subroutine meridional_edge_thickness(h_in, h_S, h_N, G, GV, US, CS, OBC, LB_in)
   endif
   ish = LB%ish ; ieh = LB%ieh ; jsh = LB%jsh ; jeh = LB%jeh ; nz = GV%ke
   nkblock = CS%nkblock
-  if (nkblock == 0) nkblock = default_nkblock
-  !$ if (omp_get_num_devices() > 0) then
-    !$ if (CS%nkblock == 0) nkblock = nz
-  !$ endif
+  if (nkblock == 0) nkblock = nz
 
   if (CS%upwind_1st) then
     ! untested
@@ -3150,6 +3117,16 @@ subroutine continuity_PPM_init(Time, G, GV, US, param_file, diag, CS, OBC)
   character(len=40)  :: mdl = "MOM_continuity_PPM" ! This module's name.
   character(len=256) :: mesg
   character(len=10) :: niblock_dflt_str, njblock_dflt_str, nkblock_dflt_str
+#ifdef __NVCOMPILER_OPENMP_GPU
+  integer, parameter :: default_niblock = 0 !< Default i block size for array calculations [nondim].
+  integer, parameter :: default_njblock = 0 !< Default j block size for array calculations [nondim].
+  integer, parameter :: default_nkblock = 0 !< Default k block size for reconstruction calculations [nondim].
+#else
+  ! These were found to give best performance in limited tests.
+  integer, parameter :: default_niblock = 32 !< Default i block size for array calculations [nondim].
+  integer, parameter :: default_njblock = 4  !< Default j block size for array calculations [nondim].
+  integer, parameter :: default_nkblock = 1  !< Default k block size for reconstruction calculations [nondim].
+#endif
 
   CS%initialized = .true.
 
@@ -3159,7 +3136,7 @@ subroutine continuity_PPM_init(Time, G, GV, US, param_file, diag, CS, OBC)
   endif
 
 ! Read all relevant parameters and write them to the model log.
-  call log_version(param_file, mdl, version, "")
+  call log_version(param_file, mdl, version, "", log_to_all=.true., layout=.true.)
   call get_param(param_file, mdl, "MONOTONIC_CONTINUITY", CS%monotonic, &
                  "If true, CONTINUITY_PPM uses the Colella and Woodward "//&
                  "monotonic limiter.  The default (false) is to use a "//&
@@ -3223,20 +3200,17 @@ subroutine continuity_PPM_init(Time, G, GV, US, param_file, diag, CS, OBC)
   write(njblock_dflt_str, '(I0)') default_njblock
   write(nkblock_dflt_str, '(I0)') default_nkblock
   call get_param(param_file, mdl, "CONTINUITY_NIBLOCK", CS%niblock, &
-                 "The i-direction block size used in the continuity solver. "//&
-                 "If 0, defaults to "//trim(niblock_dflt_str)//", except when "//&
-                 "running with OpenMP offload, in which case the full computational "//&
-                 "domain width is used.", default=0)
+                 "The i-direction block size used in the mass and volume flux calculations. "//&
+                 "the default 0 setting is dynamic and fits the "//&
+                 "full computational i-domain length.", default=default_niblock, layoutParam=.true.)
   call get_param(param_file, mdl, "CONTINUITY_NJBLOCK", CS%njblock, &
-                 "The j-direction block size used in the continuity solver. "//&
-                 "If 0, defaults to "//trim(njblock_dflt_str)//", except when "//&
-                 "running with OpenMP offload, in which case the full computational "//&
-                 "domain height is used.", default=0)
+                 "The j-direction block size used in the mass and volume flux calculations. "//&
+                 "the default 0 setting is dynamic and fits the "//&
+                 "full computational j-domain length.", default=default_njblock, layoutParam=.true.)
   call get_param(param_file, mdl, "CONTINUITY_NKBLOCK", CS%nkblock, &
-                 "The k-direction block size used in continuity reconstruction. "//&
-                 "If 0, defaults to "//trim(nkblock_dflt_str)//", except when "//&
-                 "running with OpenMP offload, in which case the full vertical "//&
-                 "column is used.", default=0)
+                 "The k-direction block size used in PPM reconstruction edge value calculations. "//&
+                 "the default 0 setting is dynamic and fits the "//&
+                 "full vertical column.", default=default_nkblock, layoutParam=.true.)
   if (CS%niblock < 0) &
     call MOM_error(FATAL, "CONTINUITY_NIBLOCK must be nonnegative; "//&
                           "use 0 to select the default block size.")
