@@ -189,6 +189,7 @@ subroutine tracer_hordiff(h, dt, MEKE, VarMix, visc, G, GV, US, CS, Reg, tv, do_
   real :: Res_Fn     ! The local value of the resolution function [nondim].
   real :: Rd_dx      ! The local value of deformation radius over grid-spacing [nondim].
   real :: normalize  ! normalization used for diagnostic Kh_h [nondim]; diffusivity averaged to h-points.
+  ! these seem needed but need to verify
   real :: conc_underflow_loc ! [FIX hoist] local copy of Reg%Tr(m)%conc_underflow for the do_concurrent mask
   real :: MEKE_KhTr_fac_loc
 

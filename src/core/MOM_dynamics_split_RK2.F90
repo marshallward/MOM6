@@ -1767,8 +1767,6 @@ subroutine initialize_dyn_split_RK2(u, v, h, tv, uh, vh, eta, Time, G, GV, US, p
 
   !$omp target enter data map(alloc: h_tmp )
 
-  !!$omp target teams loop collapse(3)
-  !do k=1,nz ; do j=jsd,jed ; do i=isd,ied ; h_tmp(i,j,k) = 0.0 ; enddo ; enddo ; enddo
 
   if (CS%store_CAu) then
     if (query_initialized(CS%CAu_pred, "CAu", restart_CS) .and. &

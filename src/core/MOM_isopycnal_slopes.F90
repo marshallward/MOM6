@@ -106,6 +106,7 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
     T_hr, &       ! Temperature on the interface at the h (+1) point [C ~> degC].
     S_hr, &       ! Salinity on the interface at the h (+1) point [S ~> ppt]
     pres_hr       ! Pressure on the interface at the h (+1) point [R L2 T-2 ~> Pa].
+  !! THSE ARE DEBUG THINGIES REMOVE ONCE WE ARE HAPPY
   ! BISECT-DBG: 3D capture of per-cell EOS derivative output to chksum after the
   ! parallel region. Tests whether calculate_density_derivs (the EOS dispatcher
   ! via declare-target Roquet_rho_loc) produces bit-identical results across builds.
