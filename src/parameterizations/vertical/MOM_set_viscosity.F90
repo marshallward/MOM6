@@ -13,7 +13,7 @@ use MOM_cpu_clock,     only : cpu_clock_id, cpu_clock_begin, cpu_clock_end, CLOC
 use MOM_cvmix_conv,    only : cvmix_conv_is_used
 use MOM_CVMix_ddiff,   only : CVMix_ddiff_is_used
 use MOM_cvmix_shear,   only : cvmix_shear_is_used
-use MOM_debugging,     only : uvchksum, hchksum, Bchksum
+use MOM_debugging,     only : uvchksum, hchksum
 use MOM_diag_mediator, only : post_data, register_diag_field, safe_alloc_ptr
 use MOM_diag_mediator, only : diag_ctrl, time_type
 use MOM_domains,       only : pass_var, CORNER
@@ -493,25 +493,6 @@ subroutine set_viscous_BBL(u, v, h, tv, visc, G, GV, US, CS, pbv)
 
   !$omp target enter data map(alloc: S_vel, T_vel, SpV_vel, h_vel, h_at_vel, dz_vel, &
   !$omp   dz_at_vel)
-  !!$omp target enter data map(alloc: visc%Kv_bbl_u, visc%Kv_bbl_v)
-
-  if (CS%debug) then
-    ! Zero scratch arrays so pre-kernel debug chksums see consistent data in
-    ! land/halo cells (host stack memory would otherwise be uninitialised).
-    do concurrent (j=G%JsdB:G%JedB, i=G%IsdB:G%IedB)
-      ustar(i,j) = 0.0 ; umag_avg(i,j) = 0.0
-      h_bbl_drag(i,j) = 0.0 ; dz_bbl_drag(i,j) = 0.0
-      u2_bg(i,j) = 0.0
-      T_EOS(i,j) = 0.0 ; S_EOS(i,j) = 0.0
-      dR_dT(i,j) = 0.0 ; dR_dS(i,j) = 0.0
-      press(i,j) = 0.0
-    enddo
-    do concurrent (k=1:nz, j=G%JsdB:G%JedB, i=G%IsdB:G%IedB)
-      T_vel(i,j,k) = 0.0 ; S_vel(i,j,k) = 0.0
-      h_at_vel(i,j,k) = 0.0 ; dz_at_vel(i,j,k) = 0.0
-      h_vel(i,j,k) = 0.0 ; dz_vel(i,j,k) = 0.0
-    enddo
-  endif
 
   do m=1,2
     if (m==1) then
@@ -809,34 +790,7 @@ subroutine set_viscous_BBL(u, v, h, tv, visc, G, GV, US, CS, pbv)
     if (use_BBL_EOS) then
       EOSdom(1,1) = is-G%IsdB+1 ; EOSdom(1,2) = ie-G%IsdB+1
       EOSdom(2,1) = jstart-G%JsdB+1 ; EOSdom(2,2) = Jeq-G%JsdB+1
-      if (CS%debug .and. m==1) then
-        !$omp target update from(T_EOS, S_EOS, press)
-        call Bchksum(T_EOS, "BBL pre-EOS T_EOS", G%HI, haloshift=0)
-        call Bchksum(S_EOS, "BBL pre-EOS S_EOS", G%HI, haloshift=0)
-        call Bchksum(press, "BBL pre-EOS press", G%HI, haloshift=0)
-      endif
       call calculate_density_derivs(T_EOS, S_EOS, press, dR_dT, dR_dS, tv%eqn_of_state, EOSdom)
-    endif
-
-    if (CS%debug .and. m==1) then
-      !$omp target update from(ustar, umag_avg, h_bbl_drag, dz_bbl_drag, &
-      !$omp   h_at_vel, dz_at_vel, h_vel, dz_vel, u2_bg)
-      call Bchksum(ustar,       "BBL pre-kernel ustar",       G%HI, haloshift=0)
-      call Bchksum(umag_avg,    "BBL pre-kernel umag_avg",    G%HI, haloshift=0)
-      call Bchksum(h_bbl_drag,  "BBL pre-kernel h_bbl_drag",  G%HI, haloshift=0)
-      call Bchksum(dz_bbl_drag, "BBL pre-kernel dz_bbl_drag", G%HI, haloshift=0)
-      call Bchksum(h_at_vel,    "BBL pre-kernel h_at_vel",    G%HI, haloshift=0)
-      call Bchksum(dz_at_vel,   "BBL pre-kernel dz_at_vel",   G%HI, haloshift=0)
-      call Bchksum(h_vel,       "BBL pre-kernel h_vel",       G%HI, haloshift=0)
-      call Bchksum(dz_vel,      "BBL pre-kernel dz_vel",      G%HI, haloshift=0)
-      call Bchksum(u2_bg,       "BBL pre-kernel u2_bg",       G%HI, haloshift=0)
-      if (use_BBL_EOS) then
-        !$omp target update from(T_vel, S_vel, dR_dT, dR_dS)
-        call Bchksum(T_vel, "BBL pre-kernel T_vel", G%HI, haloshift=0)
-        call Bchksum(S_vel, "BBL pre-kernel S_vel", G%HI, haloshift=0)
-        call Bchksum(dR_dT, "BBL pre-kernel dR_dT", G%HI, haloshift=0)
-        call Bchksum(dR_dS, "BBL pre-kernel dR_dS", G%HI, haloshift=0)
-      endif
     endif
 
     ! Find a BBL thickness given by equation 2.20 of Killworth and Edwards, 1999:
@@ -1909,11 +1863,11 @@ pure subroutine find_L_open_convex(vol_below, D_vel, Dp, Dm, L, GV, US, CS)
     if (vol_below(K) >= Vol_open) then
       L(K) = 1.0
     elseif (vol_below(K) <= Vol_direct) then
-      ! Both edges of the cell are bounded by walls.
-        ! BISECT-D: swap **C1_3 (lowered to exp/log) for cuberoot to test if
-        ! transcendental drift in the cube-root is the bit source.
-        L(K) = cuberoot(-0.25*C24_crv*vol_below(K))
+      ! if (CS%answer_date < 20240101)) then
         ! L(K) = (-0.25*C24_crv*vol_below(K))**C1_3
+      ! else
+        L(K) = cuberoot(-0.25*C24_crv*vol_below(K))
+      ! endif
     else
       ! x_R is at 1/2 but x_L is in the interior & L is found by iteratively solving
       !   vol_below(K) = 0.5*L^2*(slope + crv/3*(3-4L))
@@ -3466,21 +3420,21 @@ subroutine set_visc_end(visc, CS)
   type(set_visc_CS),   intent(inout) :: CS   !< The control structure returned by a previous
                                              !! call to set_visc_init.
 
-  if (allocated(visc%bbl_thick_u)) then 
-    deallocate(visc%bbl_thick_u)
+  if (allocated(visc%bbl_thick_u)) then
     !$omp target exit data map(delete: visc%bbl_thick_u)
+    deallocate(visc%bbl_thick_u)
   endif
-  if (allocated(visc%bbl_thick_v)) then 
-    deallocate(visc%bbl_thick_v)
+  if (allocated(visc%bbl_thick_v)) then
     !$omp target exit data map(delete: visc%bbl_thick_v)
+    deallocate(visc%bbl_thick_v)
   endif
-  if (allocated(visc%kv_bbl_u)) then 
-    deallocate(visc%kv_bbl_u)
+  if (allocated(visc%kv_bbl_u)) then
     !$omp target exit data map(delete: visc%kv_bbl_u)
+    deallocate(visc%kv_bbl_u)
   endif
-  if (allocated(visc%kv_bbl_v)) then 
-    deallocate(visc%kv_bbl_v)
+  if (allocated(visc%kv_bbl_v)) then
     !$omp target exit data map(delete: visc%kv_bbl_v)
+    deallocate(visc%kv_bbl_v)
   endif
   if (allocated(CS%bbl_u)) deallocate(CS%bbl_u)
   if (allocated(CS%bbl_v)) deallocate(CS%bbl_v)
@@ -3492,8 +3446,14 @@ subroutine set_visc_end(visc, CS)
     !$omp target exit data map(delete: visc%Ray_v)
     deallocate(visc%Ray_v)
   endif
-  if (allocated(visc%nkml_visc_u)) deallocate(visc%nkml_visc_u)
-  if (allocated(visc%nkml_visc_v)) deallocate(visc%nkml_visc_v)
+  if (allocated(visc%nkml_visc_u)) then
+    !$omp target exit data map(delete: visc%nkml_visc_u)
+    deallocate(visc%nkml_visc_u)
+  endif
+  if (allocated(visc%nkml_visc_v)) then
+    !$omp target exit data map(delete: visc%nkml_visc_v)
+    deallocate(visc%nkml_visc_v)
+  endif
   if (associated(visc%Kd_shear)) deallocate(visc%Kd_shear)
   if (associated(visc%Kv_slow)) deallocate(visc%Kv_slow)
   if (associated(visc%TKE_turb)) deallocate(visc%TKE_turb)

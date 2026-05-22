@@ -189,9 +189,7 @@ subroutine tracer_hordiff(h, dt, MEKE, VarMix, visc, G, GV, US, CS, Reg, tv, do_
   real :: Res_Fn     ! The local value of the resolution function [nondim].
   real :: Rd_dx      ! The local value of deformation radius over grid-spacing [nondim].
   real :: normalize  ! normalization used for diagnostic Kh_h [nondim]; diffusivity averaged to h-points.
-  ! these seem needed but need to verify
-  real :: conc_underflow_loc ! [FIX hoist] local copy of Reg%Tr(m)%conc_underflow for the do_concurrent mask
-  real :: MEKE_KhTr_fac_loc
+  real :: MEKE_KhTr_fac
 
   is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec ; nz = GV%ke
 
@@ -208,10 +206,13 @@ subroutine tracer_hordiff(h, dt, MEKE, VarMix, visc, G, GV, US, CS, Reg, tv, do_
 
   call cpu_clock_begin(id_clock_diffuse)
 
-  !$omp target enter data map(to: Reg, Reg%Tr(:), CS) map(alloc: khdt_x, khdt_y, kh_u, kh_v)
+  !$omp target enter data map(to: Reg, Reg%Tr, CS) map(alloc: khdt_x, khdt_y, kh_u, kh_v)
   !$ do m = 1, Reg%ntr
-    !$omp target enter data map(to: Reg%Tr(m)%t, Reg%Tr(m)%df_x, Reg%Tr(m)%df_y, Reg%Tr(m)%df2d_x, &
-    !$omp   Reg%tr(m)%df2d_y)
+    !$omp target enter data map(to: Reg%Tr(m)%t)
+    !$omp target enter data map(to: Reg%Tr(m)%df_x) if(associated(Reg%Tr(m)%df_x))
+    !$omp target enter data map(to: Reg%Tr(m)%df_y) if(associated(Reg%Tr(m)%df_y))
+    !$omp target enter data map(to: Reg%Tr(m)%df2d_x) if(associated(Reg%Tr(m)%df2d_x))
+    !$omp target enter data map(to: Reg%Tr(m)%df2d_y) if(associated(Reg%Tr(m)%df2d_y))
   !$ enddo
 
   ntr = Reg%ntr
@@ -248,14 +249,14 @@ subroutine tracer_hordiff(h, dt, MEKE, VarMix, visc, G, GV, US, CS, Reg, tv, do_
 
   if (do_online) then
     if (use_VarMix) then
-      MEKE_KhTr_fac_loc = MEKE%KhTr_fac
+      MEKE_KhTr_fac = MEKE%KhTr_fac
       !$omp target enter data map(to: VarMix, VarMix%SN_u, VarMix%L2u, VarMix%Res_fn_h, &
       !$omp   VarMix%Rd_dx_h, MEKE, MEKE%Kh)
       do concurrent (j=js:je, I=is-1:ie)
         Kh_loc = CS%KhTr
         if (use_Eady) Kh_loc = Kh_loc + CS%KhTr_Slope_Cff*VarMix%L2u(I,j)*VarMix%SN_u(I,j)
         if (allocated(MEKE%Kh)) &
-          Kh_loc = Kh_loc + MEKE_KhTr_fac_loc*sqrt(MEKE%Kh(i,j)*MEKE%Kh(i+1,j))
+          Kh_loc = Kh_loc + MEKE_KhTr_fac*sqrt(MEKE%Kh(i,j)*MEKE%Kh(i+1,j))
         if (CS%KhTr_max > 0.) Kh_loc = min(Kh_loc, CS%KhTr_max)
         if (Resoln_scaled) &
           Kh_loc = Kh_loc * 0.5*(VarMix%Res_fn_h(i,j) + VarMix%Res_fn_h(i+1,j))
@@ -271,7 +272,7 @@ subroutine tracer_hordiff(h, dt, MEKE, VarMix, visc, G, GV, US, CS, Reg, tv, do_
         Kh_loc = CS%KhTr
         if (use_Eady) Kh_loc = Kh_loc + CS%KhTr_Slope_Cff*VarMix%L2v(i,J)*VarMix%SN_v(i,J)
         if (allocated(MEKE%Kh)) &
-          Kh_loc = Kh_loc + MEKE_KhTr_fac_loc*sqrt(MEKE%Kh(i,j)*MEKE%Kh(i,j+1))
+          Kh_loc = Kh_loc + MEKE_KhTr_fac*sqrt(MEKE%Kh(i,j)*MEKE%Kh(i,j+1))
         if (CS%KhTr_max > 0.) Kh_loc = min(Kh_loc, CS%KhTr_max)
         if (Resoln_scaled) &
           Kh_loc = Kh_loc * 0.5*(VarMix%Res_fn_h(i,j) + VarMix%Res_fn_h(i,j+1))
@@ -584,13 +585,15 @@ subroutine tracer_hordiff(h, dt, MEKE, VarMix, visc, G, GV, US, CS, Reg, tv, do_
                                                    (h(i,j,k)+h(i,j+1,k)+h_neglect)
         enddo
 
-        do concurrent (j=js:je, I=is-1:ie)
-          Coef_x(I,j,1) = ((scale * khdt_x(I,j))*2.0*(h(I,j,k)*h(I+1,j,k))) / &
-                                                   (h(I,j,k)+h(I+1,j,k)+h_neglect)
-        enddo
+        do concurrent (j=js:je)
+          do concurrent (I=is-1:ie)
+            Coef_x(I,j,1) = ((scale * khdt_x(I,j))*2.0*(h(i,j,k)*h(i+1,j,k))) / &
+                                                     (h(i,j,k)+h(i+1,j,k)+h_neglect)
+          enddo
 
-        do concurrent (j=js:je, i=is:ie)
-          Ihdxdy(i,j) = G%IareaT(i,j) / (h(i,j,k)+h_neglect)
+          do concurrent (i=is:ie)
+            Ihdxdy(i,j) = G%IareaT(i,j) / (h(i,j,k)+h_neglect)
+          enddo
         enddo
 
         do m=1,ntr
@@ -625,15 +628,11 @@ subroutine tracer_hordiff(h, dt, MEKE, VarMix, visc, G, GV, US, CS, Reg, tv, do_
       enddo ! End of k loop.
 
       ! Do user controlled underflow of the tracer concentrations.
-      ! this helped at some point, no idea if this is needed anymore
-      do m=1,ntr
-        conc_underflow_loc = Reg%Tr(m)%conc_underflow
-        if (conc_underflow_loc > 0.0) then
-          do concurrent (k=1:nz, j=js:je, i=is:ie, abs(Reg%Tr(m)%t(i,j,k)) < conc_underflow_loc)
-            Reg%Tr(m)%t(i,j,k) = 0.0
-          enddo
-        endif
-      enddo
+      do m=1,ntr ; if (Reg%Tr(m)%conc_underflow > 0.0) then
+        do concurrent (k=1:nz, j=js:je, i=is:ie, abs(Reg%Tr(m)%t(i,j,k)) < Reg%Tr(m)%conc_underflow)
+          Reg%Tr(m)%t(i,j,k) = 0.0
+        enddo
+      endif ; enddo
 
     enddo ! End of "while" loop.
     !$omp target exit data map(release: dTr, Ihdxdy, Coef_x, Coef_y)
@@ -649,18 +648,14 @@ subroutine tracer_hordiff(h, dt, MEKE, VarMix, visc, G, GV, US, CS, Reg, tv, do_
                                   CS, tv, num_itts)
     call cpu_clock_end(id_clock_epimix)
   endif
-
-  ! Per-tracer exit: `map(from:)` copies the diffused `t` back to host (needed
-  ! when tracer_epipycnal_ML_diff has updated it on device in benchmark mode);
-  ! the df_* fields just need releasing.
   !$ do m = 1, Reg%ntr
     !$omp target exit data map(from: Reg%Tr(m)%t)
+    !$omp target exit data map(from: Reg%Tr(m)%df_x) if(associated(Reg%Tr(m)%df_x))
+    !$omp target exit data map(from: Reg%Tr(m)%df_y) if(associated(Reg%Tr(m)%df_y))
+    !$omp target exit data map(from: Reg%Tr(m)%df2d_x) if(associated(Reg%Tr(m)%df2d_x))
+    !$omp target exit data map(from: Reg%Tr(m)%df2d_y) if(associated(Reg%Tr(m)%df2d_y))
   !$ enddo
-  !$ do m = 1, Reg%ntr
-    !$omp target exit data map(release: Reg%Tr(m)%df_x, Reg%Tr(m)%df_y, &
-    !$omp   Reg%Tr(m)%df2d_x, Reg%tr(m)%df2d_y)
-  !$ enddo
-  !$omp target exit data map(release: Reg%Tr(:), Reg)
+  !$omp target exit data map(release: Reg%Tr, Reg)
 
   if (CS%debug) call MOM_tracer_chksum("After tracer diffusion ", Reg, G)
 
@@ -722,8 +717,6 @@ subroutine tracer_hordiff(h, dt, MEKE, VarMix, visc, G, GV, US, CS, Reg, tv, do_
     call post_data(CS%id_KhTr_h, Kh_h, CS%diag)
   endif
 
-  ! BISECT-F: was map(from:); switching to update from + map(release:) per
-  ! [[feedback_map_from_clobbers_managed]] — map(from:) can clobber managed mem
   !$omp target update from(khdt_x, khdt_y) if(CS%debug .or. CS%id_khdt_x>0 .or. CS%id_khdt_y>0)
   !$omp target exit data map(release: khdt_x, khdt_y, Kh_u, Kh_v) map(release: CS)
 
