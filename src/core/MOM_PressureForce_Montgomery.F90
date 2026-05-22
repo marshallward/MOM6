@@ -682,8 +682,7 @@ subroutine Set_pbce_Bouss(e, tv, G, GV, US, Rho0, GFS_scale, pbce, rho_star)
   integer :: EOSdom(2,2)     ! The computational domain for the equation of state
   integer :: Isq, Ieq, Jsq, Jeq, nz, i, j, k
 
-  ! e, pbce needs t obe done via omp target ENTER data somewhere
-  !$omp target data map(alloc: Ihtot) map(tofrom: e, pbce)
+  !$omp target data map(alloc: Ihtot)
   Isq = G%IscB ; Ieq = G%IecB ; Jsq = G%JscB ; Jeq = G%JecB ; nz = GV%ke
 
   use_EOS = associated(tv%eqn_of_state)
