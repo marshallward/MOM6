@@ -1618,12 +1618,12 @@ subroutine btstep(U_in, V_in, eta_in, dt, bc_accel_u, bc_accel_v, forces, pbce, 
     do concurrent (j=js:je, I=is-1:ie)
       bt_rem_u(I,j) = 0.0
       if (G%mask2dCu(I,j) * av_rem_u(I,j) > 0.0) &
-        bt_rem_u(I,j) = G%mask2dCu(I,j) * nth_root(av_rem_u(I,j), nstep)
+        bt_rem_u(I,j) = G%mask2dCu(I,j) * (av_rem_u(I,j)**Instep) !nth_root(av_rem_u(I,j), nstep)
     enddo
     do concurrent (J=js-1:je, i=is:ie)
       bt_rem_v(i,J) = 0.0
       if (G%mask2dCv(i,J) * av_rem_v(i,J) > 0.0) &
-        bt_rem_v(i,J) = G%mask2dCv(i,J) * nth_root(av_rem_v(i,J), nstep)
+        bt_rem_v(i,J) = G%mask2dCv(i,J) * (av_rem_v(i,J)**Instep) !nth_root(av_rem_v(i,J), nstep)
     enddo
   endif
 
