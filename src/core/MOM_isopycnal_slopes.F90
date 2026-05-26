@@ -225,11 +225,6 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
     else
       call vert_fill_TS(h, tv%T, tv%S, dt_kappa_smooth, T, S, G, GV, US, 1)
     endif
-#ifdef DEBUG
-    !$omp target update from(T, S)
-    call hchksum(T, "calc_isoneutral_slopes: T after vert_fill", G%HI)
-    call hchksum(S, "calc_isoneutral_slopes: S after vert_fill", G%HI)
-#endif
   endif
 
   if ((use_EOS .and. allocated(tv%SpV_avg) .and. (tv%valid_SpV_halo < 1)) .and. &
@@ -295,9 +290,6 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
         T_uvh(ii,jj,K) = 0.25*((T(i,j,k) + T(i+1,j,k)) + (T(i,j,k-1) + T(i+1,j,k-1)))
         S_uvh(ii,jj,K) = 0.25*((S(i,j,k) + S(i+1,j,k)) + (S(i,j,k-1) + S(i+1,j,k-1)))
       enddo
-
-      ! Transfer tile arrays from device to host for CPU-only EOS and OBC operations
-      !$omp target update from(T_uvh, S_uvh, pres_uvh)
 
       ! Apply OBC overrides: at open boundary faces use only the interior cell's T/S/P
       ! rather than the two-cell average computed above. Runs on CPU because it requires
@@ -368,8 +360,6 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
           S_uvh(ii,jj,K) = 0.5*(S(i,j,K) + S(i,j,K-1))
         enddo
 
-        !$omp target update from(T_uvh, S_uvh, pres_uvh)
-
         do jj=1,jend-jstart+1 ; do K=nz,2,-1
           call calculate_density_second_derivs(T_uvh(:,jj,K), S_uvh(:,jj,K), pres_uvh(:,jj,K), &
                      scrap, scrap, drho_dT_dT_h(:,jj,K), scrap, scrap, &
@@ -378,9 +368,6 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
       endif ! end use_stanley
 
     endif ! end use_EOS for zonal tile
-
-    ! Push density derivatives to device for the slope compute kernel
-    !$omp target update to(drho_dT, drho_dS, drho_dT_dT_h)
 
     ! Zonal slope compute over the tile
     do concurrent( jj=1:jend-jstart+1, K=2:nz, ii=1:iend-istart+1 ) &
@@ -498,8 +485,6 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
         S_uvh(ii,jj,K) = 0.25*((S(i,j,K) + S(i,j+1,K)) + (S(i,j,K-1) + S(i,j+1,K-1)))
       enddo
 
-      !$omp target update from(T_uvh, S_uvh, pres_uvh)
-
       ! Apply OBC overrides at v-points: north-facing uses interior (j), south-facing uses j+1.
       if (OBC_friendly) then
         if (OBC%v_N_OBCs_on_PE) then
@@ -563,8 +548,6 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
           S_uvh(ii,jj,K) = 0.5*(S(i,j,K) + S(i,j,K-1))
         enddo
 
-        !$omp target update from(T_uvh, S_uvh, pres_uvh)
-
         do jj=1,jend-jstart+2 ; do K=nz,2,-1
           call calculate_density_second_derivs(T_uvh(:,jj,K), S_uvh(:,jj,K), pres_uvh(:,jj,K), &
                      scrap, scrap, drho_dT_dT_h(:,jj,K), scrap, scrap, &
@@ -573,9 +556,6 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
       endif ! end use_stanley
 
     endif ! end use_EOS for meridional tile
-
-    ! Push derivatives to device
-    !$omp target update to(drho_dT, drho_dS, drho_dT_dT_h)
 
     ! Meridional slope compute over the tile
     do concurrent( jj=1:jend-jstart+1, K=2:nz, ii=1:iend-istart+1 ) &
