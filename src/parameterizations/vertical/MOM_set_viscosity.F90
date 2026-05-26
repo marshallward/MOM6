@@ -1863,11 +1863,11 @@ pure subroutine find_L_open_convex(vol_below, D_vel, Dp, Dm, L, GV, US, CS)
     if (vol_below(K) >= Vol_open) then
       L(K) = 1.0
     elseif (vol_below(K) <= Vol_direct) then
-      ! if (CS%answer_date < 20240101)) then
+      if (CS%answer_date < 20260501) then
         L(K) = (-0.25*C24_crv*vol_below(K))**C1_3
-      ! else
-        ! L(K) = cuberoot(-0.25*C24_crv*vol_below(K))
-      ! endif
+      else
+        L(K) = cuberoot(-0.25*C24_crv*vol_below(K))
+      endif
     else
       ! x_R is at 1/2 but x_L is in the interior & L is found by iteratively solving
       !   vol_below(K) = 0.5*L^2*(slope + crv/3*(3-4L))
