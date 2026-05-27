@@ -945,6 +945,7 @@ end subroutine thickness_to_dz_3d
 !! distance between edges in height units, perhaps by multiplication by the precomputed layer-mean
 !! specific volume stored in an array in the thermo_var_ptrs type when in non-Boussinesq mode.
 subroutine thickness_to_dz_jslice(h, tv, dz, j, G, GV, halo_size)
+  !$omp declare target
   type(ocean_grid_type),   intent(in)    :: G  !< The ocean's grid structure
   type(verticalGrid_type), intent(in)    :: GV !< The ocean's vertical grid structure
    real, dimension(SZI_(G),SZJ_(G),SZK_(GV)), &
@@ -970,10 +971,10 @@ subroutine thickness_to_dz_jslice(h, tv, dz, j, G, GV, halo_size)
       if (tv%valid_SpV_halo < 0) then
         mesg = "invalid values of SpV_avg."
       else
-        write(mesg, '("insufficiently large SpV_avg halos of width ", i2, " but ", i2," is needed.")') &
-                     tv%valid_SpV_halo, halo
+        !*!write(mesg, '("insufficiently large SpV_avg halos of width ", i2, " but ", i2," is needed.")') &
+        !*!             tv%valid_SpV_halo, halo
       endif
-      call MOM_error(FATAL, "thickness_to_dz called in fully non-Boussinesq mode with "//trim(mesg))
+      !*!call MOM_error(FATAL, "thickness_to_dz called in fully non-Boussinesq mode with "//trim(mesg))
     endif
 
     do k=1,nz ; do i=is,ie
