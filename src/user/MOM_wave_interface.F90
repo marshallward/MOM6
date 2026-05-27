@@ -673,8 +673,8 @@ subroutine query_wave_properties(CS, NumBands, WaveNumbers, US)
 
   if (present(NumBands)) NumBands = CS%NumBands
   if (present(Wavenumbers)) then
-    if (size(Wavenumbers) < CS%NumBands) call MOM_error(FATAL, "query_wave_properties called "//&
-                                "with a Wavenumbers array that is smaller than the number of bands.")
+    !*!if (size(Wavenumbers) < CS%NumBands) call MOM_error(FATAL, "query_wave_properties called "//&
+    !*!                            "with a Wavenumbers array that is smaller than the number of bands.")
     if (present(US)) then
       do n=1,CS%NumBands ; Wavenumbers(n) = US%m_to_Z * CS%WaveNum_Cen(n) ; enddo
     else
@@ -709,15 +709,15 @@ subroutine Update_Surface_Waves(G, GV, US, Time_present, dt, CS, forces)
       call Surface_Bands_by_data_override(Stokes_Time, G, GV, US, CS)
     elseif (CS%DataSource == COUPLER) then
       if (.not.present(FORCES)) then
-        call MOM_error(FATAL,"The option SURFBAND = COUPLER can not be used with "//&
-             "this driver. If you are using a coupled driver with a wave model then "//&
-             "check the arguments in the subroutine call to Update_Surface_Waves, "//&
-             "otherwise select another option for SURFBAND_SOURCE.")
+        !*!call MOM_error(FATAL,"The option SURFBAND = COUPLER can not be used with "//&
+        !*!     "this driver. If you are using a coupled driver with a wave model then "//&
+        !*!     "check the arguments in the subroutine call to Update_Surface_Waves, "//&
+        !*!     "otherwise select another option for SURFBAND_SOURCE.")
       endif
       if (size(CS%WaveNum_Cen) /= size(forces%stk_wavenumbers)) then
-        call MOM_error(FATAL, "Number of wavenumber bands in WW3 does not match that in MOM6. "//&
-             "Make sure that STK_BAND_COUPLER in MOM6 input is equal to the number of bands in "//&
-             "ww3_grid.inp, and that your mod_def.ww3 is up to date.")
+        !*!call MOM_error(FATAL, "Number of wavenumber bands in WW3 does not match that in MOM6. "//&
+        !*!     "Make sure that STK_BAND_COUPLER in MOM6 input is equal to the number of bands in "//&
+        !*!     "ww3_grid.inp, and that your mod_def.ww3 is up to date.")
       endif
 
       do b=1,CS%NumBands
@@ -1088,8 +1088,8 @@ subroutine Surface_Bands_by_data_override(Time, G, GV, US, CS)
     call data_override_init(G%Domain)
     CS%DataOver_initialized = .true.
 
-    if (.not.file_exists(CS%SurfBandFileName)) &
-      call MOM_error(FATAL, "MOM_wave_interface is unable to find file "//trim(CS%SurfBandFileName))
+    !*!if (.not.file_exists(CS%SurfBandFileName)) &
+    !*!  call MOM_error(FATAL, "MOM_wave_interface is unable to find file "//trim(CS%SurfBandFileName))
 
     ! Check if input has wavenumber or frequency variables.
 
@@ -1100,9 +1100,9 @@ subroutine Surface_Bands_by_data_override(Time, G, GV, US, CS)
     if (.not.wavenumber_exists) then
       ! Read the number of frequency bands in the file, if the variable 'frequency' exists.
       call get_var_sizes(CS%SurfBandFileName, 'frequency', ndims, sizes, dim_names=dim_name)
-      if (ndims < 0) &
-        call MOM_error(FATAL, "error finding variable 'wavenumber' or 'frequency' in file "//&
-                              trim(CS%SurfBandFileName)//" in MOM_wave_interface.")
+      !*!if (ndims < 0) &
+      !*!  call MOM_error(FATAL, "error finding variable 'wavenumber' or 'frequency' in file "//&
+      !*!                        trim(CS%SurfBandFileName)//" in MOM_wave_interface.")
     endif
 
     CS%NUMBANDS = sizes(1)
@@ -1195,6 +1195,7 @@ end subroutine Surface_Bands_by_data_override
 !!  careful about what we try to access here.
 subroutine get_Langmuir_Number( LA, G, GV, US, HBL, ustar, i, j, dz, Waves, &
                                 U_H, V_H, Override_MA )
+  !$omp declare target
   type(ocean_grid_type),     intent(in)  :: G     !< Ocean grid structure
   type(verticalGrid_type),   intent(in)  :: GV    !< Ocean vertical grid structure
   real,                      intent(out) :: LA    !< Langmuir number [nondim]
@@ -1234,8 +1235,8 @@ subroutine get_Langmuir_Number( LA, G, GV, US, HBL, ustar, i, j, dz, Waves, &
 
   ! If requesting to use misalignment in the Langmuir number compute the Shear Direction
   if (USE_MA) then
-    if (.not.(present(U_H).and.present(V_H))) call MOM_error(FATAL, &
-        "Get_LA_waves requested to consider misalignment, but velocities were not provided.")
+    !*!if (.not.(present(U_H).and.present(V_H))) call MOM_error(FATAL, &
+    !*!    "Get_LA_waves requested to consider misalignment, but velocities were not provided.")
     ContinueLoop = .true.
     bottom = 0.0
     do k = 1,GV%ke
@@ -1259,51 +1260,55 @@ subroutine get_Langmuir_Number( LA, G, GV, US, HBL, ustar, i, j, dz, Waves, &
   endif
 
   if (Waves%WaveMethod==TESTPROF) then
-    do k = 1,GV%ke
-      US_H(k) = 0.5*(Waves%US_X(I,j,k)+Waves%US_X(I-1,j,k))
-      VS_H(k) = 0.5*(Waves%US_Y(i,J,k)+Waves%US_Y(i,J-1,k))
-    enddo
-    call Get_SL_Average_Prof( GV, Dpt_LASL, dz, US_H, LA_STKx)
-    call Get_SL_Average_Prof( GV, Dpt_LASL, dz, VS_H, LA_STKy)
-    LA_STK = sqrt((LA_STKX*LA_STKX) + (LA_STKY*LA_STKY))
+    !**!do k = 1,GV%ke
+    !**!  US_H(k) = 0.5*(Waves%US_X(I,j,k)+Waves%US_X(I-1,j,k))
+    !**!  VS_H(k) = 0.5*(Waves%US_Y(i,J,k)+Waves%US_Y(i,J-1,k))
+    !**!enddo
+    !**!call Get_SL_Average_Prof( GV, Dpt_LASL, dz, US_H, LA_STKx)
+    !**!call Get_SL_Average_Prof( GV, Dpt_LASL, dz, VS_H, LA_STKy)
+    !**!LA_STK = sqrt((LA_STKX*LA_STKX) + (LA_STKY*LA_STKY))
   elseif (Waves%WaveMethod==SURFBANDS) then
-    allocate(StkBand_X(Waves%NumBands), StkBand_Y(Waves%NumBands))
-    do bb = 1,Waves%NumBands
-      StkBand_X(bb) = 0.5*(Waves%STKx0(I,j,bb)+Waves%STKx0(I-1,j,bb))
-      StkBand_Y(bb) = 0.5*(Waves%STKy0(i,J,bb)+Waves%STKy0(i,J-1,bb))
-    enddo
-    call Get_SL_Average_Band(GV, Dpt_LASL, Waves%NumBands, Waves%WaveNum_Cen, StkBand_X, LA_STKx )
-    call Get_SL_Average_Band(GV, Dpt_LASL, Waves%NumBands, Waves%WaveNum_Cen, StkBand_Y, LA_STKy )
-    LA_STK = sqrt((LA_STKX**2) + (LA_STKY**2))
-    deallocate(StkBand_X, StkBand_Y)
+    !**!allocate(StkBand_X(Waves%NumBands), StkBand_Y(Waves%NumBands))
+    !**!do bb = 1,Waves%NumBands
+    !**!  StkBand_X(bb) = 0.5*(Waves%STKx0(I,j,bb)+Waves%STKx0(I-1,j,bb))
+    !**!  StkBand_Y(bb) = 0.5*(Waves%STKy0(i,J,bb)+Waves%STKy0(i,J-1,bb))
+    !**!enddo
+    !**!call Get_SL_Average_Band(GV, Dpt_LASL, Waves%NumBands, Waves%WaveNum_Cen, StkBand_X, LA_STKx )
+    !**!call Get_SL_Average_Band(GV, Dpt_LASL, Waves%NumBands, Waves%WaveNum_Cen, StkBand_Y, LA_STKy )
+    !**!LA_STK = sqrt((LA_STKX**2) + (LA_STKY**2))
+    !**!deallocate(StkBand_X, StkBand_Y)
   elseif (Waves%WaveMethod==DHH85) then
     ! Temporarily integrating profile rather than spectrum for simplicity
     do k = 1,GV%ke
       US_H(k) = 0.5*(Waves%US_X(I,j,k)+Waves%US_X(I-1,j,k))
       VS_H(k) = 0.5*(Waves%US_Y(i,J,k)+Waves%US_Y(i,J-1,k))
     enddo
-    call Get_SL_Average_Prof( GV, Dpt_LASL, dz, US_H, LA_STKx)
-    call Get_SL_Average_Prof( GV, Dpt_LASL, dz, VS_H, LA_STKy)
+    !***** is this it? *****!
+    !**!call Get_SL_Average_Prof( GV, Dpt_LASL, dz, US_H, LA_STKx)
+    !**!call Get_SL_Average_Prof( GV, Dpt_LASL, dz, VS_H, LA_STKy)
+    call Get_SL_Average_Prof(GV, Dpt_LASL, dz, LA_STKx)
+    call Get_SL_Average_Prof(GV, Dpt_LASL, dz, LA_STKy)
+    !***** is this it? *****!
     LA_STK = sqrt((LA_STKX**2) + (LA_STKY**2))
   elseif (Waves%WaveMethod==LF17) then
-    call get_StokesSL_LiFoxKemper(ustar, HBL*Waves%LA_FracHBL, GV, US, Waves, LA_STK, LA)
+    !*!call get_StokesSL_LiFoxKemper(ustar, HBL*Waves%LA_FracHBL, GV, US, Waves, LA_STK, LA)
   elseif (Waves%WaveMethod==Null_WaveMethod) then
-    call MOM_error(FATAL, "Get_Langmuir_number called without defining a WaveMethod. "//&
-                          "Suggest to make sure USE_LT is set/overridden to False or choose "//&
-                          "a wave method (or set USE_LA_LI2016 to use statistical waves).")
+    !*!call MOM_error(FATAL, "Get_Langmuir_number called without defining a WaveMethod. "//&
+    !*!                      "Suggest to make sure USE_LT is set/overridden to False or choose "//&
+    !*!                      "a wave method (or set USE_LA_LI2016 to use statistical waves).")
   endif
 
-  if (.not.(Waves%WaveMethod==LF17)) then
-    ! This expression uses an arbitrary lower bound on Langmuir number.
-    ! We shouldn't expect values lower than this, but there is also no good reason to cap it here
-    ! other than to prevent large enhancements in unconstrained parts of the curve fit parameterizations.
-    LA = max(Waves%La_min, sqrt(US%Z_to_L*ustar / (LA_STK + Waves%La_Stk_backgnd)))
-  endif
+  !*!if (.not.(Waves%WaveMethod==LF17)) then
+  !*!  ! This expression uses an arbitrary lower bound on Langmuir number.
+  !*!  ! We shouldn't expect values lower than this, but there is also no good reason to cap it here
+  !*!  ! other than to prevent large enhancements in unconstrained parts of the curve fit parameterizations.
+  !*!  LA = max(Waves%La_min, sqrt(US%Z_to_L*ustar / (LA_STK + Waves%La_Stk_backgnd)))
+  !*!endif
 
-  if (Use_MA) then
-    WaveDirection = atan2(LA_STKy, LA_STKx)
-    LA = LA / sqrt(max(1.e-8, cos( WaveDirection - ShearDirection)))
-  endif
+  !*!if (Use_MA) then
+  !*!  WaveDirection = atan2(LA_STKy, LA_STKx)
+  !*!  LA = LA / sqrt(max(1.e-8, cos( WaveDirection - ShearDirection)))
+  !*!endif
 
 end subroutine get_Langmuir_Number
 
@@ -1470,48 +1475,52 @@ subroutine get_StokesSL_LiFoxKemper(ustar, hbl, GV, US, CS, UStokes_SL, LA)
 end subroutine Get_StokesSL_LiFoxKemper
 
 !> Get SL Averaged Stokes drift from a Stokes drift Profile
-subroutine Get_SL_Average_Prof( GV, AvgDepth, dz, Profile, Average )
+!**!subroutine Get_SL_Average_Prof( GV, AvgDepth, dz, Profile, Average )
+subroutine Get_SL_Average_Prof(GV, AvgDepth, dz, Average )
+  !$omp declare target
   type(verticalGrid_type),  &
        intent(in)   :: GV       !< Ocean vertical grid structure
   real, intent(in)  :: AvgDepth !< Depth to average over (negative) [Z ~> m]
-  real, dimension(SZK_(GV)), &
-       intent(in)   :: dz       !< Grid thickness [Z ~> m]
-  real, dimension(SZK_(GV)), &
-       intent(in)   :: Profile  !< Profile of quantity to be averaged in arbitrary units [A]
-                                !! (used here for Stokes drift)
+  !*!real, dimension(SZK_(GV)), &
+  !*!     intent(in)   :: dz       !< Grid thickness [Z ~> m]
+  !*!real, dimension(SZK_(GV)), &
+  !*!     intent(in)   :: Profile  !< Profile of quantity to be averaged in arbitrary units [A]
+  real, intent(in) :: dz(:)       !< Grid thickness [Z ~> m]
+  !*!real, intent(in) :: Profile(:)  !< Profile of quantity to be averaged in arbitrary units [A]
+  !*!                              !! (used here for Stokes drift)
   real, intent(out) :: Average  !< Output quantity averaged over depth AvgDepth [A]
                                 !! (used here for Stokes drift)
   !Local variables
   real :: Top, Bottom ! Depths, negative downward [Z ~> m]
-  real :: Sum  ! The depth weighted vertical sum of a quantity [A Z ~> A m]
+  real :: vsum  ! The depth weighted vertical sum of a quantity [A Z ~> A m]
   integer :: k
 
   ! Initializing sum
-  Sum = 0.0
+  vsum = 0.0
 
-  ! Integrate
-  bottom = 0.0
-  do k = 1, GV%ke
-    Top = Bottom
-    Bottom = Bottom - dz(k)
-    if (AvgDepth < Bottom) then ! The whole cell is within H_LA
-      Sum = Sum + Profile(k) * dz(k)
-    elseif (AvgDepth < Top) then ! A partial cell is within H_LA
-      Sum = Sum + Profile(k) * (Top-AvgDepth)
-      exit
-    else
-      exit
-    endif
-  enddo
+  !**!! Integrate
+  !**!bottom = 0.0
+  !**!do k = 1, GV%ke
+  !**!  Top = Bottom
+  !**!  Bottom = Bottom - dz(k)
+  !**!  if (AvgDepth < Bottom) then ! The whole cell is within H_LA
+  !**!    vsum = vsum + Profile(k) * dz(k)
+  !**!  elseif (AvgDepth < Top) then ! A partial cell is within H_LA
+  !**!    vsum = vsum + Profile(k) * (Top-AvgDepth)
+  !**!    exit
+  !**!  else
+  !**!    exit
+  !**!  endif
+  !**!enddo
 
-  ! Divide by AvgDepth or the depth in the column, whichever is smaller.
-  if (abs(AvgDepth) <= abs(Bottom)) then
-    Average = Sum / abs(AvgDepth)
-  elseif (abs(Bottom) > 0.0) then
-    Average = Sum / abs(Bottom)
-  else
-    Average = 0.0
-  endif
+  !**!! Divide by AvgDepth or the depth in the column, whichever is smaller.
+  !**!if (abs(AvgDepth) <= abs(Bottom)) then
+  !**!  Average = vsum / abs(AvgDepth)
+  !**!elseif (abs(Bottom) > 0.0) then
+  !**!  Average = vsum / abs(Bottom)
+  !**!else
+  !**!  Average = 0.0
+  !**!endif
 
 end subroutine Get_SL_Average_Prof
 
@@ -2060,6 +2069,7 @@ end subroutine Stokes_PGF
 !! wind speed for wind-wave relationships.  Should be a fine way to estimate
 !! the neutral wind-speed as written here.
 subroutine ust_2_u10_coare3p5(USTair, U10, GV, US, CS)
+  !$omp declare target
   real, intent(in)                    :: USTair !< Wind friction velocity [Z T-1 ~> m s-1]
   real, intent(out)                   :: U10    !< 10-m neutral wind speed [L T-1 ~> m s-1]
   type(verticalGrid_type), intent(in) :: GV     !< vertical grid type
@@ -2084,8 +2094,8 @@ subroutine ust_2_u10_coare3p5(USTair, U10, GV, US, CS)
   ! Note in Edson et al. 2013, eq. 13 m is given as 0.017.  However,
   ! m=0.0017 reproduces the curve in their figure 6.
 
-  if (CS%vonKar < 0.0) call MOM_error(FATAL, &
-    "ust_2_u10_coare3p5 called with a negative value of Waves%vonKar")
+  !*!if (CS%vonKar < 0.0) call MOM_error(FATAL, &
+  !*!  "ust_2_u10_coare3p5 called with a negative value of Waves%vonKar")
 
   z0sm = 0.11 * CS%nu_air / USTair ! Compute z0smooth from ustar guess
   u10a = 1000.0*US%m_s_to_L_T ! An insanely large upper bound for u10.

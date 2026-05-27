@@ -587,11 +587,13 @@ subroutine energetic_PBL(h_3d, u_3d, v_3d, tv, fluxes, visc, dt, Kd_int, G, GV, 
     if (CS%id_opt_diff_hML_depth > 0)  diff_hML_depth(:,:) = 0.0
   endif
 
-  !!OMP parallel do default(private) shared(js,je,nz,is,ie,h_3d,u_3d,v_3d,tv,dt,I_dt,BBL_mixing, &
-  !!OMP                                  CS,G,GV,US,fluxes,TKE_forced,dSV_dT,dSV_dS,Kd_int)
+  !$omp target loop private(h_2d, dz_2d, u_2d, v_2d, T_2d, S_2d) &
+  !$omp   private(TKE_forced_2d, dSV_dT_2d, dSV_dS_2d, Kd_2d) &
+  !$omp   private(SpV_dt)
   do j=js,je
     ! Copy the thicknesses and other fields to 2-d arrays.
-    do k=1,nz ; do i=is,ie
+    !$omp loop
+    do i=is,ie ; do k=1,nz
       h_2d(i,k) = h_3d(i,j,k) ; u_2d(i,k) = u_3d(i,j,k) ; v_2d(i,k) = v_3d(i,j,k)
       T_2d(i,k) = tv%T(i,j,k) ; S_2d(i,k) = tv%S(i,j,k)
       TKE_forced_2d(i,k) = TKE_forced(i,j,k)
@@ -619,6 +621,11 @@ subroutine energetic_PBL(h_3d, u_3d, v_3d, tv, fluxes, visc, dt, Kd_int, G, GV, 
     ! homogenizing the shortwave heating within that cell.  This sets the energy
     ! and ustar and wstar available to drive mixing at the first interior
     ! interface.
+    !$omp loop private(h, dz, u, v, T0, S0, TKE_forcing) &
+    !$omp   private(dSV_dT_1d, dSV_dS_1d, Kd, SpV_dt_cf) &
+    !$omp   private(Kd, mixvel, mixlen) &
+    !$omp   private(Kd_BBL, mixvel_BBL, mixlen_BBL) &
+    !$omp   private(Kd_1, Kd_2)
     do i=is,ie ; if (G%mask2dT(i,j) > 0.0) then
 
       ! Copy the thicknesses and other fields to 1-d arrays.
@@ -647,13 +654,14 @@ subroutine energetic_PBL(h_3d, u_3d, v_3d, tv, fluxes, visc, dt, Kd_int, G, GV, 
       endif
       diag_ustar(i,j) = u_star
 
-      if (allocated(tv%SpV_avg) .and. .not.GV%Boussinesq) then
-        SpV_dt(1) = tv%SpV_avg(i,j,1) * I_dt
-        do K=2,nz
-          SpV_dt(K) = 0.5*(tv%SpV_avg(i,j,k-1) + tv%SpV_avg(i,j,k)) * I_dt
-        enddo
-        SpV_dt(nz+1) = tv%SpV_avg(i,j,nz) * I_dt
-      endif
+      ! TODO
+      !*!if (allocated(tv%SpV_avg) .and. .not.GV%Boussinesq) then
+      !*!  SpV_dt(1) = tv%SpV_avg(i,j,1) * I_dt
+      !*!  do K=2,nz
+      !*!    SpV_dt(K) = 0.5*(tv%SpV_avg(i,j,k-1) + tv%SpV_avg(i,j,k)) * I_dt
+      !*!  enddo
+      !*!  SpV_dt(nz+1) = tv%SpV_avg(i,j,nz) * I_dt
+      !*!endif
 
       B_flux = buoy_flux(i,j)
       if (associated(fluxes%ustar_shelf) .and. associated(fluxes%frac_shelf_h)) then
@@ -694,8 +702,8 @@ subroutine energetic_PBL(h_3d, u_3d, v_3d, tv, fluxes, visc, dt, Kd_int, G, GV, 
                          u_star, u_star_mean, mech_TKE, dt, MLD_io, Kd, mixvel, mixlen, GV, &
                          US, CS, eCD, Waves, G, i, j)
       endif
-      if (CS%id_Kd_ePBL_col_by_col > 0) &
-        call post_data_3d_by_column(CS%id_Kd_ePBL_col_by_col, Kd, CS%diag, i, j)
+      !*!if (CS%id_Kd_ePBL_col_by_col > 0) &
+      !*!  call post_data_3d_by_column(CS%id_Kd_ePBL_col_by_col, Kd, CS%diag, i, j)
 
       ! Add the diffusivity due to bottom boundary layer mixing, if there is energy to drive this mixing.
       if (BBL_mixing) then
@@ -774,14 +782,14 @@ subroutine energetic_PBL(h_3d, u_3d, v_3d, tv, fluxes, visc, dt, Kd_int, G, GV, 
       if (CS%id_mstar_LT > 0) diag_mstar_lt(i,j) = eCD%mstar_LT
       if (CS%id_LA > 0) diag_LA(i,j) = eCD%LA
       if (CS%id_LA_mod > 0) diag_LA_mod(i,j) = eCD%LAmod
-      if (report_avg_its) then
-        CS%sum_its(1) = CS%sum_its(1) + real_to_EFP(real(eCD%OBL_its))
-        CS%sum_its(2) = CS%sum_its(2) + real_to_EFP(1.0)
-        if (BBL_mixing) then
-          CS%sum_its_BBL(1) = CS%sum_its_BBL(1) + real_to_EFP(real(eCD%BBL_its))
-          CS%sum_its_BBL(2) = CS%sum_its_BBL(2) + real_to_EFP(1.0)
-        endif
-      endif
+      !*!if (report_avg_its) then
+      !*!  CS%sum_its(1) = CS%sum_its(1) + real_to_EFP(real(eCD%OBL_its))
+      !*!  CS%sum_its(2) = CS%sum_its(2) + real_to_EFP(1.0)
+      !*!  if (BBL_mixing) then
+      !*!    CS%sum_its_BBL(1) = CS%sum_its_BBL(1) + real_to_EFP(real(eCD%BBL_its))
+      !*!    CS%sum_its_BBL(2) = CS%sum_its_BBL(2) + real_to_EFP(1.0)
+      !*!  endif
+      !*!endif
 
       if (CS%options_diff > 0) then
         ! Call ePBL_column of ePBL_BBL_column with different parameter settings to diagnose sensitivities.
@@ -828,7 +836,8 @@ subroutine energetic_PBL(h_3d, u_3d, v_3d, tv, fluxes, visc, dt, Kd_int, G, GV, 
       CS%BBL_depth(i,j) = 0.0
     endif ; enddo ! Close of i-loop - Note the unusual loop order, with k-loops inside i-loops.
 
-    do K=1,nz+1 ; do i=is,ie ; Kd_int(i,j,K) = Kd_2d(i,K) ; enddo ; enddo
+    !$omp loop
+    do i=is,ie ; do K=1,nz+1 ; Kd_int(i,j,K) = Kd_2d(i,K) ; enddo ; enddo
 
   enddo ! j-loop
   if (CS%id_Kd_ePBL_col_by_col > 0) call post_data_3d_final(CS%id_Kd_ePBL_col_by_col, CS%diag)
@@ -1186,12 +1195,12 @@ subroutine ePBL_column(h, dz, u, v, T0, S0, dSV_dT, dSV_dS, SpV_dt, TKE_forcing,
 
   MLD_guess = MLD_io
 
-!   Determine the initial mech_TKE and conv_PErel, including the energy required
-! to mix surface heating through the topmost cell, the energy released by mixing
-! surface cooling & brine rejection down through the topmost cell, and
-! homogenizing the shortwave heating within that cell.  This sets the energy
-! and ustar and wstar available to drive mixing at the first interior
-! interface.
+  !   Determine the initial mech_TKE and conv_PErel, including the energy required
+  ! to mix surface heating through the topmost cell, the energy released by mixing
+  ! surface cooling & brine rejection down through the topmost cell, and
+  ! homogenizing the shortwave heating within that cell.  This sets the energy
+  ! and ustar and wstar available to drive mixing at the first interior
+  ! interface.
 
   do K=1,nz+1 ; Kd(K) = 0.0 ; enddo
 
@@ -1250,9 +1259,10 @@ subroutine ePBL_column(h, dz, u, v, T0, S0, dSV_dT, dSV_dS, SpV_dt, TKE_forcing,
     sfc_connected = .true.
 
     !/ Here we get mstar, which is the ratio of convective TKE driven mixing to UStar**3
-    if (CS%Use_LT) then
-      call get_Langmuir_Number(LA, G, GV, US, abs(MLD_guess), u_star_mean, i, j, dz, Waves, &
-                               U_H=u, V_H=v)
+    !if (CS%Use_LT) then
+    if (.true.) then
+      !*!call get_Langmuir_Number(LA, G, GV, US, abs(MLD_guess), u_star_mean, i, j, dz, Waves, &
+      !*!                         U_H=u, V_H=v)
       call find_mstar(CS, US, B_flux, u_star, MLD_guess, absf, .false., &
                       mstar_total, Langmuir_Number=La, Convect_Langmuir_Number=LAmod,&
                       mstar_LT=mstar_LT)
