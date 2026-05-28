@@ -398,13 +398,13 @@ subroutine generic_plm_update_inty_dpa(TILE_SIZE_X, TILE_SIZE_Y, k, tv, T_t, T_b
   logical,              intent(in)  :: use_rho_ref, use_stanley_eos, use_varT, use_covarTS, use_varS
   type(EOS_type),       intent(in)  :: EOS
 
-  real :: T15((15*HI%iscB+1):(15*(HI%iecB+1)),HI%jscB:HI%jecB+1)
-  real :: S15((15*HI%iscB+1):(15*(HI%iecB+1)),HI%jscB:HI%jecB+1)
-  real :: T215((15*HI%iscB+1):(15*(HI%iecB+1)),HI%jscB:HI%jecB+1)
-  real :: TS15((15*HI%iscB+1):(15*(HI%iecB+1)),HI%jscB:HI%jecB+1)
-  real :: S215((15*HI%iscB+1):(15*(HI%iecB+1)),HI%jscB:HI%jecB+1)
-  real :: p15((15*HI%iscB+1):(15*(HI%iecB+1)),HI%jscB:HI%jecB+1)
-  real :: r15((15*HI%iscB+1):(15*(HI%iecB+1)),HI%jscB:HI%jecB+1)
+  real :: T15(15*TILE_SIZE_X,TILE_SIZE_Y)
+  real :: S15(15*TILE_SIZE_X,TILE_SIZE_Y)
+  real :: T215(15*TILE_SIZE_X,TILE_SIZE_Y)
+  real :: TS15(15*TILE_SIZE_X,TILE_SIZE_Y)
+  real :: S215(15*TILE_SIZE_X,TILE_SIZE_Y)
+  real :: p15(15*TILE_SIZE_X,TILE_SIZE_Y)
+  real :: r15(15*TILE_SIZE_X,TILE_SIZE_Y)
   real :: dz_y(5,HI%isc:HI%iec,HI%jscB:HI%jecB+1)
   real :: wt_t(5), wt_b(5)
   real :: intz(5)
@@ -412,7 +412,7 @@ subroutine generic_plm_update_inty_dpa(TILE_SIZE_X, TILE_SIZE_Y, k, tv, T_t, T_b
   real :: w_left, w_right, hWght, hWghtTop, iDenom, hL, hR
   real :: Ttl, Tbl, Ttr, Tbr, Stl, Sbl, Str, Sbr
   integer, dimension(2,2) :: EOSdom_h15
-  integer :: Isq, Ieq, Jsq, Jeq, i, j, m, n, pos, jstart, jend, istart, iend
+  integer :: Isq, Ieq, Jsq, Jeq, i, j, m, n, pos, jstart, jend, istart, iend, ii, jj
 
   Isq = HI%IscB ; Ieq = HI%IecB ; Jsq = HI%JscB ; Jeq = HI%JecB
 
@@ -429,6 +429,7 @@ subroutine generic_plm_update_inty_dpa(TILE_SIZE_X, TILE_SIZE_Y, k, tv, T_t, T_b
     jend = min(Jeq, jstart+TILE_SIZE_Y-1) ; iend = min(HI%iec, istart+TILE_SIZE_X-1)
 
     do j=jstart,jend ; do i=istart,iend
+      ii = i-istart+1 ; jj = j-jstart+1
       hWght = massWeightToggle * &
               max(0., -bathyT(i,j)-e(i,j+1,K), -bathyT(i,j+1)-e(i,j,K))
       hWghtTop = TopWeightToggle * &
@@ -460,31 +461,31 @@ subroutine generic_plm_update_inty_dpa(TILE_SIZE_X, TILE_SIZE_Y, k, tv, T_t, T_b
         w_left = wt_t(m) ; w_right = wt_b(m)
         dz_y(m,i,j) = (w_left*(e(i,j,K) - e(i,j,K+1))) + (w_right*(e(i,j+1,K) - e(i,j+1,K+1)))
 
-        pos = i*15+(m-2)*5
-        T15(pos+1,j) = (w_left*Ttl) + (w_right*Ttr)
-        T15(pos+5,j) = (w_left*Tbl) + (w_right*Tbr)
+        pos = (ii-1)*15+(m-2)*5
+        T15(pos+1,jj) = (w_left*Ttl) + (w_right*Ttr)
+        T15(pos+5,jj) = (w_left*Tbl) + (w_right*Tbr)
 
-        S15(pos+1,j) = (w_left*Stl) + (w_right*Str)
-        S15(pos+5,j) = (w_left*Sbl) + (w_right*Sbr)
+        S15(pos+1,jj) = (w_left*Stl) + (w_right*Str)
+        S15(pos+5,jj) = (w_left*Sbl) + (w_right*Sbr)
 
-        p15(pos+1,j) = -GxRho * ((w_left*(e(i,j,K)-z0pres(i,j))) + (w_right*(e(i,j+1,K)-z0pres(i,j+1))))
+        p15(pos+1,jj) = -GxRho * ((w_left*(e(i,j,K)-z0pres(i,j))) + (w_right*(e(i,j+1,K)-z0pres(i,j+1))))
 
         do n=2,5
-          p15(pos+n,j) = p15(pos+n-1,j) + GxRho*0.25*dz_y(m,i,j)
+          p15(pos+n,jj) = p15(pos+n-1,jj) + GxRho*0.25*dz_y(m,i,j)
         enddo
 
         do n=2,4
-          S15(pos+n,j) = wt_t(n) * S15(pos+1,j) + wt_b(n) * S15(pos+5,j)
-          T15(pos+n,j) = wt_t(n) * T15(pos+1,j) + wt_b(n) * T15(pos+5,j)
+          S15(pos+n,jj) = wt_t(n) * S15(pos+1,jj) + wt_b(n) * S15(pos+5,jj)
+          T15(pos+n,jj) = wt_t(n) * T15(pos+1,jj) + wt_b(n) * T15(pos+5,jj)
         enddo
-        if (use_varT) T215(pos+1:pos+5,j) = (w_left*tv%varT(i,j,k)) + (w_right*tv%varT(i,j+1,k))
-        if (use_covarTS) TS15(pos+1:pos+5,j) = (w_left*tv%covarTS(i,j,k)) + (w_right*tv%covarTS(i,j+1,k))
-        if (use_varS) S215(pos+1:pos+5,j) = (w_left*tv%varS(i,j,k)) + (w_right*tv%varS(i,j+1,k))
+        if (use_varT) T215(pos+1:pos+5,jj) = (w_left*tv%varT(i,j,k)) + (w_right*tv%varT(i,j+1,k))
+        if (use_covarTS) TS15(pos+1:pos+5,jj) = (w_left*tv%covarTS(i,j,k)) + (w_right*tv%covarTS(i,j+1,k))
+        if (use_varS) S215(pos+1:pos+5,jj) = (w_left*tv%varS(i,j,k)) + (w_right*tv%varS(i,j+1,k))
       enddo
     enddo ; enddo
 
-    EOSdom_h15(1,1) = 15*(istart-Isq)+1 ; EOSdom_h15(1,2) = 15*(iend-Isq+1)
-    EOSdom_h15(2,1) = jstart-Jsq+1 ; EOSdom_h15(2,2) = jend-Jsq+1
+    EOSdom_h15(1,1) = 1 ; EOSdom_h15(1,2) = 15*(iend-istart+1)
+    EOSdom_h15(2,1) = 1 ; EOSdom_h15(2,2) = jend-jstart+1
 
     if (use_stanley_eos) then
       call calculate_density(T15, S15, p15, T215, TS15, S215, r15, EOS, EOSdom_h15, rho_ref=rho_ref)
@@ -497,21 +498,22 @@ subroutine generic_plm_update_inty_dpa(TILE_SIZE_X, TILE_SIZE_Y, k, tv, T_t, T_b
     endif
 
     do j=jstart,jend ; do i=istart,iend
+      ii = i-istart+1 ; jj = j-jstart+1
       intz(1) = dpa(i,j) ; intz(5) = dpa(i,j+1)
 
       if (use_rho_ref) then
         do m = 2,4
-          pos = i*15+(m-2)*5
-          intz(m) = (G_e*dz_y(m,i,j)*( C1_90*(7.0*(r15(pos+1,j)+r15(pos+5,j)) + &
-                                           32.0*(r15(pos+2,j)+r15(pos+4,j)) + &
-                                           12.0*r15(pos+3,j)) ))
+          pos = (ii-1)*15+(m-2)*5
+          intz(m) = (G_e*dz_y(m,i,j)*( C1_90*(7.0*(r15(pos+1,jj)+r15(pos+5,jj)) + &
+                                           32.0*(r15(pos+2,jj)+r15(pos+4,jj)) + &
+                                           12.0*r15(pos+3,jj)) ))
         enddo
       else
         do m = 2,4
-          pos = i*15+(m-2)*5
-          intz(m) = (G_e*dz_y(m,i,j)*( C1_90*(7.0*(r15(pos+1,j)+r15(pos+5,j)) + &
-                                           32.0*(r15(pos+2,j)+r15(pos+4,j)) + &
-                                           12.0*r15(pos+3,j)) - rho_ref ))
+          pos = (ii-1)*15+(m-2)*5
+          intz(m) = (G_e*dz_y(m,i,j)*( C1_90*(7.0*(r15(pos+1,jj)+r15(pos+5,jj)) + &
+                                           32.0*(r15(pos+2,jj)+r15(pos+4,jj)) + &
+                                           12.0*r15(pos+3,jj)) - rho_ref ))
         enddo
       endif
       inty_dpa(i,J) = C1_90*(7.0*(intz(1)+intz(5)) + 32.0*(intz(2)+intz(4)) + &
