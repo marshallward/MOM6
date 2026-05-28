@@ -73,6 +73,7 @@ interface calculate_density
   module procedure calculate_density_2d
   module procedure calculate_stanley_density_scalar
   module procedure calculate_stanley_density_1d
+  module procedure calculate_stanley_density_2d
 end interface calculate_density
 
 !> Calculates specific volume of sea water from T, S and P
@@ -467,6 +468,39 @@ subroutine calculate_stanley_density_1d(T, S, pressure, Tvar, TScov, Svar, rho, 
   enddo ; endif ; endif
 
 end subroutine calculate_stanley_density_1d
+
+!> Calls the Stanley density routine for each row of 2-D array inputs.
+subroutine calculate_stanley_density_2d(T, S, pressure, Tvar, TScov, Svar, rho, EOS, dom, rho_ref, scale)
+  real, dimension(:,:),  intent(in)    :: T        !< Potential temperature referenced to the surface [C ~> degC]
+  real, dimension(:,:),  intent(in)    :: S        !< Salinity [S ~> ppt]
+  real, dimension(:,:),  intent(in)    :: pressure !< Pressure [R L2 T-2 ~> Pa]
+  real, dimension(:,:),  intent(in)    :: Tvar     !< Variance of potential temperature [C2 ~> degC2]
+  real, dimension(:,:),  intent(in)    :: TScov    !< Covariance of potential temperature and salinity [C S ~> degC ppt]
+  real, dimension(:,:),  intent(in)    :: Svar     !< Variance of salinity [S2 ~> ppt2]
+  real, dimension(:,:),  intent(inout) :: rho      !< Density (in-situ if pressure is local) [R ~> kg m-3]
+  type(EOS_type),        intent(in)    :: EOS      !< Equation of state structure
+  integer, dimension(2,2), optional, intent(in) :: dom !< The domain of indices to work on, taking
+                                                       !! into account that arrays start at 1.
+  real,                  optional, intent(in) :: rho_ref !< A reference density [R ~> kg m-3]
+  real,                  optional, intent(in) :: scale !< A multiplicative factor by which to scale density
+                                                   !! in combination with scaling stored in EOS [various]
+  integer :: j, js, je
+  integer, dimension(2) :: dom_row
+
+  if (present(dom)) then
+    js = dom(2,1) ; je = dom(2,2)
+    dom_row = [dom(1,1), dom(1,2)]
+  else
+    js = 1 ; je = size(rho,2)
+    dom_row = [1, size(rho,1)]
+  endif
+
+  do j=js,je
+    call calculate_stanley_density_1d(T(:,j), S(:,j), pressure(:,j), &
+                                      Tvar(:,j), TScov(:,j), Svar(:,j), &
+                                      rho(:,j), EOS, dom_row, rho_ref, scale)
+  enddo
+end subroutine calculate_stanley_density_2d
 
 !> Calls the appropriate subroutine to calculate the specific volume of sea water
 !! for 1-D array inputs.
