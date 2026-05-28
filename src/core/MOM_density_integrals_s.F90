@@ -129,7 +129,8 @@ module subroutine int_density_dz_generic_plm(k, tv, T_t, T_b, S_t, S_b, e, rho_r
   integer, dimension(2) :: EOSdom_h5  ! The 5-point h-point i-computational domain for the equation of state
   integer, dimension(2) :: EOSdom_q15 ! The 3x5-point q-point i-computational domain for the equation of state
   integer, dimension(2) :: EOSdom_h15 ! The 3x5-point h-point i-computational domain for the equation of state
-  integer :: Isq, Ieq, Jsq, Jeq, i, j, m, n, pos
+  integer :: Isq, Ieq, Jsq, Jeq, i, j, m, n, pos, jstart, jend, istart, iend
+  integer, parameter :: TILE_SIZE_X = 32, TILE_SIZE_Y = 4
 
   Isq = HI%IscB ; Ieq = HI%IecB ; Jsq = HI%JscB ; Jeq = HI%JecB
 
@@ -184,8 +185,11 @@ module subroutine int_density_dz_generic_plm(k, tv, T_t, T_b, S_t, S_b, e, rho_r
   EOSdom_h15(1) = 1 ; EOSdom_h15(2) = 15*(HI%iec-HI%isc+1)
 
   ! 1. Compute vertical integrals
-  do j=Jsq,Jeq+1
-    do i = Isq,Ieq+1
+  do jstart=Jsq,Jeq+1,TILE_SIZE_Y ; do istart=Isq,Ieq+1,TILE_SIZE_X
+    jend = min(Jeq+1, jstart+TILE_SIZE_Y-1)
+    iend = min(Ieq+1, istart+TILE_SIZE_X-1)
+
+    do j=jstart,jend ; do i=istart,iend
       dz(i,j) = e(i,j,K) - e(i,j,K+1)
       do n=1,5
         p5(i*5+n,j) = -GxRho*((e(i,j,K) - z0pres(i,j)) - 0.25*real(n-1)*dz(i,j))
@@ -196,7 +200,11 @@ module subroutine int_density_dz_generic_plm(k, tv, T_t, T_b, S_t, S_b, e, rho_r
       if (use_varT) T25(i*5+1:i*5+5,j) = tv%varT(i,j,k)
       if (use_covarTS) TS5(i*5+1:i*5+5,j) = tv%covarTS(i,j,k)
       if (use_varS) S25(i*5+1:i*5+5,j) = tv%varS(i,j,k)
-    enddo
+    enddo ; enddo
+
+    EOSdom_h5(1) = 5*(istart-Isq)+1 ; EOSdom_h5(2) = 5*(iend-Isq+1)
+
+    do j=jstart,jend
     if (use_Stanley_eos) then
       call calculate_density(T5(:,j), S5(:,j), p5(:,j), T25(:,j), TS5(:,j), S25(:,j), r5(:,j), EOS, EOSdom_h5, rho_ref=rho_ref)
     else
@@ -207,7 +215,10 @@ module subroutine int_density_dz_generic_plm(k, tv, T_t, T_b, S_t, S_b, e, rho_r
         u5(:,j) = r5(:,j) - rho_ref
       endif
     endif
+    enddo
+  enddo ; enddo
 
+  do j=Jsq,Jeq+1
     if (use_rho_ref) then
       do i=Isq,Ieq+1
         ! Use Boole's rule to estimate the pressure anomaly change.
