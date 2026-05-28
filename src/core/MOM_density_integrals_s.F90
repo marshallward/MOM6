@@ -79,28 +79,28 @@ module subroutine int_density_dz_generic_plm(k, tv, T_t, T_b, S_t, S_b, e, rho_r
 ! a linear interpolation is used to compute intermediate values.
 
   ! Local variables
-  real :: T5((5*HI%iscB+1):(5*(HI%iecB+2)))  ! Temperatures along a line of subgrid locations [C ~> degC]
-  real :: S5((5*HI%iscB+1):(5*(HI%iecB+2)))  ! Salinities along a line of subgrid locations [S ~> ppt]
-  real :: T25((5*HI%iscB+1):(5*(HI%iecB+2))) ! SGS temperature variance along a line of subgrid
+  real :: T5((5*HI%iscB+1):(5*(HI%iecB+2)),HI%jscB:HI%jecB+1)  ! Temperatures along a line of subgrid locations [C ~> degC]
+  real :: S5((5*HI%iscB+1):(5*(HI%iecB+2)),HI%jscB:HI%jecB+1)  ! Salinities along a line of subgrid locations [S ~> ppt]
+  real :: T25((5*HI%iscB+1):(5*(HI%iecB+2)),HI%jscB:HI%jecB+1) ! SGS temperature variance along a line of subgrid
                                              ! locations [C2 ~> degC2]
-  real :: TS5((5*HI%iscB+1):(5*(HI%iecB+2))) ! SGS temp-salt covariance along a line of subgrid
+  real :: TS5((5*HI%iscB+1):(5*(HI%iecB+2)),HI%jscB:HI%jecB+1) ! SGS temp-salt covariance along a line of subgrid
                                              ! locations [C S ~> degC ppt]
-  real :: S25((5*HI%iscB+1):(5*(HI%iecB+2))) ! SGS salinity variance along a line of subgrid locations [S2 ~> ppt2]
-  real :: p5((5*HI%iscB+1):(5*(HI%iecB+2)))  ! Pressures along a line of subgrid locations [R L2 T-2 ~> Pa]
-  real :: r5((5*HI%iscB+1):(5*(HI%iecB+2)))  ! Densities anomalies along a line of subgrid
+  real :: S25((5*HI%iscB+1):(5*(HI%iecB+2)),HI%jscB:HI%jecB+1) ! SGS salinity variance along a line of subgrid locations [S2 ~> ppt2]
+  real :: p5((5*HI%iscB+1):(5*(HI%iecB+2)),HI%jscB:HI%jecB+1)  ! Pressures along a line of subgrid locations [R L2 T-2 ~> Pa]
+  real :: r5((5*HI%iscB+1):(5*(HI%iecB+2)),HI%jscB:HI%jecB+1)  ! Densities anomalies along a line of subgrid
                                              ! locations [R ~> kg m-3]
-  real :: u5((5*HI%iscB+1):(5*(HI%iecB+2)))  ! Densities anomalies along a line of subgrid locations
+  real :: u5((5*HI%iscB+1):(5*(HI%iecB+2)),HI%jscB:HI%jecB+1)  ! Densities anomalies along a line of subgrid locations
                                              ! (used for inaccurate form) [R ~> kg m-3]
-  real :: T15((15*HI%iscB+1):(15*(HI%iecB+1))) ! Temperatures at an array of subgrid locations [C ~> degC]
-  real :: S15((15*HI%iscB+1):(15*(HI%iecB+1))) ! Salinities at an array of subgrid locations [S ~> ppt]
-  real :: T215((15*HI%iscB+1):(15*(HI%iecB+1))) ! SGS temperature variance along a line of subgrid
+  real :: T15((15*HI%iscB+1):(15*(HI%iecB+1)),HI%jscB:HI%jecB+1) ! Temperatures at an array of subgrid locations [C ~> degC]
+  real :: S15((15*HI%iscB+1):(15*(HI%iecB+1)),HI%jscB:HI%jecB+1) ! Salinities at an array of subgrid locations [S ~> ppt]
+  real :: T215((15*HI%iscB+1):(15*(HI%iecB+1)),HI%jscB:HI%jecB+1) ! SGS temperature variance along a line of subgrid
                                                 ! locations [C2 ~> degC2]
-  real :: TS15((15*HI%iscB+1):(15*(HI%iecB+1))) ! SGS temp-salt covariance along a line of subgrid
+  real :: TS15((15*HI%iscB+1):(15*(HI%iecB+1)),HI%jscB:HI%jecB+1) ! SGS temp-salt covariance along a line of subgrid
                                                 ! locations [C S ~> degC ppt]
-  real :: S215((15*HI%iscB+1):(15*(HI%iecB+1))) ! SGS salinity variance along a line of subgrid
+  real :: S215((15*HI%iscB+1):(15*(HI%iecB+1)),HI%jscB:HI%jecB+1) ! SGS salinity variance along a line of subgrid
                                                 ! locations [S2 ~> ppt2]
-  real :: p15((15*HI%iscB+1):(15*(HI%iecB+1))) ! Pressures at an array of subgrid locations [R L2 T-2 ~> Pa]
-  real :: r15((15*HI%iscB+1):(15*(HI%iecB+1))) ! Densities at an array of subgrid locations [R ~> kg m-3]
+  real :: p15((15*HI%iscB+1):(15*(HI%iecB+1)),HI%jscB:HI%jecB+1) ! Pressures at an array of subgrid locations [R L2 T-2 ~> Pa]
+  real :: r15((15*HI%iscB+1):(15*(HI%iecB+1)),HI%jscB:HI%jecB+1) ! Densities at an array of subgrid locations [R ~> kg m-3]
   real :: wt_t(5), wt_b(5)          ! Top and bottom weights [nondim]
   real :: rho_anom                  ! A density anomaly [R ~> kg m-3]
   real :: w_left, w_right           ! Left and right weights [nondim]
@@ -108,9 +108,9 @@ module subroutine int_density_dz_generic_plm(k, tv, T_t, T_b, S_t, S_b, e, rho_r
                      ! with height at the 5 sub-column locations [R L2 T-2 ~> Pa]
   real, parameter :: C1_90 = 1.0/90.0  ! A rational constant [nondim]
   real :: GxRho      ! The product of the gravitational acceleration and reference density [R L2 Z-1 T-2 ~> Pa m-1]
-  real :: dz(HI%iscB:HI%iecB+1)   ! Layer thicknesses at tracer points [Z ~> m]
-  real :: dz_x(5,HI%iscB:HI%iecB) ! Layer thicknesses along an x-line of subgrid locations [Z ~> m]
-  real :: dz_y(5,HI%isc:HI%iec)   ! Layer thicknesses along a y-line of subgrid locations [Z ~> m]
+  real :: dz(HI%iscB:HI%iecB+1,HI%jscB:HI%jecB+1)   ! Layer thicknesses at tracer points [Z ~> m]
+  real :: dz_x(5,HI%iscB:HI%iecB,HI%jscB:HI%jecB+1) ! Layer thicknesses along an x-line of subgrid locations [Z ~> m]
+  real :: dz_y(5,HI%isc:HI%iec,HI%jscB:HI%jecB+1)   ! Layer thicknesses along a y-line of subgrid locations [Z ~> m]
   real :: massWeightToggle          ! A non-dimensional toggle factor for near-bottom mass weighting (0 or 1) [nondim]
   real :: TopWeightToggle           ! A non-dimensional toggle factor for near-surface mass weighting (0 or 1) [nondim]
   real :: massWeightNVonlyToggle    ! A non-dimensional toggle factor for only using mass weighting
@@ -166,12 +166,12 @@ module subroutine int_density_dz_generic_plm(k, tv, T_t, T_b, S_t, S_b, e, rho_r
     use_varS = associated(tv%varS)
   endif
 
-  T25(:) = 0.
-  TS5(:) = 0.
-  S25(:) = 0.
-  T215(:) = 0.
-  TS15(:) = 0.
-  S215(:) = 0.
+  T25(:,:) = 0.
+  TS5(:,:) = 0.
+  S25(:,:) = 0.
+  T215(:,:) = 0.
+  TS15(:,:) = 0.
+  S215(:,:) = 0.
 
   do n = 1, 5
     wt_t(n) = 0.25 * real(5-n)
@@ -186,51 +186,51 @@ module subroutine int_density_dz_generic_plm(k, tv, T_t, T_b, S_t, S_b, e, rho_r
   ! 1. Compute vertical integrals
   do j=Jsq,Jeq+1
     do i = Isq,Ieq+1
-      dz(i) = e(i,j,K) - e(i,j,K+1)
+      dz(i,j) = e(i,j,K) - e(i,j,K+1)
       do n=1,5
-        p5(i*5+n) = -GxRho*((e(i,j,K) - z0pres(i,j)) - 0.25*real(n-1)*dz(i))
+        p5(i*5+n,j) = -GxRho*((e(i,j,K) - z0pres(i,j)) - 0.25*real(n-1)*dz(i,j))
         ! Salinity and temperature points are linearly interpolated
-        S5(i*5+n) = wt_t(n) * S_t(i,j,k) + wt_b(n) * S_b(i,j,k)
-        T5(i*5+n) = wt_t(n) * T_t(i,j,k) + wt_b(n) * T_b(i,j,k)
+        S5(i*5+n,j) = wt_t(n) * S_t(i,j,k) + wt_b(n) * S_b(i,j,k)
+        T5(i*5+n,j) = wt_t(n) * T_t(i,j,k) + wt_b(n) * T_b(i,j,k)
       enddo
-      if (use_varT) T25(i*5+1:i*5+5) = tv%varT(i,j,k)
-      if (use_covarTS) TS5(i*5+1:i*5+5) = tv%covarTS(i,j,k)
-      if (use_varS) S25(i*5+1:i*5+5) = tv%varS(i,j,k)
+      if (use_varT) T25(i*5+1:i*5+5,j) = tv%varT(i,j,k)
+      if (use_covarTS) TS5(i*5+1:i*5+5,j) = tv%covarTS(i,j,k)
+      if (use_varS) S25(i*5+1:i*5+5,j) = tv%varS(i,j,k)
     enddo
     if (use_Stanley_eos) then
-      call calculate_density(T5, S5, p5, T25, TS5, S25, r5, EOS, EOSdom_h5, rho_ref=rho_ref)
+      call calculate_density(T5(:,j), S5(:,j), p5(:,j), T25(:,j), TS5(:,j), S25(:,j), r5(:,j), EOS, EOSdom_h5, rho_ref=rho_ref)
     else
       if (use_rho_ref) then
-        call calculate_density(T5, S5, p5, r5, EOS, EOSdom_h5, rho_ref=rho_ref)
+        call calculate_density(T5(:,j), S5(:,j), p5(:,j), r5(:,j), EOS, EOSdom_h5, rho_ref=rho_ref)
       else
-        call calculate_density(T5, S5, p5, r5, EOS, EOSdom_h5)
-        u5(:) = r5(:) - rho_ref
+        call calculate_density(T5(:,j), S5(:,j), p5(:,j), r5(:,j), EOS, EOSdom_h5)
+        u5(:,j) = r5(:,j) - rho_ref
       endif
     endif
 
     if (use_rho_ref) then
       do i=Isq,Ieq+1
         ! Use Boole's rule to estimate the pressure anomaly change.
-        rho_anom = C1_90*(7.0*(r5(i*5+1)+r5(i*5+5)) + 32.0*(r5(i*5+2)+r5(i*5+4)) + 12.0*r5(i*5+3))
-        dpa(i,j) = G_e*dz(i)*rho_anom
+        rho_anom = C1_90*(7.0*(r5(i*5+1,j)+r5(i*5+5,j)) + 32.0*(r5(i*5+2,j)+r5(i*5+4,j)) + 12.0*r5(i*5+3,j))
+        dpa(i,j) = G_e*dz(i,j)*rho_anom
         if (present(intz_dpa)) then
           ! Use a Boole's-rule-like fifth-order accurate estimate of
           ! the double integral of the pressure anomaly.
-          intz_dpa(i,j) = 0.5*G_e*dz(i)**2 * &
-                  (rho_anom - C1_90*(16.0*(r5(i*5+4)-r5(i*5+2)) + 7.0*(r5(i*5+5)-r5(i*5+1))) )
+          intz_dpa(i,j) = 0.5*G_e*dz(i,j)**2 * &
+                  (rho_anom - C1_90*(16.0*(r5(i*5+4,j)-r5(i*5+2,j)) + 7.0*(r5(i*5+5,j)-r5(i*5+1,j))) )
         endif
       enddo
     else
       do i=Isq,Ieq+1
         ! Use Boole's rule to estimate the pressure anomaly change.
-        rho_anom = C1_90*(7.0*(r5(i*5+1)+r5(i*5+5)) + 32.0*(r5(i*5+2)+r5(i*5+4)) + 12.0*r5(i*5+3)) &
+        rho_anom = C1_90*(7.0*(r5(i*5+1,j)+r5(i*5+5,j)) + 32.0*(r5(i*5+2,j)+r5(i*5+4,j)) + 12.0*r5(i*5+3,j)) &
                    - rho_ref
-        dpa(i,j) = G_e*dz(i)*rho_anom
+        dpa(i,j) = G_e*dz(i,j)*rho_anom
         if (present(intz_dpa)) then
           ! Use a Boole's-rule-like fifth-order accurate estimate of
           ! the double integral of the pressure anomaly.
-          intz_dpa(i,j) = 0.5*G_e*dz(i)**2 * &
-                  (rho_anom - C1_90*(16.0*(u5(i*5+4)-u5(i*5+2)) + 7.0*(u5(i*5+5)-u5(i*5+1))) )
+          intz_dpa(i,j) = 0.5*G_e*dz(i,j)**2 * &
+                  (rho_anom - C1_90*(16.0*(u5(i*5+4,j)-u5(i*5+2,j)) + 7.0*(u5(i*5+5,j)-u5(i*5+1,j))) )
         endif
       enddo
     endif
@@ -283,44 +283,44 @@ module subroutine int_density_dz_generic_plm(k, tv, T_t, T_b, S_t, S_b, e, rho_r
 
       do m=2,4
         w_left = wt_t(m) ; w_right = wt_b(m)
-        dz_x(m,i) = (w_left*(e(i,j,K) - e(i,j,K+1))) + (w_right*(e(i+1,j,K) - e(i+1,j,K+1)))
+        dz_x(m,i,j) = (w_left*(e(i,j,K) - e(i,j,K+1))) + (w_right*(e(i+1,j,K) - e(i+1,j,K+1)))
 
         ! Salinity and temperature points are linearly interpolated in
         ! the horizontal. The subscript (1) refers to the top value in
         ! the vertical profile while subscript (5) refers to the bottom
         ! value in the vertical profile.
         pos = i*15+(m-2)*5
-        T15(pos+1) = (w_left*Ttl) + (w_right*Ttr)
-        T15(pos+5) = (w_left*Tbl) + (w_right*Tbr)
+        T15(pos+1,j) = (w_left*Ttl) + (w_right*Ttr)
+        T15(pos+5,j) = (w_left*Tbl) + (w_right*Tbr)
 
-        S15(pos+1) = (w_left*Stl) + (w_right*Str)
-        S15(pos+5) = (w_left*Sbl) + (w_right*Sbr)
+        S15(pos+1,j) = (w_left*Stl) + (w_right*Str)
+        S15(pos+5,j) = (w_left*Sbl) + (w_right*Sbr)
 
-        p15(pos+1) = -GxRho * ((w_left*(e(i,j,K)-z0pres(i,j))) + (w_right*(e(i+1,j,K)-z0pres(i+1,j))))
+        p15(pos+1,j) = -GxRho * ((w_left*(e(i,j,K)-z0pres(i,j))) + (w_right*(e(i+1,j,K)-z0pres(i+1,j))))
 
         ! Pressure
         do n=2,5
-          p15(pos+n) = p15(pos+n-1) + GxRho*0.25*dz_x(m,i)
+          p15(pos+n,j) = p15(pos+n-1,j) + GxRho*0.25*dz_x(m,i,j)
         enddo
 
         ! Salinity and temperature (linear interpolation in the vertical)
         do n=2,4
-          S15(pos+n) = wt_t(n) * S15(pos+1) + wt_b(n) * S15(pos+5)
-          T15(pos+n) = wt_t(n) * T15(pos+1) + wt_b(n) * T15(pos+5)
+          S15(pos+n,j) = wt_t(n) * S15(pos+1,j) + wt_b(n) * S15(pos+5,j)
+          T15(pos+n,j) = wt_t(n) * T15(pos+1,j) + wt_b(n) * T15(pos+5,j)
         enddo
-        if (use_varT) T215(pos+1:pos+5) = (w_left*tv%varT(i,j,k)) + (w_right*tv%varT(i+1,j,k))
-        if (use_covarTS) TS15(pos+1:pos+5) = (w_left*tv%covarTS(i,j,k)) + (w_right*tv%covarTS(i+1,j,k))
-        if (use_varS) S215(pos+1:pos+5) = (w_left*tv%varS(i,j,k)) + (w_right*tv%varS(i+1,j,k))
+        if (use_varT) T215(pos+1:pos+5,j) = (w_left*tv%varT(i,j,k)) + (w_right*tv%varT(i+1,j,k))
+        if (use_covarTS) TS15(pos+1:pos+5,j) = (w_left*tv%covarTS(i,j,k)) + (w_right*tv%covarTS(i+1,j,k))
+        if (use_varS) S215(pos+1:pos+5,j) = (w_left*tv%varS(i,j,k)) + (w_right*tv%varS(i+1,j,k))
       enddo
     enddo
 
     if (use_stanley_eos) then
-      call calculate_density(T15, S15, p15, T215, TS15, S215, r15, EOS, EOSdom_q15, rho_ref=rho_ref)
+      call calculate_density(T15(:,j), S15(:,j), p15(:,j), T215(:,j), TS15(:,j), S215(:,j), r15(:,j), EOS, EOSdom_q15, rho_ref=rho_ref)
     else
       if (use_rho_ref) then
-        call calculate_density(T15, S15, p15, r15, EOS, EOSdom_q15, rho_ref=rho_ref)
+        call calculate_density(T15(:,j), S15(:,j), p15(:,j), r15(:,j), EOS, EOSdom_q15, rho_ref=rho_ref)
       else
-        call calculate_density(T15, S15, p15, r15, EOS, EOSdom_q15)
+        call calculate_density(T15(:,j), S15(:,j), p15(:,j), r15(:,j), EOS, EOSdom_q15)
       endif
     endif
 
@@ -331,14 +331,14 @@ module subroutine int_density_dz_generic_plm(k, tv, T_t, T_b, S_t, S_b, e, rho_r
       if (use_rho_ref) then
         do m = 2,4
           pos = i*15+(m-2)*5
-          intz(m) = (G_e*dz_x(m,i)*( C1_90*(7.0*(r15(pos+1)+r15(pos+5)) + 32.0*(r15(pos+2)+r15(pos+4)) + &
-                            12.0*r15(pos+3)) ))
+          intz(m) = (G_e*dz_x(m,i,j)*( C1_90*(7.0*(r15(pos+1,j)+r15(pos+5,j)) + 32.0*(r15(pos+2,j)+r15(pos+4,j)) + &
+                            12.0*r15(pos+3,j)) ))
         enddo
       else
         do m = 2,4
           pos = i*15+(m-2)*5
-          intz(m) = (G_e*dz_x(m,i)*( C1_90*(7.0*(r15(pos+1)+r15(pos+5)) + 32.0*(r15(pos+2)+r15(pos+4)) + &
-                            12.0*r15(pos+3)) - rho_ref ))
+          intz(m) = (G_e*dz_x(m,i,j)*( C1_90*(7.0*(r15(pos+1,j)+r15(pos+5,j)) + 32.0*(r15(pos+2,j)+r15(pos+4,j)) + &
+                            12.0*r15(pos+3,j)) - rho_ref ))
         enddo
       endif
       ! Use Boole's rule to integrate the bottom pressure anomaly values in x.
@@ -395,48 +395,48 @@ module subroutine int_density_dz_generic_plm(k, tv, T_t, T_b, S_t, S_b, e, rho_r
 
       do m=2,4
         w_left = wt_t(m) ; w_right = wt_b(m)
-        dz_y(m,i) = (w_left*(e(i,j,K) - e(i,j,K+1))) + (w_right*(e(i,j+1,K) - e(i,j+1,K+1)))
+        dz_y(m,i,j) = (w_left*(e(i,j,K) - e(i,j,K+1))) + (w_right*(e(i,j+1,K) - e(i,j+1,K+1)))
 
         ! Salinity and temperature points are linearly interpolated in
         ! the horizontal. The subscript (1) refers to the top value in
         ! the vertical profile while subscript (5) refers to the bottom
         ! value in the vertical profile.
         pos = i*15+(m-2)*5
-        T15(pos+1) = (w_left*Ttl) + (w_right*Ttr)
-        T15(pos+5) = (w_left*Tbl) + (w_right*Tbr)
+        T15(pos+1,j) = (w_left*Ttl) + (w_right*Ttr)
+        T15(pos+5,j) = (w_left*Tbl) + (w_right*Tbr)
 
-        S15(pos+1) = (w_left*Stl) + (w_right*Str)
-        S15(pos+5) = (w_left*Sbl) + (w_right*Sbr)
+        S15(pos+1,j) = (w_left*Stl) + (w_right*Str)
+        S15(pos+5,j) = (w_left*Sbl) + (w_right*Sbr)
 
-        p15(pos+1) = -GxRho * ((w_left*(e(i,j,K)-z0pres(i,j))) + (w_right*(e(i,j+1,K)-z0pres(i,j+1))))
+        p15(pos+1,j) = -GxRho * ((w_left*(e(i,j,K)-z0pres(i,j))) + (w_right*(e(i,j+1,K)-z0pres(i,j+1))))
 
         ! Pressure
         do n=2,5
-          p15(pos+n) = p15(pos+n-1) + GxRho*0.25*dz_y(m,i)
+          p15(pos+n,j) = p15(pos+n-1,j) + GxRho*0.25*dz_y(m,i,j)
         enddo
 
         ! Salinity and temperature (linear interpolation in the vertical)
         do n=2,4
-          S15(pos+n) = wt_t(n) * S15(pos+1) + wt_b(n) * S15(pos+5)
-          T15(pos+n) = wt_t(n) * T15(pos+1) + wt_b(n) * T15(pos+5)
+          S15(pos+n,j) = wt_t(n) * S15(pos+1,j) + wt_b(n) * S15(pos+5,j)
+          T15(pos+n,j) = wt_t(n) * T15(pos+1,j) + wt_b(n) * T15(pos+5,j)
         enddo
-        if (use_varT) T215(pos+1:pos+5) = (w_left*tv%varT(i,j,k)) + (w_right*tv%varT(i,j+1,k))
-        if (use_covarTS) TS15(pos+1:pos+5) = (w_left*tv%covarTS(i,j,k)) + (w_right*tv%covarTS(i,j+1,k))
-        if (use_varS) S215(pos+1:pos+5) = (w_left*tv%varS(i,j,k)) + (w_right*tv%varS(i,j+1,k))
+        if (use_varT) T215(pos+1:pos+5,j) = (w_left*tv%varT(i,j,k)) + (w_right*tv%varT(i,j+1,k))
+        if (use_covarTS) TS15(pos+1:pos+5,j) = (w_left*tv%covarTS(i,j,k)) + (w_right*tv%covarTS(i,j+1,k))
+        if (use_varS) S215(pos+1:pos+5,j) = (w_left*tv%varS(i,j,k)) + (w_right*tv%varS(i,j+1,k))
       enddo
     enddo
 
     if (use_stanley_eos) then
-      call calculate_density(T15(15*HI%isc+1:), S15(15*HI%isc+1:), p15(15*HI%isc+1:), &
-                             T215(15*HI%isc+1:), TS15(15*HI%isc+1:), S215(15*HI%isc+1:), &
-                             r15(15*HI%isc+1:), EOS, EOSdom_h15, rho_ref=rho_ref)
+      call calculate_density(T15(15*HI%isc+1:,j), S15(15*HI%isc+1:,j), p15(15*HI%isc+1:,j), &
+                             T215(15*HI%isc+1:,j), TS15(15*HI%isc+1:,j), S215(15*HI%isc+1:,j), &
+                             r15(15*HI%isc+1:,j), EOS, EOSdom_h15, rho_ref=rho_ref)
     else
       if (use_rho_ref) then
-        call calculate_density(T15(15*HI%isc+1:), S15(15*HI%isc+1:), p15(15*HI%isc+1:), &
-                               r15(15*HI%isc+1:), EOS, EOSdom_h15, rho_ref=rho_ref)
+        call calculate_density(T15(15*HI%isc+1:,j), S15(15*HI%isc+1:,j), p15(15*HI%isc+1:,j), &
+                               r15(15*HI%isc+1:,j), EOS, EOSdom_h15, rho_ref=rho_ref)
       else
-        call calculate_density(T15(15*HI%isc+1:), S15(15*HI%isc+1:), p15(15*HI%isc+1:), &
-                               r15(15*HI%isc+1:), EOS, EOSdom_h15)
+        call calculate_density(T15(15*HI%isc+1:,j), S15(15*HI%isc+1:,j), p15(15*HI%isc+1:,j), &
+                               r15(15*HI%isc+1:,j), EOS, EOSdom_h15)
       endif
     endif
 
@@ -447,16 +447,16 @@ module subroutine int_density_dz_generic_plm(k, tv, T_t, T_b, S_t, S_b, e, rho_r
       if (use_rho_ref) then
         do m = 2,4
           pos = i*15+(m-2)*5
-          intz(m) = (G_e*dz_y(m,i)*( C1_90*(7.0*(r15(pos+1)+r15(pos+5)) + &
-                                           32.0*(r15(pos+2)+r15(pos+4)) + &
-                                           12.0*r15(pos+3)) ))
+          intz(m) = (G_e*dz_y(m,i,j)*( C1_90*(7.0*(r15(pos+1,j)+r15(pos+5,j)) + &
+                                           32.0*(r15(pos+2,j)+r15(pos+4,j)) + &
+                                           12.0*r15(pos+3,j)) ))
         enddo
       else
         do m = 2,4
           pos = i*15+(m-2)*5
-          intz(m) = (G_e*dz_y(m,i)*( C1_90*(7.0*(r15(pos+1)+r15(pos+5)) + &
-                                           32.0*(r15(pos+2)+r15(pos+4)) + &
-                                           12.0*r15(pos+3)) - rho_ref ))
+          intz(m) = (G_e*dz_y(m,i,j)*( C1_90*(7.0*(r15(pos+1,j)+r15(pos+5,j)) + &
+                                           32.0*(r15(pos+2,j)+r15(pos+4,j)) + &
+                                           12.0*r15(pos+3,j)) - rho_ref ))
         enddo
       endif
       ! Use Boole's rule to integrate the values.
