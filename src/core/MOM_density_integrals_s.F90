@@ -331,9 +331,9 @@ module subroutine int_density_dz_generic_plm(k, tv, T_t, T_b, S_t, S_b, e, rho_r
       enddo
     enddo ; enddo
 
-  enddo ; enddo ; endif
+    EOSdom_q15(1) = 15*(istart-Isq)+1 ; EOSdom_q15(2) = 15*(iend-Isq+1)
 
-  if (present(intx_dpa)) then ; do j=HI%jsc,HI%jec
+    do j=jstart,jend
     if (use_stanley_eos) then
       call calculate_density(T15(:,j), S15(:,j), p15(:,j), T215(:,j), TS15(:,j), S215(:,j), r15(:,j), EOS, EOSdom_q15, rho_ref=rho_ref)
     else
@@ -343,7 +343,11 @@ module subroutine int_density_dz_generic_plm(k, tv, T_t, T_b, S_t, S_b, e, rho_r
         call calculate_density(T15(:,j), S15(:,j), p15(:,j), r15(:,j), EOS, EOSdom_q15)
       endif
     endif
+    enddo
 
+  enddo ; enddo ; endif
+
+  if (present(intx_dpa)) then ; do j=HI%jsc,HI%jec
     do I=Isq,Ieq
       intz(1) = dpa(i,j) ; intz(5) = dpa(i+1,j)
 
