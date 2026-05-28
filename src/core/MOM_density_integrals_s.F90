@@ -79,62 +79,20 @@ module subroutine int_density_dz_generic_plm(k, tv, T_t, T_b, S_t, S_b, e, rho_r
 ! a linear interpolation is used to compute intermediate values.
 
   ! Local variables
-  real :: T5((5*HI%iscB+1):(5*(HI%iecB+2)),HI%jscB:HI%jecB+1)  ! Temperatures along a line of subgrid locations [C ~> degC]
-  real :: S5((5*HI%iscB+1):(5*(HI%iecB+2)),HI%jscB:HI%jecB+1)  ! Salinities along a line of subgrid locations [S ~> ppt]
-  real :: T25((5*HI%iscB+1):(5*(HI%iecB+2)),HI%jscB:HI%jecB+1) ! SGS temperature variance along a line of subgrid
-                                             ! locations [C2 ~> degC2]
-  real :: TS5((5*HI%iscB+1):(5*(HI%iecB+2)),HI%jscB:HI%jecB+1) ! SGS temp-salt covariance along a line of subgrid
-                                             ! locations [C S ~> degC ppt]
-  real :: S25((5*HI%iscB+1):(5*(HI%iecB+2)),HI%jscB:HI%jecB+1) ! SGS salinity variance along a line of subgrid locations [S2 ~> ppt2]
-  real :: p5((5*HI%iscB+1):(5*(HI%iecB+2)),HI%jscB:HI%jecB+1)  ! Pressures along a line of subgrid locations [R L2 T-2 ~> Pa]
-  real :: r5((5*HI%iscB+1):(5*(HI%iecB+2)),HI%jscB:HI%jecB+1)  ! Densities anomalies along a line of subgrid
-                                             ! locations [R ~> kg m-3]
-  real :: u5((5*HI%iscB+1):(5*(HI%iecB+2)),HI%jscB:HI%jecB+1)  ! Densities anomalies along a line of subgrid locations
-                                             ! (used for inaccurate form) [R ~> kg m-3]
-  real :: T15((15*HI%iscB+1):(15*(HI%iecB+1)),HI%jscB:HI%jecB+1) ! Temperatures at an array of subgrid locations [C ~> degC]
-  real :: S15((15*HI%iscB+1):(15*(HI%iecB+1)),HI%jscB:HI%jecB+1) ! Salinities at an array of subgrid locations [S ~> ppt]
-  real :: T215((15*HI%iscB+1):(15*(HI%iecB+1)),HI%jscB:HI%jecB+1) ! SGS temperature variance along a line of subgrid
-                                                ! locations [C2 ~> degC2]
-  real :: TS15((15*HI%iscB+1):(15*(HI%iecB+1)),HI%jscB:HI%jecB+1) ! SGS temp-salt covariance along a line of subgrid
-                                                ! locations [C S ~> degC ppt]
-  real :: S215((15*HI%iscB+1):(15*(HI%iecB+1)),HI%jscB:HI%jecB+1) ! SGS salinity variance along a line of subgrid
-                                                ! locations [S2 ~> ppt2]
-  real :: p15((15*HI%iscB+1):(15*(HI%iecB+1)),HI%jscB:HI%jecB+1) ! Pressures at an array of subgrid locations [R L2 T-2 ~> Pa]
-  real :: r15((15*HI%iscB+1):(15*(HI%iecB+1)),HI%jscB:HI%jecB+1) ! Densities at an array of subgrid locations [R ~> kg m-3]
-  real :: wt_t(5), wt_b(5)          ! Top and bottom weights [nondim]
-  real :: rho_anom                  ! A density anomaly [R ~> kg m-3]
-  real :: w_left, w_right           ! Left and right weights [nondim]
-  real :: intz(5)    ! The gravitational acceleration times the integrals of density
-                     ! with height at the 5 sub-column locations [R L2 T-2 ~> Pa]
-  real, parameter :: C1_90 = 1.0/90.0  ! A rational constant [nondim]
   real :: GxRho      ! The product of the gravitational acceleration and reference density [R L2 Z-1 T-2 ~> Pa m-1]
-  real :: dz(HI%iscB:HI%iecB+1,HI%jscB:HI%jecB+1)   ! Layer thicknesses at tracer points [Z ~> m]
-  real :: dz_x(5,HI%iscB:HI%iecB,HI%jscB:HI%jecB+1) ! Layer thicknesses along an x-line of subgrid locations [Z ~> m]
-  real :: dz_y(5,HI%isc:HI%iec,HI%jscB:HI%jecB+1)   ! Layer thicknesses along a y-line of subgrid locations [Z ~> m]
+  real :: z0pres(HI%isd:HI%ied,HI%jsd:HI%jed) ! The height at which the pressure is zero [Z ~> m]
   real :: massWeightToggle          ! A non-dimensional toggle factor for near-bottom mass weighting (0 or 1) [nondim]
   real :: TopWeightToggle           ! A non-dimensional toggle factor for near-surface mass weighting (0 or 1) [nondim]
   real :: massWeightNVonlyToggle    ! A non-dimensional toggle factor for only using mass weighting
                                     ! if at least one side vanished (0 or 1) [nondim]
-  real :: Ttl, Tbl, Ttr, Tbr        ! Temperatures at the velocity cell corners [C ~> degC]
-  real :: Stl, Sbl, Str, Sbr        ! Salinities at the velocity cell corners [S ~> ppt]
-  real :: z0pres(HI%isd:HI%ied,HI%jsd:HI%jed) ! The height at which the pressure is zero [Z ~> m]
-  real :: hWght                     ! A topographically limited thickness weight [Z ~> m]
-  real :: hWghtTop                  ! An ice draft limited thickness weight [Z ~> m]
-  real :: hL, hR                    ! Thicknesses to the left and right [Z ~> m]
-  real :: iDenom                    ! The denominator of the thickness weight expressions [Z-2 ~> m-2]
   real :: h_nonvanished             ! nonvanished height [Z ~> m]
   logical :: use_rho_ref ! Pass rho_ref to the equation of state for more accurate calculation
                          ! of density anomalies.
   logical :: use_varT, use_varS, use_covarTS ! Logicals for SGS variances fields
-  integer, dimension(2,2) :: EOSdom_h5  ! The 5-point h-point i-computational domain for the equation of state
-  integer, dimension(2,2) :: EOSdom_q15 ! The 3x5-point q-point i-computational domain for the equation of state
-  integer, dimension(2,2) :: EOSdom_h15 ! The 3x5-point h-point i-computational domain for the equation of state
-  integer :: Isq, Ieq, Jsq, Jeq, i, j, m, n, pos, jstart, jend, istart, iend
+  integer :: Isq, Ieq, Jsq, Jeq, i, j
   integer :: TILE_SIZE_X, TILE_SIZE_Y
 
   Isq = HI%IscB ; Ieq = HI%IecB ; Jsq = HI%JscB ; Jeq = HI%JecB
-
-  TILE_SIZE_X = Ieq+1-Isq+1 ; TILE_SIZE_Y = Jeq+1-Jsq+1
 
   GxRho = G_e * rho_0
   if (present(Z_0p)) then
@@ -169,81 +127,12 @@ module subroutine int_density_dz_generic_plm(k, tv, T_t, T_b, S_t, S_b, e, rho_r
     use_varS = associated(tv%varS)
   endif
 
-  T25(:,:) = 0.
-  TS5(:,:) = 0.
-  S25(:,:) = 0.
-  T215(:,:) = 0.
-  TS15(:,:) = 0.
-  S215(:,:) = 0.
-
-  do n = 1, 5
-    wt_t(n) = 0.25 * real(5-n)
-    wt_b(n) = 1.0 - wt_t(n)
-  enddo
-
-
   ! 1. Compute vertical integrals
-  do jstart=Jsq,Jeq+1,TILE_SIZE_Y ; do istart=Isq,Ieq+1,TILE_SIZE_X
-    jend = min(Jeq+1, jstart+TILE_SIZE_Y-1)
-    iend = min(Ieq+1, istart+TILE_SIZE_X-1)
-
-    do j=jstart,jend ; do i=istart,iend
-      dz(i,j) = e(i,j,K) - e(i,j,K+1)
-      do n=1,5
-        p5(i*5+n,j) = -GxRho*((e(i,j,K) - z0pres(i,j)) - 0.25*real(n-1)*dz(i,j))
-        ! Salinity and temperature points are linearly interpolated
-        S5(i*5+n,j) = wt_t(n) * S_t(i,j,k) + wt_b(n) * S_b(i,j,k)
-        T5(i*5+n,j) = wt_t(n) * T_t(i,j,k) + wt_b(n) * T_b(i,j,k)
-      enddo
-      if (use_varT) T25(i*5+1:i*5+5,j) = tv%varT(i,j,k)
-      if (use_covarTS) TS5(i*5+1:i*5+5,j) = tv%covarTS(i,j,k)
-      if (use_varS) S25(i*5+1:i*5+5,j) = tv%varS(i,j,k)
-    enddo ; enddo
-
-    EOSdom_h5(1,1) = 5*(istart-Isq)+1 ; EOSdom_h5(1,2) = 5*(iend-Isq+1)
-    EOSdom_h5(2,1) = jstart-Jsq+1 ; EOSdom_h5(2,2) = jend-Jsq+1
-
-    if (use_Stanley_eos) then
-      call calculate_density(T5, S5, p5, T25, TS5, S25, r5, EOS, EOSdom_h5, rho_ref=rho_ref)
-    else
-      if (use_rho_ref) then
-        call calculate_density(T5, S5, p5, r5, EOS, EOSdom_h5, rho_ref=rho_ref)
-      else
-        call calculate_density(T5, S5, p5, r5, EOS, EOSdom_h5)
-        do j=jstart,jend
-          u5(5*istart+1:5*iend+5,j) = r5(5*istart+1:5*iend+5,j) - rho_ref
-        enddo
-      endif
-    endif
-
-    if (use_rho_ref) then
-      do j=jstart,jend ; do i=istart,iend
-        ! Use Boole's rule to estimate the pressure anomaly change.
-        rho_anom = C1_90*(7.0*(r5(i*5+1,j)+r5(i*5+5,j)) + 32.0*(r5(i*5+2,j)+r5(i*5+4,j)) + 12.0*r5(i*5+3,j))
-        dpa(i,j) = G_e*dz(i,j)*rho_anom
-        if (present(intz_dpa)) then
-          ! Use a Boole's-rule-like fifth-order accurate estimate of
-          ! the double integral of the pressure anomaly.
-          intz_dpa(i,j) = 0.5*G_e*dz(i,j)**2 * &
-                  (rho_anom - C1_90*(16.0*(r5(i*5+4,j)-r5(i*5+2,j)) + 7.0*(r5(i*5+5,j)-r5(i*5+1,j))) )
-        endif
-      enddo ; enddo
-    else
-      do j=jstart,jend ; do i=istart,iend
-        ! Use Boole's rule to estimate the pressure anomaly change.
-        rho_anom = C1_90*(7.0*(r5(i*5+1,j)+r5(i*5+5,j)) + 32.0*(r5(i*5+2,j)+r5(i*5+4,j)) + 12.0*r5(i*5+3,j)) &
-                   - rho_ref
-        dpa(i,j) = G_e*dz(i,j)*rho_anom
-        if (present(intz_dpa)) then
-          ! Use a Boole's-rule-like fifth-order accurate estimate of
-          ! the double integral of the pressure anomaly.
-          intz_dpa(i,j) = 0.5*G_e*dz(i,j)**2 * &
-                  (rho_anom - C1_90*(16.0*(u5(i*5+4,j)-u5(i*5+2,j)) + 7.0*(u5(i*5+5,j)-u5(i*5+1,j))) )
-        endif
-      enddo ; enddo
-    endif
-
-  enddo ; enddo
+  TILE_SIZE_X = Ieq+1-Isq+1 ; TILE_SIZE_Y = Jeq+1-Jsq+1
+  call generic_plm_update_dpa(TILE_SIZE_X, TILE_SIZE_Y, k, tv, T_t, T_b, S_t, S_b, e, &
+                              z0pres, dpa, intz_dpa, GxRho, G_e, &
+                              use_rho_ref, use_stanley_eos, use_varT, use_covarTS, use_varS, &
+                              rho_ref, EOS, HI, GV)
 
   ! 2. Compute horizontal integrals in the x direction
   if (present(intx_dpa)) then
@@ -266,6 +155,112 @@ module subroutine int_density_dz_generic_plm(k, tv, T_t, T_b, S_t, S_b, e, rho_r
   endif
 
 end subroutine int_density_dz_generic_plm
+
+subroutine generic_plm_update_dpa(TILE_SIZE_X, TILE_SIZE_Y, k, tv, T_t, T_b, S_t, S_b, e, &
+                                  z0pres, dpa, intz_dpa, GxRho, G_e, &
+                                  use_rho_ref, use_stanley_eos, use_varT, use_covarTS, use_varS, &
+                                  rho_ref, EOS, HI, GV)
+  integer,              intent(in)  :: TILE_SIZE_X, TILE_SIZE_Y
+  integer,              intent(in)  :: k
+  type(hor_index_type), intent(in)  :: HI
+  type(verticalGrid_type), intent(in) :: GV
+  type(thermo_var_ptrs), intent(in) :: tv
+  real, dimension(SZI_(HI),SZJ_(HI),SZK_(GV)), intent(in) :: T_t, T_b, S_t, S_b
+  real, dimension(SZI_(HI),SZJ_(HI),SZK_(GV)+1), intent(in) :: e
+  real, dimension(HI%isd:HI%ied,HI%jsd:HI%jed), intent(in) :: z0pres
+  real, dimension(SZI_(HI),SZJ_(HI)), intent(inout) :: dpa
+  real, dimension(SZI_(HI),SZJ_(HI)), optional, intent(inout) :: intz_dpa
+  real,                 intent(in)  :: GxRho, G_e, rho_ref
+  logical,              intent(in)  :: use_rho_ref, use_stanley_eos, use_varT, use_covarTS, use_varS
+  type(EOS_type),       intent(in)  :: EOS
+
+  real :: T5(5*TILE_SIZE_X,TILE_SIZE_Y)
+  real :: S5(5*TILE_SIZE_X,TILE_SIZE_Y)
+  real :: T25(5*TILE_SIZE_X,TILE_SIZE_Y)
+  real :: TS5(5*TILE_SIZE_X,TILE_SIZE_Y)
+  real :: S25(5*TILE_SIZE_X,TILE_SIZE_Y)
+  real :: p5(5*TILE_SIZE_X,TILE_SIZE_Y)
+  real :: r5(5*TILE_SIZE_X,TILE_SIZE_Y)
+  real :: u5(5*TILE_SIZE_X,TILE_SIZE_Y)
+  real :: wt_t(5), wt_b(5)
+  real :: rho_anom, dz
+  real, parameter :: C1_90 = 1.0/90.0
+  integer, dimension(2,2) :: EOSdom_h5
+  integer :: Isq, Ieq, Jsq, Jeq, i, j, n, jstart, jend, istart, iend, ii, jj
+
+  Isq = HI%IscB ; Ieq = HI%IecB ; Jsq = HI%JscB ; Jeq = HI%JecB
+
+  T25(:,:) = 0.
+  TS5(:,:) = 0.
+  S25(:,:) = 0.
+
+  do n = 1, 5
+    wt_t(n) = 0.25 * real(5-n)
+    wt_b(n) = 1.0 - wt_t(n)
+  enddo
+
+  do jstart=Jsq,Jeq+1,TILE_SIZE_Y ; do istart=Isq,Ieq+1,TILE_SIZE_X
+    jend = min(Jeq+1, jstart+TILE_SIZE_Y-1)
+    iend = min(Ieq+1, istart+TILE_SIZE_X-1)
+
+    do j=jstart,jend ; do i=istart,iend
+      ii = i-istart+1 ; jj = j-jstart+1
+      dz = e(i,j,K) - e(i,j,K+1)
+      do n=1,5
+        p5((ii-1)*5+n,jj) = -GxRho*((e(i,j,K) - z0pres(i,j)) - 0.25*real(n-1)*dz)
+        S5((ii-1)*5+n,jj) = wt_t(n) * S_t(i,j,k) + wt_b(n) * S_b(i,j,k)
+        T5((ii-1)*5+n,jj) = wt_t(n) * T_t(i,j,k) + wt_b(n) * T_b(i,j,k)
+      enddo
+      if (use_varT)    T25((ii-1)*5+1:(ii-1)*5+5,jj) = tv%varT(i,j,k)
+      if (use_covarTS) TS5((ii-1)*5+1:(ii-1)*5+5,jj) = tv%covarTS(i,j,k)
+      if (use_varS)    S25((ii-1)*5+1:(ii-1)*5+5,jj) = tv%varS(i,j,k)
+    enddo ; enddo
+
+    EOSdom_h5(1,1) = 1 ; EOSdom_h5(1,2) = 5*(iend-istart+1)
+    EOSdom_h5(2,1) = 1 ; EOSdom_h5(2,2) = jend-jstart+1
+
+    if (use_stanley_eos) then
+      call calculate_density(T5, S5, p5, T25, TS5, S25, r5, EOS, EOSdom_h5, rho_ref=rho_ref)
+    else
+      if (use_rho_ref) then
+        call calculate_density(T5, S5, p5, r5, EOS, EOSdom_h5, rho_ref=rho_ref)
+      else
+        call calculate_density(T5, S5, p5, r5, EOS, EOSdom_h5)
+        do j=jstart,jend ; do i=istart,iend
+          ii = i-istart+1 ; jj = j-jstart+1
+          u5((ii-1)*5+1:(ii-1)*5+5,jj) = r5((ii-1)*5+1:(ii-1)*5+5,jj) - rho_ref
+        enddo ; enddo
+      endif
+    endif
+
+    if (use_rho_ref) then
+      do j=jstart,jend ; do i=istart,iend
+        ii = i-istart+1 ; jj = j-jstart+1
+        dz = e(i,j,K) - e(i,j,K+1)
+        rho_anom = C1_90*(7.0*(r5((ii-1)*5+1,jj)+r5((ii-1)*5+5,jj)) + 32.0*(r5((ii-1)*5+2,jj)+r5((ii-1)*5+4,jj)) + 12.0*r5((ii-1)*5+3,jj))
+        dpa(i,j) = G_e*dz*rho_anom
+        if (present(intz_dpa)) then
+          intz_dpa(i,j) = 0.5*G_e*dz**2 * &
+                  (rho_anom - C1_90*(16.0*(r5((ii-1)*5+4,jj)-r5((ii-1)*5+2,jj)) + 7.0*(r5((ii-1)*5+5,jj)-r5((ii-1)*5+1,jj))) )
+        endif
+      enddo ; enddo
+    else
+      do j=jstart,jend ; do i=istart,iend
+        ii = i-istart+1 ; jj = j-jstart+1
+        dz = e(i,j,K) - e(i,j,K+1)
+        rho_anom = C1_90*(7.0*(r5((ii-1)*5+1,jj)+r5((ii-1)*5+5,jj)) + 32.0*(r5((ii-1)*5+2,jj)+r5((ii-1)*5+4,jj)) + 12.0*r5((ii-1)*5+3,jj)) &
+                   - rho_ref
+        dpa(i,j) = G_e*dz*rho_anom
+        if (present(intz_dpa)) then
+          intz_dpa(i,j) = 0.5*G_e*dz**2 * &
+                  (rho_anom - C1_90*(16.0*(u5((ii-1)*5+4,jj)-u5((ii-1)*5+2,jj)) + 7.0*(u5((ii-1)*5+5,jj)-u5((ii-1)*5+1,jj))) )
+        endif
+      enddo ; enddo
+    endif
+
+  enddo ; enddo
+
+end subroutine generic_plm_update_dpa
 
 subroutine generic_plm_update_intx_dpa(TILE_SIZE_X, TILE_SIZE_Y, k, tv, T_t, T_b, S_t, S_b, e, &
                                        bathyT, z0pres, dpa, intx_dpa, GxRho, G_e, dz_subroundoff, &
