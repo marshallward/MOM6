@@ -249,8 +249,13 @@ module subroutine int_density_dz_generic_plm(k, tv, T_t, T_b, S_t, S_b, e, rho_r
   enddo ; enddo
 
   ! 2. Compute horizontal integrals in the x direction
-  if (present(intx_dpa)) then ; do j=HI%jsc,HI%jec
-    do I=Isq,Ieq
+
+  TILE_SIZE_X = Ieq-Isq+1 ; TILE_SIZE_Y = HI%jec-HI%jsc+1
+
+  if (present(intx_dpa)) then ; do jstart=HI%jsc,HI%jec,TILE_SIZE_Y ; do istart=Isq,Ieq,TILE_SIZE_X
+    jend = min(HI%jec, jstart+TILE_SIZE_Y-1) ; iend = min(Ieq, istart+TILE_SIZE_X-1)
+
+    do j=jstart,jend ; do I=istart,iend
       ! Corner values of T and S
       ! hWght is the distance measure by which the cell is violation of
       ! hydrostatic consistency. For large hWght we bias the interpolation
@@ -324,8 +329,11 @@ module subroutine int_density_dz_generic_plm(k, tv, T_t, T_b, S_t, S_b, e, rho_r
         if (use_covarTS) TS15(pos+1:pos+5,j) = (w_left*tv%covarTS(i,j,k)) + (w_right*tv%covarTS(i+1,j,k))
         if (use_varS) S215(pos+1:pos+5,j) = (w_left*tv%varS(i,j,k)) + (w_right*tv%varS(i+1,j,k))
       enddo
-    enddo
+    enddo ; enddo
 
+  enddo ; enddo ; endif
+
+  if (present(intx_dpa)) then ; do j=HI%jsc,HI%jec
     if (use_stanley_eos) then
       call calculate_density(T15(:,j), S15(:,j), p15(:,j), T215(:,j), TS15(:,j), S215(:,j), r15(:,j), EOS, EOSdom_q15, rho_ref=rho_ref)
     else
