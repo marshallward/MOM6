@@ -343,10 +343,7 @@ module subroutine int_density_dz_generic_plm(k, tv, T_t, T_b, S_t, S_b, e, rho_r
       endif
     endif
 
-  enddo ; enddo ; endif
-
-  if (present(intx_dpa)) then ; do j=HI%jsc,HI%jec
-    do I=Isq,Ieq
+    do j=jstart,jend ; do I=istart,iend
       intz(1) = dpa(i,j) ; intz(5) = dpa(i+1,j)
 
       ! Use Boole's rule to estimate the pressure anomaly change.
@@ -366,8 +363,9 @@ module subroutine int_density_dz_generic_plm(k, tv, T_t, T_b, S_t, S_b, e, rho_r
       ! Use Boole's rule to integrate the bottom pressure anomaly values in x.
       intx_dpa(I,j) = C1_90*(7.0*(intz(1)+intz(5)) + 32.0*(intz(2)+intz(4)) + &
                              12.0*intz(3))
-    enddo
-  enddo ; endif
+    enddo ; enddo
+
+  enddo ; enddo ; endif
 
   ! 3. Compute horizontal integrals in the y direction
   if (present(inty_dpa)) then ; do J=Jsq,Jeq
