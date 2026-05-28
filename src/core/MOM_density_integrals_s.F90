@@ -219,11 +219,8 @@ module subroutine int_density_dz_generic_plm(k, tv, T_t, T_b, S_t, S_b, e, rho_r
       endif
     endif
 
-  enddo ; enddo
-
-  do j=Jsq,Jeq+1
     if (use_rho_ref) then
-      do i=Isq,Ieq+1
+      do j=jstart,jend ; do i=istart,iend
         ! Use Boole's rule to estimate the pressure anomaly change.
         rho_anom = C1_90*(7.0*(r5(i*5+1,j)+r5(i*5+5,j)) + 32.0*(r5(i*5+2,j)+r5(i*5+4,j)) + 12.0*r5(i*5+3,j))
         dpa(i,j) = G_e*dz(i,j)*rho_anom
@@ -233,9 +230,9 @@ module subroutine int_density_dz_generic_plm(k, tv, T_t, T_b, S_t, S_b, e, rho_r
           intz_dpa(i,j) = 0.5*G_e*dz(i,j)**2 * &
                   (rho_anom - C1_90*(16.0*(r5(i*5+4,j)-r5(i*5+2,j)) + 7.0*(r5(i*5+5,j)-r5(i*5+1,j))) )
         endif
-      enddo
+      enddo ; enddo
     else
-      do i=Isq,Ieq+1
+      do j=jstart,jend ; do i=istart,iend
         ! Use Boole's rule to estimate the pressure anomaly change.
         rho_anom = C1_90*(7.0*(r5(i*5+1,j)+r5(i*5+5,j)) + 32.0*(r5(i*5+2,j)+r5(i*5+4,j)) + 12.0*r5(i*5+3,j)) &
                    - rho_ref
@@ -246,9 +243,10 @@ module subroutine int_density_dz_generic_plm(k, tv, T_t, T_b, S_t, S_b, e, rho_r
           intz_dpa(i,j) = 0.5*G_e*dz(i,j)**2 * &
                   (rho_anom - C1_90*(16.0*(u5(i*5+4,j)-u5(i*5+2,j)) + 7.0*(u5(i*5+5,j)-u5(i*5+1,j))) )
         endif
-      enddo
+      enddo ; enddo
     endif
-  enddo ! end loops on j
+
+  enddo ; enddo
 
   ! 2. Compute horizontal integrals in the x direction
   if (present(intx_dpa)) then ; do j=HI%jsc,HI%jec
