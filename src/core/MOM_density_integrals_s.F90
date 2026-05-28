@@ -405,7 +405,7 @@ subroutine generic_plm_update_inty_dpa(TILE_SIZE_X, TILE_SIZE_Y, k, tv, T_t, T_b
   real :: S215(15*TILE_SIZE_X,TILE_SIZE_Y)
   real :: p15(15*TILE_SIZE_X,TILE_SIZE_Y)
   real :: r15(15*TILE_SIZE_X,TILE_SIZE_Y)
-  real :: dz_y(5,HI%isc:HI%iec,HI%jscB:HI%jecB+1)
+  real :: dz_y(5,TILE_SIZE_X,TILE_SIZE_Y)
   real :: wt_t(5), wt_b(5)
   real :: intz(5)
   real, parameter :: C1_90 = 1.0/90.0
@@ -459,7 +459,7 @@ subroutine generic_plm_update_inty_dpa(TILE_SIZE_X, TILE_SIZE_Y, k, tv, T_t, T_b
 
       do m=2,4
         w_left = wt_t(m) ; w_right = wt_b(m)
-        dz_y(m,i,j) = (w_left*(e(i,j,K) - e(i,j,K+1))) + (w_right*(e(i,j+1,K) - e(i,j+1,K+1)))
+        dz_y(m,ii,jj) = (w_left*(e(i,j,K) - e(i,j,K+1))) + (w_right*(e(i,j+1,K) - e(i,j+1,K+1)))
 
         pos = (ii-1)*15+(m-2)*5
         T15(pos+1,jj) = (w_left*Ttl) + (w_right*Ttr)
@@ -471,7 +471,7 @@ subroutine generic_plm_update_inty_dpa(TILE_SIZE_X, TILE_SIZE_Y, k, tv, T_t, T_b
         p15(pos+1,jj) = -GxRho * ((w_left*(e(i,j,K)-z0pres(i,j))) + (w_right*(e(i,j+1,K)-z0pres(i,j+1))))
 
         do n=2,5
-          p15(pos+n,jj) = p15(pos+n-1,jj) + GxRho*0.25*dz_y(m,i,j)
+          p15(pos+n,jj) = p15(pos+n-1,jj) + GxRho*0.25*dz_y(m,ii,jj)
         enddo
 
         do n=2,4
@@ -504,14 +504,14 @@ subroutine generic_plm_update_inty_dpa(TILE_SIZE_X, TILE_SIZE_Y, k, tv, T_t, T_b
       if (use_rho_ref) then
         do m = 2,4
           pos = (ii-1)*15+(m-2)*5
-          intz(m) = (G_e*dz_y(m,i,j)*( C1_90*(7.0*(r15(pos+1,jj)+r15(pos+5,jj)) + &
+          intz(m) = (G_e*dz_y(m,ii,jj)*( C1_90*(7.0*(r15(pos+1,jj)+r15(pos+5,jj)) + &
                                            32.0*(r15(pos+2,jj)+r15(pos+4,jj)) + &
                                            12.0*r15(pos+3,jj)) ))
         enddo
       else
         do m = 2,4
           pos = (ii-1)*15+(m-2)*5
-          intz(m) = (G_e*dz_y(m,i,j)*( C1_90*(7.0*(r15(pos+1,jj)+r15(pos+5,jj)) + &
+          intz(m) = (G_e*dz_y(m,ii,jj)*( C1_90*(7.0*(r15(pos+1,jj)+r15(pos+5,jj)) + &
                                            32.0*(r15(pos+2,jj)+r15(pos+4,jj)) + &
                                            12.0*r15(pos+3,jj)) - rho_ref ))
         enddo
