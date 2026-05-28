@@ -126,13 +126,15 @@ module subroutine int_density_dz_generic_plm(k, tv, T_t, T_b, S_t, S_b, e, rho_r
   logical :: use_rho_ref ! Pass rho_ref to the equation of state for more accurate calculation
                          ! of density anomalies.
   logical :: use_varT, use_varS, use_covarTS ! Logicals for SGS variances fields
-  integer, dimension(2) :: EOSdom_h5  ! The 5-point h-point i-computational domain for the equation of state
+  integer, dimension(2,2) :: EOSdom_h5  ! The 5-point h-point i-computational domain for the equation of state
   integer, dimension(2) :: EOSdom_q15 ! The 3x5-point q-point i-computational domain for the equation of state
   integer, dimension(2) :: EOSdom_h15 ! The 3x5-point h-point i-computational domain for the equation of state
   integer :: Isq, Ieq, Jsq, Jeq, i, j, m, n, pos, jstart, jend, istart, iend
-  integer, parameter :: TILE_SIZE_X = 32, TILE_SIZE_Y = 4
+  integer :: TILE_SIZE_X, TILE_SIZE_Y
 
   Isq = HI%IscB ; Ieq = HI%IecB ; Jsq = HI%JscB ; Jeq = HI%JecB
+
+  TILE_SIZE_X = Ieq+1-Isq+1 ; TILE_SIZE_Y = Jeq+1-Jsq+1
 
   GxRho = G_e * rho_0
   if (present(Z_0p)) then
@@ -180,7 +182,6 @@ module subroutine int_density_dz_generic_plm(k, tv, T_t, T_b, S_t, S_b, e, rho_r
   enddo
 
   ! Set the loop ranges for equation of state calculations at various points.
-  EOSdom_h5(1) = 1 ; EOSdom_h5(2) = 5*(Ieq-Isq+2)
   EOSdom_q15(1) = 1 ; EOSdom_q15(2) = 15*(Ieq-Isq+1)
   EOSdom_h15(1) = 1 ; EOSdom_h15(2) = 15*(HI%iec-HI%isc+1)
 
@@ -202,20 +203,22 @@ module subroutine int_density_dz_generic_plm(k, tv, T_t, T_b, S_t, S_b, e, rho_r
       if (use_varS) S25(i*5+1:i*5+5,j) = tv%varS(i,j,k)
     enddo ; enddo
 
-    EOSdom_h5(1) = 5*(istart-Isq)+1 ; EOSdom_h5(2) = 5*(iend-Isq+1)
+    EOSdom_h5(1,1) = 5*(istart-Isq)+1 ; EOSdom_h5(1,2) = 5*(iend-Isq+1)
+    EOSdom_h5(2,1) = jstart-Jsq+1 ; EOSdom_h5(2,2) = jend-Jsq+1
 
-    do j=jstart,jend
     if (use_Stanley_eos) then
-      call calculate_density(T5(:,j), S5(:,j), p5(:,j), T25(:,j), TS5(:,j), S25(:,j), r5(:,j), EOS, EOSdom_h5, rho_ref=rho_ref)
+      call calculate_density(T5, S5, p5, T25, TS5, S25, r5, EOS, EOSdom_h5, rho_ref=rho_ref)
     else
       if (use_rho_ref) then
-        call calculate_density(T5(:,j), S5(:,j), p5(:,j), r5(:,j), EOS, EOSdom_h5, rho_ref=rho_ref)
+        call calculate_density(T5, S5, p5, r5, EOS, EOSdom_h5, rho_ref=rho_ref)
       else
-        call calculate_density(T5(:,j), S5(:,j), p5(:,j), r5(:,j), EOS, EOSdom_h5)
-        u5(:,j) = r5(:,j) - rho_ref
+        call calculate_density(T5, S5, p5, r5, EOS, EOSdom_h5)
+        do j=jstart,jend
+          u5(5*istart+1:5*iend+5,j) = r5(5*istart+1:5*iend+5,j) - rho_ref
+        enddo
       endif
     endif
-    enddo
+
   enddo ; enddo
 
   do j=Jsq,Jeq+1
