@@ -462,10 +462,7 @@ module subroutine int_density_dz_generic_plm(k, tv, T_t, T_b, S_t, S_b, e, rho_r
       endif
     endif
 
-  enddo ; enddo ; endif
-
-  if (present(inty_dpa)) then ; do J=Jsq,Jeq
-    do i=HI%isc,HI%iec
+    do j=jstart,jend ; do i=istart,iend
       intz(1) = dpa(i,j) ; intz(5) = dpa(i,j+1)
 
       ! Use Boole's rule to estimate the pressure anomaly change.
@@ -487,8 +484,9 @@ module subroutine int_density_dz_generic_plm(k, tv, T_t, T_b, S_t, S_b, e, rho_r
       ! Use Boole's rule to integrate the values.
       inty_dpa(i,J) = C1_90*(7.0*(intz(1)+intz(5)) + 32.0*(intz(2)+intz(4)) + &
                              12.0*intz(3))
-    enddo
-  enddo ; endif
+    enddo ; enddo
+
+  enddo ; enddo ; endif
 
 end subroutine int_density_dz_generic_plm
 
