@@ -366,34 +366,74 @@ module subroutine int_density_dz_generic_plm(k, tv, T_t, T_b, S_t, S_b, e, rho_r
   enddo ; enddo ; endif
 
   ! 3. Compute horizontal integrals in the y direction
+  if (present(inty_dpa)) then
+    TILE_SIZE_X = HI%iec-HI%isc+1 ; TILE_SIZE_Y = Jeq-Jsq+1
+    call generic_plm_update_inty_dpa(TILE_SIZE_X, TILE_SIZE_Y, k, tv, T_t, T_b, S_t, S_b, e, &
+                                     bathyT, z0pres, dpa, inty_dpa, GxRho, G_e, dz_subroundoff, &
+                                     massWeightToggle, TopWeightToggle, massWeightNVonlyToggle, h_nonvanished, &
+                                     use_rho_ref, use_stanley_eos, use_varT, use_covarTS, use_varS, &
+                                     rho_ref, EOS, HI, GV)
+  endif
 
-  TILE_SIZE_X = HI%iec-HI%isc+1 ; TILE_SIZE_Y = Jeq-Jsq+1
+end subroutine int_density_dz_generic_plm
 
-  if (present(inty_dpa)) then ; do jstart=Jsq,Jeq,TILE_SIZE_Y ; do istart=HI%isc,HI%iec,TILE_SIZE_X
+subroutine generic_plm_update_inty_dpa(TILE_SIZE_X, TILE_SIZE_Y, k, tv, T_t, T_b, S_t, S_b, e, &
+                                       bathyT, z0pres, dpa, inty_dpa, GxRho, G_e, dz_subroundoff, &
+                                       massWeightToggle, TopWeightToggle, massWeightNVonlyToggle, h_nonvanished, &
+                                       use_rho_ref, use_stanley_eos, use_varT, use_covarTS, use_varS, &
+                                       rho_ref, EOS, HI, GV)
+  integer,              intent(in)  :: TILE_SIZE_X, TILE_SIZE_Y
+  integer,              intent(in)  :: k
+  type(hor_index_type), intent(in)  :: HI
+  type(verticalGrid_type), intent(in) :: GV
+  type(thermo_var_ptrs), intent(in) :: tv
+  real, dimension(SZI_(HI),SZJ_(HI),SZK_(GV)), intent(in) :: T_t, T_b, S_t, S_b
+  real, dimension(SZI_(HI),SZJ_(HI),SZK_(GV)+1), intent(in) :: e
+  real, dimension(SZI_(HI),SZJ_(HI)), intent(in) :: bathyT
+  real, dimension(HI%isd:HI%ied,HI%jsd:HI%jed), intent(in) :: z0pres
+  real, dimension(SZI_(HI),SZJ_(HI)), intent(in) :: dpa
+  real, dimension(SZI_(HI),SZJB_(HI)), intent(inout) :: inty_dpa
+  real,                 intent(in)  :: GxRho, G_e, dz_subroundoff, rho_ref
+  real,                 intent(in)  :: massWeightToggle, TopWeightToggle, massWeightNVonlyToggle, h_nonvanished
+  logical,              intent(in)  :: use_rho_ref, use_stanley_eos, use_varT, use_covarTS, use_varS
+  type(EOS_type),       intent(in)  :: EOS
+
+  real :: T15((15*HI%iscB+1):(15*(HI%iecB+1)),HI%jscB:HI%jecB+1)
+  real :: S15((15*HI%iscB+1):(15*(HI%iecB+1)),HI%jscB:HI%jecB+1)
+  real :: T215((15*HI%iscB+1):(15*(HI%iecB+1)),HI%jscB:HI%jecB+1)
+  real :: TS15((15*HI%iscB+1):(15*(HI%iecB+1)),HI%jscB:HI%jecB+1)
+  real :: S215((15*HI%iscB+1):(15*(HI%iecB+1)),HI%jscB:HI%jecB+1)
+  real :: p15((15*HI%iscB+1):(15*(HI%iecB+1)),HI%jscB:HI%jecB+1)
+  real :: r15((15*HI%iscB+1):(15*(HI%iecB+1)),HI%jscB:HI%jecB+1)
+  real :: dz_y(5,HI%isc:HI%iec,HI%jscB:HI%jecB+1)
+  real :: wt_t(5), wt_b(5)
+  real :: intz(5)
+  real, parameter :: C1_90 = 1.0/90.0
+  real :: w_left, w_right, hWght, hWghtTop, iDenom, hL, hR
+  real :: Ttl, Tbl, Ttr, Tbr, Stl, Sbl, Str, Sbr
+  integer, dimension(2,2) :: EOSdom_h15
+  integer :: Isq, Ieq, Jsq, Jeq, i, j, m, n, pos, jstart, jend, istart, iend
+
+  Isq = HI%IscB ; Ieq = HI%IecB ; Jsq = HI%JscB ; Jeq = HI%JecB
+
+  T215(:,:) = 0.
+  TS15(:,:) = 0.
+  S215(:,:) = 0.
+
+  do n = 1, 5
+    wt_t(n) = 0.25 * real(5-n)
+    wt_b(n) = 1.0 - wt_t(n)
+  enddo
+
+  do jstart=Jsq,Jeq,TILE_SIZE_Y ; do istart=HI%isc,HI%iec,TILE_SIZE_X
     jend = min(Jeq, jstart+TILE_SIZE_Y-1) ; iend = min(HI%iec, istart+TILE_SIZE_X-1)
 
     do j=jstart,jend ; do i=istart,iend
-    ! Corner values of T and S
-    ! hWght is the distance measure by which the cell is violation of
-    ! hydrostatic consistency. For large hWght we bias the interpolation
-    ! of T,S along the top and bottom integrals, almost like thickness
-    ! weighting.
-    ! Note: To work in terrain following coordinates we could offset
-    ! this distance by the layer thickness to replicate other models.
       hWght = massWeightToggle * &
               max(0., -bathyT(i,j)-e(i,j+1,K), -bathyT(i,j+1)-e(i,j,K))
-      ! CY: The below code just uses top interface, which may be bad in high res open ocean
-      ! We want something like if (pa(j+1,k+1)<pa(j,1)) or (pa(j+1,1) <pa(i,j,k+1)) then...
-      ! but pressures are not passed through to this submodule, and tv just has surface press.
-      !if ((p(i,j+1,k+1)<p(i,j,1)).or.(tv%p(i,j+1,k+1)<tv%p(i,j,1))) then
       hWghtTop = TopWeightToggle * &
               max(0., e(i,j+1,K+1)-e(i,j,1), e(i,j,K+1)-e(i,j+1,1))
-      !else ! pressure criteria not activated
-      !  hWghtTop = 0.
-      !endif
-      ! Set it to be max of the bottom and top hWghts:
       hWght = max(hWght, hWghtTop)
-      ! If both sides are nonvanished, then set it back to zero.
       if (((e(i,j,K) - e(i,j,K+1)) > h_nonvanished) .and. ((e(i,j+1,K) - e(i,j+1,K+1)) > h_nonvanished)) then
         hWght = massWeightNVonlyToggle * hWght
       endif
@@ -420,10 +460,6 @@ module subroutine int_density_dz_generic_plm(k, tv, T_t, T_b, S_t, S_b, e, rho_r
         w_left = wt_t(m) ; w_right = wt_b(m)
         dz_y(m,i,j) = (w_left*(e(i,j,K) - e(i,j,K+1))) + (w_right*(e(i,j+1,K) - e(i,j+1,K+1)))
 
-        ! Salinity and temperature points are linearly interpolated in
-        ! the horizontal. The subscript (1) refers to the top value in
-        ! the vertical profile while subscript (5) refers to the bottom
-        ! value in the vertical profile.
         pos = i*15+(m-2)*5
         T15(pos+1,j) = (w_left*Ttl) + (w_right*Ttr)
         T15(pos+5,j) = (w_left*Tbl) + (w_right*Tbr)
@@ -433,12 +469,10 @@ module subroutine int_density_dz_generic_plm(k, tv, T_t, T_b, S_t, S_b, e, rho_r
 
         p15(pos+1,j) = -GxRho * ((w_left*(e(i,j,K)-z0pres(i,j))) + (w_right*(e(i,j+1,K)-z0pres(i,j+1))))
 
-        ! Pressure
         do n=2,5
           p15(pos+n,j) = p15(pos+n-1,j) + GxRho*0.25*dz_y(m,i,j)
         enddo
 
-        ! Salinity and temperature (linear interpolation in the vertical)
         do n=2,4
           S15(pos+n,j) = wt_t(n) * S15(pos+1,j) + wt_b(n) * S15(pos+5,j)
           T15(pos+n,j) = wt_t(n) * T15(pos+1,j) + wt_b(n) * T15(pos+5,j)
@@ -465,7 +499,6 @@ module subroutine int_density_dz_generic_plm(k, tv, T_t, T_b, S_t, S_b, e, rho_r
     do j=jstart,jend ; do i=istart,iend
       intz(1) = dpa(i,j) ; intz(5) = dpa(i,j+1)
 
-      ! Use Boole's rule to estimate the pressure anomaly change.
       if (use_rho_ref) then
         do m = 2,4
           pos = i*15+(m-2)*5
@@ -481,14 +514,13 @@ module subroutine int_density_dz_generic_plm(k, tv, T_t, T_b, S_t, S_b, e, rho_r
                                            12.0*r15(pos+3,j)) - rho_ref ))
         enddo
       endif
-      ! Use Boole's rule to integrate the values.
       inty_dpa(i,J) = C1_90*(7.0*(intz(1)+intz(5)) + 32.0*(intz(2)+intz(4)) + &
                              12.0*intz(3))
     enddo ; enddo
 
-  enddo ; enddo ; endif
+  enddo ; enddo
 
-end subroutine int_density_dz_generic_plm
+end subroutine generic_plm_update_inty_dpa
 
 end submodule MOM_density_integrals_s
 
