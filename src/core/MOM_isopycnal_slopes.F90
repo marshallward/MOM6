@@ -252,7 +252,7 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
   do concurrent( j=js-1:je+1 )
     do k=1,nz
       do concurrent( i=is-1:ie+1 )
-      pres(i,j,K+1) = pres(i,j,K) + GV%g_Earth * GV%H_to_RZ * h(i,j,k)
+        pres(i,j,K+1) = pres(i,j,K) + GV%g_Earth * GV%H_to_RZ * h(i,j,k)
       enddo
     enddo
   enddo
