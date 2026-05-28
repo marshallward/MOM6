@@ -128,7 +128,7 @@ module subroutine int_density_dz_generic_plm(k, tv, T_t, T_b, S_t, S_b, e, rho_r
   logical :: use_varT, use_varS, use_covarTS ! Logicals for SGS variances fields
   integer, dimension(2,2) :: EOSdom_h5  ! The 5-point h-point i-computational domain for the equation of state
   integer, dimension(2,2) :: EOSdom_q15 ! The 3x5-point q-point i-computational domain for the equation of state
-  integer, dimension(2) :: EOSdom_h15 ! The 3x5-point h-point i-computational domain for the equation of state
+  integer, dimension(2,2) :: EOSdom_h15 ! The 3x5-point h-point i-computational domain for the equation of state
   integer :: Isq, Ieq, Jsq, Jeq, i, j, m, n, pos, jstart, jend, istart, iend
   integer :: TILE_SIZE_X, TILE_SIZE_Y
 
@@ -181,8 +181,6 @@ module subroutine int_density_dz_generic_plm(k, tv, T_t, T_b, S_t, S_b, e, rho_r
     wt_b(n) = 1.0 - wt_t(n)
   enddo
 
-  ! Set the loop ranges for equation of state calculations at various points.
-  EOSdom_h15(1) = 1 ; EOSdom_h15(2) = 15*(HI%iec-HI%isc+1)
 
   ! 1. Compute vertical integrals
   do jstart=Jsq,Jeq+1,TILE_SIZE_Y ; do istart=Isq,Ieq+1,TILE_SIZE_X
@@ -451,23 +449,22 @@ module subroutine int_density_dz_generic_plm(k, tv, T_t, T_b, S_t, S_b, e, rho_r
       enddo
     enddo ; enddo
 
-  enddo ; enddo ; endif
+    EOSdom_h15(1,1) = 15*(istart-Isq)+1 ; EOSdom_h15(1,2) = 15*(iend-Isq+1)
+    EOSdom_h15(2,1) = jstart-Jsq+1 ; EOSdom_h15(2,2) = jend-Jsq+1
 
-  if (present(inty_dpa)) then ; do J=Jsq,Jeq
     if (use_stanley_eos) then
-      call calculate_density(T15(15*HI%isc+1:,j), S15(15*HI%isc+1:,j), p15(15*HI%isc+1:,j), &
-                             T215(15*HI%isc+1:,j), TS15(15*HI%isc+1:,j), S215(15*HI%isc+1:,j), &
-                             r15(15*HI%isc+1:,j), EOS, EOSdom_h15, rho_ref=rho_ref)
+      call calculate_density(T15, S15, p15, T215, TS15, S215, r15, EOS, EOSdom_h15, rho_ref=rho_ref)
     else
       if (use_rho_ref) then
-        call calculate_density(T15(15*HI%isc+1:,j), S15(15*HI%isc+1:,j), p15(15*HI%isc+1:,j), &
-                               r15(15*HI%isc+1:,j), EOS, EOSdom_h15, rho_ref=rho_ref)
+        call calculate_density(T15, S15, p15, r15, EOS, EOSdom_h15, rho_ref=rho_ref)
       else
-        call calculate_density(T15(15*HI%isc+1:,j), S15(15*HI%isc+1:,j), p15(15*HI%isc+1:,j), &
-                               r15(15*HI%isc+1:,j), EOS, EOSdom_h15)
+        call calculate_density(T15, S15, p15, r15, EOS, EOSdom_h15)
       endif
     endif
 
+  enddo ; enddo ; endif
+
+  if (present(inty_dpa)) then ; do J=Jsq,Jeq
     do i=HI%isc,HI%iec
       intz(1) = dpa(i,j) ; intz(5) = dpa(i,j+1)
 
