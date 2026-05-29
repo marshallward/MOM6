@@ -189,6 +189,8 @@ contains
   procedure :: calculate_spec_vol_array => calculate_spec_vol_array_Roquet_rho
   !> Local implementation of generic calculate_density_derivs_2d for efficiency
   procedure :: calculate_density_derivs_2d => calculate_density_derivs_2d_Roquet_rho
+  !> Local implementation of generic calculate_density_derivs_3d for efficiency
+  procedure :: calculate_density_derivs_3d => calculate_density_derivs_3d_Roquet_rho
 
 end type Roquet_rho_EOS
 
@@ -793,6 +795,40 @@ subroutine calculate_density_derivs_2d_Roquet_rho(this, T, S, pressure, &
         pressure(i,j), drho_dT(i,j), drho_dS(i,j))
   enddo
 end subroutine calculate_density_derivs_2d_Roquet_rho
+
+!> Calculate the in-situ density derivatives for 3D array inputs and outputs.
+subroutine calculate_density_derivs_3d_Roquet_rho(this, T, S, pressure, &
+    drho_dT, drho_dS, dom)
+  class(Roquet_rho_EOS), intent(in) :: this
+    !< This EOS
+  real, intent(in)  :: T(:,:,:)
+    !< Conservative temperature [degC]
+  real, intent(in)  :: S(:,:,:)
+    !< Absolute salinity [g kg-1]
+  real, intent(in)  :: pressure(:,:,:)
+    !< Pressure [Pa]
+  real, intent(out) :: drho_dT(:,:,:)
+    !< Partial derivative of density with potential temperature [kg m-3 degC-1]
+  real, intent(out) :: drho_dS(:,:,:)
+    !< Partial derivative of density with salinity [kg m-3 ppt-1]
+  integer, intent(in) :: dom(3,2)
+    !< Index bounds of domain.  First index is rank, second is bounds
+
+  integer :: is, ie, js, je, ks, ke
+  integer :: i, j, k
+
+  is = dom(1,1) ; ie = dom(1,2)
+  js = dom(2,1) ; je = dom(2,2)
+  ks = dom(3,1) ; ke = dom(3,2)
+
+  ! The element subroutine is called via its free-function (_loc) form rather than
+  ! through the polymorphic "this" binding, which causes runtime errors in do concurrent
+  ! regions offloaded to the GPU with nvfortran.
+  do concurrent (k=ks:ke, j=js:je, i=is:ie)
+    call calculate_density_derivs_elem_Roquet_rho_loc(T(i,j,k), S(i,j,k), &
+        pressure(i,j,k), drho_dT(i,j,k), drho_dS(i,j,k))
+  enddo
+end subroutine calculate_density_derivs_3d_Roquet_rho
 
 !> Calculate the in-situ specific volume for 1D array inputs and outputs.
 subroutine calculate_spec_vol_array_Roquet_rho(this, T, S, pressure, specvol, start, npts, spv_ref)

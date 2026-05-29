@@ -88,6 +88,7 @@ interface calculate_density_derivs
   module procedure calculate_density_derivs_scalar, calculate_density_derivs_array
   module procedure calculate_density_derivs_1d
   module procedure calculate_density_derivs_2d
+  module procedure calculate_density_derivs_3d
 end interface calculate_density_derivs
 
 !> Calculate the derivatives of specific volume with temperature and salinity from T, S, and P
@@ -1047,6 +1048,68 @@ subroutine calculate_density_derivs_2d(T, S, pressure, drho_dT, drho_dS, EOS, do
   if (EOS%kg_m3_to_R * EOS%S_to_ppt /= 1.) &
     drho_dS(is:ie, js:je) = EOS%kg_m3_to_R * EOS%S_to_ppt * drho_dS(is:ie, js:je)
 end subroutine calculate_density_derivs_2d
+
+
+!> Calls the appropriate subroutine to calculate density derivatives for 3-D array inputs.
+subroutine calculate_density_derivs_3d(T, S, pressure, drho_dT, drho_dS, EOS, dom)
+  real, intent(in) :: T(:,:,:)
+    !< Potential temperature referenced to the surface [degC]
+  real, intent(in) :: S(:,:,:)
+    !< Salinity [ppt]
+  real, intent(in) :: pressure(:,:,:)
+    !< Pressure [Pa]
+  real, intent(inout) :: drho_dT(:,:,:)
+    !< The partial derivative of density with potential temperature
+    !! [kg m-3 degC-1] or other units determined by the optional scale argument
+  real, intent(inout) :: drho_dS(:,:,:)
+    !< The partial derivative of density with salinity, in [kg m-3 ppt-1] or
+    !! other units determined by the optional scale argument
+  type(EOS_type), intent(in) :: EOS
+    !< Equation of state structure
+  integer, optional, intent(in) :: dom(3,2)
+    !< The domain of indices to work on, taking into account that arrays start
+    !! at 1.  The first index is the rank (i, j, k) and the second is the bound
+    !! (1 = lower, 2 = upper).
+
+  ! Local variables
+  real :: Ta(size(T,1), size(T,2), size(T,3))
+    ! Temperature converted to [degC]
+  real :: Sa(size(S,1), size(S,2), size(S,3))
+    ! Salinity converted to [ppt]
+  real :: press(size(pressure,1), size(pressure,2), size(pressure,3))
+    ! Pressure converted to [Pa]
+  integer :: is, ie, js, je, ks, ke
+  integer :: domain(3,2)
+
+  if (present(dom)) then
+    domain(:,:) = dom(:,:)
+  else
+    domain(1,:) = [1, size(drho_dT, 1)]
+    domain(2,:) = [1, size(drho_dT, 2)]
+    domain(3,:) = [1, size(drho_dT, 3)]
+  endif
+  is = domain(1,1) ; ie = domain(1,2)
+  js = domain(2,1) ; je = domain(2,2)
+  ks = domain(3,1) ; ke = domain(3,2)
+
+  if (.not. allocated(EOS%type)) call MOM_error(FATAL, &
+      "calculate_density_derivs_3d: EOS%form_of_EOS is not valid.")
+
+  if (all([EOS%RL2_T2_to_Pa, EOS%C_to_degC, EOS%S_to_ppt] == 1.)) then
+    call EOS%type%calculate_density_derivs_3d(T, S, pressure, drho_dT, drho_dS, domain)
+  else
+    press(is:ie, js:je, ks:ke) = EOS%RL2_T2_to_Pa * pressure(is:ie, js:je, ks:ke)
+    Ta(is:ie, js:je, ks:ke) = EOS%C_to_degC * T(is:ie, js:je, ks:ke)
+    Sa(is:ie, js:je, ks:ke) = EOS%S_to_ppt * S(is:ie, js:je, ks:ke)
+
+    call EOS%type%calculate_density_derivs_3d(Ta, Sa, press, drho_dT, drho_dS, domain)
+  endif
+
+  if (EOS%kg_m3_to_R * EOS%C_to_degC /= 1.) &
+    drho_dT(is:ie, js:je, ks:ke) = EOS%kg_m3_to_R * EOS%C_to_degC * drho_dT(is:ie, js:je, ks:ke)
+  if (EOS%kg_m3_to_R * EOS%S_to_ppt /= 1.) &
+    drho_dS(is:ie, js:je, ks:ke) = EOS%kg_m3_to_R * EOS%S_to_ppt * drho_dS(is:ie, js:je, ks:ke)
+end subroutine calculate_density_derivs_3d
 
 
 !> Calls the appropriate subroutines to calculate density derivatives by promoting a scalar

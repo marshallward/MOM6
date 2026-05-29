@@ -2,6 +2,8 @@
 ! See the LICENSE file for licensing information.
 ! SPDX-License-Identifier: Apache-2.0
 
+#include <do_concurrent_compat.h>
+
 !> Provides integrals of density
 submodule (MOM_density_integrals) MOM_density_integrals_s
 
@@ -242,23 +244,27 @@ subroutine generic_plm_update_dpa(TILE_SIZE_X, TILE_SIZE_Y, kstart, kend, tv, T_
       do concurrent (k=kstart:kend, j=jstart:jend, i=istart:iend)
         ii = i-istart+1 ; jj = j-jstart+1
         dz = e(i,j,K) - e(i,j,K+1)
-        rho_anom = C1_90*(7.0*(r5((ii-1)*5+1,jj,k)+r5((ii-1)*5+5,jj,k)) + 32.0*(r5((ii-1)*5+2,jj,k)+r5((ii-1)*5+4,jj,k)) + 12.0*r5((ii-1)*5+3,jj,k))
+        rho_anom = C1_90*(7.0*(r5((ii-1)*5+1,jj,k)+r5((ii-1)*5+5,jj,k)) + &
+                          32.0*(r5((ii-1)*5+2,jj,k)+r5((ii-1)*5+4,jj,k)) + 12.0*r5((ii-1)*5+3,jj,k))
         dpa(i,j,k) = G_e*dz*rho_anom
         if (present(intz_dpa)) then
           intz_dpa(i,j,k) = 0.5*G_e*dz**2 * &
-                  (rho_anom - C1_90*(16.0*(r5((ii-1)*5+4,jj,k)-r5((ii-1)*5+2,jj,k)) + 7.0*(r5((ii-1)*5+5,jj,k)-r5((ii-1)*5+1,jj,k))) )
+                  (rho_anom - C1_90*(16.0*(r5((ii-1)*5+4,jj,k)-r5((ii-1)*5+2,jj,k)) + &
+                                     7.0*(r5((ii-1)*5+5,jj,k)-r5((ii-1)*5+1,jj,k))) )
         endif
       enddo
     else
       do concurrent (k=kstart:kend, j=jstart:jend, i=istart:iend)
         ii = i-istart+1 ; jj = j-jstart+1
         dz = e(i,j,K) - e(i,j,K+1)
-        rho_anom = C1_90*(7.0*(r5((ii-1)*5+1,jj,k)+r5((ii-1)*5+5,jj,k)) + 32.0*(r5((ii-1)*5+2,jj,k)+r5((ii-1)*5+4,jj,k)) + 12.0*r5((ii-1)*5+3,jj,k)) &
+        rho_anom = C1_90*(7.0*(r5((ii-1)*5+1,jj,k)+r5((ii-1)*5+5,jj,k)) + &
+                          32.0*(r5((ii-1)*5+2,jj,k)+r5((ii-1)*5+4,jj,k)) + 12.0*r5((ii-1)*5+3,jj,k)) &
                    - rho_ref
         dpa(i,j,k) = G_e*dz*rho_anom
         if (present(intz_dpa)) then
           intz_dpa(i,j,k) = 0.5*G_e*dz**2 * &
-                  (rho_anom - C1_90*(16.0*(u5((ii-1)*5+4,jj,k)-u5((ii-1)*5+2,jj,k)) + 7.0*(u5((ii-1)*5+5,jj,k)-u5((ii-1)*5+1,jj,k))) )
+                  (rho_anom - C1_90*(16.0*(u5((ii-1)*5+4,jj,k)-u5((ii-1)*5+2,jj,k)) + &
+                                     7.0*(u5((ii-1)*5+5,jj,k)-u5((ii-1)*5+1,jj,k))) )
         endif
       enddo
     endif
@@ -312,7 +318,8 @@ subroutine generic_plm_update_intx_dpa(TILE_SIZE_X, TILE_SIZE_Y, kstart, kend, t
   do jstart=HI%jsc,HI%jec,TILE_SIZE_Y ; do istart=Isq,Ieq,TILE_SIZE_X
     jend = min(HI%jec, jstart+TILE_SIZE_Y-1) ; iend = min(Ieq, istart+TILE_SIZE_X-1)
 
-    do concurrent (k=kstart:kend, j=jstart:jend, i=istart:iend) local(ii,jj,hWght,hWghtTop,hL,hR,iDenom,Ttl,Tbl,Ttr,Tbr,Stl,Sbl,Str,Sbr,w_left,pos)
+    do concurrent (k=kstart:kend, j=jstart:jend, i=istart:iend) &
+        DO_LOCALITY(local(ii,jj,hWght,hWghtTop,hL,hR,iDenom,Ttl,Tbl,Ttr,Tbr,Stl,Sbl,Str,Sbr,w_left,pos))
       ii = i-istart+1 ; jj = j-jstart+1
       hWght = massWeightToggle * &
               max(0., -bathyT(i,j)-e(i+1,j,K), -bathyT(i+1,j)-e(i,j,K))
@@ -385,24 +392,26 @@ subroutine generic_plm_update_intx_dpa(TILE_SIZE_X, TILE_SIZE_Y, kstart, kend, t
     endif
 
     if (use_rho_ref) then
-      do concurrent(k=kstart:kend, j=jstart:jend, I=istart:iend) local(intz, pos, ii, jj, m)
+      do concurrent(k=kstart:kend, j=jstart:jend, I=istart:iend) DO_LOCALITY(local(intz, pos, ii, jj, m))
         ii = i-istart+1 ; jj = j-jstart+1
         intz(1) = dpa(i,j,k) ; intz(5) = dpa(i+1,j,k)
         do m = 2,4
           pos = (ii-1)*15+(m-2)*5
-          intz(m) = (G_e*dz_x(m,ii,jj,k)*( C1_90*(7.0*(r15(pos+1,jj,k)+r15(pos+5,jj,k)) + 32.0*(r15(pos+2,jj,k)+r15(pos+4,jj,k)) + &
+          intz(m) = (G_e*dz_x(m,ii,jj,k)*( C1_90*(7.0*(r15(pos+1,jj,k)+r15(pos+5,jj,k)) + &
+                            32.0*(r15(pos+2,jj,k)+r15(pos+4,jj,k)) + &
                             12.0*r15(pos+3,jj,k)) ))
         enddo
         intx_dpa(I,j,k) = C1_90*(7.0*(intz(1)+intz(5)) + 32.0*(intz(2)+intz(4)) + &
                               12.0*intz(3))
       enddo
     else
-      do concurrent(k=kstart:kend, j=jstart:jend, I=istart:iend) local(intz, pos, ii, jj, m)
+      do concurrent(k=kstart:kend, j=jstart:jend, I=istart:iend) DO_LOCALITY(local(intz, pos, ii, jj, m))
         ii = i-istart+1 ; jj = j-jstart+1
         intz(1) = dpa(i,j,k) ; intz(5) = dpa(i+1,j,k)
         do m = 2,4
           pos = (ii-1)*15+(m-2)*5
-          intz(m) = (G_e*dz_x(m,ii,jj,k)*( C1_90*(7.0*(r15(pos+1,jj,k)+r15(pos+5,jj,k)) + 32.0*(r15(pos+2,jj,k)+r15(pos+4,jj,k)) + &
+          intz(m) = (G_e*dz_x(m,ii,jj,k)*( C1_90*(7.0*(r15(pos+1,jj,k)+r15(pos+5,jj,k)) + &
+                            32.0*(r15(pos+2,jj,k)+r15(pos+4,jj,k)) + &
                             12.0*r15(pos+3,jj,k)) - rho_ref ))
         enddo
         intx_dpa(I,j,k) = C1_90*(7.0*(intz(1)+intz(5)) + 32.0*(intz(2)+intz(4)) + &
@@ -533,7 +542,7 @@ subroutine generic_plm_update_inty_dpa(TILE_SIZE_X, TILE_SIZE_Y, kstart, kend, t
     endif
 
     if (use_rho_ref) then
-      do concurrent (k=kstart:kend, j=jstart:jend, i=istart:iend) local(ii,jj,intz,pos)
+      do concurrent (k=kstart:kend, j=jstart:jend, i=istart:iend) DO_LOCALITY(local(ii,jj,intz,pos))
         ii = i-istart+1 ; jj = j-jstart+1
         intz(1) = dpa(i,j,k) ; intz(5) = dpa(i,j+1,k)
         do m = 2,4
@@ -546,7 +555,7 @@ subroutine generic_plm_update_inty_dpa(TILE_SIZE_X, TILE_SIZE_Y, kstart, kend, t
                               12.0*intz(3))
       enddo
     else
-      do concurrent (k=kstart:kend, j=jstart:jend, i=istart:iend) local(ii,jj,intz,pos)
+      do concurrent (k=kstart:kend, j=jstart:jend, i=istart:iend) DO_LOCALITY(local(ii,jj,intz,pos))
         ii = i-istart+1 ; jj = j-jstart+1
         intz(1) = dpa(i,j,k) ; intz(5) = dpa(i,j+1,k)
         do m = 2,4

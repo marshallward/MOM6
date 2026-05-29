@@ -1294,7 +1294,8 @@ subroutine PressureForce_FV_Bouss(h, tv, PFu, PFv, G, GV, US, CS, ALE_CSp, ADp, 
         Z_0p(i,j) = G%meanSL(i,j)
       enddo
     endif
-    !$omp target update from(Z_0p) if((use_ALE .and. CS%Recon_Scheme == 2) .or. CS%reset_intxpa_integral .or. CS%correction_intxpa)
+    !$omp target update from(Z_0p) &
+    !$omp   if((use_ALE .and. CS%Recon_Scheme == 2) .or. CS%reset_intxpa_integral .or. CS%correction_intxpa)
   endif
 
   ! Calculate 4 integrals through the layer that are required in the
@@ -1951,7 +1952,7 @@ subroutine PressureForce_FV_Bouss(h, tv, PFu, PFv, G, GV, US, CS, ALE_CSp, ADp, 
   endif
 
   if (present(pbce)) then
-    call set_pbce_Bouss(e, tv_tmp, G, GV, US, rho0_set_pbce, CS%GFS_scale, pbce)
+    call set_pbce_Bouss(e, tv_tmp, G, GV, US, rho0_set_pbce, CS%GFS_scale, pbce, nkblock=nkblock)
   endif
 
   !$omp target exit data if (use_EOS) &
