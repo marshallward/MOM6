@@ -632,11 +632,16 @@ end subroutine increment_ints
 !! forced inlining is required. NaN/overflow are reported via flags rather than
 !! the module-level error logicals, so the routine is side-effect free.
 pure subroutine efp_decompose(r, e1, e2, e3, e4, e5, e6, rmag, is_nan, is_ovf)
-  real,                intent(in)  :: r       !< The real number being decomposed [a]
-  integer(kind=int64), intent(out) :: e1, e2, e3, e4, e5, e6 !< Signed per-bin contributions
-  real,                intent(out) :: rmag    !< abs(r), or 0 if r is NaN/Inf [a]
-  integer,             intent(out) :: is_nan  !< 1 if r is a NaN or Inf, else 0
-  integer,             intent(out) :: is_ovf  !< 1 if abs(r) has no EFP representation, else 0
+  real,                intent(in)  :: r      !< The real number being decomposed [a]
+  integer(kind=int64), intent(out) :: e1     !< Signed contribution to EFP bin 1
+  integer(kind=int64), intent(out) :: e2     !< Signed contribution to EFP bin 2
+  integer(kind=int64), intent(out) :: e3     !< Signed contribution to EFP bin 3
+  integer(kind=int64), intent(out) :: e4     !< Signed contribution to EFP bin 4
+  integer(kind=int64), intent(out) :: e5     !< Signed contribution to EFP bin 5
+  integer(kind=int64), intent(out) :: e6     !< Signed contribution to EFP bin 6
+  real,                intent(out) :: rmag   !< abs(r), or 0 if r is NaN/Inf [a]
+  integer,             intent(out) :: is_nan !< 1 if r is a NaN or Inf, else 0
+  integer,             intent(out) :: is_ovf !< 1 if abs(r) has no EFP representation, else 0
 
   real :: rs  ! The remaining value to add, in arbitrary units [a]
   integer(kind=int64) :: ival
@@ -697,7 +702,10 @@ end subroutine increment_ints_faster
 !! unchanged; only the sign in one FATAL message can differ.
 subroutine increment_ints_2d(array, is, ie, js, je, descale, ints_sum, max_mag_term)
   real, dimension(:,:),               intent(in)    :: array  !< Input slice in arbitrary units [a]
-  integer,                            intent(in)    :: is, ie, js, je !< Window bounds (1-based)
+  integer,                            intent(in)    :: is !< Starting i-index of the window (1-based)
+  integer,                            intent(in)    :: ie !< Ending i-index of the window (1-based)
+  integer,                            intent(in)    :: js !< Starting j-index of the window (1-based)
+  integer,                            intent(in)    :: je !< Ending j-index of the window (1-based)
   real,                               intent(in)    :: descale !< unscale factor or 1.0 [a A-1 ~> 1]
   integer(kind=int64), dimension(ni), intent(inout) :: ints_sum !< EFP bins, incremented in place
   real,                               intent(inout) :: max_mag_term !< Running max magnitude [a]
