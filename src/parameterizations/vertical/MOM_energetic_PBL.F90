@@ -539,23 +539,71 @@ subroutine energetic_PBL(h_3d, u_3d, v_3d, tv, fluxes, visc, dt, Kd_int, G, GV, 
       diag_TKE_mixing(i,j) = 0.0 ; diag_TKE_mech_decay(i,j) = 0.0
       diag_TKE_conv_decay(i,j) = 0.0 !; diag_TKE_unbalanced(i,j) = 0.0
     enddo ; enddo
+    !*!!$omp target enter data map(to: &
+    !*!!$omp   diag_TKE_wind, diag_TKE_MKE, diag_TKE_conv, diag_TKE_forcing, &
+    !*!!$omp   diag_TKE_mixing, diag_TKE_mech_decay, diag_TKE_conv_decay)
     if (BBL_mixing) then
       !!OMP parallel do default(shared)
       do j=js,je ; do i=is,ie
         diag_TKE_BBL(i,j) = 0.0 ; diag_TKE_BBL_mixing(i,j) = 0.0
         diag_TKE_BBL_decay(i,j) = 0.0
       enddo ; enddo
+      !*!!$omp target enter data map(to: &
+      !*!!$omp   diag_TKE_BBL, diag_TKE_BBL_mixing, diag_TKE_BBL_decay)
     endif
   endif
-  if (CS%debug .or. (CS%id_Mixing_Length>0)) diag_Mixing_Length(:,:,:) = 0.0
-  if (CS%debug .or. (CS%id_Velocity_Scale>0)) diag_Velocity_Scale(:,:,:) = 0.0
-  if (BBL_mixing) then
-    if (CS%debug .or. (CS%id_BBL_Mix_Length>0)) BBL_Mix_Length(:,:,:) = 0.0
-    if (CS%debug .or. (CS%id_BBL_Vel_Scale>0)) BBL_Vel_Scale(:,:,:) = 0.0
-    if (CS%id_Kd_BBL > 0) Kd_BBL_3d(:,:,:) = 0.0
-    if (CS%id_ustar_BBL > 0) diag_ustar_BBL(:,:) = 0.0
-    if (CS%id_BBL_decay_scale > 0) diag_BBL_decay_scale(:,:) = 0.0
+  !$omp target enter data map(to: &
+  !$omp   diag_TKE_wind, diag_TKE_MKE, diag_TKE_conv, diag_TKE_forcing, &
+  !$omp   diag_TKE_mixing, diag_TKE_mech_decay, diag_TKE_conv_decay)
+  !$omp target enter data map(to: &
+  !$omp   diag_TKE_BBL, diag_TKE_BBL_mixing, diag_TKE_BBL_decay)
+
+  if (CS%debug .or. CS%id_Mixing_Length > 0) then
+    diag_Mixing_Length(:,:,:) = 0.0
   endif
+  !$omp target enter data map(to: diag_Mixing_Length)
+
+  if (CS%debug .or. CS%id_Velocity_Scale > 0) then
+    diag_Velocity_Scale(:,:,:) = 0.0
+    !*!!$omp target enter data map(to: diag_Velocity_Scale)
+  endif
+  !$omp target enter data map(to: diag_Velocity_Scale)
+
+  if (BBL_mixing) then
+    if (CS%debug .or. CS%id_BBL_Mix_Length > 0) then
+      BBL_Mix_Length(:,:,:) = 0.0
+      !*!!$omp target enter data map(to: BBL_Mix_Length)
+    endif
+
+    if (CS%debug .or. CS%id_BBL_Vel_Scale > 0) then
+      BBL_Vel_Scale(:,:,:) = 0.0
+      !*!!$omp target enter data map(to: BBL_Vel_scale)
+    endif
+
+    if (CS%id_Kd_BBL > 0) then
+      Kd_BBL_3d(:,:,:) = 0.0
+      !*!!$omp target enter data map(to: Kd_BBL_3d)
+    endif
+
+    if (CS%id_ustar_BBL > 0) then
+      diag_ustar_BBL(:,:) = 0.0
+      !*!!$omp target enter data map(to: diag_ustar_BBL)
+    endif
+
+    if (CS%id_BBL_decay_scale > 0) then
+      diag_BBL_decay_scale(:,:) = 0.0
+      !*!!$omp target enter data map(to: diag_BBL_decay_scale)
+    endif
+  endif
+  !$omp target enter data map(to: BBL_Mix_Length)
+  !$omp target enter data map(to: BBL_Vel_scale)
+  !$omp target enter data map(to: Kd_BBL_3d)
+  !$omp target enter data map(to: diag_ustar_BBL)
+  !$omp target enter data map(to: diag_BBL_decay_scale)
+
+  !*!!$omp target enter data map(alloc: diag_ustar) if (CS%id_ustar_ePBL > 0)
+  !*!!$omp target enter data map(alloc: buoy_flux) if (CS%id_bflx_ePBL > 0)
+  !$omp target enter data map(alloc: diag_ustar)
 
   ! CS_tmp is used to test sensitivity to parameter setting changes.
   if (CS%options_diff > 0) then
@@ -586,6 +634,17 @@ subroutine energetic_PBL(h_3d, u_3d, v_3d, tv, fluxes, visc, dt, Kd_int, G, GV, 
     if (CS%id_opt_maxdiff_Kd_ePBL > 0) max_abs_diff_Kd(:,:) = 0.0
     if (CS%id_opt_diff_hML_depth > 0)  diff_hML_depth(:,:) = 0.0
   endif
+  ! TODO: Should be conditional!
+  !$omp target enter data map(to: diff_Kd)
+  !$omp target enter data map(to: max_abs_diff_Kd)
+  !$omp target enter data map(to: diff_hML_depth)
+
+  ! TODO: All of this should be handled externally
+  !$omp target enter data map(to: CS)
+  !$omp target enter data map(to: h_3d, u_3d, v_3d, tv%T, tv%S, TKE_forced)
+  !$omp target enter data map(to: dSV_dT, dSV_dS)
+  !$omp target enter data map(to: buoy_flux)
+  !$omp target enter data map(alloc: Kd_int)
 
   !$omp target loop private(h_2d, dz_2d, u_2d, v_2d, T_2d, S_2d) &
   !$omp   private(TKE_forced_2d, dSV_dT_2d, dSV_dS_2d, Kd_2d) &
@@ -652,8 +711,8 @@ subroutine energetic_PBL(h_3d, u_3d, v_3d, tv, fluxes, visc, dt, Kd_int, G, GV, 
         mech_TKE = dt * GV%Rho0 * u_star**3
         ! The line above is equivalent to: mech_TKE = dt * u_star * fluxes%tau_mag(i,j)
       endif
-      diag_ustar(i,j) = u_star
 
+      if (CS%id_ustar_ePBL > 0) diag_ustar(i,j) = u_star
       ! TODO
       !*!if (allocated(tv%SpV_avg) .and. .not.GV%Boussinesq) then
       !*!  SpV_dt(1) = tv%SpV_avg(i,j,1) * I_dt
@@ -840,6 +899,15 @@ subroutine energetic_PBL(h_3d, u_3d, v_3d, tv, fluxes, visc, dt, Kd_int, G, GV, 
     do i=is,ie ; do K=1,nz+1 ; Kd_int(i,j,K) = Kd_2d(i,K) ; enddo ; enddo
 
   enddo ! j-loop
+
+  !$omp target exit data map(delete: CS)
+  !$omp target exit data map(release: h_3d, u_3d, v_3d, tv%T, tv%S, TKE_forced)
+  !$omp target exit data map(release: dSV_dT, dSV_dS)
+  !$omp target exit data map(release: buoy_flux)
+
+  !$omp target exit data map(from: Kd_int)
+  !$omp target exit data map(from: diag_ustar)
+
   if (CS%id_Kd_ePBL_col_by_col > 0) call post_data_3d_final(CS%id_Kd_ePBL_col_by_col, CS%diag)
 
   if (CS%debug .and. BBL_mixing) then
@@ -857,6 +925,7 @@ subroutine energetic_PBL(h_3d, u_3d, v_3d, tv, fluxes, visc, dt, Kd_int, G, GV, 
   if (CS%id_ustar_ePBL > 0) call post_data(CS%id_ustar_ePBL, diag_ustar, CS%diag)
   if (CS%id_bflx_ePBL > 0) call post_data(CS%id_bflx_ePBL, buoy_flux, CS%diag)
   if (CS%id_hML_depth > 0) call post_data(CS%id_hML_depth, CS%ML_depth, CS%diag)
+
   if (CS%id_TKE_wind > 0) call post_data(CS%id_TKE_wind, diag_TKE_wind, CS%diag)
   if (CS%id_TKE_MKE > 0)  call post_data(CS%id_TKE_MKE, diag_TKE_MKE, CS%diag)
   if (CS%id_TKE_conv > 0) call post_data(CS%id_TKE_conv, diag_TKE_conv, CS%diag)
@@ -866,21 +935,69 @@ subroutine energetic_PBL(h_3d, u_3d, v_3d, tv, fluxes, visc, dt, Kd_int, G, GV, 
     call post_data(CS%id_TKE_mech_decay, diag_TKE_mech_decay, CS%diag)
   if (CS%id_TKE_conv_decay > 0) &
     call post_data(CS%id_TKE_conv_decay, diag_TKE_conv_decay, CS%diag)
+  !*!!$omp target exit data map(delete: &
+  !*!!$omp   diag_TKE_wind, diag_TKE_MKE, diag_TKE_conv, diag_TKE_forcing, &
+  !*!!$omp   diag_TKE_mixing, diag_TKE_mech_decay, diag_TKE_conv_decay) &
+  !*!!$omp   if (CS%TKE_diagnostics)
+  !$omp target exit data map(delete: &
+  !$omp   diag_TKE_wind, diag_TKE_MKE, diag_TKE_conv, diag_TKE_forcing, &
+  !$omp   diag_TKE_mixing, diag_TKE_mech_decay, diag_TKE_conv_decay)
+
   if (CS%id_Mixing_Length > 0) call post_data(CS%id_Mixing_Length, diag_Mixing_Length, CS%diag)
+  !*!!$omp target exit data map(delete: diag_Mixing_Length) &
+  !*!!$omp   if (CS%debug .or. CS%id_Mixing_Length > 0)
+  !$omp target exit data map(delete: diag_Mixing_Length)
+
   if (CS%id_Velocity_Scale >0) call post_data(CS%id_Velocity_Scale, diag_Velocity_Scale, CS%diag)
+  !*!!$omp target exit data map(delete: diag_Velocity_Scale) &
+  !*!!$omp   if (CS%debug .or. CS%id_Velocity_Scale > 0)
+  !$omp target exit data map(delete: diag_Velocity_Scale)
+
   if (CS%id_mstar_sfc > 0)     call post_data(CS%id_mstar_sfc, diag_mstar_sfc, CS%diag)
+
+
   if (BBL_mixing) then
-    if (CS%id_Kd_BBL > 0) call post_data(CS%id_Kd_BBL, Kd_BBL_3d, CS%diag)
+    if (CS%id_Kd_BBL > 0) then
+      call post_data(CS%id_Kd_BBL, Kd_BBL_3d, CS%diag)
+      !*!!$omp target exit data map(delete: Kd_BBL_3d)
+    endif
+
     if (CS%id_BBL_Mix_Length > 0) call post_data(CS%id_BBL_Mix_Length, BBL_Mix_Length, CS%diag)
     if (CS%id_BBL_Vel_Scale > 0) call post_data(CS%id_BBL_Vel_Scale, BBL_Vel_Scale, CS%diag)
-    if (CS%id_ustar_BBL > 0) call post_data(CS%id_ustar_BBL, diag_ustar_BBL, CS%diag)
-    if (CS%id_BBL_decay_scale > 0) call post_data(CS%id_BBL_decay_scale, diag_BBL_decay_scale, CS%diag)
+
+    if (CS%id_ustar_BBL > 0) then
+      call post_data(CS%id_ustar_BBL, diag_ustar_BBL, CS%diag)
+      !*!!$omp target exit data map(delete: diag_ustar_BBL)
+    endif
+
+    if (CS%id_BBL_decay_scale > 0) then
+      call post_data(CS%id_BBL_decay_scale, diag_BBL_decay_scale, CS%diag)
+      !*!!$omp target exit data map(delete: diag_BBL_decay_scale)
+    endif
+
     if (CS%id_TKE_BBL > 0) call post_data(CS%id_TKE_BBL, diag_TKE_BBL, CS%diag)
     if (CS%id_TKE_BBL_mixing > 0) call post_data(CS%id_TKE_BBL_mixing, diag_TKE_BBL_mixing, CS%diag)
     if (CS%id_TKE_BBL_decay > 0) call post_data(CS%id_TKE_BBL_decay, diag_TKE_BBL_decay, CS%diag)
+    !*!!$omp target exit data map(delete: &
+    !*!!$omp   diag_TKE_BBL, diag_TKE_BBL_mixing, diag_TKE_BBL_decay) &
+    !*!!$omp   if (CS%TKE_diagnostics)
+
     if (CS%id_BBL_depth > 0) call post_data(CS%id_BBL_depth, CS%BBL_depth, CS%diag)
     if (CS%id_mstar_BBL > 0)     call post_data(CS%id_mstar_BBL, diag_mstar_BBL, CS%diag)
+
+    !*!!$omp target exit data map(delete: BBL_Mix_Length) &
+    !*!!$omp   if (CS%debug .or. CS%id_BBL_Mix_Length > 0)
+    !*!!$omp target exit data map(delete: BBL_Vel_Scale) &
+    !*!!$omp   if (CS%debug .or. CS%id_BBL_Vel_Scale > 0)
   endif
+  !$omp target exit data map(delete: Kd_BBL_3d)
+  !$omp target exit data map(delete: diag_ustar_BBL)
+  !$omp target exit data map(delete: diag_BBL_decay_scale)
+  !$omp target exit data map(delete: &
+  !$omp   diag_TKE_BBL, diag_TKE_BBL_mixing, diag_TKE_BBL_decay)
+  !$omp target exit data map(delete: BBL_Mix_Length)
+  !$omp target exit data map(delete: BBL_Vel_Scale)
+
   if (CS%id_LA > 0)       call post_data(CS%id_LA, diag_LA, CS%diag)
   if (CS%id_LA_mod > 0)   call post_data(CS%id_LA_mod, diag_LA_mod, CS%diag)
   if (CS%id_mstar_LT > 0) call post_data(CS%id_mstar_LT, diag_mstar_LT, CS%diag)
@@ -895,6 +1012,9 @@ subroutine energetic_PBL(h_3d, u_3d, v_3d, tv, fluxes, visc, dt, Kd_int, G, GV, 
     if (CS%id_opt_maxdiff_Kd_ePBL > 0) call post_data(CS%id_opt_maxdiff_Kd_ePBL, max_abs_diff_Kd, CS%diag)
     if (CS%id_opt_diff_hML_depth > 0)  call post_data(CS%id_opt_diff_hML_depth, diff_hML_depth, CS%diag)
   endif
+  !$omp target exit data map(delete: diff_Kd)
+  !$omp target exit data map(delete: max_abs_diff_Kd)
+  !$omp target exit data map(delete: diff_hML_depth)
 
 end subroutine energetic_PBL
 
