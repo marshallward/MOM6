@@ -39,11 +39,11 @@ interface
 !> Calls the appropriate subroutine to calculate analyti
 !> Compute pressure gradient force integrals by quadrature for the case where
 !! T and S are linear profiles.
-module subroutine int_density_dz_generic_plm(k, tv, T_t, T_b, S_t, S_b, e, rho_ref, &
+module subroutine int_density_dz_generic_plm(kstart, kend, tv, T_t, T_b, S_t, S_b, e, rho_ref, &
                                       rho_0, G_e, dz_subroundoff, bathyT, HI, GV, EOS, US, use_stanley_eos, dpa, &
                                       intz_dpa, intx_dpa, inty_dpa, MassWghtInterp, &
                                       use_inaccurate_form, Z_0p, MassWghtInterpVanOnly, h_nv)
-  integer,              intent(in)  :: k   !< Layer index to calculate integrals for
+  integer,              intent(in)  :: kstart,kend   !< Layer index to calculate integrals for
   type(hor_index_type), intent(in)  :: HI  !< Ocean horizontal index structures for the input arrays
   type(verticalGrid_type), intent(in) :: GV !< Vertical grid structure
   type(thermo_var_ptrs), intent(in) :: tv  !< Thermodynamic variables
@@ -68,17 +68,17 @@ module subroutine int_density_dz_generic_plm(k, tv, T_t, T_b, S_t, S_b, e, rho_r
   type(EOS_type),       intent(in)  :: EOS !< Equation of state structure
   type(unit_scale_type), intent(in) :: US !< A dimensional unit scaling type
   logical,              intent(in) :: use_stanley_eos !< If true, turn on Stanley SGS T variance parameterization
-  real, dimension(SZI_(HI),SZJ_(HI)), &
+  real, dimension(SZI_(HI),SZJ_(HI),SZK_(GV)), &
                         intent(inout) :: dpa !< The change in the pressure anomaly across the layer [R L2 T-2 ~> Pa]
-  real, dimension(SZI_(HI),SZJ_(HI)), &
+  real, dimension(SZI_(HI),SZJ_(HI),SZK_(GV)), &
               optional, intent(inout) :: intz_dpa !< The integral through the thickness of the layer of
                                            !! the pressure anomaly relative to the anomaly at the
                                            !! top of the layer [R L2 Z T-2 ~> Pa m]
-  real, dimension(SZIB_(HI),SZJ_(HI)), &
+  real, dimension(SZIB_(HI),SZJ_(HI),SZK_(GV)), &
               optional, intent(inout) :: intx_dpa !< The integral in x of the difference between the
                                            !! pressure anomaly at the top and bottom of the layer
                                            !! divided by the x grid spacing [R L2 T-2 ~> Pa]
-  real, dimension(SZI_(HI),SZJB_(HI)), &
+  real, dimension(SZI_(HI),SZJB_(HI),SZK_(GV)), &
               optional, intent(inout) :: inty_dpa !< The integral in y of the difference between the
                                            !! pressure anomaly at the top and bottom of the layer
                                            !! divided by the y grid spacing [R L2 T-2 ~> Pa]

@@ -18,11 +18,11 @@ contains
 !> Calls the appropriate subroutine to calculate analyti
 !> Compute pressure gradient force integrals by quadrature for the case where
 !! T and S are linear profiles.
-module subroutine int_density_dz_generic_plm(k, tv, T_t, T_b, S_t, S_b, e, rho_ref, &
+module subroutine int_density_dz_generic_plm(kstart, kend, tv, T_t, T_b, S_t, S_b, e, rho_ref, &
                                       rho_0, G_e, dz_subroundoff, bathyT, HI, GV, EOS, US, use_stanley_eos, dpa, &
                                       intz_dpa, intx_dpa, inty_dpa, MassWghtInterp, &
                                       use_inaccurate_form, Z_0p, MassWghtInterpVanOnly, h_nv)
-  integer,              intent(in)  :: k   !< Layer index to calculate integrals for
+  integer,              intent(in)  :: kstart, kend   !< Layer index to calculate integrals for
   type(hor_index_type), intent(in)  :: HI  !< Ocean horizontal index structures for the input arrays
   type(verticalGrid_type), intent(in) :: GV !< Vertical grid structure
   type(thermo_var_ptrs), intent(in) :: tv  !< Thermodynamic variables
@@ -47,17 +47,17 @@ module subroutine int_density_dz_generic_plm(k, tv, T_t, T_b, S_t, S_b, e, rho_r
   type(EOS_type),       intent(in)  :: EOS !< Equation of state structure
   type(unit_scale_type), intent(in) :: US !< A dimensional unit scaling type
   logical,              intent(in) :: use_stanley_eos !< If true, turn on Stanley SGS T variance parameterization
-  real, dimension(SZI_(HI),SZJ_(HI)), &
+  real, dimension(SZI_(HI),SZJ_(HI),SZK_(GV)), &
                         intent(inout) :: dpa !< The change in the pressure anomaly across the layer [R L2 T-2 ~> Pa]
-  real, dimension(SZI_(HI),SZJ_(HI)), &
+  real, dimension(SZI_(HI),SZJ_(HI),SZK_(GV)), &
               optional, intent(inout) :: intz_dpa !< The integral through the thickness of the layer of
                                            !! the pressure anomaly relative to the anomaly at the
                                            !! top of the layer [R L2 Z T-2 ~> Pa m]
-  real, dimension(SZIB_(HI),SZJ_(HI)), &
+  real, dimension(SZIB_(HI),SZJ_(HI),SZK_(GV)), &
               optional, intent(inout) :: intx_dpa !< The integral in x of the difference between the
                                            !! pressure anomaly at the top and bottom of the layer
                                            !! divided by the x grid spacing [R L2 T-2 ~> Pa]
-  real, dimension(SZI_(HI),SZJB_(HI)), &
+  real, dimension(SZI_(HI),SZJB_(HI),SZK_(GV)), &
               optional, intent(inout) :: inty_dpa !< The integral in y of the difference between the
                                            !! pressure anomaly at the top and bottom of the layer
                                            !! divided by the y grid spacing [R L2 T-2 ~> Pa]
@@ -134,10 +134,9 @@ module subroutine int_density_dz_generic_plm(k, tv, T_t, T_b, S_t, S_b, e, rho_r
     use_covarTS = associated(tv%covarTS)
     use_varS = associated(tv%varS)
   endif
-
   ! 1. Compute vertical integrals
   TILE_SIZE_X = Ieq+1-Isq+1 ; TILE_SIZE_Y = Jeq+1-Jsq+1
-  call generic_plm_update_dpa(TILE_SIZE_X, TILE_SIZE_Y, k, tv, T_t, T_b, S_t, S_b, e, &
+  call generic_plm_update_dpa(TILE_SIZE_X, TILE_SIZE_Y, kstart, kend, tv, T_t, T_b, S_t, S_b, e, &
                               z0pres, dpa, intz_dpa, GxRho, G_e, &
                               use_rho_ref, use_stanley_eos, use_varT, use_covarTS, use_varS, &
                               rho_ref, EOS, HI, GV)
@@ -145,7 +144,7 @@ module subroutine int_density_dz_generic_plm(k, tv, T_t, T_b, S_t, S_b, e, rho_r
   ! 2. Compute horizontal integrals in the x direction
   if (present(intx_dpa)) then
     TILE_SIZE_X = Ieq-Isq+1 ; TILE_SIZE_Y = HI%jec-HI%jsc+1
-    call generic_plm_update_intx_dpa(TILE_SIZE_X, TILE_SIZE_Y, k, tv, T_t, T_b, S_t, S_b, e, &
+    call generic_plm_update_intx_dpa(TILE_SIZE_X, TILE_SIZE_Y, kstart, kend, tv, T_t, T_b, S_t, S_b, e, &
                                      bathyT, z0pres, dpa, intx_dpa, GxRho, G_e, dz_subroundoff, &
                                      massWeightToggle, TopWeightToggle, massWeightNVonlyToggle, h_nonvanished, &
                                      use_rho_ref, use_stanley_eos, use_varT, use_covarTS, use_varS, &
@@ -155,7 +154,7 @@ module subroutine int_density_dz_generic_plm(k, tv, T_t, T_b, S_t, S_b, e, rho_r
   ! 3. Compute horizontal integrals in the y direction
   if (present(inty_dpa)) then
     TILE_SIZE_X = HI%iec-HI%isc+1 ; TILE_SIZE_Y = Jeq-Jsq+1
-    call generic_plm_update_inty_dpa(TILE_SIZE_X, TILE_SIZE_Y, k, tv, T_t, T_b, S_t, S_b, e, &
+    call generic_plm_update_inty_dpa(TILE_SIZE_X, TILE_SIZE_Y, kstart, kend, tv, T_t, T_b, S_t, S_b, e, &
                                      bathyT, z0pres, dpa, inty_dpa, GxRho, G_e, dz_subroundoff, &
                                      massWeightToggle, TopWeightToggle, massWeightNVonlyToggle, h_nonvanished, &
                                      use_rho_ref, use_stanley_eos, use_varT, use_covarTS, use_varS, &
@@ -166,20 +165,20 @@ module subroutine int_density_dz_generic_plm(k, tv, T_t, T_b, S_t, S_b, e, rho_r
 
 end subroutine int_density_dz_generic_plm
 
-subroutine generic_plm_update_dpa(TILE_SIZE_X, TILE_SIZE_Y, k, tv, T_t, T_b, S_t, S_b, e, &
+subroutine generic_plm_update_dpa(TILE_SIZE_X, TILE_SIZE_Y, kstart, kend, tv, T_t, T_b, S_t, S_b, e, &
                                   z0pres, dpa, intz_dpa, GxRho, G_e, &
                                   use_rho_ref, use_stanley_eos, use_varT, use_covarTS, use_varS, &
                                   rho_ref, EOS, HI, GV)
   integer,              intent(in)  :: TILE_SIZE_X, TILE_SIZE_Y
-  integer,              intent(in)  :: k
+  integer,              intent(in)  :: kstart, kend
   type(hor_index_type), intent(in)  :: HI
   type(verticalGrid_type), intent(in) :: GV
   type(thermo_var_ptrs), intent(in) :: tv
   real, dimension(SZI_(HI),SZJ_(HI),SZK_(GV)), intent(in) :: T_t, T_b, S_t, S_b
   real, dimension(SZI_(HI),SZJ_(HI),SZK_(GV)+1), intent(in) :: e
   real, dimension(HI%isd:HI%ied,HI%jsd:HI%jed), intent(in) :: z0pres
-  real, dimension(SZI_(HI),SZJ_(HI)), intent(inout) :: dpa
-  real, dimension(SZI_(HI),SZJ_(HI)), optional, intent(inout) :: intz_dpa
+  real, dimension(SZI_(HI),SZJ_(HI),SZK_(GV)), intent(inout) :: dpa
+  real, dimension(SZI_(HI),SZJ_(HI),SZK_(GV)), optional, intent(inout) :: intz_dpa
   real,                 intent(in)  :: GxRho, G_e, rho_ref
   logical,              intent(in)  :: use_rho_ref, use_stanley_eos, use_varT, use_covarTS, use_varS
   type(EOS_type),       intent(in)  :: EOS
@@ -195,7 +194,7 @@ subroutine generic_plm_update_dpa(TILE_SIZE_X, TILE_SIZE_Y, k, tv, T_t, T_b, S_t
   real :: rho_anom, dz
   real, parameter :: C1_90 = 1.0/90.0
   integer, dimension(2,2) :: EOSdom_h5
-  integer :: Isq, Ieq, Jsq, Jeq, i, j, n, jstart, jend, istart, iend, ii, jj
+  integer :: Isq, Ieq, Jsq, Jeq, i, j, n, jstart, jend, istart, iend, ii, jj, k
 
   Isq = HI%IscB ; Ieq = HI%IecB ; Jsq = HI%JscB ; Jeq = HI%JecB
 
@@ -205,7 +204,7 @@ subroutine generic_plm_update_dpa(TILE_SIZE_X, TILE_SIZE_Y, k, tv, T_t, T_b, S_t
     jend = min(Jeq+1, jstart+TILE_SIZE_Y-1)
     iend = min(Ieq+1, istart+TILE_SIZE_X-1)
 
-    do concurrent (j=jstart:jend, i=istart:iend)
+    do concurrent (k=kstart:kend, j=jstart:jend, i=istart:iend)
       ii = i-istart+1 ; jj = j-jstart+1
       dz = e(i,j,K) - e(i,j,K+1)
       do n=1,5
@@ -221,6 +220,7 @@ subroutine generic_plm_update_dpa(TILE_SIZE_X, TILE_SIZE_Y, k, tv, T_t, T_b, S_t
     EOSdom_h5(1,1) = 1 ; EOSdom_h5(1,2) = 5*(iend-istart+1)
     EOSdom_h5(2,1) = 1 ; EOSdom_h5(2,2) = jend-jstart+1
 
+    do k=kstart,kend
     if (use_stanley_eos) then
       call calculate_density(T5, S5, p5, T25, TS5, S25, r5, EOS, EOSdom_h5, rho_ref=rho_ref)
     else
@@ -234,27 +234,28 @@ subroutine generic_plm_update_dpa(TILE_SIZE_X, TILE_SIZE_Y, k, tv, T_t, T_b, S_t
         enddo
       endif
     endif
+    enddo
 
     if (use_rho_ref) then
-      do concurrent (j=jstart:jend, i=istart:iend)
+      do concurrent (k=kstart:kend, j=jstart:jend, i=istart:iend)
         ii = i-istart+1 ; jj = j-jstart+1
         dz = e(i,j,K) - e(i,j,K+1)
         rho_anom = C1_90*(7.0*(r5((ii-1)*5+1,jj)+r5((ii-1)*5+5,jj)) + 32.0*(r5((ii-1)*5+2,jj)+r5((ii-1)*5+4,jj)) + 12.0*r5((ii-1)*5+3,jj))
-        dpa(i,j) = G_e*dz*rho_anom
+        dpa(i,j,k) = G_e*dz*rho_anom
         if (present(intz_dpa)) then
-          intz_dpa(i,j) = 0.5*G_e*dz**2 * &
+          intz_dpa(i,j,k) = 0.5*G_e*dz**2 * &
                   (rho_anom - C1_90*(16.0*(r5((ii-1)*5+4,jj)-r5((ii-1)*5+2,jj)) + 7.0*(r5((ii-1)*5+5,jj)-r5((ii-1)*5+1,jj))) )
         endif
       enddo
     else
-      do concurrent (j=jstart:jend, i=istart:iend)
+      do concurrent (k=kstart:kend, j=jstart:jend, i=istart:iend)
         ii = i-istart+1 ; jj = j-jstart+1
         dz = e(i,j,K) - e(i,j,K+1)
         rho_anom = C1_90*(7.0*(r5((ii-1)*5+1,jj)+r5((ii-1)*5+5,jj)) + 32.0*(r5((ii-1)*5+2,jj)+r5((ii-1)*5+4,jj)) + 12.0*r5((ii-1)*5+3,jj)) &
                    - rho_ref
-        dpa(i,j) = G_e*dz*rho_anom
+        dpa(i,j,k) = G_e*dz*rho_anom
         if (present(intz_dpa)) then
-          intz_dpa(i,j) = 0.5*G_e*dz**2 * &
+          intz_dpa(i,j,k) = 0.5*G_e*dz**2 * &
                   (rho_anom - C1_90*(16.0*(u5((ii-1)*5+4,jj)-u5((ii-1)*5+2,jj)) + 7.0*(u5((ii-1)*5+5,jj)-u5((ii-1)*5+1,jj))) )
         endif
       enddo
@@ -266,13 +267,13 @@ subroutine generic_plm_update_dpa(TILE_SIZE_X, TILE_SIZE_Y, k, tv, T_t, T_b, S_t
 
 end subroutine generic_plm_update_dpa
 
-subroutine generic_plm_update_intx_dpa(TILE_SIZE_X, TILE_SIZE_Y, k, tv, T_t, T_b, S_t, S_b, e, &
+subroutine generic_plm_update_intx_dpa(TILE_SIZE_X, TILE_SIZE_Y, kstart, kend, tv, T_t, T_b, S_t, S_b, e, &
                                        bathyT, z0pres, dpa, intx_dpa, GxRho, G_e, dz_subroundoff, &
                                        massWeightToggle, TopWeightToggle, massWeightNVonlyToggle, h_nonvanished, &
                                        use_rho_ref, use_stanley_eos, use_varT, use_covarTS, use_varS, &
                                        rho_ref, EOS, HI, GV)
   integer,              intent(in)  :: TILE_SIZE_X, TILE_SIZE_Y
-  integer,              intent(in)  :: k
+  integer,              intent(in)  :: kstart, kend
   type(hor_index_type), intent(in)  :: HI
   type(verticalGrid_type), intent(in) :: GV
   type(thermo_var_ptrs), intent(in) :: tv
@@ -280,8 +281,8 @@ subroutine generic_plm_update_intx_dpa(TILE_SIZE_X, TILE_SIZE_Y, k, tv, T_t, T_b
   real, dimension(SZI_(HI),SZJ_(HI),SZK_(GV)+1), intent(in) :: e
   real, dimension(SZI_(HI),SZJ_(HI)), intent(in) :: bathyT
   real, dimension(HI%isd:HI%ied,HI%jsd:HI%jed), intent(in) :: z0pres
-  real, dimension(SZI_(HI),SZJ_(HI)), intent(in) :: dpa
-  real, dimension(SZIB_(HI),SZJ_(HI)), intent(inout) :: intx_dpa
+  real, dimension(SZI_(HI),SZJ_(HI),SZK_(GV)), intent(in) :: dpa
+  real, dimension(SZIB_(HI),SZJ_(HI),SZK_(GV)), intent(inout) :: intx_dpa
   real,                 intent(in)  :: GxRho, G_e, dz_subroundoff, rho_ref
   real,                 intent(in)  :: massWeightToggle, TopWeightToggle, massWeightNVonlyToggle, h_nonvanished
   logical,              intent(in)  :: use_rho_ref, use_stanley_eos, use_varT, use_covarTS, use_varS
@@ -300,7 +301,7 @@ subroutine generic_plm_update_intx_dpa(TILE_SIZE_X, TILE_SIZE_Y, k, tv, T_t, T_b
   real :: w_left, w_right, hWght, hWghtTop, iDenom, hL, hR
   real :: Ttl, Tbl, Ttr, Tbr, Stl, Sbl, Str, Sbr
   integer, dimension(2,2) :: EOSdom_q15
-  integer :: Isq, Ieq, Jsq, Jeq, i, j, m, n, pos, jstart, jend, istart, iend, ii, jj
+  integer :: Isq, Ieq, Jsq, Jeq, i, j, k, m, n, pos, jstart, jend, istart, iend, ii, jj
 
   Isq = HI%IscB ; Ieq = HI%IecB ; Jsq = HI%JscB ; Jeq = HI%JecB
 
@@ -309,7 +310,7 @@ subroutine generic_plm_update_intx_dpa(TILE_SIZE_X, TILE_SIZE_Y, k, tv, T_t, T_b
   do jstart=HI%jsc,HI%jec,TILE_SIZE_Y ; do istart=Isq,Ieq,TILE_SIZE_X
     jend = min(HI%jec, jstart+TILE_SIZE_Y-1) ; iend = min(Ieq, istart+TILE_SIZE_X-1)
 
-    do concurrent (j=jstart:jend, i=istart:iend) local(ii,jj,hWght,hWghtTop,hL,hR,iDenom,Ttl,Tbl,Ttr,Tbr,Stl,Sbl,Str,Sbr,w_left,pos)
+    do concurrent (k=kstart:kend, j=jstart:jend, i=istart:iend) local(ii,jj,hWght,hWghtTop,hL,hR,iDenom,Ttl,Tbl,Ttr,Tbr,Stl,Sbl,Str,Sbr,w_left,pos)
       ii = i-istart+1 ; jj = j-jstart+1
       hWght = massWeightToggle * &
               max(0., -bathyT(i,j)-e(i+1,j,K), -bathyT(i+1,j)-e(i,j,K))
@@ -367,6 +368,7 @@ subroutine generic_plm_update_intx_dpa(TILE_SIZE_X, TILE_SIZE_Y, k, tv, T_t, T_b
     EOSdom_q15(1,1) = 1 ; EOSdom_q15(1,2) = 15*(iend-istart+1)
     EOSdom_q15(2,1) = 1 ; EOSdom_q15(2,2) = jend-jstart+1
 
+    do k=kstart,kend
     if (use_stanley_eos) then
       call calculate_density(T15, S15, p15, T215, TS15, S215, r15, EOS, EOSdom_q15, rho_ref=rho_ref)
     else
@@ -376,29 +378,30 @@ subroutine generic_plm_update_intx_dpa(TILE_SIZE_X, TILE_SIZE_Y, k, tv, T_t, T_b
         call calculate_density(T15, S15, p15, r15, EOS, EOSdom_q15)
       endif
     endif
+    enddo
 
     if (use_rho_ref) then
-      do concurrent(j=jstart:jend, I=istart:iend) local(intz, pos, ii, jj, m)
+      do concurrent(k=kstart:kend, j=jstart:jend, I=istart:iend) local(intz, pos, ii, jj, m)
         ii = i-istart+1 ; jj = j-jstart+1
-        intz(1) = dpa(i,j) ; intz(5) = dpa(i+1,j)
+        intz(1) = dpa(i,j,k) ; intz(5) = dpa(i+1,j,k)
         do m = 2,4
           pos = (ii-1)*15+(m-2)*5
           intz(m) = (G_e*dz_x(m,ii,jj)*( C1_90*(7.0*(r15(pos+1,jj)+r15(pos+5,jj)) + 32.0*(r15(pos+2,jj)+r15(pos+4,jj)) + &
                             12.0*r15(pos+3,jj)) ))
         enddo
-        intx_dpa(I,j) = C1_90*(7.0*(intz(1)+intz(5)) + 32.0*(intz(2)+intz(4)) + &
+        intx_dpa(I,j,k) = C1_90*(7.0*(intz(1)+intz(5)) + 32.0*(intz(2)+intz(4)) + &
                               12.0*intz(3))
       enddo
     else
-      do concurrent(j=jstart:jend, I=istart:iend) local(intz, pos, ii, jj, m)
+      do concurrent(k=kstart:kend, j=jstart:jend, I=istart:iend) local(intz, pos, ii, jj, m)
         ii = i-istart+1 ; jj = j-jstart+1
-        intz(1) = dpa(i,j) ; intz(5) = dpa(i+1,j)
+        intz(1) = dpa(i,j,k) ; intz(5) = dpa(i+1,j,k)
         do m = 2,4
           pos = (ii-1)*15+(m-2)*5
           intz(m) = (G_e*dz_x(m,ii,jj)*( C1_90*(7.0*(r15(pos+1,jj)+r15(pos+5,jj)) + 32.0*(r15(pos+2,jj)+r15(pos+4,jj)) + &
                             12.0*r15(pos+3,jj)) - rho_ref ))
         enddo
-        intx_dpa(I,j) = C1_90*(7.0*(intz(1)+intz(5)) + 32.0*(intz(2)+intz(4)) + &
+        intx_dpa(I,j,k) = C1_90*(7.0*(intz(1)+intz(5)) + 32.0*(intz(2)+intz(4)) + &
                               12.0*intz(3))
       enddo
     endif
@@ -409,13 +412,13 @@ subroutine generic_plm_update_intx_dpa(TILE_SIZE_X, TILE_SIZE_Y, k, tv, T_t, T_b
 
 end subroutine generic_plm_update_intx_dpa
 
-subroutine generic_plm_update_inty_dpa(TILE_SIZE_X, TILE_SIZE_Y, k, tv, T_t, T_b, S_t, S_b, e, &
+subroutine generic_plm_update_inty_dpa(TILE_SIZE_X, TILE_SIZE_Y, kstart, kend, tv, T_t, T_b, S_t, S_b, e, &
                                        bathyT, z0pres, dpa, inty_dpa, GxRho, G_e, dz_subroundoff, &
                                        massWeightToggle, TopWeightToggle, massWeightNVonlyToggle, h_nonvanished, &
                                        use_rho_ref, use_stanley_eos, use_varT, use_covarTS, use_varS, &
                                        rho_ref, EOS, HI, GV)
   integer,              intent(in)  :: TILE_SIZE_X, TILE_SIZE_Y
-  integer,              intent(in)  :: k
+  integer,              intent(in)  :: kstart, kend
   type(hor_index_type), intent(in)  :: HI
   type(verticalGrid_type), intent(in) :: GV
   type(thermo_var_ptrs), intent(in) :: tv
@@ -423,8 +426,8 @@ subroutine generic_plm_update_inty_dpa(TILE_SIZE_X, TILE_SIZE_Y, k, tv, T_t, T_b
   real, dimension(SZI_(HI),SZJ_(HI),SZK_(GV)+1), intent(in) :: e
   real, dimension(SZI_(HI),SZJ_(HI)), intent(in) :: bathyT
   real, dimension(HI%isd:HI%ied,HI%jsd:HI%jed), intent(in) :: z0pres
-  real, dimension(SZI_(HI),SZJ_(HI)), intent(in) :: dpa
-  real, dimension(SZI_(HI),SZJB_(HI)), intent(inout) :: inty_dpa
+  real, dimension(SZI_(HI),SZJ_(HI),SZK_(GV)), intent(in) :: dpa
+  real, dimension(SZI_(HI),SZJB_(HI),SZK_(GV)), intent(inout) :: inty_dpa
   real,                 intent(in)  :: GxRho, G_e, dz_subroundoff, rho_ref
   real,                 intent(in)  :: massWeightToggle, TopWeightToggle, massWeightNVonlyToggle, h_nonvanished
   logical,              intent(in)  :: use_rho_ref, use_stanley_eos, use_varT, use_covarTS, use_varS
@@ -443,7 +446,7 @@ subroutine generic_plm_update_inty_dpa(TILE_SIZE_X, TILE_SIZE_Y, k, tv, T_t, T_b
   real :: w_left, w_right, hWght, hWghtTop, iDenom, hL, hR
   real :: Ttl, Tbl, Ttr, Tbr, Stl, Sbl, Str, Sbr
   integer, dimension(2,2) :: EOSdom_h15
-  integer :: Isq, Ieq, Jsq, Jeq, i, j, m, n, pos, jstart, jend, istart, iend, ii, jj
+  integer :: Isq, Ieq, Jsq, Jeq, i, j, k, m, n, pos, jstart, jend, istart, iend, ii, jj
 
   Isq = HI%IscB ; Ieq = HI%IecB ; Jsq = HI%JscB ; Jeq = HI%JecB
 
@@ -452,7 +455,7 @@ subroutine generic_plm_update_inty_dpa(TILE_SIZE_X, TILE_SIZE_Y, k, tv, T_t, T_b
   do jstart=Jsq,Jeq,TILE_SIZE_Y ; do istart=HI%isc,HI%iec,TILE_SIZE_X
     jend = min(Jeq, jstart+TILE_SIZE_Y-1) ; iend = min(HI%iec, istart+TILE_SIZE_X-1)
 
-    do concurrent (j=jstart:jend, i=istart:iend)
+    do concurrent (k=kstart:kend, j=jstart:jend, i=istart:iend)
       ii = i-istart+1 ; jj = j-jstart+1
       hWght = massWeightToggle * &
               max(0., -bathyT(i,j)-e(i,j+1,K), -bathyT(i,j+1)-e(i,j,K))
@@ -511,6 +514,7 @@ subroutine generic_plm_update_inty_dpa(TILE_SIZE_X, TILE_SIZE_Y, k, tv, T_t, T_b
     EOSdom_h15(1,1) = 1 ; EOSdom_h15(1,2) = 15*(iend-istart+1)
     EOSdom_h15(2,1) = 1 ; EOSdom_h15(2,2) = jend-jstart+1
 
+    do k=kstart,kend
     if (use_stanley_eos) then
       call calculate_density(T15, S15, p15, T215, TS15, S215, r15, EOS, EOSdom_h15, rho_ref=rho_ref)
     else
@@ -520,31 +524,32 @@ subroutine generic_plm_update_inty_dpa(TILE_SIZE_X, TILE_SIZE_Y, k, tv, T_t, T_b
         call calculate_density(T15, S15, p15, r15, EOS, EOSdom_h15)
       endif
     endif
+    enddo
 
     if (use_rho_ref) then
-      do concurrent (j=jstart:jend, i=istart:iend) local(ii,jj,intz,pos)
+      do concurrent (k=kstart:kend, j=jstart:jend, i=istart:iend) local(ii,jj,intz,pos)
         ii = i-istart+1 ; jj = j-jstart+1
-        intz(1) = dpa(i,j) ; intz(5) = dpa(i,j+1)
+        intz(1) = dpa(i,j,k) ; intz(5) = dpa(i,j+1,k)
         do m = 2,4
           pos = (ii-1)*15+(m-2)*5
           intz(m) = (G_e*dz_y(m,ii,jj)*( C1_90*(7.0*(r15(pos+1,jj)+r15(pos+5,jj)) + &
                                           32.0*(r15(pos+2,jj)+r15(pos+4,jj)) + &
                                           12.0*r15(pos+3,jj)) ))
         enddo
-        inty_dpa(i,J) = C1_90*(7.0*(intz(1)+intz(5)) + 32.0*(intz(2)+intz(4)) + &
+        inty_dpa(i,J,k) = C1_90*(7.0*(intz(1)+intz(5)) + 32.0*(intz(2)+intz(4)) + &
                               12.0*intz(3))
       enddo
     else
-      do concurrent (j=jstart:jend, i=istart:iend) local(ii,jj,intz,pos)
+      do concurrent (k=kstart:kend, j=jstart:jend, i=istart:iend) local(ii,jj,intz,pos)
         ii = i-istart+1 ; jj = j-jstart+1
-        intz(1) = dpa(i,j) ; intz(5) = dpa(i,j+1)
+        intz(1) = dpa(i,j,k) ; intz(5) = dpa(i,j+1,k)
         do m = 2,4
           pos = (ii-1)*15+(m-2)*5
           intz(m) = (G_e*dz_y(m,ii,jj)*( C1_90*(7.0*(r15(pos+1,jj)+r15(pos+5,jj)) + &
                                           32.0*(r15(pos+2,jj)+r15(pos+4,jj)) + &
                                           12.0*r15(pos+3,jj)) - rho_ref ))
         enddo
-        inty_dpa(i,J) = C1_90*(7.0*(intz(1)+intz(5)) + 32.0*(intz(2)+intz(4)) + &
+        inty_dpa(i,J,k) = C1_90*(7.0*(intz(1)+intz(5)) + 32.0*(intz(2)+intz(4)) + &
                               12.0*intz(3))
       enddo
     endif
