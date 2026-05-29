@@ -1208,9 +1208,11 @@ subroutine PressureForce_FV_Bouss(h, tv, PFu, PFv, G, GV, US, CS, ALE_CSp, ADp, 
     !$omp target update to(e(:,:,nz+1))
   endif
 
-  do k=nz,1,-1
-    do concurrent (j=Jsq:Jeq+1, i=Isq:Ieq+1)
-      e(i,j,K) = e(i,j,K+1) + h(i,j,k)*GV%H_to_Z
+  do concurrent(j=Jsq:Jeq+1)
+    do k=nz,1,-1
+      do concurrent (i=Isq:Ieq+1)
+        e(i,j,K) = e(i,j,K+1) + h(i,j,k)*GV%H_to_Z
+      enddo
     enddo
   enddo
 
@@ -1243,6 +1245,7 @@ subroutine PressureForce_FV_Bouss(h, tv, PFu, PFv, G, GV, US, CS, ALE_CSp, ADp, 
       tv_tmp%T => tv%T ; tv_tmp%S => tv%S
       tv_tmp%eqn_of_state => tv%eqn_of_state
     endif
+    !$omp target enter data map(to: tv_tmp, tv_tmp%T, tv_tmp%S)
   endif
 
   ! If regridding is activated, do a linear reconstruction of salinity
@@ -1584,14 +1587,18 @@ subroutine PressureForce_FV_Bouss(h, tv, PFu, PFv, G, GV, US, CS, ALE_CSp, ADp, 
     enddo
   endif
 
-  do k=1,nz
-    do concurrent (j=js:je, I=Isq:Ieq)
-      intx_pa(I,j,K+1) = intx_pa(I,j,K) + intx_dpa(I,j,k)
+  do concurrent (j=js:je)
+    do k=1,nz
+      do concurrent (I=Isq:Ieq)
+        intx_pa(I,j,K+1) = intx_pa(I,j,K) + intx_dpa(I,j,k)
+      enddo
     enddo
   enddo
-  do k=1,nz
-    do concurrent (J=Jsq:Jeq, i=is:ie)
-      inty_pa(i,J,K+1) = inty_pa(i,J,K) + inty_dpa(i,J,k)
+  do concurrent (J=Jsq:Jeq)
+    do k=1,nz
+      do concurrent (i=is:ie)
+        inty_pa(i,J,K+1) = inty_pa(i,J,K) + inty_dpa(i,J,k)
+      enddo
     enddo
   enddo
 
