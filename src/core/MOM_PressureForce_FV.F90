@@ -38,6 +38,14 @@ public PressureForce_FV_Bouss, PressureForce_FV_nonBouss
 ! their mks counterparts with notation like "a velocity [Z T-1 ~> m s-1]".  If the units
 ! vary with the Boussinesq approximation, the Boussinesq variant is given first.
 
+#ifdef __NVCOMPILER_OPENMP_GPU
+integer, parameter :: default_nkblock = 0  !< Default k block size for PLM density integrals [nondim].
+#else
+integer, parameter :: default_nkblock = 1  !< Default k block size for PLM density integrals [nondim]
+#endif
+integer, parameter :: default_niblock_plm = 0 !< Default i tile size, 0 = full domain [nondim]
+integer, parameter :: default_njblock_plm = 0 !< Default j tile size, 0 = full domain [nondim]
+
 !> Finite volume pressure gradient control structure
 type, public :: PressureForce_FV_CS ; private
   logical :: initialized = .false. !< True if this control structure has been initialized.
@@ -104,6 +112,9 @@ type, public :: PressureForce_FV_CS ; private
   integer :: id_sal_v = -1 !< Diagnostic identifier
   integer :: id_tides_u = -1 !< Diagnostic identifier
   integer :: id_tides_v = -1 !< Diagnostic identifier
+  integer :: nkblock      !< Vertical block size for PLM density integrals [nondim]
+  integer :: niblock_plm  !< i-tile size for PLM density integrals, 0 = full domain [nondim]
+  integer :: njblock_plm  !< j-tile size for PLM density integrals, 0 = full domain [nondim]
   type(SAL_CS), pointer :: SAL_CSp => NULL() !< SAL control structure
   type(tidal_forcing_CS), pointer :: tides_CSp => NULL() !< Tides control structure
 end type PressureForce_FV_CS
@@ -1103,9 +1114,10 @@ subroutine PressureForce_FV_Bouss(h, tv, PFu, PFv, G, GV, US, CS, ALE_CSp, ADp, 
   integer :: EOSdom2d(2,2)  ! The 2D compute domain for the equation of state
   integer :: is, ie, js, je, Isq, Ieq, Jsq, Jeq, nz, nkmb
   integer :: i, j, k, m, kstart, kend
-  integer, parameter :: nkblock = 75
+  integer :: nkblock
 
   is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec ; nz = GV%ke
+  nkblock = CS%nkblock ; if (nkblock <= 0) nkblock = nz
   nkmb=GV%nk_rho_varies
   Isq = G%IscB ; Ieq = G%IecB ; Jsq = G%JscB ; Jeq = G%JecB
   EOSdom(1) = Isq - (G%isd-1) ;  EOSdom(2) = G%iec+1 - (G%isd-1)
@@ -1322,7 +1334,8 @@ subroutine PressureForce_FV_Bouss(h, tv, PFu, PFv, G, GV, US, CS, ALE_CSp, ADp, 
                     intx_dpa, inty_dpa, &
                     MassWghtInterp=CS%MassWghtInterp, &
                     use_inaccurate_form=CS%use_inaccurate_pgf_rho_anom, Z_0p=Z_0p, &
-                    MassWghtInterpVanOnly=CS%MassWghtInterpVanOnly, h_nv=dz_nonvanished)
+                    MassWghtInterpVanOnly=CS%MassWghtInterpVanOnly, h_nv=dz_nonvanished, &
+                    niblock=CS%niblock_plm, njblock=CS%njblock_plm)
         elseif ( CS%Recon_Scheme == 2 ) then
           do k=kstart,kend
           call int_density_dz_generic_ppm(k, tv, T_t, T_b, S_t, S_b, e, &
@@ -2280,6 +2293,18 @@ subroutine PressureForce_FV_init(Time, G, GV, US, param_file, diag, CS, ADp, SAL
   call get_param(param_file, mdl, "USE_STANLEY_PGF", CS%use_stanley_pgf, &
                  "If true, turn on Stanley SGS T variance parameterization "// &
                  "in PGF code.", default=.false.)
+  call get_param(param_file, mdl, "PGF_PLM_NKBLOCK", CS%nkblock, &
+                 "Vertical block size for the PLM pressure gradient density integral. "//&
+                 "0 processes all layers in a single block.", &
+                 default=default_nkblock)
+  call get_param(param_file, mdl, "PGF_PLM_NIBLOCK", CS%niblock_plm, &
+                 "i-tile size for the PLM pressure gradient density integral. "//&
+                 "0 uses the full i compute domain.", &
+                 default=default_niblock_plm)
+  call get_param(param_file, mdl, "PGF_PLM_NJBLOCK", CS%njblock_plm, &
+                 "j-tile size for the PLM pressure gradient density integral. "//&
+                 "0 uses the full j compute domain.", &
+                 default=default_njblock_plm)
   if (CS%use_stanley_pgf) then
     call get_param(param_file, mdl, "STANLEY_COEFF", Stanley_coeff, &
                  "Coefficient correlating the temperature gradient and SGS T variance.", &
