@@ -1148,7 +1148,7 @@ subroutine PressureForce_FV_Bouss(h, tv, PFu, PFv, G, GV, US, CS, ALE_CSp, ADp, 
     MassWt_u(:,:,:) = 0.0 ; MassWt_v(:,:,:) = 0.0
   endif
 
-  !$omp target enter data map(alloc: e)
+  !$omp target enter data map(alloc: e, T_t, T_b, S_t, S_b)
 
   do concurrent (j=Jsq:Jeq+1, i=Isq:Ieq+1)
     e(i,j,nz+1) = -G%bathyT(i,j)
@@ -1290,7 +1290,7 @@ subroutine PressureForce_FV_Bouss(h, tv, PFu, PFv, G, GV, US, CS, ALE_CSp, ADp, 
         Z_0p(i,j) = G%meanSL(i,j)
       enddo
     endif
-    !$omp target update from(Z_0p)
+    !$omp target update from(Z_0p) if((use_ALE .and. CS%Recon_Scheme == 2) .or. CS%reset_intxpa_integral .or. CS%correction_intxpa)
   endif
 
   ! Calculate 4 integrals through the layer that are required in the
@@ -1298,7 +1298,7 @@ subroutine PressureForce_FV_Bouss(h, tv, PFu, PFv, G, GV, US, CS, ALE_CSp, ADp, 
   !$omp target enter data map(alloc: dpa, intx_dpa, inty_dpa, intz_dpa)
 
   if (use_EOS) then
-    !$omp target update from(e) if( (use_ALE .and. CS%Recon_Scheme > 0) .or. &
+    !$omp target update from(e) if( (use_ALE .and. CS%Recon_Scheme == 2) .or. &
     !$omp                           (CS%id_MassWt_u > 0) .or. (CS%id_MassWt_v > 0))
 
     ! The following routine computes the integrals that are needed to
@@ -1306,7 +1306,7 @@ subroutine PressureForce_FV_Bouss(h, tv, PFu, PFv, G, GV, US, CS, ALE_CSp, ADp, 
     ! assumed when regridding is activated. Otherwise, the previous version
     ! is used, whereby densities within each layer are constant no matter
     ! where the layers are located.
-    !$omp target enter data map(to: T_t, T_b, S_t, S_b, e, tv)
+    !$omp target enter data map(to: tv)
     do k=1,nz
       if ( use_ALE .and. CS%Recon_Scheme > 0 ) then
         if ( CS%Recon_Scheme == 1 .or. CS%Recon_Scheme == 3 ) then
@@ -1342,7 +1342,7 @@ subroutine PressureForce_FV_Bouss(h, tv, PFu, PFv, G, GV, US, CS, ALE_CSp, ADp, 
                                     G%HI, MassWt_u(:,:,k), MassWt_v(:,:,k), &
                                     MassWghtInterpVanOnly=CS%MassWghtInterpVanOnly, h_nv=CS%h_nonvanished)
     enddo
-    !$omp target exit data map(release: T_t, T_b, S_t, S_b, e, tv)
+    !$omp target exit data map(release: tv)
   else
     !$omp target data map(alloc: dz_geo)
     do k=1,nz
@@ -1422,7 +1422,6 @@ subroutine PressureForce_FV_Bouss(h, tv, PFu, PFv, G, GV, US, CS, ALE_CSp, ADp, 
   endif
 
   !$omp target enter data map(alloc: intx_pa, inty_pa)
-
   if (CS%correction_intxpa) then
     ! TODO needs to be moved to GPU
 
@@ -1974,7 +1973,7 @@ subroutine PressureForce_FV_Bouss(h, tv, PFu, PFv, G, GV, US, CS, ALE_CSp, ADp, 
     endif
   endif
 
-  !$omp target exit data map(delete: e)
+  !$omp target exit data map(delete: e, T_t, T_b, S_t, S_b)
   !$omp target exit data map(delete: e_tidal_eq, e_tidal_sal, e_sal_and_tide) if (CS%tides)
   !$omp target exit data map(delete: e_sal) if (CS%calculate_SAL)
 
