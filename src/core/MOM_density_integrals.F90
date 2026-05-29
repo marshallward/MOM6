@@ -42,7 +42,8 @@ interface
 module subroutine int_density_dz_generic_plm(kstart, kend, tv, T_t, T_b, S_t, S_b, e, rho_ref, &
                                       rho_0, G_e, dz_subroundoff, bathyT, HI, GV, EOS, US, use_stanley_eos, dpa, &
                                       intz_dpa, intx_dpa, inty_dpa, MassWghtInterp, &
-                                      use_inaccurate_form, Z_0p, MassWghtInterpVanOnly, h_nv)
+                                      use_inaccurate_form, Z_0p, MassWghtInterpVanOnly, h_nv, &
+                                      niblock, njblock)
   integer,              intent(in)  :: kstart,kend   !< Layer index to calculate integrals for
   type(hor_index_type), intent(in)  :: HI  !< Ocean horizontal index structures for the input arrays
   type(verticalGrid_type), intent(in) :: GV !< Vertical grid structure
@@ -91,6 +92,8 @@ module subroutine int_density_dz_generic_plm(kstart, kend, tv, T_t, T_b, S_t, S_
   real,       optional, intent(in)  :: h_nv !< Nonvanished height [Z ~> m]
   real, dimension(HI%isd:HI%ied,HI%jsd:HI%jed), &
               optional, intent(in)  :: Z_0p !< The height at which the pressure is 0 [Z ~> m]
+  integer,    optional, intent(in)  :: niblock !< i-tile size for horizontal blocking; 0 = full domain [nondim]
+  integer,    optional, intent(in)  :: njblock !< j-tile size for horizontal blocking; 0 = full domain [nondim]
 end subroutine int_density_dz_generic_plm
 end interface
 
