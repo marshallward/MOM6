@@ -31,7 +31,7 @@ real elemental pure function PLM_slope_wa(h_l, h_c, h_r, h_neglect, u_l, u_c, u_
   real :: sigma_l, sigma_c, sigma_r ! Left, central and right slope estimates as
                                     ! differences across the cell [A]
   real :: u_min, u_max ! Minimum and maximum value across cell [A]
-
+  !$omp declare target
   ! Side differences
   sigma_r = u_r - u_c
   sigma_l = u_c - u_l
@@ -132,7 +132,7 @@ real elemental pure function PLM_monotonized_slope(u_l, u_c, u_r, s_l, s_c, s_r)
   real :: e_r, e_l, edge ! Right, left and temporary edge values [A]
   real :: almost_two ! The number 2, almost [nondim]
   real :: slp ! Magnitude of PLM central slope [A]
-
+  !$omp declare target
   almost_two = 2. * ( 1. - epsilon(s_c) )
 
   ! Edge values of neighbors abutting this cell
@@ -170,7 +170,7 @@ real elemental pure function PLM_extrapolate_slope(h_l, h_c, h_neglect, u_l, u_c
   ! Local variables
   real :: left_edge ! Left edge value [A]
   real :: hl, hc ! Left and central cell thicknesses [H]
-
+  !$omp declare target
   ! Avoid division by zero for vanished cells
   hl = h_l + h_neglect
   hc = h_c + h_neglect
