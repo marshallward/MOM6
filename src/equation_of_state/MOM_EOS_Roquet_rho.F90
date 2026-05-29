@@ -183,6 +183,8 @@ contains
   procedure :: calculate_density_array => calculate_density_array_Roquet_rho
   !> Local implementation of generic calculate_density_array_2d for efficiency
   procedure :: calculate_density_array_2d => calculate_density_array_2d_Roquet_rho
+  !> Local implementation of generic calculate_density_array_3d for efficiency
+  procedure :: calculate_density_array_3d => calculate_density_array_3d_Roquet_rho
   !> Local implementation of generic calculate_spec_vol_array for efficiency
   procedure :: calculate_spec_vol_array => calculate_spec_vol_array_Roquet_rho
   !> Local implementation of generic calculate_density_derivs_2d for efficiency
@@ -720,6 +722,45 @@ subroutine calculate_density_array_2d_Roquet_rho(this, T, S, pressure, rho, dom,
     enddo
   endif
 end subroutine calculate_density_array_2d_Roquet_rho
+
+!> Calculate the in-situ density for 3D array inputs and outputs.
+subroutine calculate_density_array_3d_Roquet_rho(this, T, S, pressure, rho, dom, rho_ref)
+  class(Roquet_rho_EOS), intent(in) :: this
+    !< This EOS
+  real, intent(in)  :: T(:,:,:)
+    !< Conservative temperature [degC]
+  real, intent(in)  :: S(:,:,:)
+    !< Absolute salinity [g kg-1]
+  real, intent(in)  :: pressure(:,:,:)
+    !< Pressure [Pa]
+  real, intent(out) :: rho(:,:,:)
+    !< In situ density [kg m-3]
+  integer, intent(in) :: dom(3,2)
+    !< Index bounds of domain.  First index is rank, second is bounds
+  real, optional, intent(in) :: rho_ref
+    !< A reference density [kg m-3]
+
+  integer :: is, ie, js, je, ks, ke
+  integer :: i, j, k
+
+  is = dom(1,1) ; ie = dom(1,2)
+  js = dom(2,1) ; je = dom(2,2)
+  ks = dom(3,1) ; ke = dom(3,2)
+
+  ! The element functions are called via their free-function (_loc) forms rather than
+  ! through the polymorphic "this" binding, which causes runtime errors in do concurrent
+  ! regions offloaded to the GPU with nvfortran.
+  if (present(rho_ref)) then
+    do concurrent (k=ks:ke, j=js:je, i=is:ie)
+      rho(i,j,k) = density_anomaly_elem_Roquet_rho_loc(T(i,j,k), S(i,j,k), &
+          pressure(i,j,k), rho_ref)
+    enddo
+  else
+    do concurrent (k=ks:ke, j=js:je, i=is:ie)
+      rho(i,j,k) = density_elem_Roquet_rho_loc(T(i,j,k), S(i,j,k), pressure(i,j,k))
+    enddo
+  endif
+end subroutine calculate_density_array_3d_Roquet_rho
 
 !> Calculate the in-situ density derivatives for 2D array inputs and outputs.
 subroutine calculate_density_derivs_2d_Roquet_rho(this, T, S, pressure, &
