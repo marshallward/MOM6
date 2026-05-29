@@ -1102,7 +1102,8 @@ subroutine PressureForce_FV_Bouss(h, tv, PFu, PFv, G, GV, US, CS, ALE_CSp, ADp, 
   integer, dimension(2) :: EOSdom_v ! The i-computational domain for the equation of state at v-velocity points
   integer :: EOSdom2d(2,2)  ! The 2D compute domain for the equation of state
   integer :: is, ie, js, je, Isq, Ieq, Jsq, Jeq, nz, nkmb
-  integer :: i, j, k, m
+  integer :: i, j, k, m, kstart, kend
+  integer, parameter :: nkblock = 1
 
   is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec ; nz = GV%ke
   nkmb=GV%nk_rho_varies
@@ -1307,40 +1308,48 @@ subroutine PressureForce_FV_Bouss(h, tv, PFu, PFv, G, GV, US, CS, ALE_CSp, ADp, 
     ! is used, whereby densities within each layer are constant no matter
     ! where the layers are located.
     !$omp target enter data map(to: tv)
-    do k=1,nz
+    do kstart=1,nz,nkblock
+      kend = min(kstart+nkblock-1, nz)
       if ( use_ALE .and. CS%Recon_Scheme > 0 ) then
         if ( CS%Recon_Scheme == 1 .or. CS%Recon_Scheme == 3 ) then
-          call int_density_dz_generic_plm(k, tv, T_t, T_b, S_t, S_b, e, &
+          call int_density_dz_generic_plm(kstart, kend, tv, T_t, T_b, S_t, S_b, e, &
                     rho_ref, rho0_int_density, GV%g_Earth, dz_neglect, G%bathyT, &
-                    G%HI, GV, tv%eqn_of_state, US, CS%use_stanley_pgf, dpa(:,:,k), intz_dpa(:,:,k), &
-                    intx_dpa(:,:,k), inty_dpa(:,:,k), &
+                    G%HI, GV, tv%eqn_of_state, US, CS%use_stanley_pgf, dpa, intz_dpa, &
+                    intx_dpa, inty_dpa, &
                     MassWghtInterp=CS%MassWghtInterp, &
                     use_inaccurate_form=CS%use_inaccurate_pgf_rho_anom, Z_0p=Z_0p, &
                     MassWghtInterpVanOnly=CS%MassWghtInterpVanOnly, h_nv=dz_nonvanished)
         elseif ( CS%Recon_Scheme == 2 ) then
+          do k=kstart,kend
           call int_density_dz_generic_ppm(k, tv, T_t, T_b, S_t, S_b, e, &
                     rho_ref, rho0_int_density, GV%g_Earth, dz_neglect, G%bathyT, &
                     G%HI, GV, tv%eqn_of_state, US, CS%use_stanley_pgf, dpa(:,:,k), intz_dpa(:,:,k), &
                     intx_dpa(:,:,k), inty_dpa(:,:,k), &
                     MassWghtInterp=CS%MassWghtInterp, Z_0p=Z_0p, &
                     MassWghtInterpVanOnly=CS%MassWghtInterpVanOnly, h_nv=dz_nonvanished)
+          enddo
         endif
       else
+        do k=kstart,kend
         call int_density_dz(tv_tmp%T(:,:,k), tv_tmp%S(:,:,k), e(:,:,K), e(:,:,K+1), &
                   rho_ref, rho0_int_density, GV%g_Earth, G%HI, tv%eqn_of_state, US, dpa(:,:,k), &
                   intz_dpa(:,:,k), intx_dpa(:,:,k), inty_dpa(:,:,k), G%bathyT, e(:,:,1), dz_neglect, &
                   CS%MassWghtInterp, Z_0p=Z_0p, &
                   MassWghtInterpVanOnly=CS%MassWghtInterpVanOnly, h_nv=dz_nonvanished)
+        enddo
       endif
       if (GV%Z_to_H /= 1.0) then
-        do concurrent (j=Jsq:Jeq+1, i=Isq:Ieq+1)
+        do concurrent (k=kstart:kend, j=Jsq:Jeq+1, i=Isq:Ieq+1)
           intz_dpa(i,j,k) = intz_dpa(i,j,k)*GV%Z_to_H
         enddo
       endif
-      if ((CS%id_MassWt_u > 0) .or. (CS%id_MassWt_v > 0)) &
+      if ((CS%id_MassWt_u > 0) .or. (CS%id_MassWt_v > 0)) then
+        do k=kstart,kend
         call diagnose_mass_weight_Z(e(:,:,K), e(:,:,K+1), G%bathyT, e(:,:,1), dz_neglect, CS%MassWghtInterp, &
                                     G%HI, MassWt_u(:,:,k), MassWt_v(:,:,k), &
                                     MassWghtInterpVanOnly=CS%MassWghtInterpVanOnly, h_nv=CS%h_nonvanished)
+        enddo
+      endif
     enddo
     !$omp target exit data map(release: tv)
   else
