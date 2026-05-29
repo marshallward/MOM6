@@ -9,6 +9,10 @@ implicit none
 
 #include <MOM_memory.h>
 
+real, parameter :: wt_t(5) = [1.0, 0.75, 0.5, 0.25, 0.0] ! Top weights [nondim]
+real, parameter :: wt_b(5) = [0.0, 0.25, 0.5, 0.75, 1.0] ! Bottom weights [nondim]
+!$omp declare target to(wt_t, wt_b)
+
 contains
 
 !> Calls the appropriate subroutine to calculate analyti
@@ -89,18 +93,22 @@ module subroutine int_density_dz_generic_plm(k, tv, T_t, T_b, S_t, S_b, e, rho_r
   logical :: use_rho_ref ! Pass rho_ref to the equation of state for more accurate calculation
                          ! of density anomalies.
   logical :: use_varT, use_varS, use_covarTS ! Logicals for SGS variances fields
-  integer :: Isq, Ieq, Jsq, Jeq, i, j
+  integer :: Isq, Ieq, Jsq, Jeq, i, j, n
   integer :: TILE_SIZE_X, TILE_SIZE_Y
 
   Isq = HI%IscB ; Ieq = HI%IecB ; Jsq = HI%JscB ; Jeq = HI%JecB
 
+  !$omp target enter data map(alloc: z0pres)
+
   GxRho = G_e * rho_0
   if (present(Z_0p)) then
-    do j=Jsq,Jeq+1 ; do i=Isq,Ieq+1
+    do concurrent (j=Jsq:Jeq+1, i=Isq:Ieq+1)
       z0pres(i,j) = Z_0p(i,j)
-    enddo ; enddo
+    enddo
   else
-    z0pres(:,:) = 0.0
+    do concurrent (j=HI%jsd:HI%jed, i=HI%isd:HI%ied)
+      z0pres(i,j) = 0.0
+    enddo
   endif
   massWeightToggle = 0. ; TopWeightToggle = 0.
   if (present(MassWghtInterp)) then
@@ -154,6 +162,8 @@ module subroutine int_density_dz_generic_plm(k, tv, T_t, T_b, S_t, S_b, e, rho_r
                                      rho_ref, EOS, HI, GV)
   endif
 
+  !$omp target exit data map(release: z0pres)
+
 end subroutine int_density_dz_generic_plm
 
 subroutine generic_plm_update_dpa(TILE_SIZE_X, TILE_SIZE_Y, k, tv, T_t, T_b, S_t, S_b, e, &
@@ -182,7 +192,6 @@ subroutine generic_plm_update_dpa(TILE_SIZE_X, TILE_SIZE_Y, k, tv, T_t, T_b, S_t
   real :: p5(5*TILE_SIZE_X,TILE_SIZE_Y)
   real :: r5(5*TILE_SIZE_X,TILE_SIZE_Y)
   real :: u5(5*TILE_SIZE_X,TILE_SIZE_Y)
-  real :: wt_t(5), wt_b(5)
   real :: rho_anom, dz
   real, parameter :: C1_90 = 1.0/90.0
   integer, dimension(2,2) :: EOSdom_h5
@@ -190,20 +199,13 @@ subroutine generic_plm_update_dpa(TILE_SIZE_X, TILE_SIZE_Y, k, tv, T_t, T_b, S_t
 
   Isq = HI%IscB ; Ieq = HI%IecB ; Jsq = HI%JscB ; Jeq = HI%JecB
 
-  T25(:,:) = 0.
-  TS5(:,:) = 0.
-  S25(:,:) = 0.
-
-  do n = 1, 5
-    wt_t(n) = 0.25 * real(5-n)
-    wt_b(n) = 1.0 - wt_t(n)
-  enddo
+  !$omp target enter data map(alloc: T5, S5, T25, TS5, S25, p5, r5, u5)
 
   do jstart=Jsq,Jeq+1,TILE_SIZE_Y ; do istart=Isq,Ieq+1,TILE_SIZE_X
     jend = min(Jeq+1, jstart+TILE_SIZE_Y-1)
     iend = min(Ieq+1, istart+TILE_SIZE_X-1)
 
-    do j=jstart,jend ; do i=istart,iend
+    do concurrent (j=jstart:jend, i=istart:iend)
       ii = i-istart+1 ; jj = j-jstart+1
       dz = e(i,j,K) - e(i,j,K+1)
       do n=1,5
@@ -214,7 +216,7 @@ subroutine generic_plm_update_dpa(TILE_SIZE_X, TILE_SIZE_Y, k, tv, T_t, T_b, S_t
       if (use_varT)    T25((ii-1)*5+1:(ii-1)*5+5,jj) = tv%varT(i,j,k)
       if (use_covarTS) TS5((ii-1)*5+1:(ii-1)*5+5,jj) = tv%covarTS(i,j,k)
       if (use_varS)    S25((ii-1)*5+1:(ii-1)*5+5,jj) = tv%varS(i,j,k)
-    enddo ; enddo
+    enddo
 
     EOSdom_h5(1,1) = 1 ; EOSdom_h5(1,2) = 5*(iend-istart+1)
     EOSdom_h5(2,1) = 1 ; EOSdom_h5(2,2) = jend-jstart+1
@@ -226,15 +228,15 @@ subroutine generic_plm_update_dpa(TILE_SIZE_X, TILE_SIZE_Y, k, tv, T_t, T_b, S_t
         call calculate_density(T5, S5, p5, r5, EOS, EOSdom_h5, rho_ref=rho_ref)
       else
         call calculate_density(T5, S5, p5, r5, EOS, EOSdom_h5)
-        do j=jstart,jend ; do i=istart,iend
+        do concurrent (j=jstart:jend, i=istart:iend, n=1:5)
           ii = i-istart+1 ; jj = j-jstart+1
-          u5((ii-1)*5+1:(ii-1)*5+5,jj) = r5((ii-1)*5+1:(ii-1)*5+5,jj) - rho_ref
-        enddo ; enddo
+          u5((ii-1)*5+n,jj) = r5((ii-1)*5+n,jj) - rho_ref
+        enddo
       endif
     endif
 
     if (use_rho_ref) then
-      do j=jstart,jend ; do i=istart,iend
+      do concurrent (j=jstart:jend, i=istart:iend)
         ii = i-istart+1 ; jj = j-jstart+1
         dz = e(i,j,K) - e(i,j,K+1)
         rho_anom = C1_90*(7.0*(r5((ii-1)*5+1,jj)+r5((ii-1)*5+5,jj)) + 32.0*(r5((ii-1)*5+2,jj)+r5((ii-1)*5+4,jj)) + 12.0*r5((ii-1)*5+3,jj))
@@ -243,9 +245,9 @@ subroutine generic_plm_update_dpa(TILE_SIZE_X, TILE_SIZE_Y, k, tv, T_t, T_b, S_t
           intz_dpa(i,j) = 0.5*G_e*dz**2 * &
                   (rho_anom - C1_90*(16.0*(r5((ii-1)*5+4,jj)-r5((ii-1)*5+2,jj)) + 7.0*(r5((ii-1)*5+5,jj)-r5((ii-1)*5+1,jj))) )
         endif
-      enddo ; enddo
+      enddo
     else
-      do j=jstart,jend ; do i=istart,iend
+      do concurrent (j=jstart:jend, i=istart:iend)
         ii = i-istart+1 ; jj = j-jstart+1
         dz = e(i,j,K) - e(i,j,K+1)
         rho_anom = C1_90*(7.0*(r5((ii-1)*5+1,jj)+r5((ii-1)*5+5,jj)) + 32.0*(r5((ii-1)*5+2,jj)+r5((ii-1)*5+4,jj)) + 12.0*r5((ii-1)*5+3,jj)) &
@@ -255,8 +257,10 @@ subroutine generic_plm_update_dpa(TILE_SIZE_X, TILE_SIZE_Y, k, tv, T_t, T_b, S_t
           intz_dpa(i,j) = 0.5*G_e*dz**2 * &
                   (rho_anom - C1_90*(16.0*(u5((ii-1)*5+4,jj)-u5((ii-1)*5+2,jj)) + 7.0*(u5((ii-1)*5+5,jj)-u5((ii-1)*5+1,jj))) )
         endif
-      enddo ; enddo
+      enddo
     endif
+
+    !$omp target exit data map(release: T5, S5, T25, TS5, S25, p5, r5, u5)
 
   enddo ; enddo
 
@@ -291,7 +295,6 @@ subroutine generic_plm_update_intx_dpa(TILE_SIZE_X, TILE_SIZE_Y, k, tv, T_t, T_b
   real :: p15(15*TILE_SIZE_X,TILE_SIZE_Y)
   real :: r15(15*TILE_SIZE_X,TILE_SIZE_Y)
   real :: dz_x(5,TILE_SIZE_X,TILE_SIZE_Y)
-  real :: wt_t(5), wt_b(5)
   real :: intz(5)
   real, parameter :: C1_90 = 1.0/90.0
   real :: w_left, w_right, hWght, hWghtTop, iDenom, hL, hR
@@ -301,19 +304,12 @@ subroutine generic_plm_update_intx_dpa(TILE_SIZE_X, TILE_SIZE_Y, k, tv, T_t, T_b
 
   Isq = HI%IscB ; Ieq = HI%IecB ; Jsq = HI%JscB ; Jeq = HI%JecB
 
-  T215(:,:) = 0.
-  TS15(:,:) = 0.
-  S215(:,:) = 0.
-
-  do n = 1, 5
-    wt_t(n) = 0.25 * real(5-n)
-    wt_b(n) = 1.0 - wt_t(n)
-  enddo
+  !$omp target enter data map(alloc: T15, S15, T215, TS15, S215, p15, r15, dz_x)
 
   do jstart=HI%jsc,HI%jec,TILE_SIZE_Y ; do istart=Isq,Ieq,TILE_SIZE_X
     jend = min(HI%jec, jstart+TILE_SIZE_Y-1) ; iend = min(Ieq, istart+TILE_SIZE_X-1)
 
-    do j=jstart,jend ; do I=istart,iend
+    do concurrent (j=jstart:jend, i=istart:iend) local(ii,jj,hWght,hWghtTop,hL,hR,iDenom,Ttl,Tbl,Ttr,Tbr,Stl,Sbl,Str,Sbr,w_left,pos)
       ii = i-istart+1 ; jj = j-jstart+1
       hWght = massWeightToggle * &
               max(0., -bathyT(i,j)-e(i+1,j,K), -bathyT(i+1,j)-e(i,j,K))
@@ -366,7 +362,7 @@ subroutine generic_plm_update_intx_dpa(TILE_SIZE_X, TILE_SIZE_Y, k, tv, T_t, T_b
         if (use_covarTS) TS15(pos+1:pos+5,jj) = (w_left*tv%covarTS(i,j,k)) + (w_right*tv%covarTS(i+1,j,k))
         if (use_varS) S215(pos+1:pos+5,jj) = (w_left*tv%varS(i,j,k)) + (w_right*tv%varS(i+1,j,k))
       enddo
-    enddo ; enddo
+    enddo
 
     EOSdom_q15(1,1) = 1 ; EOSdom_q15(1,2) = 15*(iend-istart+1)
     EOSdom_q15(2,1) = 1 ; EOSdom_q15(2,2) = jend-jstart+1
@@ -381,28 +377,35 @@ subroutine generic_plm_update_intx_dpa(TILE_SIZE_X, TILE_SIZE_Y, k, tv, T_t, T_b
       endif
     endif
 
-    do j=jstart,jend ; do I=istart,iend
-      ii = i-istart+1 ; jj = j-jstart+1
-      intz(1) = dpa(i,j) ; intz(5) = dpa(i+1,j)
-
-      if (use_rho_ref) then
+    if (use_rho_ref) then
+      do concurrent(j=jstart:jend, I=istart:iend) local(intz, pos, ii, jj, m)
+        ii = i-istart+1 ; jj = j-jstart+1
+        intz(1) = dpa(i,j) ; intz(5) = dpa(i+1,j)
         do m = 2,4
           pos = (ii-1)*15+(m-2)*5
           intz(m) = (G_e*dz_x(m,ii,jj)*( C1_90*(7.0*(r15(pos+1,jj)+r15(pos+5,jj)) + 32.0*(r15(pos+2,jj)+r15(pos+4,jj)) + &
                             12.0*r15(pos+3,jj)) ))
         enddo
-      else
+        intx_dpa(I,j) = C1_90*(7.0*(intz(1)+intz(5)) + 32.0*(intz(2)+intz(4)) + &
+                              12.0*intz(3))
+      enddo
+    else
+      do concurrent(j=jstart:jend, I=istart:iend) local(intz, pos, ii, jj, m)
+        ii = i-istart+1 ; jj = j-jstart+1
+        intz(1) = dpa(i,j) ; intz(5) = dpa(i+1,j)
         do m = 2,4
           pos = (ii-1)*15+(m-2)*5
           intz(m) = (G_e*dz_x(m,ii,jj)*( C1_90*(7.0*(r15(pos+1,jj)+r15(pos+5,jj)) + 32.0*(r15(pos+2,jj)+r15(pos+4,jj)) + &
                             12.0*r15(pos+3,jj)) - rho_ref ))
         enddo
-      endif
-      intx_dpa(I,j) = C1_90*(7.0*(intz(1)+intz(5)) + 32.0*(intz(2)+intz(4)) + &
-                             12.0*intz(3))
-    enddo ; enddo
+        intx_dpa(I,j) = C1_90*(7.0*(intz(1)+intz(5)) + 32.0*(intz(2)+intz(4)) + &
+                              12.0*intz(3))
+      enddo
+    endif
 
   enddo ; enddo
+
+  !$omp target exit data map(release: T15, S15, T215, TS15, S215, p15, r15, dz_x)
 
 end subroutine generic_plm_update_intx_dpa
 
@@ -435,7 +438,6 @@ subroutine generic_plm_update_inty_dpa(TILE_SIZE_X, TILE_SIZE_Y, k, tv, T_t, T_b
   real :: p15(15*TILE_SIZE_X,TILE_SIZE_Y)
   real :: r15(15*TILE_SIZE_X,TILE_SIZE_Y)
   real :: dz_y(5,TILE_SIZE_X,TILE_SIZE_Y)
-  real :: wt_t(5), wt_b(5)
   real :: intz(5)
   real, parameter :: C1_90 = 1.0/90.0
   real :: w_left, w_right, hWght, hWghtTop, iDenom, hL, hR
@@ -445,19 +447,12 @@ subroutine generic_plm_update_inty_dpa(TILE_SIZE_X, TILE_SIZE_Y, k, tv, T_t, T_b
 
   Isq = HI%IscB ; Ieq = HI%IecB ; Jsq = HI%JscB ; Jeq = HI%JecB
 
-  T215(:,:) = 0.
-  TS15(:,:) = 0.
-  S215(:,:) = 0.
-
-  do n = 1, 5
-    wt_t(n) = 0.25 * real(5-n)
-    wt_b(n) = 1.0 - wt_t(n)
-  enddo
+  !$omp target enter data map(alloc: T15, S15, T215, TS15, S215, p15, r15, dz_y)
 
   do jstart=Jsq,Jeq,TILE_SIZE_Y ; do istart=HI%isc,HI%iec,TILE_SIZE_X
     jend = min(Jeq, jstart+TILE_SIZE_Y-1) ; iend = min(HI%iec, istart+TILE_SIZE_X-1)
 
-    do j=jstart,jend ; do i=istart,iend
+    do concurrent (j=jstart:jend, i=istart:iend)
       ii = i-istart+1 ; jj = j-jstart+1
       hWght = massWeightToggle * &
               max(0., -bathyT(i,j)-e(i,j+1,K), -bathyT(i,j+1)-e(i,j,K))
@@ -511,7 +506,7 @@ subroutine generic_plm_update_inty_dpa(TILE_SIZE_X, TILE_SIZE_Y, k, tv, T_t, T_b
         if (use_covarTS) TS15(pos+1:pos+5,jj) = (w_left*tv%covarTS(i,j,k)) + (w_right*tv%covarTS(i,j+1,k))
         if (use_varS) S215(pos+1:pos+5,jj) = (w_left*tv%varS(i,j,k)) + (w_right*tv%varS(i,j+1,k))
       enddo
-    enddo ; enddo
+    enddo
 
     EOSdom_h15(1,1) = 1 ; EOSdom_h15(1,2) = 15*(iend-istart+1)
     EOSdom_h15(2,1) = 1 ; EOSdom_h15(2,2) = jend-jstart+1
@@ -526,30 +521,36 @@ subroutine generic_plm_update_inty_dpa(TILE_SIZE_X, TILE_SIZE_Y, k, tv, T_t, T_b
       endif
     endif
 
-    do j=jstart,jend ; do i=istart,iend
-      ii = i-istart+1 ; jj = j-jstart+1
-      intz(1) = dpa(i,j) ; intz(5) = dpa(i,j+1)
-
-      if (use_rho_ref) then
+    if (use_rho_ref) then
+      do concurrent (j=jstart:jend, i=istart:iend) local(ii,jj,intz,pos)
+        ii = i-istart+1 ; jj = j-jstart+1
+        intz(1) = dpa(i,j) ; intz(5) = dpa(i,j+1)
         do m = 2,4
           pos = (ii-1)*15+(m-2)*5
           intz(m) = (G_e*dz_y(m,ii,jj)*( C1_90*(7.0*(r15(pos+1,jj)+r15(pos+5,jj)) + &
-                                           32.0*(r15(pos+2,jj)+r15(pos+4,jj)) + &
-                                           12.0*r15(pos+3,jj)) ))
+                                          32.0*(r15(pos+2,jj)+r15(pos+4,jj)) + &
+                                          12.0*r15(pos+3,jj)) ))
         enddo
-      else
+        inty_dpa(i,J) = C1_90*(7.0*(intz(1)+intz(5)) + 32.0*(intz(2)+intz(4)) + &
+                              12.0*intz(3))
+      enddo
+    else
+      do concurrent (j=jstart:jend, i=istart:iend) local(ii,jj,intz,pos)
+        ii = i-istart+1 ; jj = j-jstart+1
+        intz(1) = dpa(i,j) ; intz(5) = dpa(i,j+1)
         do m = 2,4
           pos = (ii-1)*15+(m-2)*5
           intz(m) = (G_e*dz_y(m,ii,jj)*( C1_90*(7.0*(r15(pos+1,jj)+r15(pos+5,jj)) + &
-                                           32.0*(r15(pos+2,jj)+r15(pos+4,jj)) + &
-                                           12.0*r15(pos+3,jj)) - rho_ref ))
+                                          32.0*(r15(pos+2,jj)+r15(pos+4,jj)) + &
+                                          12.0*r15(pos+3,jj)) - rho_ref ))
         enddo
-      endif
-      inty_dpa(i,J) = C1_90*(7.0*(intz(1)+intz(5)) + 32.0*(intz(2)+intz(4)) + &
-                             12.0*intz(3))
-    enddo ; enddo
-
+        inty_dpa(i,J) = C1_90*(7.0*(intz(1)+intz(5)) + 32.0*(intz(2)+intz(4)) + &
+                              12.0*intz(3))
+      enddo
+    endif
   enddo ; enddo
+
+  !$omp target exit data map(release: T15, S15, T215, TS15, S215, p15, r15, dz_y)
 
 end subroutine generic_plm_update_inty_dpa
 
