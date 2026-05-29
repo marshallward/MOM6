@@ -1300,15 +1300,13 @@ subroutine PressureForce_FV_Bouss(h, tv, PFu, PFv, G, GV, US, CS, ALE_CSp, ADp, 
   if (use_EOS) then
     !$omp target update from(e) if( (use_ALE .and. CS%Recon_Scheme > 0) .or. &
     !$omp                           (CS%id_MassWt_u > 0) .or. (CS%id_MassWt_v > 0))
-    ! transfer tv_tmp%* only if int_density_dz is called
-    !$omp target enter data map(to: tv_tmp, tv_tmp%T, tv_tmp%S) &
-    !$omp   if(.not.(use_ALE .and. CS%Recon_Scheme > 0))
 
     ! The following routine computes the integrals that are needed to
     ! calculate the pressure gradient force. Linear profiles for T and S are
     ! assumed when regridding is activated. Otherwise, the previous version
     ! is used, whereby densities within each layer are constant no matter
     ! where the layers are located.
+    !$omp target enter data map(to: T_t, T_b, S_t, S_b, e, tv)
     do k=1,nz
       if ( use_ALE .and. CS%Recon_Scheme > 0 ) then
         if ( CS%Recon_Scheme == 1 .or. CS%Recon_Scheme == 3 ) then
@@ -1327,8 +1325,6 @@ subroutine PressureForce_FV_Bouss(h, tv, PFu, PFv, G, GV, US, CS, ALE_CSp, ADp, 
                     MassWghtInterp=CS%MassWghtInterp, Z_0p=Z_0p, &
                     MassWghtInterpVanOnly=CS%MassWghtInterpVanOnly, h_nv=dz_nonvanished)
         endif
-        ! defensive update - not sure if it works
-        !$omp target update to(dpa, intx_dpa, inty_dpa, intz_dpa)
       else
         call int_density_dz(tv_tmp%T(:,:,k), tv_tmp%S(:,:,k), e(:,:,K), e(:,:,K+1), &
                   rho_ref, rho0_int_density, GV%g_Earth, G%HI, tv%eqn_of_state, US, dpa(:,:,k), &
@@ -1346,8 +1342,7 @@ subroutine PressureForce_FV_Bouss(h, tv, PFu, PFv, G, GV, US, CS, ALE_CSp, ADp, 
                                     G%HI, MassWt_u(:,:,k), MassWt_v(:,:,k), &
                                     MassWghtInterpVanOnly=CS%MassWghtInterpVanOnly, h_nv=CS%h_nonvanished)
     enddo
-    !$omp target exit data map(release: tv_tmp, tv_tmp%T, tv_tmp%S) &
-    !$omp   if(.not.(use_ALE .and. CS%Recon_Scheme > 0))
+    !$omp target exit data map(release: T_t, T_b, S_t, S_b, e, tv)
   else
     !$omp target data map(alloc: dz_geo)
     do k=1,nz
@@ -1836,7 +1831,7 @@ subroutine PressureForce_FV_Bouss(h, tv, PFu, PFv, G, GV, US, CS, ALE_CSp, ADp, 
   ! Eventually, they should be set up *outside* of the function.
 
   !$omp target enter data if(use_EOS) &
-  !$omp   map(to: tv_tmp, tv_tmp%T, tv_tmp%S, tv, EOSdom2d)
+  !$omp   map(to: tv, EOSdom2d)
 
   ! NOTE: e_sal condition could be sharpened, but this is close enough.
   !$omp target enter data map(to: e_tidal_eq, e_tidal_sal, e_sal_and_tide) if (CS%tides)
