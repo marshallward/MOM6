@@ -539,70 +539,76 @@ subroutine energetic_PBL(h_3d, u_3d, v_3d, tv, fluxes, visc, dt, Kd_int, G, GV, 
       diag_TKE_mixing(i,j) = 0.0 ; diag_TKE_mech_decay(i,j) = 0.0
       diag_TKE_conv_decay(i,j) = 0.0 !; diag_TKE_unbalanced(i,j) = 0.0
     enddo ; enddo
-    !*!!$omp target enter data map(to: &
-    !*!!$omp   diag_TKE_wind, diag_TKE_MKE, diag_TKE_conv, diag_TKE_forcing, &
-    !*!!$omp   diag_TKE_mixing, diag_TKE_mech_decay, diag_TKE_conv_decay)
+    !$omp target enter data map(to: &
+    !$omp   diag_TKE_wind, diag_TKE_MKE, diag_TKE_conv, diag_TKE_forcing, &
+    !$omp   diag_TKE_mixing, diag_TKE_mech_decay, diag_TKE_conv_decay)
     if (BBL_mixing) then
       !!OMP parallel do default(shared)
       do j=js,je ; do i=is,ie
         diag_TKE_BBL(i,j) = 0.0 ; diag_TKE_BBL_mixing(i,j) = 0.0
         diag_TKE_BBL_decay(i,j) = 0.0
       enddo ; enddo
-      !*!!$omp target enter data map(to: &
-      !*!!$omp   diag_TKE_BBL, diag_TKE_BBL_mixing, diag_TKE_BBL_decay)
+      !$omp target enter data map(to: &
+      !$omp   diag_TKE_BBL, diag_TKE_BBL_mixing, diag_TKE_BBL_decay)
     endif
   endif
-  !$omp target enter data map(to: &
-  !$omp   diag_TKE_wind, diag_TKE_MKE, diag_TKE_conv, diag_TKE_forcing, &
-  !$omp   diag_TKE_mixing, diag_TKE_mech_decay, diag_TKE_conv_decay)
-  !$omp target enter data map(to: &
-  !$omp   diag_TKE_BBL, diag_TKE_BBL_mixing, diag_TKE_BBL_decay)
+  !*!!$omp target enter data map(to: &
+  !*!!$omp   diag_TKE_wind, diag_TKE_MKE, diag_TKE_conv, diag_TKE_forcing, &
+  !*!!$omp   diag_TKE_mixing, diag_TKE_mech_decay, diag_TKE_conv_decay)
+  !*!!$omp target enter data map(to: &
+  !*!!$omp   diag_TKE_BBL, diag_TKE_BBL_mixing, diag_TKE_BBL_decay)
 
   if (CS%debug .or. CS%id_Mixing_Length > 0) then
     diag_Mixing_Length(:,:,:) = 0.0
+    !$omp target enter data map(to: diag_Mixing_Length)
+  else
+    ! TODO: 3D arrays are incorrectly allocated as size -4128 due to incorrect
+    !   offset (4,4,-1) in 3d arrays.  For now just allocate.
+    !$omp target enter data map(alloc: diag_Mixing_Length)
   endif
-  !$omp target enter data map(to: diag_Mixing_Length)
+  !*!!$omp target enter data map(to: diag_Mixing_Length)
 
   if (CS%debug .or. CS%id_Velocity_Scale > 0) then
     diag_Velocity_Scale(:,:,:) = 0.0
-    !*!!$omp target enter data map(to: diag_Velocity_Scale)
+    !$omp target enter data map(to: diag_Velocity_Scale)
+  else
+    ! TODO: create_on
+    !$omp target enter data map(alloc: diag_Velocity_Scale)
   endif
-  !$omp target enter data map(to: diag_Velocity_Scale)
+  !*!!$omp target enter data map(to: diag_Velocity_Scale)
 
   if (BBL_mixing) then
     if (CS%debug .or. CS%id_BBL_Mix_Length > 0) then
       BBL_Mix_Length(:,:,:) = 0.0
-      !*!!$omp target enter data map(to: BBL_Mix_Length)
+      !$omp target enter data map(to: BBL_Mix_Length)
     endif
 
     if (CS%debug .or. CS%id_BBL_Vel_Scale > 0) then
       BBL_Vel_Scale(:,:,:) = 0.0
-      !*!!$omp target enter data map(to: BBL_Vel_scale)
+      !$omp target enter data map(to: BBL_Vel_scale)
     endif
 
     if (CS%id_Kd_BBL > 0) then
       Kd_BBL_3d(:,:,:) = 0.0
-      !*!!$omp target enter data map(to: Kd_BBL_3d)
+      !$omp target enter data map(to: Kd_BBL_3d)
     endif
 
     if (CS%id_ustar_BBL > 0) then
       diag_ustar_BBL(:,:) = 0.0
-      !*!!$omp target enter data map(to: diag_ustar_BBL)
+      !$omp target enter data map(to: diag_ustar_BBL)
     endif
 
     if (CS%id_BBL_decay_scale > 0) then
       diag_BBL_decay_scale(:,:) = 0.0
-      !*!!$omp target enter data map(to: diag_BBL_decay_scale)
+      !$omp target enter data map(to: diag_BBL_decay_scale)
     endif
+  else
+    !$omp target enter data map(alloc: BBL_Mix_Length)
+    !$omp target enter data map(alloc: BBL_Vel_scale)
+    !$omp target enter data map(alloc: Kd_BBL_3d)
   endif
-  !$omp target enter data map(to: BBL_Mix_Length)
-  !$omp target enter data map(to: BBL_Vel_scale)
-  !$omp target enter data map(to: Kd_BBL_3d)
-  !$omp target enter data map(to: diag_ustar_BBL)
-  !$omp target enter data map(to: diag_BBL_decay_scale)
 
   !*!!$omp target enter data map(alloc: diag_ustar) if (CS%id_ustar_ePBL > 0)
-  !*!!$omp target enter data map(alloc: buoy_flux) if (CS%id_bflx_ePBL > 0)
   !$omp target enter data map(alloc: diag_ustar)
 
   ! CS_tmp is used to test sensitivity to parameter setting changes.
@@ -630,14 +636,22 @@ subroutine energetic_PBL(h_3d, u_3d, v_3d, tv, fluxes, visc, dt, Kd_int, G, GV, 
     ! This logic is needed because the scaling of SpV_dt changes with answer date.
     if (CS_tmp1%answer_date < 20240101) SpV_scale1 = US%m_to_Z**3 * US%T_to_s**3
     if (CS_tmp2%answer_date < 20240101) SpV_scale2 = US%m_to_Z**3 * US%T_to_s**3
-    if (CS%id_opt_diff_Kd_ePBL > 0)    diff_Kd(:,:,:) = 0.0
-    if (CS%id_opt_maxdiff_Kd_ePBL > 0) max_abs_diff_Kd(:,:) = 0.0
-    if (CS%id_opt_diff_hML_depth > 0)  diff_hML_depth(:,:) = 0.0
+    if (CS%id_opt_diff_Kd_ePBL > 0) then
+      diff_Kd(:,:,:) = 0.0
+      !$omp target enter data map(to: diff_Kd)
+    endif
+    if (CS%id_opt_maxdiff_Kd_ePBL > 0) then
+      max_abs_diff_Kd(:,:) = 0.0
+      !$omp target enter data map(to: max_abs_diff_Kd)
+    endif
+    if (CS%id_opt_diff_hML_depth > 0) then
+      diff_hML_depth(:,:) = 0.0
+      !$omp target enter data map(to: diff_hML_depth)
+    endif
+  else
+    ! TODO: create_on
+    !$omp target enter data map(alloc: diff_Kd)
   endif
-  ! TODO: Should be conditional!
-  !$omp target enter data map(to: diff_Kd)
-  !$omp target enter data map(to: max_abs_diff_Kd)
-  !$omp target enter data map(to: diff_hML_depth)
 
   ! TODO: All of this should be handled externally
   !$omp target enter data map(to: CS)
@@ -935,13 +949,10 @@ subroutine energetic_PBL(h_3d, u_3d, v_3d, tv, fluxes, visc, dt, Kd_int, G, GV, 
     call post_data(CS%id_TKE_mech_decay, diag_TKE_mech_decay, CS%diag)
   if (CS%id_TKE_conv_decay > 0) &
     call post_data(CS%id_TKE_conv_decay, diag_TKE_conv_decay, CS%diag)
-  !*!!$omp target exit data map(delete: &
-  !*!!$omp   diag_TKE_wind, diag_TKE_MKE, diag_TKE_conv, diag_TKE_forcing, &
-  !*!!$omp   diag_TKE_mixing, diag_TKE_mech_decay, diag_TKE_conv_decay) &
-  !*!!$omp   if (CS%TKE_diagnostics)
   !$omp target exit data map(delete: &
   !$omp   diag_TKE_wind, diag_TKE_MKE, diag_TKE_conv, diag_TKE_forcing, &
-  !$omp   diag_TKE_mixing, diag_TKE_mech_decay, diag_TKE_conv_decay)
+  !$omp   diag_TKE_mixing, diag_TKE_mech_decay, diag_TKE_conv_decay) &
+  !$omp   if (CS%TKE_diagnostics)
 
   if (CS%id_Mixing_Length > 0) call post_data(CS%id_Mixing_Length, diag_Mixing_Length, CS%diag)
   !*!!$omp target exit data map(delete: diag_Mixing_Length) &
@@ -967,20 +978,20 @@ subroutine energetic_PBL(h_3d, u_3d, v_3d, tv, fluxes, visc, dt, Kd_int, G, GV, 
 
     if (CS%id_ustar_BBL > 0) then
       call post_data(CS%id_ustar_BBL, diag_ustar_BBL, CS%diag)
-      !*!!$omp target exit data map(delete: diag_ustar_BBL)
+      !$omp target exit data map(delete: diag_ustar_BBL)
     endif
 
     if (CS%id_BBL_decay_scale > 0) then
       call post_data(CS%id_BBL_decay_scale, diag_BBL_decay_scale, CS%diag)
-      !*!!$omp target exit data map(delete: diag_BBL_decay_scale)
+      !$omp target exit data map(delete: diag_BBL_decay_scale)
     endif
 
     if (CS%id_TKE_BBL > 0) call post_data(CS%id_TKE_BBL, diag_TKE_BBL, CS%diag)
     if (CS%id_TKE_BBL_mixing > 0) call post_data(CS%id_TKE_BBL_mixing, diag_TKE_BBL_mixing, CS%diag)
     if (CS%id_TKE_BBL_decay > 0) call post_data(CS%id_TKE_BBL_decay, diag_TKE_BBL_decay, CS%diag)
-    !*!!$omp target exit data map(delete: &
-    !*!!$omp   diag_TKE_BBL, diag_TKE_BBL_mixing, diag_TKE_BBL_decay) &
-    !*!!$omp   if (CS%TKE_diagnostics)
+    !$omp target exit data map(delete: &
+    !$omp   diag_TKE_BBL, diag_TKE_BBL_mixing, diag_TKE_BBL_decay) &
+    !$omp   if (CS%TKE_diagnostics)
 
     if (CS%id_BBL_depth > 0) call post_data(CS%id_BBL_depth, CS%BBL_depth, CS%diag)
     if (CS%id_mstar_BBL > 0)     call post_data(CS%id_mstar_BBL, diag_mstar_BBL, CS%diag)
@@ -991,10 +1002,6 @@ subroutine energetic_PBL(h_3d, u_3d, v_3d, tv, fluxes, visc, dt, Kd_int, G, GV, 
     !*!!$omp   if (CS%debug .or. CS%id_BBL_Vel_Scale > 0)
   endif
   !$omp target exit data map(delete: Kd_BBL_3d)
-  !$omp target exit data map(delete: diag_ustar_BBL)
-  !$omp target exit data map(delete: diag_BBL_decay_scale)
-  !$omp target exit data map(delete: &
-  !$omp   diag_TKE_BBL, diag_TKE_BBL_mixing, diag_TKE_BBL_decay)
   !$omp target exit data map(delete: BBL_Mix_Length)
   !$omp target exit data map(delete: BBL_Vel_Scale)
 
@@ -1008,16 +1015,22 @@ subroutine energetic_PBL(h_3d, u_3d, v_3d, tv, fluxes, visc, dt, Kd_int, G, GV, 
 
   if (CS%options_diff > 0) then
     ! These diagnostics are only for determining sensitivities to different ePBL settings.
-    if (CS%id_opt_diff_Kd_ePBL > 0)    call post_data(CS%id_opt_diff_Kd_ePBL, diff_Kd, CS%diag)
-    if (CS%id_opt_maxdiff_Kd_ePBL > 0) call post_data(CS%id_opt_maxdiff_Kd_ePBL, max_abs_diff_Kd, CS%diag)
-    if (CS%id_opt_diff_hML_depth > 0)  call post_data(CS%id_opt_diff_hML_depth, diff_hML_depth, CS%diag)
+    if (CS%id_opt_diff_Kd_ePBL > 0) then
+      call post_data(CS%id_opt_diff_Kd_ePBL, diff_Kd, CS%diag)
+      !*!!$omp target exit data map(delete: diff_Kd)
+    endif
+    if (CS%id_opt_maxdiff_Kd_ePBL > 0) then
+      call post_data(CS%id_opt_maxdiff_Kd_ePBL, max_abs_diff_Kd, CS%diag)
+      !$omp target exit data map(delete: max_abs_diff_Kd)
+    endif
+    if (CS%id_opt_diff_hML_depth > 0) then
+      call post_data(CS%id_opt_diff_hML_depth, diff_hML_depth, CS%diag)
+      !$omp target exit data map(delete: diff_hML_depth)
+    endif
   endif
+
   !$omp target exit data map(delete: diff_Kd)
-  !$omp target exit data map(delete: max_abs_diff_Kd)
-  !$omp target exit data map(delete: diff_hML_depth)
-
 end subroutine energetic_PBL
-
 
 
 !> This subroutine determines the diffusivities from the integrated energetics
@@ -3142,6 +3155,7 @@ end subroutine get_eqdisc_v0h
 !! of hb*Idecay, the return value increases linearly with hb.  When Idecay ~= 0, the return value
 !! is close to 1.
 function exp_decay_TKE_adjust(hb, ha, Idecay) result(TKE_to_PE_scale)
+  !$omp declare target
   real, intent(in) :: hb   !< The thickness over which the buoyancy flux varies on the
                            !! near-boundary side of an interface (e.g., a well-mixed bottom
                            !! boundary layer thickness) [H ~> m or kg m-2]
@@ -3206,6 +3220,7 @@ subroutine find_PE_chg(Kddt_h0, dKddt_h, hp_a, hp_b, Th_a, Sh_a, Th_b, Sh_b, &
                        dT_to_dPE_a, dS_to_dPE_a, dT_to_dPE_b, dS_to_dPE_b, &
                        pres_Z, dT_to_dColHt_a, dS_to_dColHt_a, dT_to_dColHt_b, dS_to_dColHt_b, &
                        PE_chg, dPEc_dKd, dPE_max, dPEc_dKd_0, PE_ColHt_cor)
+  !$omp declare target
   real, intent(in)  :: Kddt_h0  !< The previously used diffusivity at an interface times
                                 !! the time step and divided by the average of the
                                 !! thicknesses around the interface [H ~> m or kg m-2].
@@ -3355,6 +3370,7 @@ subroutine find_Kd_from_PE_chg(Kd_prev, dKd_max, dt_h, max_PE_chg, hp_a, hp_b, T
                        dT_to_dPE_a, dS_to_dPE_a, dT_to_dPE_b, dS_to_dPE_b, pres_Z, &
                        dT_to_dColHt_a, dS_to_dColHt_a, dT_to_dColHt_b, dS_to_dColHt_b, &
                        Kd_add, PE_chg, dPE_max, frac_dKd_max_PE)
+  !$omp declare target
   real, intent(in)  :: Kd_prev  !< The previously used diffusivity at an interface
                                 !! [H Z T-1 ~> m2 s-1 or kg m-1 s-1].
   real, intent(in)  :: dKd_max  !< The maximum change in the diffusivity at an interface
@@ -3652,6 +3668,7 @@ end subroutine find_PE_chg_orig
 subroutine find_mstar(CS, US, Buoyancy_Flux, UStar, &
                       BLD, Abs_Coriolis, Is_BBL, mstar, &
                       Langmuir_Number, mstar_LT, Convect_Langmuir_Number)
+  !$omp declare target
   type(energetic_PBL_CS), intent(in) :: CS    !< Energetic PBL control structure
   type(unit_scale_type), intent(in)  :: US    !< A dimensional unit scaling type
   real,                  intent(in)  :: UStar !< ustar including gustiness [Z T-1 ~> m s-1]
