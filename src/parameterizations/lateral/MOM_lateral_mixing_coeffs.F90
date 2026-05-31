@@ -801,22 +801,28 @@ subroutine calc_slope_functions(h, tv, dt, G, GV, US, CS, OBC)
     !$omp target enter data map(to: tv%SpV_avg) if (allocated(tv%SpV_avg))
     !$omp target enter data map(to: tv%p_surf) if (allocated(tv%p_surf))
     !$omp target enter data map(alloc: N2_u, N2_v, dzu, dzv, dzSxN, dzSyN)
+    call cpu_clock_end(CS%id_clock_isoneutral_slopes)
     if (CS%use_simpler_Eady_growth_rate) then
+      call cpu_clock_begin(CS%id_clock_isoneutral_slopes)
       call calc_isoneutral_slopes(G, GV, US, h, e, tv, dt*CS%kappa_smooth, CS%use_stanley_iso, &
                                   CS%slope_x, CS%slope_y, N2_u=N2_u, N2_v=N2_v, dzu=dzu, dzv=dzv, &
                                   dzSxN=dzSxN, dzSyN=dzSyN, halo=1, OBC=OBC, OBC_N2=CS%OBC_friendly)
       !$omp target exit data map(from: e, dzu, dzv, dzSxN, dzSyN)
+      call cpu_clock_end(CS%id_clock_isoneutral_slopes)
       call calc_Eady_growth_rate_2D(CS, G, GV, US, h, e, dzu, dzv, dzSxN, dzSyN, CS%SN_u, CS%SN_v)
     elseif (CS%use_stored_slopes) then
+      call cpu_clock_begin(CS%id_clock_isoneutral_slopes)
       call calc_isoneutral_slopes(G, GV, US, h, e, tv, dt*CS%kappa_smooth, CS%use_stanley_iso, &
                                   CS%slope_x, CS%slope_y, N2_u=N2_u, N2_v=N2_v, halo=1, OBC=OBC, &
                                   OBC_N2=CS%OBC_friendly)
       !$omp target exit data map(from: CS%slope_x, CS%slope_y, N2_u, N2_v)
+      call cpu_clock_end(CS%id_clock_isoneutral_slopes)
       call calc_Visbeck_coeffs_old(h, CS%slope_x, CS%slope_y, N2_u, N2_v, G, GV, US, CS, OBC)
     else
       !$omp target exit data map(from: e)
       call calc_slope_functions_using_just_e(h, G, GV, US, CS, e)
     endif
+    call cpu_clock_begin(CS%id_clock_isoneutral_slopes)
     !$omp target exit data map(release: tv, tv%T, tv%S,  &
     !$omp & CS%slope_x, CS%slope_y)
     !$omp target exit data map(release: tv%SpV_avg) if (allocated(tv%SpV_avg))
@@ -2171,7 +2177,7 @@ subroutine VarMix_init(Time, G, GV, US, param_file, diag, CS)
   ! Re-enable variable mixing if one of the schemes was enabled
   CS%use_variable_mixing = in_use .or. CS%use_variable_mixing
 
-  CS%id_clock_isoneutral_slopes = cpu_clock_id('(VarMix isoneutral slopes)', grain=CLOCK_ROUTINE)
+  CS%id_clock_isoneutral_slopes = cpu_clock_id('(Calc_isoneutral_slopes)', grain=CLOCK_ROUTINE)
 end subroutine VarMix_init
 
 !> Destructor for VarMix control structure
