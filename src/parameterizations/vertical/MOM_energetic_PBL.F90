@@ -371,7 +371,8 @@ type, public :: energetic_PBL_CS
   !>@}
 end type energetic_PBL_CS
 
-! Enumeration values for mstar_scheme
+
+!>@{ Enumeration values for mstar_scheme
 integer, parameter :: Use_Fixed_mstar = 0
   !< The value of mstar_scheme to use a constant mstar
 integer, parameter :: mstar_from_Ekman = 2
@@ -402,6 +403,7 @@ character*(20), parameter :: ROOT_TKE_STRING = "CUBE_ROOT_TKE"
 character*(20), parameter :: NONE_STRING = "NONE"
 character*(20), parameter :: RESCALED_STRING = "RESCALE"
 character*(20), parameter :: ADDITIVE_STRING = "ADDITIVE"
+!>@}
 
 
 logical :: report_avg_its = .false.

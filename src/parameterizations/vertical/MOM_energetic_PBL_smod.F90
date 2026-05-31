@@ -8,27 +8,15 @@
 submodule (MOM_energetic_PBL) MOM_energetic_PBL_impl
 
 use MOM_cpu_clock,      only : cpu_clock_id, cpu_clock_begin, cpu_clock_end, CLOCK_ROUTINE
-use MOM_coms,           only : EFP_type, real_to_EFP, EFP_to_real, operator(+), assignment(=), EFP_sum_across_PEs
 use MOM_debugging,      only : hchksum
-use MOM_diag_mediator,  only : post_data, register_diag_field, safe_alloc_alloc
+use MOM_diag_mediator,  only : post_data
 use MOM_diag_mediator,  only : post_data_3d_by_column, post_data_3d_final
-use MOM_diag_mediator,  only : time_type, diag_ctrl
 use MOM_domains,        only : create_group_pass, do_group_pass, group_pass_type
-use MOM_error_handler,  only : MOM_error, FATAL, WARNING, MOM_mesg
-use MOM_file_parser,    only : get_param, log_param, log_version, param_file_type
-use MOM_forcing_type,   only : forcing
-use MOM_grid,           only : ocean_grid_type
 use MOM_interface_heights, only : thickness_to_dz
 use MOM_intrinsic_functions, only : cuberoot
-use MOM_string_functions, only : uppercase
-use MOM_unit_scaling,   only : unit_scale_type
-use MOM_variables,      only : thermo_var_ptrs, vertvisc_type
-use MOM_verticalGrid,   only : verticalGrid_type
-use MOM_wave_interface, only : wave_parameters_CS, Get_Langmuir_Number
-use MOM_stochastics,    only : stochastic_CS
+use MOM_wave_interface, only : get_Langmuir_Number
 
 implicit none
-private
 
 ! A note on unit descriptions in comments: MOM6 uses units that can be rescaled
 ! for dimensional consistency testing. These are noted in comments with units
@@ -286,11 +274,6 @@ module subroutine energetic_PBL(h_3d, u_3d, v_3d, tv, fluxes, visc, dt, Kd_int, 
       !$omp   diag_TKE_BBL, diag_TKE_BBL_mixing, diag_TKE_BBL_decay)
     endif
   endif
-  !*!!$omp target enter data map(to: &
-  !*!!$omp   diag_TKE_wind, diag_TKE_MKE, diag_TKE_conv, diag_TKE_forcing, &
-  !*!!$omp   diag_TKE_mixing, diag_TKE_mech_decay, diag_TKE_conv_decay)
-  !*!!$omp target enter data map(to: &
-  !*!!$omp   diag_TKE_BBL, diag_TKE_BBL_mixing, diag_TKE_BBL_decay)
 
   if (CS%debug .or. CS%id_Mixing_Length > 0) then
     diag_Mixing_Length(:,:,:) = 0.0
@@ -300,13 +283,12 @@ module subroutine energetic_PBL(h_3d, u_3d, v_3d, tv, fluxes, visc, dt, Kd_int, 
     !   offset (4,4,-1) in 3d arrays.  For now just allocate.
     !$omp target enter data map(alloc: diag_Mixing_Length)
   endif
-  !*!!$omp target enter data map(to: diag_Mixing_Length)
 
   if (CS%debug .or. CS%id_Velocity_Scale > 0) then
     diag_Velocity_Scale(:,:,:) = 0.0
     !$omp target enter data map(to: diag_Velocity_Scale)
   else
-    ! TODO: create_on
+    ! TODO: Use OpenACC create_on
     !$omp target enter data map(alloc: diag_Velocity_Scale)
   endif
   !*!!$omp target enter data map(to: diag_Velocity_Scale)
@@ -443,7 +425,7 @@ module subroutine energetic_PBL(h_3d, u_3d, v_3d, tv, fluxes, visc, dt, Kd_int, 
     ! and ustar and wstar available to drive mixing at the first interior
     ! interface.
     !$omp loop private(h, dz, u, v, T0, S0, TKE_forcing) &
-    !$omp   private(dSV_dT_1d, dSV_dS_1d, Kd, SpV_dt_cf) &
+    !$omp   private(dSV_dT_1d, dSV_dS_1d, SpV_dt_cf) &
     !$omp   private(Kd, mixvel, mixlen) &
     !$omp   private(Kd_BBL, mixvel_BBL, mixlen_BBL) &
     !$omp   private(Kd_1, Kd_2)
@@ -673,6 +655,8 @@ module subroutine energetic_PBL(h_3d, u_3d, v_3d, tv, fluxes, visc, dt, Kd_int, 
   !$omp target exit data map(release: buoy_flux)
 
   !$omp target exit data map(from: Kd_int)
+
+  ! Development diagnostic
   !$omp target exit data map(from: diag_ustar)
   !$omp target exit data map(from: kd_guess)
 
