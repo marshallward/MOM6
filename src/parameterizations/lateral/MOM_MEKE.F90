@@ -1716,7 +1716,7 @@ logical function MEKE_init(Time, G, GV, US, param_file, diag, dbcomms_CS, CS, ME
   endif
 
   CS%id_clock_pass = cpu_clock_id('(Ocean continuity halo updates)', grain=CLOCK_ROUTINE)
-  CS%id_clock_isoneutral_slopes = cpu_clock_id('(MEKE isoneutral slopes)', grain=CLOCK_ROUTINE)
+  CS%id_clock_isoneutral_slopes = cpu_clock_id('(Calc_isoneutral_slopes)', grain=CLOCK_ROUTINE)
 
 
   ! Detect whether this instance of MEKE_init() is at the beginning of a run
