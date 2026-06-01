@@ -334,7 +334,6 @@ module subroutine energetic_PBL(h_3d, u_3d, v_3d, tv, fluxes, visc, dt, Kd_int, 
 
   kd_guess(:,:,:) = 0.
   !$omp target enter data map(to: kd_guess)
-  !$omp target enter data map(alloc: kd_guess_col)
 
   ! CS_tmp is used to test sensitivity to parameter setting changes.
   if (CS%options_diff > 0) then
@@ -383,11 +382,12 @@ module subroutine energetic_PBL(h_3d, u_3d, v_3d, tv, fluxes, visc, dt, Kd_int, 
   ! Needed?
   !$omp target update to(fluxes%ustar)
 
-  ! TODO: All of this should be handled externally
+  ! TODO: These could be computed and held on device
   !$omp target enter data map(to: CS)
+  !$omp target enter data map(to: CS%ML_depth, CS%BBL_depth)
   !$omp target enter data map(to: h_3d, u_3d, v_3d, tv%T, tv%S, TKE_forced)
   !$omp target enter data map(to: dSV_dT, dSV_dS)
-  !$omp target enter data map(to: buoy_flux)
+  !$omp target enter data map(to: buoy_flux, BBL_buoy_flux)
   !$omp target enter data map(alloc: Kd_int)
 
   !$omp target loop private(h_2d, dz_2d, u_2d, v_2d, T_2d, S_2d) &
@@ -428,7 +428,8 @@ module subroutine energetic_PBL(h_3d, u_3d, v_3d, tv, fluxes, visc, dt, Kd_int, 
     !$omp   private(dSV_dT_1d, dSV_dS_1d, SpV_dt_cf) &
     !$omp   private(Kd, mixvel, mixlen) &
     !$omp   private(Kd_BBL, mixvel_BBL, mixlen_BBL) &
-    !$omp   private(Kd_1, Kd_2)
+    !$omp   private(Kd_1, Kd_2) &
+    !$omp   private(kd_guess_col)
     do i=is,ie ; if (G%mask2dT(i,j) > 0.0) then
 
       ! Copy the thicknesses and other fields to 1-d arrays.
@@ -457,7 +458,6 @@ module subroutine energetic_PBL(h_3d, u_3d, v_3d, tv, fluxes, visc, dt, Kd_int, 
       endif
 
       if (CS%debug .or. CS%id_ustar_ePBL > 0) diag_ustar(i,j) = u_star
-      !if (CS%debug .or. CS%id_ustar_ePBL > 0) diag_ustar(i,j) = mech_TKE
 
       ! TODO
       !*!if (allocated(tv%SpV_avg) .and. .not.GV%Boussinesq) then
@@ -543,10 +543,13 @@ module subroutine energetic_PBL(h_3d, u_3d, v_3d, tv, fluxes, visc, dt, Kd_int, 
                              GV, US, CS, eCD)
 
         do K=1,nz+1 ; Kd(K) = Kd(K) + Kd_BBL(K) ; enddo
+
         if (CS%id_Kd_BBL > 0) then ; do K=1,nz+1
           Kd_BBL_3d(i,j,K) = Kd_BBL(K)
         enddo ; endif
+
         if (CS%id_ustar_BBL > 0) diag_ustar_BBL(i,j) = u_star_BBL
+
         if ((CS%id_BBL_decay_scale > 0) .and. (CS%TKE_decay * absf > 0)) &
           diag_BBL_decay_scale(i,j) = u_star_BBL / (CS%TKE_decay * absf)
       endif
@@ -636,7 +639,6 @@ module subroutine energetic_PBL(h_3d, u_3d, v_3d, tv, fluxes, visc, dt, Kd_int, 
         endif
         if (CS%id_opt_diff_hML_depth > 0) diff_hML_depth(i,j) = BLD_1 - BLD_2
       endif
-
     else ! End of the ocean-point part of the i-loop
       ! For masked points, Kd_int must still be set (to 0) because it has intent out.
       do K=1,nz+1 ; Kd_2d(i,K) = 0. ; enddo
@@ -646,13 +648,13 @@ module subroutine energetic_PBL(h_3d, u_3d, v_3d, tv, fluxes, visc, dt, Kd_int, 
 
     !$omp loop
     do i=is,ie ; do K=1,nz+1 ; Kd_int(i,j,K) = Kd_2d(i,K) ; enddo ; enddo
-
   enddo ! j-loop
 
+  !$omp target exit data map(delete: CS%ML_depth, CS%BBL_depth)
   !$omp target exit data map(delete: CS)
   !$omp target exit data map(release: h_3d, u_3d, v_3d, tv%T, tv%S, TKE_forced)
   !$omp target exit data map(release: dSV_dT, dSV_dS)
-  !$omp target exit data map(release: buoy_flux)
+  !$omp target exit data map(release: buoy_flux, bbl_buoy_flux)
 
   !$omp target exit data map(from: Kd_int)
 
@@ -1148,15 +1150,15 @@ subroutine ePBL_column(h, dz, u, v, T0, S0, dSV_dT, dSV_dS, SpV_dt, TKE_forcing,
     sfc_connected = .true.
 
     !/ Here we get mstar, which is the ratio of convective TKE driven mixing to UStar**3
-    !*!if (CS%Use_LT) then
-    !*!  !*!call get_Langmuir_Number(LA, G, GV, US, abs(MLD_guess), u_star_mean, i, j, dz, Waves, &
-    !*!  !*!                         U_H=u, V_H=v)
-    !*!  call find_mstar(CS, US, B_flux, u_star, MLD_guess, absf, .false., &
-    !*!                  mstar_total, Langmuir_Number=La, Convect_Langmuir_Number=LAmod,&
-    !*!                  mstar_LT=mstar_LT)
-    !*!else
+    if (CS%Use_LT) then
+      call get_Langmuir_Number(LA, G, GV, US, abs(MLD_guess), u_star_mean, i, j, dz, Waves, &
+                               U_H=u, V_H=v)
+      call find_mstar(CS, US, B_flux, u_star, MLD_guess, absf, .false., &
+                      mstar_total, Langmuir_Number=La, Convect_Langmuir_Number=LAmod,&
+                      mstar_LT=mstar_LT)
+    else
       call find_mstar(CS, US, B_flux, u_star, MLD_guess, absf, .false., mstar_total)
-    !*!endif
+    endif
 
     !/ Apply mstar to get mech_TKE
     if ((CS%answer_date < 20190101) .and. (CS%mstar_scheme==Use_Fixed_mstar)) then
