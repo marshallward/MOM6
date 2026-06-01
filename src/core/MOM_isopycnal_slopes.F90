@@ -119,12 +119,10 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
   logical :: local_open_u_BC, local_open_v_BC ! True if u- or v-face OBCs exist anywhere in the global domain.
   logical :: OBC_friendly  ! If true, open boundary conditions are in use and only interior data should
                         ! be used to calculate N2 at OBC faces.
-  integer, dimension(2) :: EOSdom_u  ! The shifted I-computational domain to use for equation of
-                                     ! state calculations at u-points.
-  integer, dimension(2) :: EOSdom_v  ! The shifted i-computational domain to use for equation of
-                                     ! state calculations at v-points.
   integer, dimension(2) :: EOSdom_h1 ! The shifted i-computational domain to use for equation of
                                      ! state calculations at h points with 1 extra halo point
+  integer, dimension(2,2) :: EOSdom  ! The shifted i- and j-computational domains to use for equation
+                                     ! of state calculations at u and v points
   integer :: is, ie, js, je, nz, IsdB
   integer :: i, j, k
 
@@ -139,8 +137,9 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
     is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec
     EOSdom_h1(:) = EOS_domain(G%HI, halo=1)
   endif
-  EOSdom_u(1) = is-1 - (G%IsdB-1) ; EOSdom_u(2) = ie - (G%IsdB-1)
-  EOSdom_v(:) = EOS_domain(G%HI, halo=halo)
+  ! For zonal loop: u-points for i, tracer points for j
+  EOSdom(1,1) = is-1 - (G%IsdB-1) ; EOSdom(1,2) = ie - (G%IsdB-1)
+  EOSdom(2,1) = js - (G%Jsdb-1) ; EOSdom(2,2) = je - (G%Jsdb-1)
 
   nz = GV%ke ; IsdB = G%IsdB
 
@@ -297,10 +296,10 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
       endif
     endif
 
-    do j=js,je ; do k=nz,2,-1
-      call calculate_density_derivs(T_uvh(:,j,k), S_uvh(:,j,k), pres_uvh(:,j,k), drho_dT(:,j,k), &
-                                  drho_dS(:,j,k), tv%eqn_of_state, EOSdom_u)
-    enddo ; enddo
+    do k=nz,2,-1
+      call calculate_density_derivs(T_uvh(:,:,k), S_uvh(:,:,k), pres_uvh(:,:,k), drho_dT(:,:,k), &
+                                  drho_dS(:,:,k), tv%eqn_of_state, EOSdom)
+    enddo
 
     if (use_stanley) then
       ! Recalculate T, S, and press at h-points for the second derivative calculation.
@@ -438,7 +437,12 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
   do concurrent( I=is-1:ie, J=js-1:je, k=1:nz )
     GxSpV_uvh(I,J,k) = G_Rho0  ! This will be changed if both use_EOS and allocated(tv%SpV_avg) are true
   enddo
+
   ! Calculate the meridional isopycnal slope.
+  ! For meridional loop: v-points for j, tracer points for i
+  EOSdom(1,1) = is - (G%IsdB-1) ; EOSdom(1,2) = ie - (G%IsdB-1)
+  EOSdom(2,1) = js-1 - (G%Jsdb-1) ; EOSdom(2,2) = je - (G%Jsdb-1)
+
 
   ! As before, calculate density derviatves outside of slope calculation since
   ! deferred EOS subroutines cannot be called on the GPU, but this time in the
@@ -498,10 +502,10 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
       endif
     endif
 
-    do J=js-1,je ; do K=nz,2,-1
-      call calculate_density_derivs(T_uvh(:,J,K), S_uvh(:,J,K), pres_uvh(:,J,K), drho_dT(:,J,K), &
-                                  drho_dS(:,J,K), tv%eqn_of_state, EOSdom_v)
-    enddo ; enddo
+    do K=nz,2,-1
+      call calculate_density_derivs(T_uvh(:,:,K), S_uvh(:,:,K), pres_uvh(:,:,K), drho_dT(:,:,K), &
+                                  drho_dS(:,:,K), tv%eqn_of_state, EOSdom)
+    enddo
 
     if (use_stanley) then
       ! Recalculate T, S, and press at h-points for the second derivative calculation.
