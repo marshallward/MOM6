@@ -730,8 +730,7 @@ subroutine increment_ints_2d(array, is, ie, js, je, descale, ints_sum, max_mag_t
   ! The per-element decomposition is shared with the host path via efp_decompose;
   ! the six int64 bins reduce as scalars (libnvomp array-section reductions are
   ! avoided on purpose). array is copied in by stdpar if not already resident.
-  do concurrent (j=js:je, i=is:ie)                        &
-    local(r, e1, e2, e3, e4, e5, e6, rmag, lnan, lovf)    &
+  do concurrent (j=js:je, i=is:ie) local(r, e1, e2, e3, e4, e5, e6, rmag, lnan, lovf)    &
     reduce(+: s1, s2, s3, s4, s5, s6)                     &
     reduce(max: mmag) reduce(max: inan, iovf)
     r = descale*array(i,j)
