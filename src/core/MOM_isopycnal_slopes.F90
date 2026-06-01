@@ -129,7 +129,8 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
   integer :: i, j, k
 
   ! Allocate locals on device
-  !$omp target enter data map(alloc: T, S, pres, T_uvh, S_uvh, pres_uvh, GxSpV_uvh)
+  !$omp target enter data map(alloc: T, S, pres, T_uvh, S_uvh, pres_uvh, GxSpV_uvh, &
+  !$omp & scrap, drho_dT, drho_dS, drho_dT_dT_h)
 
   if (present(halo)) then
     is = G%isc-halo ; ie = G%iec+halo ; js = G%jsc-halo ; je = G%jec+halo
@@ -250,11 +251,11 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
       S_uvh(I,j,K) = 0.25*((S(i,j,k) + S(i+1,j,k)) + (S(i,j,k-1) + S(i+1,j,k-1)))
     enddo
 
-    ! Bring T, S, and press back from device for deriv and OBC calcs
-    !$omp target update from(T_uvh, S_uvh, pres_uvh)
-
     ! UMW NOTE: Vibe-coded and untested.
     if (OBC_friendly) then
+      ! Bring T, S, and press back from device for OBC calcs
+      !$omp target update from(T_uvh, S_uvh, pres_uvh)
+
       ! East-facing open boundaries: interior cell is at i, so use pres/T/S(i,j,K)
       if (OBC%u_E_OBCs_on_PE) then
         do j = max(js, OBC%js_u_E_obc), min(je, OBC%je_u_E_obc)
@@ -283,6 +284,8 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
           enddo
         enddo
       endif
+
+      !$omp target update to(T_uvh, S_uvh, pres_uvh)
     endif
 
     if (present_N2_u .or. present(dzSxN)) then
@@ -307,9 +310,6 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
         S_uvh(i,j,K) = 0.5*(S(i,j,K) + S(i,j,K-1))
       enddo
 
-      ! Bring T, S, and press back from device for density deriv calc
-      !$omp target update from(T_uvh, S_uvh, pres_uvh)
-
       ! The second line below would correspond to arguments
       !            drho_dS_dS, drho_dS_dT, drho_dT_dT, drho_dS_dP, drho_dT_dP, &
       do j=js,je ; do K=nz,2,-1
@@ -322,12 +322,6 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
 
   ! If not using EOS, gradients are handled inside the do concurrent loop below
   endif
-
-  ! Push derivatives to device
-  !$omp target enter data map(to: drho_dT, drho_dS)
-  ! UMW TODO: This transfer should only be happening if (use_stanely),
-  ! but for some reason that just causes per row transfers, so doing it unconditionally for now.
-  !$omp target enter data map(to: drho_dT_dT_h)
 
   do concurrent( j=js:je , K=2:nz , I=is-1:ie ) local(drdkL, drdkR, drdiA, drdiB)
     ! UMW: Since stanley parameterization requies EOS anyways, putting
@@ -457,11 +451,12 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
       S_uvh(i,J,K) = 0.25*((S(i,j,K) + S(i,j+1,K)) + (S(i,j,K-1) + S(i,j+1,K-1)))
     enddo
 
-    ! Bring T, S, and press back from device for density deriv calc
-    !$omp target update from(T_uvh, S_uvh, pres_uvh)
 
     ! UMW NOTE: Vibe-coded and untested.
     if (OBC_friendly) then
+      ! Bring T, S, and press back from device for OBC calc
+      !$omp target update from(T_uvh, S_uvh, pres_uvh)
+
       ! North-facing open boundaries: interior cell is at j, so use pres/T/S(i,j,K)
       if (OBC%v_N_OBCs_on_PE) then
         do J = max(js-1, OBC%Js_v_N_obc), min(je, OBC%Je_v_N_obc)
@@ -490,6 +485,8 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
           enddo
         enddo
       endif
+
+      !$omp target update to(T_uvh, S_uvh, pres_uvh)
     endif
 
     if (present_N2_v .or. present(dzSyN)) then
@@ -514,9 +511,6 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
         S_uvh(i,J,K) = 0.5*(S(i,j,K) + S(i,j,K-1))
       enddo
 
-      ! Bring T, S, and press back from device for density deriv calc
-      !$omp target update from(T_uvh, S_uvh, pres_uvh)
-
       ! The second line below would correspond to arguments
       !            drho_dS_dS, drho_dS_dT, drho_dT_dT, drho_dS_dP, drho_dT_dP, &
       ! UMW NOTE: changed J bounds from js-1:je to js-1:je+1 to account for extra J access below
@@ -531,12 +525,6 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
 
   ! If not using EOS, gradients are handled inside the do concurrent loop below
   endif
-
-  ! Push derivatives to device
-  !$omp target update to (drho_dT, drho_dS)
-  ! UMW TODO: This transfer should only be happening if (use_stanely),
-  ! but for some reason that just causes per row transfers, so doing it unconditionally for now
-  !$omp target update to (drho_dT_dT_h)
 
   do concurrent(J=js-1:je, K=2:nz, i=is:ie) local(drdkL, drdkR, drdjA, drdjB)
 
@@ -649,7 +637,7 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
   enddo ! end of meridional do concurrent
 
   ! Delete variables from device
-  !$omp target exit data map(delete: drho_dT, drho_dS)
+  !$omp target exit data map(delete: drho_dT, drho_dS, scrap)
   !$omp target exit data map(delete: drho_dT_dT_h)
   !$omp target exit data map(delete: T, S, pres, T_uvh, S_uvh, pres_uvh, GxSpV_uvh)
 
