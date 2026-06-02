@@ -2,6 +2,7 @@
 ! See the LICENSE file for licensing information.
 ! SPDX-License-Identifier: Apache-2.0
 
+#include "do_concurrent_compat.h"
 !> Interfaces to non-domain-oriented communication subroutines, including the
 !! MOM6 reproducing sums facility
 module MOM_coms
