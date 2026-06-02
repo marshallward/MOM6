@@ -123,7 +123,10 @@ module subroutine thickness_diffuse(h, uhtr, vhtr, tv, dt, G, GV, US, MEKE, VarM
     write(*,'(2X,A,L1)') "Khth_Max > 0         = ", (CS%Khth_Max > 0.0)
     write(*,'(2X,A,L1)') "max_Khth_CFL > 0     = ", (CS%max_Khth_CFL > 0.0)
   endif
+
   !$omp target update to(CS, MEKE)
+  !$omp target enter data map(alloc: KH_u_CFL, KH_v_CFL, Khth_Loc_u, Khth_Loc_v, int_slope_u, int_slope_v, e, KH_u, KH_v)
+
   do concurrent (j=js:je, I=is-1:ie)
     KH_u_CFL(I,j) = (0.25*CS%max_Khth_CFL) /  &
       (dt * ((G%IdxCu(I,j)*G%IdxCu(I,j)) + (G%IdyCu(I,j)*G%IdyCu(I,j))))
@@ -135,14 +138,12 @@ module subroutine thickness_diffuse(h, uhtr, vhtr, tv, dt, G, GV, US, MEKE, VarM
   enddo ; enddo
 
   ! Calculates interface heights, e, in [Z ~> m].
-  !$omp target enter data map(alloc: e)
   if (CS%use_meso_sfn_ANN) then
     ! The ANN streamfunction needs a wider halo on e.
     call find_eta(h, tv, G, GV, US, e, halo_size=3)
   else
     call find_eta(h, tv, G, GV, US, e, halo_size=1)
   endif
-  !$omp target exit data map(from: e)
 
   ! Set the diffusivities.
   if (.not. CS%read_khth) then
@@ -358,6 +359,9 @@ module subroutine thickness_diffuse(h, uhtr, vhtr, tv, dt, G, GV, US, MEKE, VarM
   do concurrent (K=1:nz+1, j=js:je, I=is-1:ie) ; int_slope_u(I,j,K) = 0.0 ; enddo
   do concurrent (K=1:nz+1, J=js-1:je, i=is:ie) ; int_slope_v(i,J,K) = 0.0 ; enddo
 
+  !$omp target update from(KH_u_CFL, KH_v_CFL, Khth_Loc_u, Khth_Loc_v, int_slope_u, int_slope_v, e, KH_u, KH_v)
+
+  if (is_root_pe()) write(*,'(A)') "[thickness_diffuse] Post-parallel branches:"
   if (CS%detangle_interfaces) then
     call add_detangling_Kh(h, e, Kh_u, Kh_v, KH_u_CFL, KH_v_CFL, tv, dt, G, GV, US, &
                            CS, int_slope_u, int_slope_v)
@@ -509,6 +513,8 @@ module subroutine thickness_diffuse(h, uhtr, vhtr, tv, dt, G, GV, US, MEKE, VarM
       if (h(i,j,k) < GV%Angstrom_H) h(i,j,k) = GV%Angstrom_H
     enddo ; enddo
   enddo
+
+  !$omp target exit data map(release: KH_u_CFL, KH_v_CFL, Khth_Loc_u, Khth_Loc_v, int_slope_u, int_slope_v, e, KH_u, KH_v)
 
   ! Whenever thickness changes let the diag manager know, target grids
   ! for vertical remapping may need to be regenerated.
@@ -733,10 +739,14 @@ module subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt
 
   nk_linear = max(GV%nkml, 1)
 
-  Slope_x_PE(:,:,:) = 0.0
-  Slope_y_PE(:,:,:) = 0.0
-  hN2_x_PE(:,:,:) = 0.0
-  hN2_y_PE(:,:,:) = 0.0
+  do concurrent (k=1:nz+1, j=G%jsd:G%jed, i=G%isdB:G%iedB)
+    Slope_x_PE(i,j,k) = 0.0
+    hN2_x_PE(i,j,k) = 0.0
+  enddo
+  do concurrent (k=1:nz+1, j=G%jsdB:G%jedB, i=G%isd:G%ied)
+    Slope_y_PE(i,j,k) = 0.0
+    hN2_y_PE(i,j,k) = 0.0
+  enddo
 
   find_work = allocated(MEKE%GM_src)
   find_work = (allocated(CS%GMwork) .or. find_work)
