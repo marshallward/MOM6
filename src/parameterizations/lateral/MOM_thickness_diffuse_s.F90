@@ -762,15 +762,15 @@ module subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt
   endif
 
   ! Rescale the thicknesses, perhaps using the specific volume.
-  call thickness_to_dz(h, tv, dz, G, GV, US, halo_size=1)
+  !$omp target enter data map(to: tv, tv%SpV_avg) map(alloc: dz)
+  call thickness_to_dz(h, tv, dz, G, GV, US, halo_size=1, do_offload=.true.)
+  !$omp target exit data map(release: tv, tv%SpV_avg) map(from: dz)
 
   if (CS%use_FGNV_streamfn .and. .not. associated(cg1)) call MOM_error(FATAL, &
        "cg1 must be associated when using FGNV streamfunction.")
 
-  !$OMP parallel default(shared)
   ! Find the maximum and minimum permitted streamfunction.
-  !$OMP do
-  do j=js-1,je+1 ; do i=is-1,ie+1
+  do concurrent (j=js-1:je+1, i=is-1:ie+1)
     h_avail_rsum(i,j,1) = 0.0
     pres(i,j,1) = 0.0
     if (associated(tv%p_surf)) then ; pres(i,j,1) = tv%p_surf(i,j) ; endif
@@ -779,9 +779,9 @@ module subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt
     h_avail_rsum(i,j,2) = h_avail(i,j,1)
     h_frac(i,j,1) = 1.0
     pres(i,j,2) = pres(i,j,1) + (GV%g_Earth*GV%H_to_RZ) * h(i,j,1)
-  enddo ; enddo
-  do j=js-1,je+1
-    do k=2,nz ; do i=is-1,ie+1
+  enddo
+  do concurrent (j=js-1:je+1)
+    do k=2,nz ; do concurrent (i=is-1:ie+1)
       h_avail(i,j,k) = max(I4dt*G%areaT(i,j)*(h(i,j,k)-GV%Angstrom_H),0.0)
       h_avail_rsum(i,j,k+1) = h_avail_rsum(i,j,k) + h_avail(i,j,k)
       h_frac(i,j,k) = 0.0 ; if (h_avail(i,j,k) > 0.0) &
@@ -789,15 +789,12 @@ module subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt
       pres(i,j,K+1) = pres(i,j,K) + (GV%g_Earth*GV%H_to_RZ) * h(i,j,k)
     enddo ; enddo
   enddo
-  !$OMP do
-  do j=js,je ; do I=is-1,ie
+  do concurrent (j=js:je, i=is-1:ie)
     uhtot(I,j) = 0.0 ; Work_u(I,j) = 0.0
-  enddo ; enddo
-  !$OMP do
-  do J=js-1,je ; do i=is,ie
+  enddo
+  do concurrent (J=js-1:je, i=is:ie)
     vhtot(i,J) = 0.0 ; Work_v(i,J) = 0.0
-  enddo ; enddo
-  !$OMP end parallel
+  enddo
 
   if (CS%id_sfn_x > 0) then ; diag_sfn_x(:,:,1) = 0.0 ; diag_sfn_x(:,:,nz+1) = 0.0 ; endif
   if (CS%id_sfn_y > 0) then ; diag_sfn_y(:,:,1) = 0.0 ; diag_sfn_y(:,:,nz+1) = 0.0 ; endif
