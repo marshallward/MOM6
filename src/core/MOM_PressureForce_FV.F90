@@ -40,11 +40,13 @@ public PressureForce_FV_Bouss, PressureForce_FV_nonBouss
 
 #ifdef __NVCOMPILER_OPENMP_GPU
 integer, parameter :: default_nkblock = 0  !< Default k block size for PLM density integrals [nondim].
-#else
-integer, parameter :: default_nkblock = 1  !< Default k block size for PLM density integrals [nondim]
-#endif
 integer, parameter :: default_niblock_plm = 0 !< Default i tile size, 0 = full domain [nondim]
 integer, parameter :: default_njblock_plm = 0 !< Default j tile size, 0 = full domain [nondim]
+#else
+integer, parameter :: default_nkblock = 1  !< Default k block size for PLM density integrals [nondim]
+integer, parameter :: default_niblock_plm = 32 !< Default i tile size, 0 = full domain [nondim]
+integer, parameter :: default_njblock_plm = 4 !< Default j tile size, 0 = full domain [nondim]
+#endif
 
 !> Finite volume pressure gradient control structure
 type, public :: PressureForce_FV_CS ; private
