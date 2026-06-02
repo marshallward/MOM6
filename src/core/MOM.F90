@@ -1038,7 +1038,11 @@ subroutine step_MOM(forces_in, fluxes_in, sfc_state, Time_start, time_int_in, CS
         !$omp target update to(u, v, h)
       endif
 
+      ! UMW NOTE: These transfers are needed to prevent excessive transfers in the group
+      ! updates within this subroutine
+      !$omp target enter data map(to: CS%tv, CS%tv%T, CS%tv%S)
       call post_diabatic_halo_updates(CS, G, GV, US, u, v, h, CS%tv)
+      !$omp target exit data map(release: CS%tv, CS%tv%T, CS%tv%S)
 
       CS%time_in_thermo_cycle = CS%time_in_thermo_cycle + dtdia
 
