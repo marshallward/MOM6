@@ -1042,7 +1042,8 @@ subroutine step_MOM(forces_in, fluxes_in, sfc_state, Time_start, time_int_in, CS
       ! updates within this subroutine
       !$omp target enter data map(to: CS%tv, CS%tv%T, CS%tv%S)
       call post_diabatic_halo_updates(CS, G, GV, US, u, v, h, CS%tv)
-      !$omp target exit data map(release: CS%tv, CS%tv%T, CS%tv%S)
+      !$omp target exit data map(from: CS%tv%T, CS%tv%S)
+      !$omp target exit data map(release: CS%tv)
 
       CS%time_in_thermo_cycle = CS%time_in_thermo_cycle + dtdia
 
@@ -2109,7 +2110,6 @@ subroutine post_diabatic_halo_updates(CS, G, GV, US, u, v, h, tv)
   if (associated(tv%S)) &
     call create_group_pass(pass_uv_T_S_h, tv%S, G%Domain, halo=dynamics_stencil)
   call create_group_pass(pass_uv_T_S_h, h, G%Domain, halo=dynamics_stencil)
-  ! TODO: Safe? what about T and S?
   call do_group_pass(pass_uv_T_S_h, G%Domain, clock=id_clock_pass, omp_offload=.true.)
 
   if (associated(tv%frazil) .and. (.not.tv%frazil_was_reset) .and. CS%vertex_shear) &
