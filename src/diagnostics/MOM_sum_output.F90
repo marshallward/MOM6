@@ -2,6 +2,7 @@
 ! See the LICENSE file for licensing information.
 ! SPDX-License-Identifier: Apache-2.0
 
+#include "do_concurrent_compat.h"
 !> Reports integrated quantities for monitoring the model state
 module MOM_sum_output
 
@@ -707,7 +708,7 @@ subroutine write_energy(u, v, h, tv, day, n, G, GV, US, CS, tracer_CSp, dt_forci
       PE_pt(i,j,k) = 0.0
     enddo
     if (GV%Boussinesq) then
-      do concurrent (j=js:je, i=is:ie) local(hbelow, hint, hbot, k)
+      do concurrent (j=js:je, i=is:ie) DO_LOCALITY(hbelow, hint, hbot, k)
         hbelow = 0.0
         do K=nz,1,-1
           hbelow = hbelow + h(i,j,k) * GV%H_to_Z
@@ -719,7 +720,7 @@ subroutine write_energy(u, v, h, tv, day, n, G, GV, US, CS, tracer_CSp, dt_forci
         enddo
       enddo
     elseif (GV%semi_Boussinesq) then
-      do concurrent (j=js:je, i=is:ie) local(hint, hbot, k)
+      do concurrent (j=js:je, i=is:ie) DO_LOCALITY(hint, hbot, k)
         do K=nz,1,-1
           hint = Z_0APE(K) + eta(i,j,K)  ! eta and H_0 have opposite signs.
           hbot = max(Z_0APE(K) - (G%bathyT(i,j) + G%Z_ref), 0.0)
@@ -728,7 +729,7 @@ subroutine write_energy(u, v, h, tv, day, n, G, GV, US, CS, tracer_CSp, dt_forci
         enddo
       enddo
     else
-      do concurrent (j=js:je, i=is:ie) local(hint, hbot, k)
+      do concurrent (j=js:je, i=is:ie) DO_LOCALITY(hint, hbot, k)
         do K=nz,2,-1
           hint = Z_0APE(K) + eta(i,j,K)  ! eta and H_0 have opposite signs.
           hbot = max(Z_0APE(K) - (G%bathyT(i,j) + G%Z_ref), 0.0)
@@ -764,7 +765,7 @@ subroutine write_energy(u, v, h, tv, day, n, G, GV, US, CS, tracer_CSp, dt_forci
   ! Use reproducing sums to do global integrals relate to the heat, salinity and water budgets.
   if (CS%use_temperature) then
     !$omp target update to(tv%S, tv%T)
-    do concurrent (j=js:je, i=is:ie) local(k)
+    do concurrent (j=js:je, i=is:ie) DO_LOCALITY(k)
       Salt_int(i,j) = 0.0 ; Temp_int(i,j) = 0.0
       do k=1,nz
         Salt_int(i,j) = Salt_int(i,j) + tv%S(i,j,k) * (h(i,j,k)*(GV%H_to_RZ * areaTm(i,j)))
