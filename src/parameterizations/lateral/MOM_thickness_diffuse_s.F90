@@ -105,9 +105,26 @@ module subroutine thickness_diffuse(h, uhtr, vhtr, tv, dt, G, GV, US, MEKE, VarM
     cg1 => null()
   endif
 
-
-  !$OMP parallel do default(shared)
-  do j=js,je ; do I=is-1,ie
+  if (is_root_pe()) then
+    write(*,'(A)') "[thickness_diffuse] Branch flags:"
+    write(*,'(2X,A,L1)') "use_VarMix           = ", use_VarMix
+    write(*,'(2X,A,L1)') "Resoln_scaled        = ", Resoln_scaled
+    write(*,'(2X,A,L1)') "Depth_scaled         = ", Depth_scaled
+    write(*,'(2X,A,L1)') "use_stored_slopes    = ", use_stored_slopes
+    write(*,'(2X,A,L1)') "khth_use_vert_struct = ", khth_use_vert_struct
+    write(*,'(2X,A,L1)') "use_Visbeck          = ", use_Visbeck
+    write(*,'(2X,A,L1)') "use_QG_Leith         = ", use_QG_Leith
+    write(*,'(2X,A,L1)') "CS%read_khth         = ", CS%read_khth
+    write(*,'(2X,A,L1)') "MEKE%Kh allocated    = ", allocated(MEKE%Kh)
+    if (allocated(MEKE%Kh)) &
+      write(*,'(2X,A,L1)') "CS%MEKE_GEOMETRIC    = ", CS%MEKE_GEOMETRIC
+    write(*,'(2X,A,L1)') "full_depth_khth_min  = ", CS%full_depth_khth_min
+    write(*,'(2X,A,L1)') "use_GME_thickness    = ", CS%use_GME_thickness_diffuse
+    write(*,'(2X,A,L1)') "Khth_Max > 0         = ", (CS%Khth_Max > 0.0)
+    write(*,'(2X,A,L1)') "max_Khth_CFL > 0     = ", (CS%max_Khth_CFL > 0.0)
+  endif
+  !$omp target update to(CS, MEKE)
+  do concurrent (j=js:je, I=is-1:ie)
     KH_u_CFL(I,j) = (0.25*CS%max_Khth_CFL) /  &
       (dt * ((G%IdxCu(I,j)*G%IdxCu(I,j)) + (G%IdyCu(I,j)*G%IdyCu(I,j))))
   enddo ; enddo
@@ -118,7 +135,6 @@ module subroutine thickness_diffuse(h, uhtr, vhtr, tv, dt, G, GV, US, MEKE, VarM
   enddo ; enddo
 
   ! Calculates interface heights, e, in [Z ~> m].
-  !$omp target update to(h)
   !$omp target enter data map(alloc: e)
   if (CS%use_meso_sfn_ANN) then
     ! The ANN streamfunction needs a wider halo on e.
@@ -130,218 +146,217 @@ module subroutine thickness_diffuse(h, uhtr, vhtr, tv, dt, G, GV, US, MEKE, VarM
 
   ! Set the diffusivities.
   if (.not. CS%read_khth) then
-    do j=js,je ; do I=is-1,ie
+    do concurrent (j=js:je, I=is-1:ie)
       Khth_loc_u(I,j) = CS%Khth
-    enddo ; enddo
+    enddo
   else ! use 2d KHTH that was read in from file
-    do j=js,je ; do I=is-1,ie
+    do concurrent (j=js:je, I=is-1:ie)
       Khth_loc_u(I,j) = 0.5 * (CS%khth2d(i,j) + CS%khth2d(i+1,j))
-    enddo ; enddo
+    enddo
   endif
 
   if (use_VarMix) then
     if (use_Visbeck) then
       !$omp target update from( VarMix%L2u, VarMix%SN_u)
-      do j=js,je ; do I=is-1,ie
+      do concurrent (j=js:je, I=is-1:ie)
         Khth_loc_u(I,j) = Khth_loc_u(I,j) + &
           CS%KHTH_Slope_Cff*VarMix%L2u(I,j) * VarMix%SN_u(I,j)
-      enddo ; enddo
+      enddo
     endif
   endif
 
   if (allocated(MEKE%Kh)) then
     if (CS%MEKE_GEOMETRIC) then
       !$omp target update from( VarMix%SN_u)
-      do j=js,je ; do I=is-1,ie
+      do concurrent (j=js:je, I=is-1:ie)
         Khth_loc_u(I,j) = Khth_loc_u(I,j) + G%OBCmaskCu(I,j) * CS%MEKE_GEOMETRIC_alpha * &
                           0.5*(MEKE%MEKE(i,j)+MEKE%MEKE(i+1,j)) / &
                           (VarMix%SN_u(I,j) + CS%MEKE_GEOMETRIC_epsilon)
-      enddo ; enddo
+      enddo
     else
-      do j=js,je ; do I=is-1,ie
+      do concurrent (j=js:je, I=is-1:ie)
         Khth_loc_u(I,j) = Khth_loc_u(I,j) + MEKE%KhTh_fac*sqrt(MEKE%Kh(i,j)*MEKE%Kh(i+1,j))
-      enddo ; enddo
+      enddo
     endif
   endif
 
   if (Resoln_scaled) then
     !$omp target update from( VarMix%Res_fn_u )
-    do j=js,je ; do I=is-1,ie
+    do concurrent (j=js:je, I=is-1:ie)
       Khth_loc_u(I,j) = Khth_loc_u(I,j) * VarMix%Res_fn_u(I,j)
-    enddo ; enddo
+    enddo
   endif
 
   if (Depth_scaled) then
     !$omp target update from( VarMix%Depth_fn_u )
-    do j=js,je ; do I=is-1,ie
+    do concurrent (j=js:je, I=is-1:ie)
       Khth_loc_u(I,j) = Khth_loc_u(I,j) * VarMix%Depth_fn_u(I,j)
-    enddo ; enddo
+    enddo
   endif
 
   if (CS%Khth_Max > 0) then
-    do j=js,je ; do I=is-1,ie
+    do concurrent (j=js:je, I=is-1:ie)
       Khth_loc_u(I,j) = max(CS%Khth_Min, min(Khth_loc_u(I,j), CS%Khth_Max))
-    enddo ; enddo
+    enddo
   else
-    do j=js,je ; do I=is-1,ie
+    do concurrent (j=js:je, I=is-1:ie)
       Khth_loc_u(I,j) = max(CS%Khth_Min, Khth_loc_u(I,j))
-    enddo ; enddo
+    enddo
   endif
-  do j=js,je ; do I=is-1,ie
+  do concurrent(j=js:je, I=is-1:ie)
     KH_u(I,j,1) = min(KH_u_CFL(I,j), Khth_loc_u(I,j))
-  enddo ; enddo
+  enddo
 
   if (khth_use_vert_struct) then
     if (CS%full_depth_khth_min) then
-      do K=2,nz+1 ; do j=js,je ; do I=is-1,ie
+      do concurrent (K=2:nz+1, j=js:je, I=is-1:ie)
         KH_u(I,j,K) = KH_u(I,j,1) * 0.5 * ( VarMix%khth_struct(i,j,k-1) + VarMix%khth_struct(i+1,j,k-1) )
         KH_u(I,j,K) = max(KH_u(I,j,K), CS%Khth_Min)
-      enddo ; enddo ; enddo
+      enddo
     else
-      do K=2,nz+1 ; do j=js,je ; do I=is-1,ie
+      do concurrent (K=2:nz+1, j=js:je, I=is-1:ie)
         KH_u(I,j,K) = KH_u(I,j,1) * 0.5 * ( VarMix%khth_struct(i,j,k-1) + VarMix%khth_struct(i+1,j,k-1) )
-      enddo ; enddo ; enddo
+      enddo
     endif
   else
-    do K=2,nz+1 ; do j=js,je ; do I=is-1,ie
+    do concurrent (K=2:nz+1, j=js:je, I=is-1:ie)
       KH_u(I,j,K) = KH_u(I,j,1)
-    enddo ; enddo ; enddo
+    enddo
   endif
 
   if (use_VarMix) then
     if (use_QG_Leith) then
-      do k=1,nz ; do j=js,je ; do I=is-1,ie
+      do concurrent (k=1:nz, j=js:je, I=is-1:ie)
         KH_u(I,j,k) = VarMix%KH_u_QG(I,j,k)
-      enddo ; enddo ; enddo
+      enddo
     endif
   endif
 
   if (CS%use_GME_thickness_diffuse) then
-    do k=1,nz+1 ; do j=js,je ; do I=is-1,ie
+    do concurrent (k=1:nz+1, j=js:je, I=is-1:ie)
       CS%KH_u_GME(I,j,k) = KH_u(I,j,k)
-    enddo ; enddo ; enddo
+    enddo
   endif
 
   if (.not. CS%read_khth) then
-    do J=js-1,je ; do i=is,ie
+    do concurrent (J=js-1:je, i=is:ie)
       Khth_loc_v(i,J) = CS%Khth
-    enddo ; enddo
+    enddo
   else ! read KHTH from file
-    do J=js-1,je ; do i=is,ie
+    do concurrent (J=js-1:je, i=is:ie)
       Khth_loc_v(i,J) = 0.5 * (CS%khth2d(i,j) + CS%khth2d(i,j+1))
-    enddo ; enddo
+    enddo
   endif
 
   if (use_VarMix) then
     if (use_Visbeck) then
       !$omp target update from( VarMix%L2v, VarMix%SN_v )
-      do J=js-1,je ; do i=is,ie
+      do concurrent (J=js-1:je, i=is:ie)
         Khth_loc_v(i,J) = Khth_loc_v(i,J) + CS%KHTH_Slope_Cff*VarMix%L2v(i,J)*VarMix%SN_v(i,J)
-      enddo ; enddo
+      enddo
     endif
   endif
   if (allocated(MEKE%Kh)) then
     if (CS%MEKE_GEOMETRIC) then
       !$omp target update from( VarMix%SN_v )
-      do J=js-1,je ; do i=is,ie
+      do concurrent (J=js-1:je, i=is:ie)
         Khth_loc_v(i,J) = Khth_loc_v(i,J) + G%OBCmaskCv(i,J) * CS%MEKE_GEOMETRIC_alpha * &
                         0.5*(MEKE%MEKE(i,j)+MEKE%MEKE(i,j+1)) / &
                         (VarMix%SN_v(i,J) + CS%MEKE_GEOMETRIC_epsilon)
-      enddo ; enddo
+      enddo
     else
-      do J=js-1,je ; do i=is,ie
+      do concurrent (J=js-1:je, i=is:ie)
         Khth_loc_v(i,J) = Khth_loc_v(i,J) + MEKE%KhTh_fac*sqrt(MEKE%Kh(i,j)*MEKE%Kh(i,j+1))
-      enddo ; enddo
+      enddo
     endif
   endif
 
   if (Resoln_scaled) then
     !$omp target update from( VarMix%Res_fn_v )
-    do J=js-1,je ; do i=is,ie
+    do concurrent (J=js-1:je, i=is:ie)
       Khth_loc_v(i,J) = Khth_loc_v(i,J) * VarMix%Res_fn_v(i,J)
-    enddo ; enddo
+    enddo
   endif
 
   if (Depth_scaled) then
     !$omp target update from( VarMix%Depth_fn_v )
-    do J=js-1,je ; do i=is,ie
+    do concurrent (J=js-1:je, i=is:ie)
       Khth_loc_v(i,J) = Khth_loc_v(i,J) * VarMix%Depth_fn_v(i,J)
-    enddo ; enddo
+    enddo
   endif
 
   if (CS%Khth_Max > 0) then
-    do J=js-1,je ; do i=is,ie
+    do concurrent (J=js-1:je, i=is:ie)
       Khth_loc_v(i,J) = max(CS%Khth_Min, min(Khth_loc_v(i,J), CS%Khth_Max))
-    enddo ; enddo
+    enddo
   else
-    do J=js-1,je ; do i=is,ie
+    do concurrent (J=js-1:je, i=is:ie)
       Khth_loc_v(i,J) = max(CS%Khth_Min, Khth_loc_v(i,J))
-    enddo ; enddo
+    enddo
   endif
 
   if (CS%max_Khth_CFL > 0.0) then
-    do J=js-1,je ; do i=is,ie
+    do concurrent (J=js-1:je, i=is:ie)
       KH_v(i,J,1) = min(KH_v_CFL(i,J), Khth_loc_v(i,J))
-    enddo ; enddo
+    enddo
   endif
 
   if (khth_use_vert_struct) then
       if (CS%full_depth_khth_min) then
-      do K=2,nz+1 ; do J=js-1,je ; do i=is,ie
+      do concurrent (K=2:nz+1, J=js-1:je, i=is:ie)
         KH_v(i,J,K) = KH_v(i,J,1) * 0.5 * ( VarMix%khth_struct(i,j,k-1) + VarMix%khth_struct(i,j+1,k-1) )
         KH_v(i,J,K) = max(KH_v(i,J,K), CS%Khth_Min)
-      enddo ; enddo ; enddo
+      enddo
     else
-      do K=2,nz+1 ; do J=js-1,je ; do i=is,ie
+      do concurrent (K=2:nz+1, J=js-1:je, i=is:ie)
         KH_v(i,J,K) = KH_v(i,J,1) * 0.5 * ( VarMix%khth_struct(i,j,k-1) + VarMix%khth_struct(i,j+1,k-1) )
-      enddo ; enddo ; enddo
+      enddo
     endif
   else
-    do K=2,nz+1 ; do J=js-1,je ; do i=is,ie
+    do concurrent (K=2:nz+1, J=js-1:je, i=is:ie)
       KH_v(i,J,K) = KH_v(i,J,1)
-    enddo ; enddo ; enddo
+    enddo
   endif
 
   if (use_VarMix) then
     if (use_QG_Leith) then
-      do k=1,nz ; do J=js-1,je ; do i=is,ie
+      do concurrent (k=1:nz, J=js-1:je, i=is:ie)
         KH_v(i,J,k) = VarMix%KH_v_QG(i,J,k)
-      enddo ; enddo ; enddo
+      enddo
     endif
   endif
 
   if (CS%use_GME_thickness_diffuse) then
-    do k=1,nz+1 ; do J=js-1,je ; do i=is,ie
+    do concurrent (k=1:nz+1, J=js-1:je, i=is:ie)
       CS%KH_v_GME(i,J,k) = KH_v(i,J,k)
-    enddo ; enddo ; enddo
+    enddo
   endif
 
   if (allocated(MEKE%Kh)) then
     if (CS%MEKE_GEOMETRIC) then
       !$omp target update from( VarMix%SN_u, VarMix%SN_v )
       if (CS%MEKE_GEOM_answer_date < 20190101) then
-        do j=js,je ; do i=is,ie
+        do concurrent (j=js:je, i=is:ie)
           ! This does not give bitwise rotational symmetry.
           MEKE%Kh(i,j) = CS%MEKE_GEOMETRIC_alpha * MEKE%MEKE(i,j) / &
                          (0.25*(VarMix%SN_u(I,j)+VarMix%SN_u(I-1,j) + &
                                 VarMix%SN_v(i,J)+VarMix%SN_v(i,J-1)) + &
                           CS%MEKE_GEOMETRIC_epsilon)
-        enddo ; enddo
+        enddo
       else
-        !$OMP do
-        do j=js,je ; do i=is,ie
+        do concurrent (j=js:je, i=is:ie)
           ! With the additional parentheses this gives bitwise rotational symmetry.
           MEKE%Kh(i,j) = CS%MEKE_GEOMETRIC_alpha * MEKE%MEKE(i,j) / &
                          (0.25*((VarMix%SN_u(I,j)+VarMix%SN_u(I-1,j)) + &
                                 (VarMix%SN_v(i,J)+VarMix%SN_v(i,J-1))) + &
                           CS%MEKE_GEOMETRIC_epsilon)
-        enddo ; enddo
+        enddo
       endif
     endif
   endif
 
-  do K=1,nz+1 ; do j=js,je ; do I=is-1,ie ; int_slope_u(I,j,K) = 0.0 ; enddo ; enddo ; enddo
-  do K=1,nz+1 ; do J=js-1,je ; do i=is,ie ; int_slope_v(i,J,K) = 0.0 ; enddo ; enddo ; enddo
+  do concurrent (K=1:nz+1, j=js:je, I=is-1:ie) ; int_slope_u(I,j,K) = 0.0 ; enddo
+  do concurrent (K=1:nz+1, J=js-1:je, i=is:ie) ; int_slope_v(i,J,K) = 0.0 ; enddo
 
   if (CS%detangle_interfaces) then
     call add_detangling_Kh(h, e, Kh_u, Kh_v, KH_u_CFL, KH_v_CFL, tv, dt, G, GV, US, &
