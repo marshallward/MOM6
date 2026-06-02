@@ -916,6 +916,9 @@ subroutine calc_Visbeck_coeffs_old(h, slope_x, slope_y, N2_u, N2_v, G, GV, US, C
                                  ! interface or the inward equivalent with OBCs [H4 ~> m4 or kg4 m-8]
   integer :: i, j, k, is, ie, js, je, nz
 
+  !$omp target enter data map(alloc: h4_u, h4_v,S2_u,S2_v,H_u, H_v)
+  !$omp target enter data map(to: CS%SN_u, CS%SN_v)
+
   if (.not. CS%initialized) call MOM_error(FATAL, "calc_Visbeck_coeffs_old: "// &
          "Module must be initialized before it is used.")
 
@@ -972,14 +975,13 @@ subroutine calc_Visbeck_coeffs_old(h, slope_x, slope_y, N2_u, N2_v, G, GV, US, C
     enddo
   else  ! The land mask is sufficient and there are no special considerations taken at OBC points.
     ! Use the masked product of the 4 thicknesses around a velocity-point interface for weights.
-    !$OMP parallel do default(shared)
-    do K=2,nz
-      do j=js-1,je+1 ; do I=is-1,ie
+    do concurrent(K=2:nz)
+      do concurrent(j=js-1:je+1, I=is-1:ie)
         h4_u(I,j,K) = G%mask2dCu(I,j) * ( (h(i,j,k)*h(i+1,j,k)) * (h(i,j,k-1)*h(i+1,j,k-1)) )
-      enddo ; enddo
-      do J=js-1,je ; do i=is-1,ie+1
+      enddo
+      do concurrent(J=js-1:je, i=is-1:ie+1)
         h4_v(i,J,K) = G%mask2dCv(i,J) * ( (h(i,j,k)*h(i,j+1,k)) * (h(i,j,k-1)*h(i,j+1,k-1)) )
-      enddo ; enddo
+      enddo
     enddo
   endif
 
@@ -987,12 +989,13 @@ subroutine calc_Visbeck_coeffs_old(h, slope_x, slope_y, N2_u, N2_v, G, GV, US, C
   ! calculate the first-mode gravity wave speed and then blend the equatorial
   ! and midlatitude deformation radii, using calc_resoln_function as a template.
 
-  !$OMP parallel do default(shared) private(S2,H_u,Hdn,Hup,H_geom,N2,wNE,wSE,wSW,wNW)
-  do j=js,je
-    do I=is-1,ie
+  ! UMW NOTE: H_u should be local, but this causes segfaults.
+  do concurrent(j=js:je) !local( H_u )
+    do concurrent(I=is-1:ie)
       CS%SN_u(I,j) = 0. ; H_u(I) = 0. ; S2_u(I,j) = 0.
     enddo
-    do K=2,nz ; do I=is-1,ie
+    do K=2,nz ; do concurrent(I=is-1:ie) &
+      & local(Hdn, Hup, H_geom, wSE, wNW, wNE, wSW, S2, N2)
       Hdn = sqrt( h(i,j,k) * h(i+1,j,k) )
       Hup = sqrt( h(i,j,k-1) * h(i+1,j,k-1) )
       H_geom = sqrt( Hdn * Hup )
@@ -1020,7 +1023,7 @@ subroutine calc_Visbeck_coeffs_old(h, slope_x, slope_y, N2_u, N2_v, G, GV, US, C
       S2_u(I,j) = S2_u(I,j) + S2*H_geom
       H_u(I) = H_u(I) + H_geom
     enddo ; enddo
-    do I=is-1,ie
+    do concurrent(I=is-1:ie)
       if (H_u(I)>0.) then
         CS%SN_u(I,j) = G%OBCmaskCu(I,j) * CS%SN_u(I,j) / H_u(I)
         S2_u(I,j) =  G%OBCmaskCu(I,j) * S2_u(I,j) / H_u(I)
@@ -1030,12 +1033,13 @@ subroutine calc_Visbeck_coeffs_old(h, slope_x, slope_y, N2_u, N2_v, G, GV, US, C
     enddo
   enddo
 
-  !$OMP parallel do default(shared) private(S2,H_v,Hdn,Hup,H_geom,N2,wNE,wSE,wSW,wNW)
-  do J=js-1,je
-    do i=is,ie
+  ! UMW NOTE: H_v should be local, but this causes segfaults. 
+  do concurrent(J=js-1:je) !local( H_v )
+    do concurrent(i=is:ie)
       CS%SN_v(i,J) = 0. ; H_v(i) = 0. ; S2_v(i,J) = 0.
     enddo
-    do K=2,nz ; do i=is,ie
+    do K=2,nz ; do concurrent(i=is:ie) &
+      & local(Hdn, Hup, H_geom, wSE, wNW, wNE, wSW, S2, N2)
       Hdn = sqrt( h(i,j,k) * h(i,j+1,k) )
       Hup = sqrt( h(i,j,k-1) * h(i,j+1,k-1) )
       H_geom = sqrt( Hdn * Hup )
@@ -1063,7 +1067,7 @@ subroutine calc_Visbeck_coeffs_old(h, slope_x, slope_y, N2_u, N2_v, G, GV, US, C
       S2_v(i,J) = S2_v(i,J) + S2*H_geom
       H_v(i) = H_v(i) + H_geom
     enddo ; enddo
-    do i=is,ie
+    do concurrent(i=is:ie)
       if (H_v(i)>0.) then
         CS%SN_v(i,J) = G%OBCmaskCv(i,J) * CS%SN_v(i,J) / H_v(i)
         S2_v(i,J) = G%OBCmaskCv(i,J) * S2_v(i,J) / H_v(i)
@@ -1089,6 +1093,9 @@ subroutine calc_Visbeck_coeffs_old(h, slope_x, slope_y, N2_u, N2_v, G, GV, US, C
     call uvchksum("calc_Visbeck_coeffs_old SN_[uv]", CS%SN_u, CS%SN_v, G%HI, &
                   unscale=US%s_to_T, scalar_pair=.true.)
   endif
+
+  !$omp target exit data map(delete: h4_u, h4_v,S2_u,S2_v,H_u, H_v)
+  !$omp target exit data map(from: CS%SN_u, CS%SN_v)
 
 end subroutine calc_Visbeck_coeffs_old
 
