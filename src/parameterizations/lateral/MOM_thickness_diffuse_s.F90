@@ -84,8 +84,12 @@ module subroutine thickness_diffuse(h, uhtr, vhtr, tv, dt, G, GV, US, MEKE, VarM
   is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec ; nz = GV%ke
   h_neglect = GV%H_subroundoff
 
+  !$omp target enter data map(to: MEKE) if(allocated(MEKE%GM_src) .or. allocated(MEKE%Kh))
+  !$omp target enter data map(alloc: MEKE%GM_src) if(allocated(MEKE%GM_src))
+  !$omp target enter data map(alloc: MEKE%Kh) if(allocated(MEKE%Kh))
+
   if (allocated(MEKE%GM_src)) then
-    do j=js,je ; do i=is,ie ; MEKE%GM_src(i,j) = 0. ; enddo ; enddo
+    do concurrent (j=js:je, i=is:ie) ; MEKE%GM_src(i,j) = 0. ; enddo
   endif
 
   use_VarMix = .false. ; Resoln_scaled = .false. ; use_stored_slopes = .false.
@@ -105,27 +109,8 @@ module subroutine thickness_diffuse(h, uhtr, vhtr, tv, dt, G, GV, US, MEKE, VarM
     cg1 => null()
   endif
 
-  if (is_root_pe()) then
-    write(*,'(A)') "[thickness_diffuse] Branch flags:"
-    write(*,'(2X,A,L1)') "use_VarMix           = ", use_VarMix
-    write(*,'(2X,A,L1)') "Resoln_scaled        = ", Resoln_scaled
-    write(*,'(2X,A,L1)') "Depth_scaled         = ", Depth_scaled
-    write(*,'(2X,A,L1)') "use_stored_slopes    = ", use_stored_slopes
-    write(*,'(2X,A,L1)') "khth_use_vert_struct = ", khth_use_vert_struct
-    write(*,'(2X,A,L1)') "use_Visbeck          = ", use_Visbeck
-    write(*,'(2X,A,L1)') "use_QG_Leith         = ", use_QG_Leith
-    write(*,'(2X,A,L1)') "CS%read_khth         = ", CS%read_khth
-    write(*,'(2X,A,L1)') "MEKE%Kh allocated    = ", allocated(MEKE%Kh)
-    if (allocated(MEKE%Kh)) &
-      write(*,'(2X,A,L1)') "CS%MEKE_GEOMETRIC    = ", CS%MEKE_GEOMETRIC
-    write(*,'(2X,A,L1)') "full_depth_khth_min  = ", CS%full_depth_khth_min
-    write(*,'(2X,A,L1)') "use_GME_thickness    = ", CS%use_GME_thickness_diffuse
-    write(*,'(2X,A,L1)') "Khth_Max > 0         = ", (CS%Khth_Max > 0.0)
-    write(*,'(2X,A,L1)') "max_Khth_CFL > 0     = ", (CS%max_Khth_CFL > 0.0)
-  endif
-
   !$omp target update to(CS, MEKE)
-  !$omp target enter data map(alloc: KH_u_CFL, KH_v_CFL, Khth_Loc_u, Khth_Loc_v, int_slope_u, int_slope_v, e, KH_u, KH_v)
+  !$omp target enter data map(alloc: KH_u_CFL, KH_v_CFL, Khth_Loc_u, Khth_Loc_v, int_slope_u, int_slope_v, e, KH_u, KH_v, uhD, vhD) map(to: VarMix, VarMix%res_fn_u, VarMix%res_fn_v)
 
   do concurrent (j=js:je, I=is-1:ie)
     KH_u_CFL(I,j) = (0.25*CS%max_Khth_CFL) /  &
@@ -359,9 +344,8 @@ module subroutine thickness_diffuse(h, uhtr, vhtr, tv, dt, G, GV, US, MEKE, VarM
   do concurrent (K=1:nz+1, j=js:je, I=is-1:ie) ; int_slope_u(I,j,K) = 0.0 ; enddo
   do concurrent (K=1:nz+1, J=js-1:je, i=is:ie) ; int_slope_v(i,J,K) = 0.0 ; enddo
 
-  !$omp target update from(KH_u_CFL, KH_v_CFL, Khth_Loc_u, Khth_Loc_v, int_slope_u, int_slope_v, e, KH_u, KH_v)
+  !$omp target update from(e, Kh_u, Kh_v, Kh_u_CFL, Kh_v_CFL, int_slope_u, int_slope_v) if (CS%detangle_interfaces .or. (CS%Kh_eta_bg > 0.0) .or. (CS%Kh_eta_vel > 0.0) .or. CS%debug)
 
-  if (is_root_pe()) write(*,'(A)') "[thickness_diffuse] Post-parallel branches:"
   if (CS%detangle_interfaces) then
     call add_detangling_Kh(h, e, Kh_u, Kh_v, KH_u_CFL, KH_v_CFL, tv, dt, G, GV, US, &
                            CS, int_slope_u, int_slope_v)
@@ -376,12 +360,15 @@ module subroutine thickness_diffuse(h, uhtr, vhtr, tv, dt, G, GV, US, MEKE, VarM
                               CS%meso_sfn_ANN_CS, dt, u, v)
   endif
 
+  !$omp target update to(Kh_u, Kh_v, int_slope_u, int_slope_v) if (CS%detangle_interfaces .or. (CS%Kh_eta_bg > 0.0) .or. (CS%Kh_eta_vel > 0.0))
+
   if (CS%debug) then
     call uvchksum("Kh_[uv]", Kh_u, Kh_v, G%HI, haloshift=0, &
                   unscale=(US%L_to_m**2)*US%s_to_T, scalar_pair=.true.)
     call uvchksum("Kh_[uv]_CFL", Kh_u_CFL, Kh_v_CFL, G%HI, haloshift=0, &
                   unscale=(US%L_to_m**2)*US%s_to_T, scalar_pair=.true.)
     if (Resoln_scaled) then
+      !$omp target update from(VarMix%Res_fn_v, VarMix%Res_fn_u)
       call uvchksum("Res_fn_[uv]", VarMix%Res_fn_u, VarMix%Res_fn_v, G%HI, haloshift=0, &
                     unscale=1.0, scalar_pair=.true.)
     endif
@@ -436,6 +423,7 @@ module subroutine thickness_diffuse(h, uhtr, vhtr, tv, dt, G, GV, US, MEKE, VarM
 
   ! offer diagnostic fields for averaging
   if (query_averaging_enabled(CS%diag)) then
+    !$omp target update from(uhD, vhD)
     if (CS%id_uhGM > 0)   call post_data(CS%id_uhGM, uhD, CS%diag)
     if (CS%id_vhGM > 0)   call post_data(CS%id_vhGM, vhD, CS%diag)
     if (CS%id_GMwork > 0) call post_data(CS%id_GMwork, CS%GMwork, CS%diag)
@@ -497,24 +485,19 @@ module subroutine thickness_diffuse(h, uhtr, vhtr, tv, dt, G, GV, US, MEKE, VarM
 
   endif
 
-  !$OMP parallel do default(shared)
-  do k=1,nz
-    do j=js,je ; do I=is-1,ie
+  do concurrent (k=1:nz, j=js:je, I=is-1:ie)
       uhtr(I,j,k) = uhtr(I,j,k) + uhD(I,j,k) * dt
       if (associated(CDp%uhGM)) CDp%uhGM(I,j,k) = uhD(I,j,k)
-    enddo ; enddo
-    do J=js-1,je ; do i=is,ie
+  enddo
+  do concurrent (k=1:nz, J=js-1:je, i=is:ie)
       vhtr(i,J,k) = vhtr(i,J,k) + vhD(i,J,k) * dt
       if (associated(CDp%vhGM)) CDp%vhGM(i,J,k) = vhD(i,J,k)
-    enddo ; enddo
-    do j=js,je ; do i=is,ie
-      h(i,j,k) = h(i,j,k) - dt * G%IareaT(i,j) * &
-          ((uhD(I,j,k) - uhD(I-1,j,k)) + (vhD(i,J,k) - vhD(i,J-1,k)))
-      if (h(i,j,k) < GV%Angstrom_H) h(i,j,k) = GV%Angstrom_H
-    enddo ; enddo
   enddo
-
-  !$omp target exit data map(release: KH_u_CFL, KH_v_CFL, Khth_Loc_u, Khth_Loc_v, int_slope_u, int_slope_v, e, KH_u, KH_v)
+  do concurrent (k=1:nz, j=js:je, i=is:ie)
+    h(i,j,k) = h(i,j,k) - dt * G%IareaT(i,j) * &
+        ((uhD(I,j,k) - uhD(I-1,j,k)) + (vhD(i,J,k) - vhD(i,J-1,k)))
+    if (h(i,j,k) < GV%Angstrom_H) h(i,j,k) = GV%Angstrom_H
+  enddo
 
   ! Whenever thickness changes let the diag manager know, target grids
   ! for vertical remapping may need to be regenerated.
@@ -522,12 +505,18 @@ module subroutine thickness_diffuse(h, uhtr, vhtr, tv, dt, G, GV, US, MEKE, VarM
   call diag_update_remap_grids(CS%diag)
 
   if (CS%debug) then
+    !$omp target update from(uhD, vhD, uhtr, vhtr, h)
     call uvchksum("thickness_diffuse [uv]hD", uhD, vhD, &
                   G%HI, haloshift=0, unscale=GV%H_to_m*US%L_to_m**2*US%s_to_T)
     call uvchksum("thickness_diffuse [uv]htr", uhtr, vhtr, &
                   G%HI, haloshift=0, unscale=US%L_to_m**2*GV%H_to_m)
     call hchksum(h, "thickness_diffuse h", G%HI, haloshift=0, unscale=GV%H_to_m)
   endif
+
+  !$omp target exit data map(release: KH_u_CFL, KH_v_CFL, Khth_Loc_u, Khth_Loc_v, int_slope_u, int_slope_v, e, KH_u, KH_v, uhD, vhD, VarMix, VarMix%res_fn_u, VarMix%res_fn_v)
+  !$omp target exit data map(from: MEKE%GM_src) if(allocated(MEKE%GM_src))
+  !$omp target exit data map(from: MEKE%Kh) if(allocated(MEKE%Kh))
+  !$omp target exit data map(release: MEKE) if(allocated(MEKE%GM_src) .or. allocated(MEKE%Kh))
 
 end subroutine thickness_diffuse
 
@@ -742,7 +731,7 @@ module subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt
   nk_linear = max(GV%nkml, 1)
 
   !$omp target enter data &
-  !$omp   map(alloc: diag_sfn_x, diag_sfn_y, uhD, vhD, uhtot, Work_u, vhtot, Work_v, h_avail, h_avail_rsum, &
+  !$omp   map(alloc: diag_sfn_x, diag_sfn_y, uhtot, Work_u, vhtot, Work_v, h_avail, h_avail_rsum, &
   !$omp     h_frac, pres, dz, S, T, dzN2_u, Slope_x_PE, slope_x, slope2_Ratio_u, Sfn_unlim_u, hN2_x_PE, &
   !$omp     drho_dT_u, drho_dT_dT_h, drho_dS_u, drdkDe_u, drdi_u, diag_sfn_unlim_x, pres_u, T_u, S_u, &
   !$omp     dzN2_v, Slope_y_PE, slope_y, slope2_Ratio_v, Sfn_unlim_v, hN2_y_PE, drho_dT_v, drho_dT_dT_hr, &
@@ -1645,7 +1634,7 @@ module subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt
   !$omp     T_u, S_u, dzN2_v, Slope_y_PE, slope_y, slope2_Ratio_v, Sfn_unlim_v, hN2_y_PE, &
   !$omp     drho_dT_v, drho_dT_dT_hr, drho_dS_v, drdj_v, diag_sfn_unlim_y, T_v, S_v, pres_v, &
   !$omp     drdkDe_v, tv, tv%T, tv%S, tv%p_surf, meke) &
-  !$omp   map(from: uhD, vhD, meke%gm_src)
+  !$omp   map(from: meke%gm_src)
 
 end subroutine thickness_diffuse_full
 
