@@ -178,6 +178,7 @@ subroutine mixedlayer_restrat(h, uhtr, vhtr, tv, forces, dt, MLD, h_MLD, bflux, 
     ! Original form, written for the isopycnal model with a bulk mixed layer
     call mixedlayer_restrat_BML(h, uhtr, vhtr, tv, forces, dt, G, GV, US, CS)
   elseif (CS%use_Bodner) then
+  print *, "Bodner"
     ! Implementation of Bodner et al., 2023
     call mixedlayer_restrat_Bodner(CS, G, GV, US, h, uhtr, vhtr, tv, forces, dt, MLD, h_MLD, bflux)
   else
@@ -716,7 +717,8 @@ subroutine mixedlayer_restrat_OM4(h, uhtr, vhtr, tv, forces, dt, h_MLD, VarMix, 
 end subroutine mixedlayer_restrat_OM4
 
 !> Stream function shape as a function of non-dimensional position within mixed-layer [nondim]
-real function mu(sigma, dh)
+pure real function mu(sigma, dh)
+  !$omp declare target
   real, intent(in) :: sigma !< Fractional position within mixed layer [nondim]
                             !! z=0 is surface, z=-1 is the bottom of the mixed layer
   real, intent(in) :: dh    !< Non-dimensional distance over which to extend stream
@@ -830,6 +832,22 @@ subroutine mixedlayer_restrat_Bodner(CS, G, GV, US, h, uhtr, vhtr, tv, forces, d
   real :: m2_s2_to_Z2_T2  ! Conversion factors to restore scaling after a term is raised to a
                           ! fractional power [Z2 s2 T-2 m-2 ~> 1]
   real, parameter :: two_thirds = 2./3.  ! [nondim]
+  real :: tau_bgrow, tau_bdecay ! Local copies of the BLD filter timescales for GPU kernels [T ~> s]
+  real :: h_MLD_l(SZI_(G),SZJ_(G)) ! Plain local copy of h_MLD for clean device mapping [H ~> m or kg m-2]
+  real :: MLDf_l(SZI_(G),SZJ_(G))  ! Plain local copy of CS%MLD_filtered for clean device mapping [H ~> m or kg m-2]
+  real :: MLDfs_l(SZI_(G),SZJ_(G)) ! Plain local copy of CS%MLD_filtered_slow for clean device mapping [H ~> m or kg m-2]
+  real :: tau_mgrow, tau_mdecay ! Local copies of the MLD filter timescales for GPU kernels [T ~> s]
+  real :: bflux_l(SZI_(G),SZJ_(G)) ! Plain local copy of bflux for clean device mapping [Z2 T-3 ~> m2 s-3]
+  real :: BLD_l(SZI_(G),SZJ_(G))   ! Plain local copy of BLD for clean device mapping [Z ~> m]
+  real :: wpupf_l(SZI_(G),SZJ_(G)) ! Plain local copy of CS%wpup_filtered for clean device mapping [L H T-2 ~> m2 s-2]
+  real :: l_mstar, l_nstar, l_min_wstar2 ! Local copies of Bodner CS scalars for GPU kernels [nondim]/[Z2 T-2]
+  real :: zL_zH ! Local copy of the US%Z_to_L * GV%Z_to_H rescaling factor [nondim]
+  real :: rho3d(SZI_(G),SZJ_(G),SZK_(GV)) ! Host-computed p=0 (sigma_0) density for the GPU integral [R ~> kg m-3]
+  real :: Rml_i  ! Per-column running density integral through "big H" [R H ~> kg m-2]
+  real :: htot_i ! Per-column running mixed-layer thickness [H ~> m or kg m-2]
+  real :: l_Angstrom ! Local copy of GV%Angstrom_H for GPU kernels [H ~> m or kg m-2]
+  real :: Cr_l(SZI_(G),SZJ_(G)) ! Plain local copy of CS%Cr_space for clean device mapping [nondim]
+  real :: l_MLE_tail_dh ! Local copy of CS%MLE_tail_dh for GPU kernels [nondim]
   logical :: line_is_empty, keep_going
   integer, dimension(2) :: EOSdom ! The i-computational domain for the equation of state
   integer :: i, j, k, is, ie, js, je, Isq, Ieq, Jsq, Jeq, nz
@@ -862,6 +880,7 @@ subroutine mixedlayer_restrat_Bodner(CS, G, GV, US, h, uhtr, vhtr, tv, forces, d
 
   if (associated(bflux)) &
     call pass_var(bflux, G%domain, halo=1)
+  !!$omp target enter data map(alloc: little_h, big_H, mld, htot, buoy_av)
 
   ! Extract the friction velocity from the forcing type.
   call find_ustar(forces, tv, U_star_2d, G, GV, US, halo=1)
@@ -881,28 +900,41 @@ subroutine mixedlayer_restrat_Bodner(CS, G, GV, US, h, uhtr, vhtr, tv, forces, d
 
   ! Apply time filter to h_MLD (to remove diurnal cycle) to obtain "little h".
   ! "little h" is representative of the active mixing layer depth, used in B22 formula (eq 27).
+  tau_bgrow = CS%BLD_growing_Tfilt ; tau_bdecay = CS%BLD_decaying_Tfilt
+  h_MLD_l(:,:) = h_MLD(:,:)
+  MLDf_l(:,:) = CS%MLD_filtered(:,:)
+  !$omp target teams distribute parallel do collapse(2) &
+  !$omp   map(to: h_MLD_l) map(tofrom: MLDf_l) map(from: little_h)
   do j=js-1,je+1 ; do i=is-1,ie+1
-    little_h(i,j) = rmean2ts(h_MLD(i,j), CS%MLD_filtered(i,j), &
-                             CS%BLD_growing_Tfilt, CS%BLD_decaying_Tfilt, dt)
-    CS%MLD_filtered(i,j) = little_h(i,j)
+    little_h(i,j) = rmean2ts(h_MLD_l(i,j), MLDf_l(i,j), &
+                             tau_bgrow, tau_bdecay, dt)
+    MLDf_l(i,j) = little_h(i,j)
   enddo ; enddo
+  CS%MLD_filtered(:,:) = MLDf_l(:,:)
 
   ! Calculate "big H", representative of the mixed layer depth, used in B22 formula (eq 27).
   if (CS%MLD_grid) then
+    print *, "MLD grid"
     do j=js-1,je+1 ; do i=is-1,ie+1
       big_H(i,j) = rmean2ts(little_h(i,j), CS%MLD_filtered_slow(i,j), &
                             CS%MLD_growing_Tfilt, CS%MLD_Tfilt_space(i,j), dt)
     enddo ; enddo
   elseif (CS%Bodner_detect_MLD) then
+    print *, "detect mld"
     call detect_mld(h, tv, MLD, G, GV, CS)
     do j=js-1,je+1 ; do i=is-1,ie+1
       big_H(i,j) = rmean2ts(MLD(i,j), CS%MLD_filtered_slow(i,j), &
                             CS%MLD_growing_Tfilt, CS%MLD_decaying_Tfilt, dt)
     enddo ; enddo
   else
+    print *, "Else"
+    tau_mgrow = CS%MLD_growing_Tfilt ; tau_mdecay = CS%MLD_decaying_Tfilt
+    MLDfs_l(:,:) = CS%MLD_filtered_slow(:,:)
+    !$omp target teams distribute parallel do collapse(2) &
+    !$omp   map(to: little_h, MLDfs_l) map(from: big_H)
     do j=js-1,je+1 ; do i=is-1,ie+1
-      big_H(i,j) = rmean2ts(little_h(i,j), CS%MLD_filtered_slow(i,j), &
-                            CS%MLD_growing_Tfilt, CS%MLD_decaying_Tfilt, dt)
+      big_H(i,j) = rmean2ts(little_h(i,j), MLDfs_l(i,j), &
+                            tau_mgrow, tau_mdecay, dt)
     enddo ; enddo
   endif
   do j=js-1,je+1 ; do i=is-1,ie+1
@@ -911,6 +943,7 @@ subroutine mixedlayer_restrat_Bodner(CS, G, GV, US, h, uhtr, vhtr, tv, forces, d
 
   ! Estimate w'u' at h-points, with a floor to avoid division by zero later.
   if (allocated(tv%SpV_avg) .and. .not.(GV%Boussinesq .or. GV%semi_Boussinesq)) then
+  print *, "if "
     do j=js-1,je+1 ; do i=is-1,ie+1
       ! This expression differs by a factor of 1. / (Rho_0 * SpV_avg) compared with the other
       ! expressions below, and it is invariant to the value of Rho_0 in non-Boussinesq mode.
@@ -927,6 +960,7 @@ subroutine mixedlayer_restrat_Bodner(CS, G, GV, US, h, uhtr, vhtr, tv, forces, d
                 ! expansion coefficient) and because the specific volume does vary within the mixed layer.
     enddo ; enddo
   elseif (CS%answer_date < 20240201) then
+  print *, "anwer date"
     Z3_T3_to_m3_s3 = (US%Z_to_m * US%s_to_T)**3
     m2_s2_to_Z2_T2 = (US%m_to_Z * US%T_to_s)**2
     do j=js-1,je+1 ; do i=is-1,ie+1
@@ -936,21 +970,32 @@ subroutine mixedlayer_restrat_Bodner(CS, G, GV, US, h, uhtr, vhtr, tv, forces, d
           CS%min_wstar2) * US%Z_to_L * GV%Z_to_H ! In [L H T-2 ~> m2 s-2 or kg m-1 s-2]
     enddo ; enddo
   else
+    print *, " else 2"
+    l_mstar = CS%mstar ; l_nstar = CS%nstar ; l_min_wstar2 = CS%min_wstar2
+    zL_zH = US%Z_to_L * GV%Z_to_H
+    bflux_l(:,:) = bflux(:,:) ; BLD_l(:,:) = BLD(:,:)
+    !$omp target teams distribute parallel do collapse(2) private(w_star3) &
+    !$omp   map(to: bflux_l, BLD_l, U_star_2d) map(from: wpup)
     do j=js-1,je+1 ; do i=is-1,ie+1
-      w_star3 = max(0., -bflux(i,j)) * BLD(i,j)    ! In [Z3 T-3 ~> m3 s-3]
-      wpup(i,j) = max( (cuberoot(CS%mstar * U_star_2d(i,j)**3 + CS%nstar * w_star3))**2, CS%min_wstar2 ) &
-          * US%Z_to_L * GV%Z_to_H ! In [L H T-2 ~> m2 s-2 or kg m-1 s-2]
+      w_star3 = max(0., -bflux_l(i,j)) * BLD_l(i,j)    ! In [Z3 T-3 ~> m3 s-3]
+      wpup(i,j) = max( (cuberoot(l_mstar * U_star_2d(i,j)**3 + l_nstar * w_star3))**2, l_min_wstar2 ) &
+          * zL_zH ! In [L H T-2 ~> m2 s-2 or kg m-1 s-2]
     enddo ; enddo
   endif
 
   ! We filter w'u' with the same time scales used for "little h"
+  wpupf_l(:,:) = CS%wpup_filtered(:,:)
+  !$omp target teams distribute parallel do collapse(2) &
+  !$omp   map(tofrom: wpup, wpupf_l)
   do j=js-1,je+1 ; do i=is-1,ie+1
-    wpup(i,j) = rmean2ts(wpup(i,j), CS%wpup_filtered(i,j), &
-                         CS%BLD_growing_Tfilt, CS%BLD_decaying_Tfilt, dt)
-    CS%wpup_filtered(i,j) = wpup(i,j)
+    wpup(i,j) = rmean2ts(wpup(i,j), wpupf_l(i,j), &
+                         tau_bgrow, tau_bdecay, dt)
+    wpupf_l(i,j) = wpup(i,j)
   enddo ; enddo
+  CS%wpup_filtered(:,:) = wpupf_l(:,:)
 
   if (CS%id_lfbod > 0) then
+    print *, " if lfbod "
     do j=js-1,je+1 ; do i=is-1,ie+1
       ! Calculate front length used in B22 formula (eq 24).
       w_star3 = max(0., -bflux(i,j)) * BLD(i,j)
@@ -968,11 +1013,13 @@ subroutine mixedlayer_restrat_Bodner(CS, G, GV, US, h, uhtr, vhtr, tv, forces, d
 
     ! Rescale from [Z2 H-1 ~> m or m4 kg-1] to [L ~> m]
     if (allocated(tv%SpV_avg) .and. .not.(GV%Boussinesq .or. GV%semi_Boussinesq)) then
+    print *, "rescale"
       do j=js-1,je+1 ; do i=is-1,ie+1
         lf_bodner_diag(i,j) = lf_bodner_diag(i,j) &
             * (US%Z_to_L * GV%RZ_to_H / tv%SpV_avg(i,j,1))
       enddo ; enddo
     else
+      print *, "don't erscale"
       do j=js-1,je+1 ; do i=is-1,ie+1
         lf_bodner_diag(i,j) = lf_bodner_diag(i,j) * US%Z_to_L * GV%Z_to_H
       enddo ; enddo
@@ -994,60 +1041,83 @@ subroutine mixedlayer_restrat_Bodner(CS, G, GV, US, h, uhtr, vhtr, tv, forces, d
   ! in-situ density would contain the MLD gradient (through the pressure dependence).
   p0(:) = 0.0
   EOSdom(:) = EOS_domain(G%HI, halo=1)
-  !$OMP parallel &
-  !$OMP default(shared) &
-  !$OMP private(i, j, k, keep_going, line_is_empty, dh, &
-  !$OMP   grid_dsd, absf, h_sml, h_big, grd_b, r_wpup, psi_mag, IhTot, &
-  !$OMP   sigint, muzb, muza, hAtVel, Rml_int, SpV_int)
+  if ((GV%Boussinesq .or. GV%semi_Boussinesq) .and. .not.CS%use_Stanley_ML) then
+    ! Active path: density at p=0 (sigma_0) computed on the HOST into rho3d (the polymorphic EOS
+    ! dispatch stays on the host), then the per-column mixed-layer integral is offloaded.
+    do k=1,nz ; do j=js-1,je+1
+      call calculate_density(tv%T(:,j,k), tv%S(:,j,k), p0, rho3d(:,j,k), tv%eqn_of_state, EOSdom)
+    enddo ; enddo
 
-  !$OMP do
-  do j=js-1,je+1
-    rho_ml(:) = 0.0 ; SpV_ml(:) = 0.0
-    do i=is-1,ie+1
-      htot(i,j) = 0.0 ; Rml_int(i) = 0.0 ; SpV_int(i) = 0.0
-    enddo
-    keep_going = .true.
-    do k=1,nz
-      do i=is-1,ie+1
-        vol_dt_avail(i,j,k) = max(I4dt*G%areaT(i,j)*(h(i,j,k)-GV%Angstrom_H),0.0)
-      enddo
-      if (keep_going) then
-        if (GV%Boussinesq .or. GV%semi_Boussinesq) then
-          if (CS%use_Stanley_ML) then
-            call calculate_density(tv%T(:,j,k), tv%S(:,j,k), p0, tv%varT(:,j,k), covTS, varS, &
-                                   rho_ml, tv%eqn_of_state, EOSdom)
-          else
-            call calculate_density(tv%T(:,j,k), tv%S(:,j,k), p0, rho_ml, tv%eqn_of_state, EOSdom)
-          endif
-        else
-          call calculate_spec_vol(tv%T(:,j,k), tv%S(:,j,k), p0, SpV_ml, tv%eqn_of_state, EOSdom)
+    l_Angstrom = GV%Angstrom_H
+    !$omp target teams distribute parallel do collapse(3) &
+    !$omp   map(from: vol_dt_avail)
+    do k=1,nz ; do j=js-1,je+1 ; do i=is-1,ie+1
+      vol_dt_avail(i,j,k) = max(I4dt*G%areaT(i,j)*(h(i,j,k)-l_Angstrom), 0.0)
+    enddo ; enddo ; enddo
+
+    ! Per-column integral through "big H" (drops the cross-i early-exit; htot<big_H guard preserves it).
+    !$omp target teams distribute parallel do collapse(2) private(k, dh, Rml_i, htot_i) &
+    !$omp   map(to: rho3d, big_H) map(from: htot, buoy_av)
+    do j=js-1,je+1 ; do i=is-1,ie+1
+      htot_i = 0.0 ; Rml_i = 0.0
+      do k=1,nz
+        if (htot_i < big_H(i,j)) then
+          dh = min( h(i,j,k), big_H(i,j) - htot_i )
+          Rml_i = Rml_i + dh*rho3d(i,j,k) ! Rml_i has units of [R H ~> kg m-2]
+          htot_i = htot_i + dh
         endif
-        line_is_empty = .true.
+      enddo
+      htot(i,j) = htot_i
+      ! Buoy_av has units (L2 H-1 T-2 R-1) * (R H) * H-1 = [L2 H-1 T-2 ~> m s-2 or m4 kg-1 s-2]
+      buoy_av(i,j) = -( g_Rho0 * Rml_i ) / (htot_i + h_neglect)
+    enddo ; enddo
+  else
+    ! Host fallback (Stanley SGS variance or non-Boussinesq specific-volume path): unchanged.
+    do j=js-1,je+1
+      rho_ml(:) = 0.0 ; SpV_ml(:) = 0.0
+      do i=is-1,ie+1
+        htot(i,j) = 0.0 ; Rml_int(i) = 0.0 ; SpV_int(i) = 0.0
+      enddo
+      keep_going = .true.
+      do k=1,nz
         do i=is-1,ie+1
-          if (htot(i,j) < big_H(i,j)) then
-            dh = min( h(i,j,k), big_H(i,j) - htot(i,j) )
-            Rml_int(i) = Rml_int(i) + dh*rho_ml(i) ! Rml_int has units of [R H ~> kg m-2]
-            SpV_int(i) = SpV_int(i) + dh*SpV_ml(i) ! SpV_int has units of [H R-1 ~> m4 kg-1 or m]
-            htot(i,j) = htot(i,j) + dh
-            line_is_empty = .false.
-          endif
+          vol_dt_avail(i,j,k) = max(I4dt*G%areaT(i,j)*(h(i,j,k)-GV%Angstrom_H),0.0)
         enddo
-        if (line_is_empty) keep_going=.false.
+        if (keep_going) then
+          if (GV%Boussinesq .or. GV%semi_Boussinesq) then
+            if (CS%use_Stanley_ML) then
+              call calculate_density(tv%T(:,j,k), tv%S(:,j,k), p0, tv%varT(:,j,k), covTS, varS, &
+                                     rho_ml, tv%eqn_of_state, EOSdom)
+            else
+              call calculate_density(tv%T(:,j,k), tv%S(:,j,k), p0, rho_ml, tv%eqn_of_state, EOSdom)
+            endif
+          else
+            call calculate_spec_vol(tv%T(:,j,k), tv%S(:,j,k), p0, SpV_ml, tv%eqn_of_state, EOSdom)
+          endif
+          line_is_empty = .true.
+          do i=is-1,ie+1
+            if (htot(i,j) < big_H(i,j)) then
+              dh = min( h(i,j,k), big_H(i,j) - htot(i,j) )
+              Rml_int(i) = Rml_int(i) + dh*rho_ml(i) ! Rml_int has units of [R H ~> kg m-2]
+              SpV_int(i) = SpV_int(i) + dh*SpV_ml(i) ! SpV_int has units of [H R-1 ~> m4 kg-1 or m]
+              htot(i,j) = htot(i,j) + dh
+              line_is_empty = .false.
+            endif
+          enddo
+          if (line_is_empty) keep_going=.false.
+        endif
+      enddo
+      if (GV%Boussinesq .or. GV%semi_Boussinesq) then
+        do i=is-1,ie+1
+          buoy_av(i,j) = -( g_Rho0 * Rml_int(i) ) / (htot(i,j) + h_neglect)
+        enddo
+      else
+        do i=is-1,ie+1
+          buoy_av(i,j) = (GV%H_to_RZ*GV%g_Earth * SpV_int(i)) / (htot(i,j) + h_neglect)
+        enddo
       endif
     enddo
-
-    if (GV%Boussinesq .or. GV%semi_Boussinesq) then
-      do i=is-1,ie+1
-        ! Buoy_av has units (L2 H-1 T-2 R-1) * (R H) * H-1 = [L2 H-1 T-2 ~> m s-2 or m4 kg-1 s-2]
-        buoy_av(i,j) = -( g_Rho0 * Rml_int(i) ) / (htot(i,j) + h_neglect)
-      enddo
-    else
-      do i=is-1,ie+1
-        ! Buoy_av has units (R L2 H-1 T-2) * (R-1 H) * H-1 = [L2 H-1 T-2 ~> m s-2 or m4 kg-1 s-2]
-        buoy_av(i,j) = (GV%H_to_RZ*GV%g_Earth * SpV_int(i)) / (htot(i,j) + h_neglect)
-      enddo
-    endif
-  enddo
+  endif
 
   if (CS%debug) then
     call hchksum(htot,'mle_Bodner: htot', G%HI, haloshift=1, unscale=GV%H_to_mks)
@@ -1057,7 +1127,12 @@ subroutine mixedlayer_restrat_Bodner(CS, G, GV, US, h, uhtr, vhtr, tv, forces, d
   endif
 
   ! U - Component
-  !$OMP do
+  l_MLE_tail_dh = CS%MLE_tail_dh
+  Cr_l(:,:) = CS%Cr_space(:,:)
+  !$omp target teams distribute parallel do collapse(2) &
+  !$omp   private(grid_dsd, absf, h_sml, h_big, grd_b, r_wpup, psi_mag, IhTot, sigint, muzb, muza, k, hAtVel) &
+  !$omp   map(to: little_h, big_H, buoy_av, wpup, htot, vol_dt_avail, Cr_l) &
+  !$omp   map(from: uhml, uDml_diag)
   do j=js,je ; do I=is-1,ie
     if (G%OBCmaskCu(I,j) > 0.) then
       grid_dsd = sqrt(0.5*( G%dxCu(I,j)**2 + G%dyCu(I,j)**2 )) * G%dyCu(I,j) ! [L2 ~> m2]
@@ -1066,7 +1141,7 @@ subroutine mixedlayer_restrat_Bodner(CS, G, GV, US, h, uhtr, vhtr, tv, forces, d
       h_big = 0.5*( big_H(i,j) + big_H(i+1,j) )                       ! [H ~> m or kg m-2]
       grd_b = ( buoy_av(i+1,j) - buoy_av(i,j) ) * G%IdxCu(I,j)        ! [L H-1 T-2 ~> s-2 or m3 kg-1 s-2]
       r_wpup = 2. / ( wpup(i,j) + wpup(i+1,j) )                       ! [T2 L-1 H-1 ~> s2 m-2 or m s2 kg-1]
-      psi_mag = ( ( ( (0.5*(CS%Cr_space(i,j) + CS%Cr_space(i+1,j))) * grid_dsd ) & ! [L2 H T-1 ~> m3 s-1 or kg s-1]
+      psi_mag = ( ( ( (0.5*(Cr_l(i,j) + Cr_l(i+1,j))) * grid_dsd ) & ! [L2 H T-1 ~> m3 s-1 or kg s-1]
                   * ( absf * h_sml ) ) * ( ( h_big**2 ) * grd_b ) ) * r_wpup
     else  ! There is no flux on land and no gradient at open boundary points.
       psi_mag = 0.0
@@ -1079,26 +1154,30 @@ subroutine mixedlayer_restrat_Bodner(CS, G, GV, US, h, uhtr, vhtr, tv, forces, d
       muza = muzb                           ! mu(z/MLD) for upper interface [nondim]
       hAtVel = 0.5*(h(i,j,k) + h(i+1,j,k))  ! Thickness at velocity point [H ~> m or kg m-2]
       sigint = sigint - (hAtVel * IhTot)    ! z/H for lower interface [nondim]
-      muzb = mu(sigint, CS%MLE_tail_dh)     ! mu(z/MLD) for lower interface [nondim]
-      dmu(k) = muza - muzb                  ! Change in mu(z) across layer [nondim]
-      ! dmu(k)*psi_mag is the transport in this layer [L2 H T-1 ~> m3 s-1]
+      muzb = mu(sigint, l_MLE_tail_dh)      ! mu(z/MLD) for lower interface [nondim]
+      uhml(I,j,k) = muza - muzb             ! Change in mu(z) across layer (dmu); rescaled by psi_mag below
+      ! uhml(I,j,k)*psi_mag is the transport in this layer [L2 H T-1 ~> m3 s-1]
       ! Limit magnitude (psi_mag) if it would violate CFL
-      if (dmu(k)*psi_mag > 0.0) then
-        if (dmu(k)*psi_mag > vol_dt_avail(i,j,k)) psi_mag = vol_dt_avail(i,j,k) / dmu(k)
-      elseif (dmu(k)*psi_mag < 0.0) then
-        if (-dmu(k)*psi_mag > vol_dt_avail(i+1,j,k)) psi_mag = -vol_dt_avail(i+1,j,k) / dmu(k)
+      if (uhml(I,j,k)*psi_mag > 0.0) then
+        if (uhml(I,j,k)*psi_mag > vol_dt_avail(i,j,k)) psi_mag = vol_dt_avail(i,j,k) / uhml(I,j,k)
+      elseif (uhml(I,j,k)*psi_mag < 0.0) then
+        if (-uhml(I,j,k)*psi_mag > vol_dt_avail(i+1,j,k)) psi_mag = -vol_dt_avail(i+1,j,k) / uhml(I,j,k)
       endif
     enddo ! These loops cannot be fused because psi_mag applies to the whole column
     do k=1,nz
-      uhml(I,j,k) = dmu(k) * psi_mag  ! [L2 H T-1 ~> m3 s-1 or kg s-1]
+      uhml(I,j,k) = uhml(I,j,k) * psi_mag  ! [L2 H T-1 ~> m3 s-1 or kg s-1]
       uhtr(I,j,k) = uhtr(I,j,k) + uhml(I,j,k) * dt ! [L2 H ~> m3 or kg]
     enddo
 
     uDml_diag(I,j) = psi_mag
   enddo ; enddo
+  !$omp target update from(uhtr)
 
   ! V- component
-  !$OMP do
+  !$omp target teams distribute parallel do collapse(2) &
+  !$omp   private(grid_dsd, absf, h_sml, h_big, grd_b, r_wpup, psi_mag, IhTot, sigint, muzb, muza, k, hAtVel) &
+  !$omp   map(to: little_h, big_H, buoy_av, wpup, htot, vol_dt_avail, Cr_l) &
+  !$omp   map(from: vhml, vDml_diag)
   do J=js-1,je ; do i=is,ie
     if (G%OBCmaskCv(i,J) > 0.) then
       grid_dsd = sqrt(0.5*( G%dxCv(i,J)**2 + G%dyCv(i,J)**2 )) * G%dxCv(i,J) ! [L2 ~> m2]
@@ -1107,7 +1186,7 @@ subroutine mixedlayer_restrat_Bodner(CS, G, GV, US, h, uhtr, vhtr, tv, forces, d
       h_big = 0.5*( big_H(i,j) + big_H(i,j+1) )                       ! [H ~> m or kg m-2]
       grd_b = ( buoy_av(i,j+1) - buoy_av(i,j) ) * G%IdyCv(I,j)        ! [L H-1 T-2 ~> s-2 or m3 kg-1 s-2]
       r_wpup = 2. / ( wpup(i,j) + wpup(i,j+1) )                       ! [T2 L-1 H-1 ~> s2 m-2 or m s2 kg-1]
-      psi_mag = ( ( ( (0.5*(CS%Cr_space(i,j) + CS%Cr_space(i,j+1))) * grid_dsd ) & ! [L2 H T-1 ~> m3 s-1 or kg s-1]
+      psi_mag = ( ( ( (0.5*(Cr_l(i,j) + Cr_l(i,j+1))) * grid_dsd ) & ! [L2 H T-1 ~> m3 s-1 or kg s-1]
                   * ( absf * h_sml ) ) * ( ( h_big**2 ) * grd_b ) ) * r_wpup
     else  ! There is no flux on land and no gradient at open boundary points.
       psi_mag = 0.0
@@ -1120,30 +1199,32 @@ subroutine mixedlayer_restrat_Bodner(CS, G, GV, US, h, uhtr, vhtr, tv, forces, d
       muza = muzb                           ! mu(z/MLD) for upper interface [nondim]
       hAtVel = 0.5*(h(i,j,k) + h(i,j+1,k))  ! Thickness at velocity point [H ~> m or kg m-2]
       sigint = sigint - (hAtVel * IhTot)    ! z/H for lower interface [nondim]
-      muzb = mu(sigint, CS%MLE_tail_dh)     ! mu(z/MLD) for lower interface [nondim]
-      dmu(k) = muza - muzb                  ! Change in mu(z) across layer [nondim]
-      ! dmu(k)*psi_mag is the transport in this layer [L2 H T-1 ~> m3 s-1 or kg s-1]
+      muzb = mu(sigint, l_MLE_tail_dh)      ! mu(z/MLD) for lower interface [nondim]
+      vhml(i,J,k) = muza - muzb             ! Change in mu(z) across layer (dmu); rescaled by psi_mag below
+      ! vhml(i,J,k)*psi_mag is the transport in this layer [L2 H T-1 ~> m3 s-1 or kg s-1]
       ! Limit magnitude (psi_mag) if it would violate CFL
-      if (dmu(k)*psi_mag > 0.0) then
-        if (dmu(k)*psi_mag > vol_dt_avail(i,j,k)) psi_mag = vol_dt_avail(i,j,k) / dmu(k)
-      elseif (dmu(k)*psi_mag < 0.0) then
-        if (-dmu(k)*psi_mag > vol_dt_avail(i,j+1,k)) psi_mag = -vol_dt_avail(i,j+1,k) / dmu(k)
+      if (vhml(i,J,k)*psi_mag > 0.0) then
+        if (vhml(i,J,k)*psi_mag > vol_dt_avail(i,j,k)) psi_mag = vol_dt_avail(i,j,k) / vhml(i,J,k)
+      elseif (vhml(i,J,k)*psi_mag < 0.0) then
+        if (-vhml(i,J,k)*psi_mag > vol_dt_avail(i,j+1,k)) psi_mag = -vol_dt_avail(i,j+1,k) / vhml(i,J,k)
       endif
     enddo ! These loops cannot be fused because psi_mag applies to the whole column
     do k=1,nz
-      vhml(i,J,k) = dmu(k) * psi_mag   ! [L2 H T-1 ~> m3 s-1 or kg s-1]
+      vhml(i,J,k) = vhml(i,J,k) * psi_mag   ! [L2 H T-1 ~> m3 s-1 or kg s-1]
       vhtr(i,J,k) = vhtr(i,J,k) + vhml(i,J,k) * dt ! [L2 H ~> m3 or kg]
     enddo
 
     vDml_diag(i,J) = psi_mag
   enddo ; enddo
+  !$omp target update from(vhtr)
 
-  !$OMP do
+  !$omp target teams distribute parallel do collapse(3) &
+  !$omp   map(to: uhml, vhml)
   do j=js,je ; do k=1,nz ; do i=is,ie
     h(i,j,k) = h(i,j,k) - dt*G%IareaT(i,j) * &
         ((uhml(I,j,k) - uhml(I-1,j,k)) + (vhml(i,J,k) - vhml(i,J-1,k)))
   enddo ; enddo ; enddo
-  !$OMP end parallel
+  !$omp target update from(h)
 
   if (CS%id_uhml > 0 .or. CS%id_vhml > 0) &
     ! Remapped uhml and vhml require east/north halo updates of h
@@ -1197,6 +1278,7 @@ end subroutine mixedlayer_restrat_Bodner
 !! Note that if \f$ tau=0 \f$, then the running mean equals the signal. Thus,
 !! rmean2ts with tau_growing=0 recovers the "resetting running mean" used in OM4.
 real elemental function rmean2ts(signal, filtered, tau_growing, tau_decaying, dt)
+!$omp declare target
   ! Arguments
   real, intent(in) :: signal       ! Unfiltered signal in arbitrary units [A]
   real, intent(in) :: filtered     ! Current value of running mean in the same arbitrary units [A]
