@@ -30,6 +30,7 @@ use MOM_EOS,           only : calculate_density, calculate_spec_vol, EOS_domain
 implicit none ; private
 
 #include <MOM_memory.h>
+#include <do_concurrent_compat.h>
 
 public mixedlayer_restrat
 public mixedlayer_restrat_init
@@ -1041,24 +1042,31 @@ subroutine mixedlayer_restrat_Bodner(CS, G, GV, US, h, uhtr, vhtr, tv, forces, d
   ! in-situ density would contain the MLD gradient (through the pressure dependence).
   p0(:) = 0.0
   EOSdom(:) = EOS_domain(G%HI, halo=1)
+  l_Angstrom = GV%Angstrom_H
+  l_MLE_tail_dh = CS%MLE_tail_dh
+  Cr_l(:,:) = CS%Cr_space(:,:)
+
+  ! One persistent device region spanning the mixed-layer integral, the U/V components and the h
+  ! update.  Inputs produced by the earlier host-side loops are mapped in once; the integral outputs
+  ! (htot/buoy_av/vol_dt_avail) stay resident for U/V, and uhml/vhml stay resident for the h update.
+  !$omp target data &
+  !$omp   map(to: little_h, big_H, wpup, Cr_l) map(alloc: rho3d) &
+  !$omp   map(from: vol_dt_avail, htot, buoy_av, uhml, vhml, uDml_diag, vDml_diag)
+
   if ((GV%Boussinesq .or. GV%semi_Boussinesq) .and. .not.CS%use_Stanley_ML) then
     ! Active path: density at p=0 (sigma_0) computed on the HOST into rho3d (the polymorphic EOS
     ! dispatch stays on the host), then the per-column mixed-layer integral is offloaded.
     do k=1,nz ; do j=js-1,je+1
       call calculate_density(tv%T(:,j,k), tv%S(:,j,k), p0, rho3d(:,j,k), tv%eqn_of_state, EOSdom)
     enddo ; enddo
+    !$omp target update to(rho3d)
 
-    l_Angstrom = GV%Angstrom_H
-    !$omp target teams distribute parallel do collapse(3) &
-    !$omp   map(from: vol_dt_avail)
-    do k=1,nz ; do j=js-1,je+1 ; do i=is-1,ie+1
+    do concurrent (k=1:nz, j=js-1:je+1, i=is-1:ie+1)
       vol_dt_avail(i,j,k) = max(I4dt*G%areaT(i,j)*(h(i,j,k)-l_Angstrom), 0.0)
-    enddo ; enddo ; enddo
+    enddo
 
     ! Per-column integral through "big H" (drops the cross-i early-exit; htot<big_H guard preserves it).
-    !$omp target teams distribute parallel do collapse(2) private(k, dh, Rml_i, htot_i) &
-    !$omp   map(to: rho3d, big_H) map(from: htot, buoy_av)
-    do j=js-1,je+1 ; do i=is-1,ie+1
+    do concurrent (j=js-1:je+1, i=is-1:ie+1) DO_LOCALITY(local(k, dh, Rml_i, htot_i))
       htot_i = 0.0 ; Rml_i = 0.0
       do k=1,nz
         if (htot_i < big_H(i,j)) then
@@ -1070,7 +1078,7 @@ subroutine mixedlayer_restrat_Bodner(CS, G, GV, US, h, uhtr, vhtr, tv, forces, d
       htot(i,j) = htot_i
       ! Buoy_av has units (L2 H-1 T-2 R-1) * (R H) * H-1 = [L2 H-1 T-2 ~> m s-2 or m4 kg-1 s-2]
       buoy_av(i,j) = -( g_Rho0 * Rml_i ) / (htot_i + h_neglect)
-    enddo ; enddo
+    enddo
   else
     ! Host fallback (Stanley SGS variance or non-Boussinesq specific-volume path): unchanged.
     do j=js-1,je+1
@@ -1117,9 +1125,12 @@ subroutine mixedlayer_restrat_Bodner(CS, G, GV, US, h, uhtr, vhtr, tv, forces, d
         enddo
       endif
     enddo
+    ! Host fallback produced these on the host; push them to the device for the U/V components.
+    !$omp target update to(htot, buoy_av, vol_dt_avail)
   endif
 
   if (CS%debug) then
+    !$omp target update from(htot, vol_dt_avail, buoy_av)
     call hchksum(htot,'mle_Bodner: htot', G%HI, haloshift=1, unscale=GV%H_to_mks)
     call hchksum(vol_dt_avail,'mle_Bodner: vol_dt_avail', G%HI, haloshift=1, &
                  unscale=US%L_to_m**2*GV%H_to_mks*US%s_to_T)
@@ -1127,13 +1138,8 @@ subroutine mixedlayer_restrat_Bodner(CS, G, GV, US, h, uhtr, vhtr, tv, forces, d
   endif
 
   ! U - Component
-  l_MLE_tail_dh = CS%MLE_tail_dh
-  Cr_l(:,:) = CS%Cr_space(:,:)
-  !$omp target teams distribute parallel do collapse(2) &
-  !$omp   private(grid_dsd, absf, h_sml, h_big, grd_b, r_wpup, psi_mag, IhTot, sigint, muzb, muza, k, hAtVel) &
-  !$omp   map(to: little_h, big_H, buoy_av, wpup, htot, vol_dt_avail, Cr_l) &
-  !$omp   map(from: uhml, uDml_diag)
-  do j=js,je ; do I=is-1,ie
+  do concurrent (j=js:je, I=is-1:ie) &
+      DO_LOCALITY(local(grid_dsd,absf,h_sml,h_big,grd_b,r_wpup,psi_mag,IhTot,sigint,muzb,muza,k,hAtVel))
     if (G%OBCmaskCu(I,j) > 0.) then
       grid_dsd = sqrt(0.5*( G%dxCu(I,j)**2 + G%dyCu(I,j)**2 )) * G%dyCu(I,j) ! [L2 ~> m2]
       absf = 0.5*(abs(G%CoriolisBu(I,J-1)) + abs(G%CoriolisBu(I,J)))  ! [T-1 ~> s-1]
@@ -1170,15 +1176,12 @@ subroutine mixedlayer_restrat_Bodner(CS, G, GV, US, h, uhtr, vhtr, tv, forces, d
     enddo
 
     uDml_diag(I,j) = psi_mag
-  enddo ; enddo
+  enddo
   !$omp target update from(uhtr)
 
   ! V- component
-  !$omp target teams distribute parallel do collapse(2) &
-  !$omp   private(grid_dsd, absf, h_sml, h_big, grd_b, r_wpup, psi_mag, IhTot, sigint, muzb, muza, k, hAtVel) &
-  !$omp   map(to: little_h, big_H, buoy_av, wpup, htot, vol_dt_avail, Cr_l) &
-  !$omp   map(from: vhml, vDml_diag)
-  do J=js-1,je ; do i=is,ie
+  do concurrent (J=js-1:je, i=is:ie) &
+      DO_LOCALITY(local(grid_dsd,absf,h_sml,h_big,grd_b,r_wpup,psi_mag,IhTot,sigint,muzb,muza,k,hAtVel))
     if (G%OBCmaskCv(i,J) > 0.) then
       grid_dsd = sqrt(0.5*( G%dxCv(i,J)**2 + G%dyCv(i,J)**2 )) * G%dxCv(i,J) ! [L2 ~> m2]
       absf = 0.5*(abs(G%CoriolisBu(I-1,J)) + abs(G%CoriolisBu(I,J)))  ! [T-1 ~> s-1]
@@ -1215,16 +1218,15 @@ subroutine mixedlayer_restrat_Bodner(CS, G, GV, US, h, uhtr, vhtr, tv, forces, d
     enddo
 
     vDml_diag(i,J) = psi_mag
-  enddo ; enddo
+  enddo
   !$omp target update from(vhtr)
 
-  !$omp target teams distribute parallel do collapse(3) &
-  !$omp   map(to: uhml, vhml)
-  do j=js,je ; do k=1,nz ; do i=is,ie
+  do concurrent (j=js:je, k=1:nz, i=is:ie)
     h(i,j,k) = h(i,j,k) - dt*G%IareaT(i,j) * &
         ((uhml(I,j,k) - uhml(I-1,j,k)) + (vhml(i,J,k) - vhml(i,J-1,k)))
-  enddo ; enddo ; enddo
+  enddo
   !$omp target update from(h)
+  !$omp end target data
 
   if (CS%id_uhml > 0 .or. CS%id_vhml > 0) &
     ! Remapped uhml and vhml require east/north halo updates of h
