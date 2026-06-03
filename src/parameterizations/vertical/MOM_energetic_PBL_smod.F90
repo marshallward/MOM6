@@ -404,10 +404,13 @@ module subroutine energetic_PBL(h_3d, u_3d, v_3d, tv, fluxes, visc, dt, Kd_int, 
   !$omp target enter data map(to: tv)
   !$omp target enter data map(to: tv%T, tv%S)
 
-  !$omp target loop private(SpV_dt) collapse(2)
   !**!!$omp target loop private(h_2d, dz_2d, u_2d, v_2d, T_2d, S_2d) &
   !**!!$omp   private(TKE_forced_2d, dSV_dT_2d, dSV_dS_2d, Kd_2d) &
-  do j=js,je ; do i=is,ie ; if (G%mask2dT(i,j) > 0.0) then
+
+  !$omp target loop private(SpV_dt)
+  do j=js,je
+  !!$omp target loop private(SpV_dt) collapse(2)
+  !do j=js,je ; do i=is,ie ; if (G%mask2dT(i,j) > 0.0) then
     !**!! Copy the thicknesses and other fields to 2-d arrays.
     !**!!$omp loop
     !**!do i=is,ie ; do k=1,nz
@@ -444,7 +447,8 @@ module subroutine energetic_PBL(h_3d, u_3d, v_3d, tv, fluxes, visc, dt, Kd_int, 
     !**!!$omp   private(Kd_BBL, mixvel_BBL, mixlen_BBL) &
     !**!!$omp   private(Kd_1, Kd_2) &
     !**!!$omp   private(kd_guess_col)
-    !do i=is,ie ; if (G%mask2dT(i,j) > 0.0) then
+    !$omp loop
+    do i=is,ie ; if (G%mask2dT(i,j) > 0.0) then
 
       !**!! Copy the thicknesses and other fields to 1-d arrays.
       !**!do k=1,nz
@@ -892,7 +896,8 @@ subroutine ePBL_column_3d(h, dz, u, v, T0, S0, dSV_dT, dSV_dS, SpV_dt, TKE_forci
 ! mixing.
 
   ! Local variables
-  real, dimension(SZK_(GV)+1) :: &
+  !real, dimension(SZK_(GV)+1) :: &
+  real, dimension(75+1) :: &
     pres_Z, &       ! Interface pressures with a rescaling factor to convert interface height
                     ! movements into changes in column potential energy [R Z2 T-2 ~> kg m-1 s-2].
     hb_hs           ! The distance from the bottom over the thickness of the
@@ -909,7 +914,8 @@ subroutine ePBL_column_3d(h, dz, u, v, T0, S0, dSV_dT, dSV_dS, SpV_dt, TKE_forci
   real :: Idecay_len_TKE  ! The inverse of a turbulence decay length scale [H-1 ~> m-1 or m2 kg-1].
   real :: dz_sum    ! The total thickness of the water column [Z ~> m].
 
-  real, dimension(SZK_(GV)) :: &
+  !real, dimension(SZK_(GV)) :: &
+  real, dimension(75) :: &
     dT_to_dColHt, & ! Partial derivative of the total column height with the temperature changes
                     ! within a layer [Z C-1 ~> m degC-1].
     dS_to_dColHt, & ! Partial derivative of the total column height with the salinity changes
@@ -946,7 +952,8 @@ subroutine ePBL_column_3d(h, dz, u, v, T0, S0, dSV_dT, dSV_dS, SpV_dt, TKE_forci
                     ! mixing effects with other yet lower layers [C H ~> degC m or degC kg m-2].
     Sh_b            ! An effective salinity times a thickness in the layer below, including implicit
                     ! mixing effects with other yet lower layers [S H ~> ppt m or ppt kg m-2].
-  real, dimension(SZK_(GV)+1) :: &
+  !real, dimension(SZK_(GV)+1) :: &
+  real, dimension(75+1) :: &
     MixLen_shape, & ! A nondimensional shape factor for the mixing length that
                     ! gives it an appropriate asymptotic value at the bottom of
                     ! the boundary layer [nondim].
@@ -1079,15 +1086,24 @@ subroutine ePBL_column_3d(h, dz, u, v, T0, S0, dSV_dT, dSV_dS, SpV_dt, TKE_forci
   real, dimension(20) :: Kddt_h_itt     ! The value of Kddt_h_guess after each iteration [H ~> m or kg m-2]
   real, dimension(20) :: dPEa_dKd_itt   ! The value of dPEc_dKd after each iteration [R Z3 T-2 H-1 ~> J m-3 or J kg-1]
   real, dimension(20) :: MKE_src_itt    ! The value of MKE_src after each iteration [R Z3 T-2 ~> J m-2]
-  real, dimension(SZK_(GV)) :: mech_TKE_k  ! The mechanically generated turbulent kinetic energy
+  !**!real, dimension(SZK_(GV)) :: mech_TKE_k  ! The mechanically generated turbulent kinetic energy
+  !**!                  ! available for mixing over a time step for each layer [R Z3 T-2 ~> J m-2].
+  !**!real, dimension(SZK_(GV)) :: conv_PErel_k ! The potential energy that has been convectively released
+  !**!                  ! during this timestep for each layer [R Z3 T-2 ~> J m-2].
+  !**!real, dimension(SZK_(GV)) :: nstar_k   ! The fraction of conv_PErel that can be converted to mixing
+  !**!                  ! for each layer [nondim].
+  !**!real, dimension(SZK_(GV)) :: dT_expect ! Expected temperature changes [C ~> degC]
+  !**!real, dimension(SZK_(GV)) :: dS_expect ! Expected salinity changes [S ~> ppt]
+  !**!integer, dimension(SZK_(GV)) :: num_itts
+  real, dimension(75) :: mech_TKE_k  ! The mechanically generated turbulent kinetic energy
                     ! available for mixing over a time step for each layer [R Z3 T-2 ~> J m-2].
-  real, dimension(SZK_(GV)) :: conv_PErel_k ! The potential energy that has been convectively released
+  real, dimension(75) :: conv_PErel_k ! The potential energy that has been convectively released
                     ! during this timestep for each layer [R Z3 T-2 ~> J m-2].
-  real, dimension(SZK_(GV)) :: nstar_k   ! The fraction of conv_PErel that can be converted to mixing
+  real, dimension(75) :: nstar_k   ! The fraction of conv_PErel that can be converted to mixing
                     ! for each layer [nondim].
-  real, dimension(SZK_(GV)) :: dT_expect ! Expected temperature changes [C ~> degC]
-  real, dimension(SZK_(GV)) :: dS_expect ! Expected salinity changes [S ~> ppt]
-  integer, dimension(SZK_(GV)) :: num_itts
+  real, dimension(75) :: dT_expect ! Expected temperature changes [C ~> degC]
+  real, dimension(75) :: dS_expect ! Expected salinity changes [S ~> ppt]
+  integer, dimension(75) :: num_itts
 
   integer :: k, nz, itt, max_itt
 
@@ -3781,13 +3797,16 @@ subroutine kappa_eqdisc(shape_func, CS, GV, dz, absf, B_flux, u_star, MLD_guess)
 
   type(verticalGrid_type), intent(in) :: GV     !< The ocean's vertical grid structure.
   type(energetic_PBL_CS),  intent(in) :: CS     !< Energetic PBL control struct
-  real, dimension(SZK_(GV)+1), intent(inout) :: shape_func  !< shape function, [nondim]
+  !real, dimension(SZK_(GV)+1), intent(inout) :: shape_func  !< shape function, [nondim]
+  real, dimension(75+1), intent(inout) :: shape_func  !< shape function, [nondim]
   real, intent(in) :: absf      !< The absolute value of f [T-1 ~> s-1]
   real, intent(in) :: u_star    !< The surface friction velocity [Z T-1 ~> m s-1]
   real, intent(in) :: B_Flux    !< The surface buoyancy flux [Z2 T-3 ~> m2 s-3]
-  real, dimension(SZK_(GV)), intent(in)  :: dz     !< The vertical distance across layers [Z ~> m]
+  !real, dimension(SZK_(GV)), intent(in)  :: dz     !< The vertical distance across layers [Z ~> m]
+  real, dimension(75), intent(in)  :: dz     !< The vertical distance across layers [Z ~> m]
   real, intent(in) :: MLD_guess !< Mixing Layer depth guessed/found for iteration [Z ~> m].
-  real, dimension(SZK_(GV)+1) :: hz !< depth variable, only used in this routine [H ~> m]
+  !real, dimension(SZK_(GV)+1) :: hz !< depth variable, only used in this routine [H ~> m]
+  real, dimension(75+1) :: hz !< depth variable, only used in this routine [H ~> m]
 
   ! local variables for this subroutine
   integer :: nz
@@ -4643,6 +4662,7 @@ end subroutine Find_mstar
 !> This subroutine modifies the mstar value if the Langmuir number is present
 subroutine mstar_Langmuir(CS, US, Abs_Coriolis, Buoyancy_Flux, UStar, BLD, Langmuir_Number, &
                           mstar, mstar_LT, Convect_Langmuir_Number)
+  !$omp declare target
   type(energetic_PBL_CS), intent(in) :: CS    !< Energetic PBL control structure
   type(unit_scale_type), intent(in)  :: US    !< A dimensional unit scaling type
   real,                  intent(in)  :: Abs_Coriolis !< Absolute value of the Coriolis parameter [T-1 ~> s-1]
