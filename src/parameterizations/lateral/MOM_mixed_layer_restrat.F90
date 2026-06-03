@@ -904,13 +904,13 @@ subroutine mixedlayer_restrat_Bodner(CS, G, GV, US, h, uhtr, vhtr, tv, forces, d
   tau_bgrow = CS%BLD_growing_Tfilt ; tau_bdecay = CS%BLD_decaying_Tfilt
   h_MLD_l(:,:) = h_MLD(:,:)
   MLDf_l(:,:) = CS%MLD_filtered(:,:)
-  !$omp target teams distribute parallel do collapse(2) &
-  !$omp   map(to: h_MLD_l) map(tofrom: MLDf_l) map(from: little_h)
-  do j=js-1,je+1 ; do i=is-1,ie+1
+  !$omp target enter data map(to: h_MLD_l, MLDf_l) map(alloc: little_h)
+  do concurrent (j=js-1:je+1, i=is-1:ie+1)
     little_h(i,j) = rmean2ts(h_MLD_l(i,j), MLDf_l(i,j), &
                              tau_bgrow, tau_bdecay, dt)
     MLDf_l(i,j) = little_h(i,j)
-  enddo ; enddo
+  enddo
+  !$omp target exit data map(from: little_h, MLDf_l) map(release: h_MLD_l)
   CS%MLD_filtered(:,:) = MLDf_l(:,:)
 
   ! Calculate "big H", representative of the mixed layer depth, used in B22 formula (eq 27).
@@ -931,12 +931,12 @@ subroutine mixedlayer_restrat_Bodner(CS, G, GV, US, h, uhtr, vhtr, tv, forces, d
     print *, "Else"
     tau_mgrow = CS%MLD_growing_Tfilt ; tau_mdecay = CS%MLD_decaying_Tfilt
     MLDfs_l(:,:) = CS%MLD_filtered_slow(:,:)
-    !$omp target teams distribute parallel do collapse(2) &
-    !$omp   map(to: little_h, MLDfs_l) map(from: big_H)
-    do j=js-1,je+1 ; do i=is-1,ie+1
+    !$omp target enter data map(to: little_h, MLDfs_l) map(alloc: big_H)
+    do concurrent (j=js-1:je+1, i=is-1:ie+1)
       big_H(i,j) = rmean2ts(little_h(i,j), MLDfs_l(i,j), &
                             tau_mgrow, tau_mdecay, dt)
-    enddo ; enddo
+    enddo
+    !$omp target exit data map(from: big_H) map(release: little_h, MLDfs_l)
   endif
   do j=js-1,je+1 ; do i=is-1,ie+1
     CS%MLD_filtered_slow(i,j) = big_H(i,j)
@@ -975,24 +975,24 @@ subroutine mixedlayer_restrat_Bodner(CS, G, GV, US, h, uhtr, vhtr, tv, forces, d
     l_mstar = CS%mstar ; l_nstar = CS%nstar ; l_min_wstar2 = CS%min_wstar2
     zL_zH = US%Z_to_L * GV%Z_to_H
     bflux_l(:,:) = bflux(:,:) ; BLD_l(:,:) = BLD(:,:)
-    !$omp target teams distribute parallel do collapse(2) private(w_star3) &
-    !$omp   map(to: bflux_l, BLD_l, U_star_2d) map(from: wpup)
-    do j=js-1,je+1 ; do i=is-1,ie+1
+    !$omp target enter data map(to: bflux_l, BLD_l, U_star_2d) map(alloc: wpup)
+    do concurrent (j=js-1:je+1, i=is-1:ie+1) DO_LOCALITY(local(w_star3))
       w_star3 = max(0., -bflux_l(i,j)) * BLD_l(i,j)    ! In [Z3 T-3 ~> m3 s-3]
       wpup(i,j) = max( (cuberoot(l_mstar * U_star_2d(i,j)**3 + l_nstar * w_star3))**2, l_min_wstar2 ) &
           * zL_zH ! In [L H T-2 ~> m2 s-2 or kg m-1 s-2]
-    enddo ; enddo
+    enddo
+    !$omp target exit data map(from: wpup) map(release: bflux_l, BLD_l, U_star_2d)
   endif
 
   ! We filter w'u' with the same time scales used for "little h"
   wpupf_l(:,:) = CS%wpup_filtered(:,:)
-  !$omp target teams distribute parallel do collapse(2) &
-  !$omp   map(tofrom: wpup, wpupf_l)
-  do j=js-1,je+1 ; do i=is-1,ie+1
+  !$omp target enter data map(to: wpup, wpupf_l)
+  do concurrent (j=js-1:je+1, i=is-1:ie+1)
     wpup(i,j) = rmean2ts(wpup(i,j), wpupf_l(i,j), &
                          tau_bgrow, tau_bdecay, dt)
     wpupf_l(i,j) = wpup(i,j)
-  enddo ; enddo
+  enddo
+  !$omp target exit data map(from: wpup, wpupf_l)
   CS%wpup_filtered(:,:) = wpupf_l(:,:)
 
   if (CS%id_lfbod > 0) then
