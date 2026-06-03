@@ -396,24 +396,27 @@ module subroutine energetic_PBL(h_3d, u_3d, v_3d, tv, fluxes, visc, dt, Kd_int, 
   ! TODO: These could be computed and held on device
   !$omp target enter data map(to: CS)
   !$omp target enter data map(to: CS%ML_depth, CS%BBL_depth)
-  !$omp target enter data map(to: h_3d, u_3d, v_3d, tv%T, tv%S, TKE_forced)
+  !$omp target enter data map(to: h_3d, dz_3d, u_3d, v_3d, tv%T, tv%S, TKE_forced)
   !$omp target enter data map(to: dSV_dT, dSV_dS)
   !$omp target enter data map(to: buoy_flux, BBL_buoy_flux)
   !$omp target enter data map(alloc: Kd_int)
 
-  !$omp target loop private(h_2d, dz_2d, u_2d, v_2d, T_2d, S_2d) &
-  !$omp   private(TKE_forced_2d, dSV_dT_2d, dSV_dS_2d, Kd_2d) &
-  !$omp   private(SpV_dt)
-  do j=js,je
-    ! Copy the thicknesses and other fields to 2-d arrays.
-    !$omp loop
-    do i=is,ie ; do k=1,nz
-      h_2d(i,k) = h_3d(i,j,k) ; u_2d(i,k) = u_3d(i,j,k) ; v_2d(i,k) = v_3d(i,j,k)
-      T_2d(i,k) = tv%T(i,j,k) ; S_2d(i,k) = tv%S(i,j,k)
-      TKE_forced_2d(i,k) = TKE_forced(i,j,k)
-      dSV_dT_2d(i,k) = dSV_dT(i,j,k) ; dSV_dS_2d(i,k) = dSV_dS(i,j,k)
-    enddo ; enddo
-    call thickness_to_dz(h_3d, tv, dz_2d, j, G, GV)
+  !$omp target enter data map(to: tv)
+  !$omp target enter data map(to: tv%T, tv%S)
+
+  !$omp target loop private(SpV_dt) collapse(2)
+  !**!!$omp target loop private(h_2d, dz_2d, u_2d, v_2d, T_2d, S_2d) &
+  !**!!$omp   private(TKE_forced_2d, dSV_dT_2d, dSV_dS_2d, Kd_2d) &
+  do j=js,je ; do i=is,ie ; if (G%mask2dT(i,j) > 0.0) then
+    !**!! Copy the thicknesses and other fields to 2-d arrays.
+    !**!!$omp loop
+    !**!do i=is,ie ; do k=1,nz
+    !**!  h_2d(i,k) = h_3d(i,j,k) ; u_2d(i,k) = u_3d(i,j,k) ; v_2d(i,k) = v_3d(i,j,k)
+    !**!  T_2d(i,k) = tv%T(i,j,k) ; S_2d(i,k) = tv%S(i,j,k)
+    !**!  TKE_forced_2d(i,k) = TKE_forced(i,j,k)
+    !**!  dSV_dT_2d(i,k) = dSV_dT(i,j,k) ; dSV_dS_2d(i,k) = dSV_dS(i,j,k)
+    !**!enddo ; enddo
+    !**!call thickness_to_dz(h_3d, tv, dz_2d, j, G, GV)
 
     ! Set the inverse density used to translating local TKE into a turbulence velocity
     SpV_dt(:) = 0.0
@@ -435,22 +438,22 @@ module subroutine energetic_PBL(h_3d, u_3d, v_3d, tv, fluxes, visc, dt, Kd_int, 
     ! homogenizing the shortwave heating within that cell.  This sets the energy
     ! and ustar and wstar available to drive mixing at the first interior
     ! interface.
-    !$omp loop private(h, dz, u, v, T0, S0, TKE_forcing) &
-    !$omp   private(dSV_dT_1d, dSV_dS_1d, SpV_dt_cf) &
-    !$omp   private(Kd, mixvel, mixlen) &
-    !$omp   private(Kd_BBL, mixvel_BBL, mixlen_BBL) &
-    !$omp   private(Kd_1, Kd_2) &
-    !$omp   private(kd_guess_col)
-    do i=is,ie ; if (G%mask2dT(i,j) > 0.0) then
+    !**!!$omp loop private(h, dz, u, v, T0, S0, TKE_forcing) &
+    !**!!$omp   private(dSV_dT_1d, dSV_dS_1d, SpV_dt_cf) &
+    !**!!$omp   private(Kd, mixvel, mixlen) &
+    !**!!$omp   private(Kd_BBL, mixvel_BBL, mixlen_BBL) &
+    !**!!$omp   private(Kd_1, Kd_2) &
+    !**!!$omp   private(kd_guess_col)
+    !do i=is,ie ; if (G%mask2dT(i,j) > 0.0) then
 
-      ! Copy the thicknesses and other fields to 1-d arrays.
-      do k=1,nz
-        h(k) = h_2d(i,k) + GV%H_subroundoff ; dz(k) = dz_2d(i,k) + GV%dZ_subroundoff
-        u(k) = u_2d(i,k) ; v(k) = v_2d(i,k)
-        T0(k) = T_2d(i,k) ; S0(k) = S_2d(i,k) ; TKE_forcing(k) =  TKE_forced_2d(i,k)
-        dSV_dT_1d(k) = dSV_dT_2d(i,k) ; dSV_dS_1d(k) = dSV_dS_2d(i,k)
-      enddo
-      do K=1,nz+1 ; Kd(K) = 0.0 ; enddo
+      !**!! Copy the thicknesses and other fields to 1-d arrays.
+      !**!do k=1,nz
+      !**!  h(k) = h_2d(i,k) + GV%H_subroundoff ; dz(k) = dz_2d(i,k) + GV%dZ_subroundoff
+      !**!  u(k) = u_2d(i,k) ; v(k) = v_2d(i,k)
+      !**!  T0(k) = T_2d(i,k) ; S0(k) = S_2d(i,k) ; TKE_forcing(k) =  TKE_forced_2d(i,k)
+      !**!  dSV_dT_1d(k) = dSV_dT_2d(i,k) ; dSV_dS_1d(k) = dSV_dS_2d(i,k)
+      !**!enddo
+      !**!do K=1,nz+1 ; Kd(K) = 0.0 ; enddo
 
       ! Make local copies of surface forcing and process them.
       if (associated(fluxes%ustar) .and. (GV%Boussinesq .or. .not.associated(fluxes%tau_mag))) then
@@ -659,7 +662,8 @@ module subroutine energetic_PBL(h_3d, u_3d, v_3d, tv, fluxes, visc, dt, Kd_int, 
       !***!endif
     else ! End of the ocean-point part of the i-loop
       ! For masked points, Kd_int must still be set (to 0) because it has intent out.
-      do K=1,nz+1 ; Kd_2d(i,K) = 0. ; enddo
+      !**!do K=1,nz+1 ; Kd_2d(i,K) = 0. ; enddo
+      do K=1,nz+1 ; Kd_int(i,j,K) = 0. ; enddo
       CS%ML_depth(i,j) = 0.0
       CS%BBL_depth(i,j) = 0.0
     endif ; enddo ! Close of i-loop - Note the unusual loop order, with k-loops inside i-loops.
@@ -670,13 +674,16 @@ module subroutine energetic_PBL(h_3d, u_3d, v_3d, tv, fluxes, visc, dt, Kd_int, 
 
   !$omp target exit data map(delete: CS%ML_depth, CS%BBL_depth)
   !$omp target exit data map(delete: CS)
-  !$omp target exit data map(release: h_3d, u_3d, v_3d, tv%T, tv%S, TKE_forced)
+  !$omp target exit data map(release: h_3d, dz_3d, u_3d, v_3d, tv%T, tv%S, TKE_forced)
   !$omp target exit data map(release: dSV_dT, dSV_dS)
   !$omp target exit data map(release: buoy_flux, bbl_buoy_flux)
 
   !$omp target exit data map(delete: fluxes%ustar)
   !$omp target exit data map(delete: fluxes%ustar_gustless)
   !$omp target exit data map(delete: fluxes%tau_mag)
+
+  !$omp target exit data map(delete: tv)
+  !$omp target exit data map(delete: tv%T, tv%S)
 
   !$omp target exit data map(from: Kd_int)
 
