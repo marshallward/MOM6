@@ -179,7 +179,6 @@ subroutine mixedlayer_restrat(h, uhtr, vhtr, tv, forces, dt, MLD, h_MLD, bflux, 
     ! Original form, written for the isopycnal model with a bulk mixed layer
     call mixedlayer_restrat_BML(h, uhtr, vhtr, tv, forces, dt, G, GV, US, CS)
   elseif (CS%use_Bodner) then
-  print *, "Bodner"
     ! Implementation of Bodner et al., 2023
     call mixedlayer_restrat_Bodner(CS, G, GV, US, h, uhtr, vhtr, tv, forces, dt, MLD, h_MLD, bflux)
   else
@@ -919,20 +918,17 @@ subroutine mixedlayer_restrat_Bodner(CS, G, GV, US, h, uhtr, vhtr, tv, forces, d
 
   ! Calculate "big H", representative of the mixed layer depth, used in B22 formula (eq 27).
   if (CS%MLD_grid) then
-    print *, "MLD grid"
     do j=js-1,je+1 ; do i=is-1,ie+1
       big_H(i,j) = rmean2ts(little_h(i,j), CS%MLD_filtered_slow(i,j), &
                             CS%MLD_growing_Tfilt, CS%MLD_Tfilt_space(i,j), dt)
     enddo ; enddo
   elseif (CS%Bodner_detect_MLD) then
-    print *, "detect mld"
     call detect_mld(h, tv, MLD, G, GV, CS)
     do j=js-1,je+1 ; do i=is-1,ie+1
       big_H(i,j) = rmean2ts(MLD(i,j), CS%MLD_filtered_slow(i,j), &
                             CS%MLD_growing_Tfilt, CS%MLD_decaying_Tfilt, dt)
     enddo ; enddo
   else
-    print *, "Else"
     tau_mgrow = CS%MLD_growing_Tfilt ; tau_mdecay = CS%MLD_decaying_Tfilt
     MLDfs_l(:,:) = CS%MLD_filtered_slow(:,:)
     !$omp target enter data map(to: little_h, MLDfs_l) map(alloc: big_H)
@@ -948,7 +944,6 @@ subroutine mixedlayer_restrat_Bodner(CS, G, GV, US, h, uhtr, vhtr, tv, forces, d
 
   ! Estimate w'u' at h-points, with a floor to avoid division by zero later.
   if (allocated(tv%SpV_avg) .and. .not.(GV%Boussinesq .or. GV%semi_Boussinesq)) then
-  print *, "if "
     do j=js-1,je+1 ; do i=is-1,ie+1
       ! This expression differs by a factor of 1. / (Rho_0 * SpV_avg) compared with the other
       ! expressions below, and it is invariant to the value of Rho_0 in non-Boussinesq mode.
@@ -965,7 +960,6 @@ subroutine mixedlayer_restrat_Bodner(CS, G, GV, US, h, uhtr, vhtr, tv, forces, d
                 ! expansion coefficient) and because the specific volume does vary within the mixed layer.
     enddo ; enddo
   elseif (CS%answer_date < 20240201) then
-  print *, "anwer date"
     Z3_T3_to_m3_s3 = (US%Z_to_m * US%s_to_T)**3
     m2_s2_to_Z2_T2 = (US%m_to_Z * US%T_to_s)**2
     do j=js-1,je+1 ; do i=is-1,ie+1
@@ -975,7 +969,6 @@ subroutine mixedlayer_restrat_Bodner(CS, G, GV, US, h, uhtr, vhtr, tv, forces, d
           CS%min_wstar2) * US%Z_to_L * GV%Z_to_H ! In [L H T-2 ~> m2 s-2 or kg m-1 s-2]
     enddo ; enddo
   else
-    print *, " else 2"
     l_mstar = CS%mstar ; l_nstar = CS%nstar ; l_min_wstar2 = CS%min_wstar2
     zL_zH = US%Z_to_L * GV%Z_to_H
     bflux_l(:,:) = bflux(:,:) ; BLD_l(:,:) = BLD(:,:)
@@ -1000,7 +993,6 @@ subroutine mixedlayer_restrat_Bodner(CS, G, GV, US, h, uhtr, vhtr, tv, forces, d
   CS%wpup_filtered(:,:) = wpupf_l(:,:)
 
   if (CS%id_lfbod > 0) then
-    print *, " if lfbod "
     do j=js-1,je+1 ; do i=is-1,ie+1
       ! Calculate front length used in B22 formula (eq 24).
       w_star3 = max(0., -bflux(i,j)) * BLD(i,j)
@@ -1018,13 +1010,11 @@ subroutine mixedlayer_restrat_Bodner(CS, G, GV, US, h, uhtr, vhtr, tv, forces, d
 
     ! Rescale from [Z2 H-1 ~> m or m4 kg-1] to [L ~> m]
     if (allocated(tv%SpV_avg) .and. .not.(GV%Boussinesq .or. GV%semi_Boussinesq)) then
-    print *, "rescale"
       do j=js-1,je+1 ; do i=is-1,ie+1
         lf_bodner_diag(i,j) = lf_bodner_diag(i,j) &
             * (US%Z_to_L * GV%RZ_to_H / tv%SpV_avg(i,j,1))
       enddo ; enddo
     else
-      print *, "don't erscale"
       do j=js-1,je+1 ; do i=is-1,ie+1
         lf_bodner_diag(i,j) = lf_bodner_diag(i,j) * US%Z_to_L * GV%Z_to_H
       enddo ; enddo
