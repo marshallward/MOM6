@@ -2,6 +2,8 @@
 ! See the LICENSE file for licensing information.
 ! SPDX-License-Identifier: Apache-2.0
 
+#include <do_concurrent_compat.h>
+
 !> Isopycnal height diffusion (or Gent McWilliams diffusion)
 submodule (MOM_thickness_diffuse) MOM_thickness_diffuse_s
 #include <MOM_memory.h>
@@ -838,11 +840,7 @@ module subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt
                      tv%eqn_of_state, reshape([EOSdom_h1(1), jstart - (G%jsd-1), EOSdom_h1(2), jend - (G%jsd-1)], [2,2]) )
       endif
 
-      do concurrent (j=jstart:jend, i=is-1:ie) &
-          local_init(drdiA, drdiB, drdkL, drdkR) &
-          local(drdz, hg2L, hg2R, haL, haR, dzaL, dzaR, wtL, wtR, &
-                hg2A, hg2B, haA, haB, N2_unlim, dzg2A, dzg2B, dzaA, dzaB, &
-                wtA, wtB, drdx, mag_grad2, Slope)
+      do concurrent (j=jstart:jend, i=is-1:ie) DO_LOCALITY(local_init(drdiA, drdiB, drdkL, drdkR))
         if (calc_derivatives) then
           ! Estimate the horizontal density gradients along layers.
           drdiA = drho_dT_u(I,j) * (T(i+1,j,k-1)-T(i,j,k-1)) + &
@@ -1024,7 +1022,7 @@ module subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt
     enddo ! k-loop
 
     if (CS%use_FGNV_streamfn) then
-      do concurrent (k=1:nz, j=jstart:jend, i=is-1:ie, G%OBCmaskCu(i,j)>0.) local(dz_harm)
+      do concurrent (k=1:nz, j=jstart:jend, i=is-1:ie, G%OBCmaskCu(i,j)>0.)
         dz_harm = max( dz_neglect, &
               2. * dz(i,j,k) * dz(i+1,j,k) / ( ( dz(i,j,k) + dz(i+1,j,k) ) + dz_neglect ) )
         c2_dz_u(I,j,k) = CS%FGNV_scale * ( 0.5*( cg1(i,j) + cg1(i+1,j) ) )**2 / dz_harm
@@ -1046,7 +1044,7 @@ module subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt
       enddo
     endif
     do concurrent (j=jstart:jend)
-      do K=nz,2,-1 ; do concurrent (I=is-1:ie) local(Rho_avg, Z_to_H, Sfn_safe, Sfn_est, Sfn_in_H, G_scale)
+      do K=nz,2,-1 ; do concurrent (I=is-1:ie)
 
         if (allocated(tv%SpV_avg) .and. (find_work .or. (k > nk_linear)) ) then
           Rho_avg = ( ((h(i,j,k) + h(i,j,k-1)) + (h(i+1,j,k) + h(i+1,j,k-1))) + 4.0*hn_2 ) / &
@@ -1185,11 +1183,7 @@ module subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt
                      tv%eqn_of_state, reshape([is - (G%isd-1), jstart - (G%jsdB-1), &
                          ie - (G%isd-1), jend - (G%jsdB-1)], [2,2]))
       endif
-      do concurrent (J=jstart:jend, i=is:ie) &
-          local_init(drdjA, drdjB, drdkL, drdkR) &
-          local(drdz, hg2L, hg2R, haL, haR, dzaL, dzaR, wtL, wtR, &
-                hg2A, hg2B, haA, haB, N2_unlim, dzg2A, dzg2B, dzaA, dzaB, &
-                wtA, wtB, drdy, mag_grad2, Slope)
+      do concurrent (J=jstart:jend, i=is:ie) DO_LOCALITY(local_init(drdjA, drdjB, drdkL, drdkR))
         if (calc_derivatives) then
           ! Estimate the horizontal density gradients along layers.
           drdjA = drho_dT_v(i,J) * (T(i,j+1,k-1)-T(i,j,k-1)) + &
@@ -1372,7 +1366,7 @@ module subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt
     enddo ! k-loop
 
     if (CS%use_FGNV_streamfn) then
-      do concurrent (k=1:nz, J=jstart:jend, i=is:ie, G%OBCmaskCv(i,J)>0.) local(dz_harm)
+      do concurrent (k=1:nz, J=jstart:jend, i=is:ie, G%OBCmaskCv(i,J)>0.)
         dz_harm = max( dz_neglect, &
               2. * dz(i,j,k) * dz(i,j+1,k) / ( ( dz(i,j,k) + dz(i,j+1,k) ) + dz_neglect ) )
         c2_dz_v(i,J,k) = CS%FGNV_scale * ( 0.5*( cg1(i,j) + cg1(i,j+1) ) )**2 / dz_harm
@@ -1394,7 +1388,7 @@ module subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt
     endif
 
     do concurrent (J=jstart:jend)
-      do K=nz,2,-1 ; do concurrent (i=is:ie) local(Rho_avg, Z_to_H, Sfn_safe, Sfn_est, Sfn_in_H, G_scale)
+      do K=nz,2,-1 ; do concurrent (i=is:ie)
         if (allocated(tv%SpV_avg) .and. (find_work .or. (k > nk_linear)) ) then
           Rho_avg = ( ((h(i,j,k) + h(i,j,k-1)) + (h(i,j+1,k) + h(i,j+1,k-1))) + 4.0*hn_2 ) / &
               ( (((h(i,j,k)+hn_2) * tv%SpV_avg(i,j,k))   + ((h(i,j,k-1)+hn_2) * tv%SpV_avg(i,j,k-1))) + &
@@ -1499,7 +1493,7 @@ module subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt
                                       tv%eqn_of_state, reshape([(is-1) - (G%IsdB-1), jstart - (G%jsd-1), &
                                           ie - (G%IsdB-1), jend - (G%jsd-1)], [2,2]))
       endif
-      do concurrent (j=jstart:jend, i=is-1:ie) local(drdiB, G_scale)
+      do concurrent (j=jstart:jend, i=is-1:ie)
         uhD(I,j,1) = -uhtot(I,j)
 
         G_scale = GV%g_Earth * GV%H_to_Z
@@ -1537,7 +1531,7 @@ module subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt
                                       tv%eqn_of_state, reshape([is - (G%isd-1), jstart - (G%jsdB-1), &
                                           ie - (G%isd-1), jend - (G%jsdB-1)], [2,2]))
       endif
-      do concurrent (J=jstart:jend, i=is:ie) local(drdjB, G_scale)
+      do concurrent (J=jstart:jend, i=is:ie)
         vhD(i,J,1) = -vhtot(i,J)
 
         G_scale = GV%g_Earth * GV%H_to_Z
@@ -1557,7 +1551,7 @@ module subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt
     enddo
   endif
 
-  if (find_work) then ; do concurrent (J=js:je, i=is:ie) local(Work_h)
+  if (find_work) then ; do concurrent (J=js:je, i=is:ie)
     ! Note that the units of Work_v and Work_u are [R Z L4 T-3 ~> W], while Work_h is in [R Z L2 T-3 ~> W m-2].
     Work_h = 0.5 * G%IareaT(i,j) * &
       ((Work_u(I-1,j) + Work_u(I,j)) + (Work_v(i,J-1) + Work_v(i,J)))
@@ -1586,7 +1580,7 @@ module subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt
 
   if (find_work .and. CS%GM_src_alt) then ; if (allocated(MEKE%GM_src)) then
     if (CS%MEKE_src_answer_date >= 20240601) then
-      do concurrent (j=js:je, i=is:ie) local(PE_release_h, k) ; do k=nz,1,-1
+      do concurrent (j=js:je, i=is:ie) ; do k=nz,1,-1
         PE_release_h = -0.25 * GV%H_to_RZ * &
                          ( ((KH_u(I,j,k)*(Slope_x_PE(I,j,k)**2) * hN2_x_PE(I,j,k)) + &
                             (Kh_u(I-1,j,k)*(Slope_x_PE(I-1,j,k)**2) * hN2_x_PE(I-1,j,k))) + &
@@ -1595,7 +1589,7 @@ module subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt
         MEKE%GM_src(i,j) = MEKE%GM_src(i,j) + PE_release_h
       enddo ; enddo
     else
-      do concurrent(j=js:je, i=is:ie) local(PE_release_h, k); do k=nz,1,-1
+      do concurrent(j=js:je, i=is:ie) ; do k=nz,1,-1
         PE_release_h = -0.25 * GV%H_to_RZ * &
                            ((KH_u(I,j,k)*(Slope_x_PE(I,j,k)**2) * hN2_x_PE(I,j,k)) + &
                             (Kh_u(I-1,j,k)*(Slope_x_PE(I-1,j,k)**2) * hN2_x_PE(I-1,j,k)) + &
