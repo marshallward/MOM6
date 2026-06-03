@@ -715,8 +715,7 @@ module subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt
                                      ! state calculations at h points with 1 extra halo point
   logical :: use_stanley, skeb_use_gm
   integer :: is, ie, js, je, nz, IsdB, halo
-  integer :: i, j, k, jstart, jend
-  integer, parameter :: njblock = 1
+  integer :: i, j, k, jstart, jend, njblock
   is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec ; nz = GV%ke ; IsdB = G%IsdB
 
   I4dt = 0.25 / dt
@@ -742,6 +741,14 @@ module subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt
 
   nk_linear = max(GV%nkml, 1)
 
+  !$omp target enter data &
+  !$omp   map(alloc: diag_sfn_x, diag_sfn_y, uhD, vhD, uhtot, Work_u, vhtot, Work_v, h_avail, h_avail_rsum, &
+  !$omp     h_frac, pres, dz, S, T, dzN2_u, Slope_x_PE, slope_x, slope2_Ratio_u, Sfn_unlim_u, hN2_x_PE, &
+  !$omp     drho_dT_u, drho_dT_dT_h, drho_dS_u, drdkDe_u, drdi_u, diag_sfn_unlim_x, pres_u, T_u, S_u, &
+  !$omp     dzN2_v, Slope_y_PE, slope_y, slope2_Ratio_v, Sfn_unlim_v, hN2_y_PE, drho_dT_v, drho_dT_dT_hr, &
+  !$omp     drho_dS_v, drdj_v, diag_sfn_unlim_y, T_v, S_v, pres_v, drdkDe_v) &
+  !$omp   map(to: tv, tv%T, tv%S, tv%p_surf, meke, meke%gm_src)
+
   do concurrent (k=1:nz+1, j=G%jsd:G%jed, i=G%isdB:G%iedB)
     Slope_x_PE(i,j,k) = 0.0
     hN2_x_PE(i,j,k) = 0.0
@@ -757,11 +764,7 @@ module subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt
 
   if (use_EOS) then
     halo = 1 ! Default halo to fill is 1
-    !$omp target enter data map(to: h, tv%T, tv%S)
-    !$omp target enter data map(alloc: T, S)
     call vert_fill_TS(h, tv%T, tv%S, CS%kappa_smooth*dt, T, S, G, GV, US, halo, larger_h_denom=.true.)
-    !$omp target exit data map(from: T, S)
-    !$omp target exit data map(release: h, tv%T, tv%S)
   endif
 
   ! Rescale the thicknesses, perhaps using the specific volume.
@@ -799,8 +802,6 @@ module subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt
     vhtot(i,J) = 0.0 ; Work_v(i,J) = 0.0
   enddo
 
-  !$omp target exit data map(from: uhtot, Work_u, vhtot, Work_v, h_avail, h_avail_rsum, h_frac, pres, dz)
-
   if (CS%id_sfn_x > 0) then ; diag_sfn_x(:,:,1) = 0.0 ; diag_sfn_x(:,:,nz+1) = 0.0 ; endif
   if (CS%id_sfn_y > 0) then ; diag_sfn_y(:,:,1) = 0.0 ; diag_sfn_y(:,:,nz+1) = 0.0 ; endif
   if (CS%id_sfn_unlim_x > 0) then ; diag_sfn_unlim_x(:,:,1) = 0.0 ; diag_sfn_unlim_x(:,:,nz+1) = 0.0 ; endif
@@ -810,9 +811,11 @@ module subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt
   EOSdom_v(:) = EOS_domain(G%HI)
   EOSdom_h1(:) = EOS_domain(G%HI, halo=1)
 
+  njblock = je-js+1
+
   do jstart=js,je,njblock
     jend = min(jstart+njblock-1, je)
-    do j=jstart,jend ; do I=is-1,ie ; dzN2_u(I,j,1) = 0. ; dzN2_u(I,j,nz+1) = 0. ; enddo ; enddo
+    do concurrent (j=jstart:jend, i=is-1:ie) ; dzN2_u(i,j,1) = 0. ; dzN2_u(i,j,nz+1) = 0. ; enddo
     do K=nz,2,-1
       if (find_work .and. .not.(use_EOS)) then
         drdiA = 0.0 ; drdiB = 0.0
@@ -824,33 +827,33 @@ module subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt
 
       ! Calculate the zonal fluxes and gradients.
       if (calc_derivatives) then
-        do j=jstart,jend ; do I=is-1,ie
-          pres_u(I,j) = 0.5*(pres(i,j,K) + pres(i+1,j,K))
-          T_u(I,j) = 0.25*((T(i,j,k) + T(i+1,j,k)) + (T(i,j,k-1) + T(i+1,j,k-1)))
-          S_u(I,j) = 0.25*((S(i,j,k) + S(i+1,j,k)) + (S(i,j,k-1) + S(i+1,j,k-1)))
-        enddo ; enddo
-        do j=jstart,jend
-        call calculate_density_derivs(T_u(:,j), S_u(:,j), pres_u(:,j), drho_dT_u(:,j), drho_dS_u(:,j), &
-                                      tv%eqn_of_state, EOSdom_u)
+        do concurrent (j=jstart:jend, i=is-1:ie)
+          pres_u(i,j) = 0.5*(pres(i,j,k) + pres(i+1,j,k))
+          T_u(i,j) = 0.25*((T(i,j,k) + T(i+1,j,k)) + (T(i,j,k-1) + T(i+1,j,k-1)))
+          S_u(i,j) = 0.25*((S(i,j,k) + S(i+1,j,k)) + (S(i,j,k-1) + S(i+1,j,k-1)))
         enddo
+        call calculate_density_derivs(T_u, S_u, pres_u, drho_dT_u, drho_dS_u, &
+                                      tv%eqn_of_state, reshape([(is-1) - (G%IsdB-1), jstart - (G%jsd-1), ie - (G%IsdB-1), jend - (G%jsd-1)], [2,2]) )
       endif
       if (use_stanley) then
-        do j=jstart,jend ; do i=is-1,ie+1
+        do concurrent (j=jstart:jend, i=is-1:ie+1)
           pres_h(i,j) = pres(i,j,K)
           T_h(i,j) = 0.5*(T(i,j,k) + T(i,j,k-1))
           S_h(i,j) = 0.5*(S(i,j,k) + S(i,j,k-1))
-        enddo ; enddo
+        enddo
 
         ! The second line below would correspond to arguments
         !            drho_dS_dS, drho_dS_dT, drho_dT_dT, drho_dS_dP, drho_dT_dP, &
-        do j=jstart,jend
-        call calculate_density_second_derivs(T_h(:,j), S_h(:,j), pres_h(:,j), &
-                     scrap(:,j), scrap(:,j), drho_dT_dT_h(:,j), scrap(:,j), scrap(:,j), &
-                     tv%eqn_of_state, EOSdom_h1)
-        enddo
+        call calculate_density_second_derivs(T_h, S_h, pres_h, &
+                     scrap, scrap, drho_dT_dT_h, scrap, scrap, &
+                     tv%eqn_of_state, reshape([EOSdom_h1(1), jstart - (G%jsd-1), EOSdom_h1(2), jend - (G%jsd-1)], [2,2]) )
       endif
 
-      do j=jstart,jend ; do I=is-1,ie
+      do concurrent (j=jstart:jend, i=is-1:ie) &
+          local_init(drdiA, drdiB, drdkL, drdkR) &
+          local(drdz, hg2L, hg2R, haL, haR, dzaL, dzaR, wtL, wtR, &
+                hg2A, hg2B, haA, haB, N2_unlim, dzg2A, dzg2B, dzaA, dzaB, &
+                wtA, wtB, drdx, mag_grad2, Slope)
         if (calc_derivatives) then
           ! Estimate the horizontal density gradients along layers.
           drdiA = drho_dT_u(I,j) * (T(i+1,j,k-1)-T(i,j,k-1)) + &
@@ -1028,32 +1031,33 @@ module subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt
           Sfn_unlim_u(I,j,K) = 0.
         endif ! if (k > nk_linear)
         if (CS%id_sfn_unlim_x>0) diag_sfn_unlim_x(I,j,K) = Sfn_unlim_u(I,j,K)
-      enddo ; enddo ! i-loop
+      enddo ! i-loop
     enddo ! k-loop
 
     if (CS%use_FGNV_streamfn) then
-      do k=1,nz ; do j=jstart,jend ; do I=is-1,ie ; if (G%OBCmaskCu(I,j)>0.) then
+      do concurrent (k=1:nz, j=jstart:jend, i=is-1:ie, G%OBCmaskCu(i,j)>0.) local(dz_harm)
         dz_harm = max( dz_neglect, &
               2. * dz(i,j,k) * dz(i+1,j,k) / ( ( dz(i,j,k) + dz(i+1,j,k) ) + dz_neglect ) )
         c2_dz_u(I,j,k) = CS%FGNV_scale * ( 0.5*( cg1(i,j) + cg1(i+1,j) ) )**2 / dz_harm
-      endif ; enddo ; enddo ; enddo
+      enddo
 
       ! Solve an elliptic equation for the streamfunction following Ferrari et al., 2010.
-      do j=jstart,jend ; do I=is-1,ie
+      do concurrent (j=jstart:jend, I=is-1:ie)
         if (G%OBCmaskCu(I,j)>0.) then
           do K=2,nz
             Sfn_unlim_u(I,j,K) = (1. + CS%FGNV_scale) * Sfn_unlim_u(I,j,K)
           enddo
+          ! unsure if this works on GPU due to non-contiguous memory access
           call streamfn_solver(nz, c2_dz_u(I,j,:), dzN2_u(I,j,:), Sfn_unlim_u(I,j,:))
         else
           do K=2,nz
             Sfn_unlim_u(I,j,K) = 0.
           enddo
         endif
-      enddo ; enddo
+      enddo
     endif
-    do K=nz,2,-1
-      do j=jstart,jend ; do I=is-1,ie
+    do concurrent (j=jstart:jend)
+      do K=nz,2,-1 ; do concurrent (I=is-1:ie) local(Rho_avg, Z_to_H, Sfn_safe, Sfn_est, Sfn_in_H, G_scale)
 
         if (allocated(tv%SpV_avg) .and. (find_work .or. (k > nk_linear)) ) then
           Rho_avg = ( ((h(i,j,k) + h(i,j,k-1)) + (h(i+1,j,k) + h(i+1,j,k-1))) + 4.0*hn_2 ) / &
@@ -1062,6 +1066,7 @@ module subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt
           ! Use an average density to convert the volume streamfunction estimate into a mass streamfunction.
           Z_to_H = GV%RZ_to_H*Rho_avg
         else
+          Rho_avg = 0.0
           Z_to_H = GV%Z_to_H
         endif
 
@@ -1144,28 +1149,33 @@ module subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt
 
   ! Calculate the meridional fluxes and gradients.
 
-  do J=js-1,je ; do i=is,ie ; dzN2_v(i,J,1) = 0. ; dzN2_v(i,J,nz+1) = 0. ; enddo ; enddo
-  do J=js-1,je
+  njblock = je - (js-1) + 1
+  do jstart=js-1,je,njblock
+    jend = min(jstart+njblock-1, je)
+    do concurrent (J=jstart:jend, i=is:ie) ; dzN2_v(i,J,1) = 0. ; dzN2_v(i,J,nz+1) = 0. ; enddo
     do K=nz,2,-1
+      drdjA = 0.0 ; drdjB = 0.0
       if (find_work .and. .not.(use_EOS)) then
-        drdjA = 0.0 ; drdjB = 0.0
         drdkL = GV%Rlay(k) - GV%Rlay(k-1) ; drdkR = drdkL
+      else
+        drdkL = 0.0 ; drdkR = 0.0
       endif
 
       calc_derivatives = use_EOS .and. (k >= nk_linear) .and. &
          (find_work .or. .not. present_slope_y .or. CS%use_FGNV_streamfn .or. use_stanley)
 
       if (calc_derivatives) then
-        do i=is,ie
+        do concurrent (J=jstart:jend, i=is:ie)
           pres_v(i,J) = 0.5*(pres(i,j,K) + pres(i,j+1,K))
           T_v(i,J) = 0.25*((T(i,j,k) + T(i,j+1,k)) + (T(i,j,k-1) + T(i,j+1,k-1)))
           S_v(i,J) = 0.25*((S(i,j,k) + S(i,j+1,k)) + (S(i,j,k-1) + S(i,j+1,k-1)))
         enddo
-        call calculate_density_derivs(T_v(:,J), S_v(:,J), pres_v(:,J), drho_dT_v(:,J), drho_dS_v(:,J), &
-                                      tv%eqn_of_state, EOSdom_v)
+        call calculate_density_derivs(T_v, S_v, pres_v, drho_dT_v, drho_dS_v, &
+                                      tv%eqn_of_state, reshape([is - (G%isd-1), jstart - (G%jsdB-1), &
+                                          ie - (G%isd-1), jend - (G%jsdB-1)], [2,2]))
       endif
       if (use_stanley) then
-        do i=is,ie
+        do concurrent (J=jstart:jend, i=is:ie)
           pres_h(i,J) = pres(i,j,K)
           T_h(i,J) = 0.5*(T(i,j,k) + T(i,j,k-1))
           S_h(i,J) = 0.5*(S(i,j,k) + S(i,j,k-1))
@@ -1177,14 +1187,20 @@ module subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt
 
         ! The second line below would correspond to arguments
         !            drho_dS_dS, drho_dS_dT, drho_dT_dT, drho_dS_dP, drho_dT_dP, &
-        call calculate_density_second_derivs(T_h(:,J), S_h(:,J), pres_h(:,J), &
-                     scrap(:,J), scrap(:,J), drho_dT_dT_h(:,J), scrap(:,J), scrap(:,J), &
-                     tv%eqn_of_state, EOSdom_v)
-        call calculate_density_second_derivs(T_hr(:,J), S_hr(:,J), pres_hr(:,J), &
-                     scrap(:,J), scrap(:,J), drho_dT_dT_hr(:,J), scrap(:,J), scrap(:,J), &
-                     tv%eqn_of_state, EOSdom_v)
+        call calculate_density_second_derivs(T_h, S_h, pres_h, &
+                     scrap, scrap, drho_dT_dT_h, scrap, scrap, &
+                     tv%eqn_of_state, reshape([is - (G%isd-1), jstart - (G%jsd-1), &
+                         ie - (G%isd-1), jend - (G%jsd-1)], [2,2]))
+        call calculate_density_second_derivs(T_hr, S_hr, pres_hr, &
+                     scrap, scrap, drho_dT_dT_hr, scrap, scrap, &
+                     tv%eqn_of_state, reshape([is - (G%isd-1), jstart - (G%jsdB-1), &
+                         ie - (G%isd-1), jend - (G%jsdB-1)], [2,2]))
       endif
-      do i=is,ie
+      do concurrent (J=jstart:jend, i=is:ie) &
+          local_init(drdjA, drdjB, drdkL, drdkR) &
+          local(drdz, hg2L, hg2R, haL, haR, dzaL, dzaR, wtL, wtR, &
+                hg2A, hg2B, haA, haB, N2_unlim, dzg2A, dzg2B, dzaA, dzaB, &
+                wtA, wtB, drdy, mag_grad2, Slope)
         if (calc_derivatives) then
           ! Estimate the horizontal density gradients along layers.
           drdjA = drho_dT_v(i,J) * (T(i,j+1,k-1)-T(i,j,k-1)) + &
@@ -1363,18 +1379,18 @@ module subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt
           Sfn_unlim_v(i,J,K) = 0.
         endif ! if (k > nk_linear)
         if (CS%id_sfn_unlim_y>0) diag_sfn_unlim_y(i,J,K) = Sfn_unlim_v(i,J,K)
-      enddo ! i-loop
+      enddo ! (J,i) concurrent loop
     enddo ! k-loop
 
     if (CS%use_FGNV_streamfn) then
-      do k=1,nz ; do i=is,ie ; if (G%OBCmaskCv(i,J)>0.) then
+      do concurrent (k=1:nz, J=jstart:jend, i=is:ie, G%OBCmaskCv(i,J)>0.) local(dz_harm)
         dz_harm = max( dz_neglect, &
               2. * dz(i,j,k) * dz(i,j+1,k) / ( ( dz(i,j,k) + dz(i,j+1,k) ) + dz_neglect ) )
         c2_dz_v(i,J,k) = CS%FGNV_scale * ( 0.5*( cg1(i,j) + cg1(i,j+1) ) )**2 / dz_harm
-      endif ; enddo ; enddo
+      enddo
 
       ! Solve an elliptic equation for the streamfunction following Ferrari et al., 2010.
-      do i=is,ie
+      do concurrent (J=jstart:jend, i=is:ie)
         if (G%OBCmaskCv(i,J)>0.) then
           do K=2,nz
             Sfn_unlim_v(i,J,K) = (1. + CS%FGNV_scale) * Sfn_unlim_v(i,J,K)
@@ -1388,8 +1404,8 @@ module subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt
       enddo
     endif
 
-    do K=nz,2,-1
-      do i=is,ie
+    do concurrent (J=jstart:jend)
+      do K=nz,2,-1 ; do concurrent (i=is:ie) local(Rho_avg, Z_to_H, Sfn_safe, Sfn_est, Sfn_in_H, G_scale)
         if (allocated(tv%SpV_avg) .and. (find_work .or. (k > nk_linear)) ) then
           Rho_avg = ( ((h(i,j,k) + h(i,j,k-1)) + (h(i,j+1,k) + h(i,j+1,k-1))) + 4.0*hn_2 ) / &
               ( (((h(i,j,k)+hn_2) * tv%SpV_avg(i,j,k))   + ((h(i,j,k-1)+hn_2) * tv%SpV_avg(i,j,k-1))) + &
@@ -1397,6 +1413,7 @@ module subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt
           ! Use an average density to convert the volume streamfunction estimate into a mass streamfunction.
           Z_to_H = GV%RZ_to_H*Rho_avg
         else
+          Rho_avg = 0.0
           Z_to_H = GV%Z_to_H
         endif
 
@@ -1471,28 +1488,29 @@ module subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt
              ((e(i,j,K) + e(i,j,K+1)) + (e(i,j+1,K) + e(i,j+1,K+1))) )
         endif
 
-      enddo
+      enddo ; enddo
     enddo ! end of k-loop
-  enddo ! end of j-loop
+  enddo ! end of jstart-loop
 
   ! In layer 1, enforce the boundary conditions that Sfn(z=0) = 0.0
   if (.not.find_work .or. .not.(use_EOS)) then
-    do j=js,je ; do I=is-1,ie ; uhD(I,j,1) = -uhtot(I,j) ; enddo ; enddo
-    do J=js-1,je ; do i=is,ie ; vhD(i,J,1) = -vhtot(i,J) ; enddo ; enddo
+    do concurrent (j=js:je, I=is-1:ie) ; uhD(I,j,1) = -uhtot(I,j) ; enddo
+    do concurrent (J=js-1:je, i=is:ie) ; vhD(i,J,1) = -vhtot(i,J) ; enddo
   else
-    EOSdom_u(1) = (is-1) - (G%IsdB-1) ; EOSdom_u(2) = ie - (G%IsdB-1)
-    !$OMP parallel do default(shared) private(drdiB,G_scale)
-    do j=js,je
+    njblock = je-js+1
+    do jstart=js,je,njblock
+      jend = min(jstart+njblock-1, je)
       if (use_EOS) then
-        do I=is-1,ie
-          pres_u(I,j) = 0.5*(pres(i,j,1) + pres(i+1,j,1))
-          T_u(I,j) = 0.5*(T(i,j,1) + T(i+1,j,1))
-          S_u(I,j) = 0.5*(S(i,j,1) + S(i+1,j,1))
+        do concurrent (j=jstart:jend, i=is-1:ie)
+          pres_u(i,j) = 0.5*(pres(i,j,1) + pres(i+1,j,1))
+          T_u(i,j) = 0.5*(T(i,j,1) + T(i+1,j,1))
+          S_u(i,j) = 0.5*(S(i,j,1) + S(i+1,j,1))
         enddo
-        call calculate_density_derivs(T_u(:,j), S_u(:,j), pres_u(:,j), drho_dT_u(:,j), drho_dS_u(:,j), &
-                                      tv%eqn_of_state, EOSdom_u )
+        call calculate_density_derivs(T_u, S_u, pres_u, drho_dT_u, drho_dS_u, &
+                                      tv%eqn_of_state, reshape([(is-1) - (G%IsdB-1), jstart - (G%jsd-1), &
+                                          ie - (G%IsdB-1), jend - (G%jsd-1)], [2,2]))
       endif
-      do I=is-1,ie
+      do concurrent (j=jstart:jend, i=is-1:ie) local(drdiB, G_scale)
         uhD(I,j,1) = -uhtot(I,j)
 
         G_scale = GV%g_Earth * GV%H_to_Z
@@ -1517,19 +1535,20 @@ module subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt
       enddo
     enddo
 
-    EOSdom_v(:) = EOS_domain(G%HI)
-    !$OMP parallel do default(shared) private(drdjB,G_scale)
-    do J=js-1,je
+    njblock = je - (js-1) + 1
+    do jstart=js-1,je,njblock
+      jend = min(jstart+njblock-1, je)
       if (use_EOS) then
-        do i=is,ie
+        do concurrent (J=jstart:jend, i=is:ie)
           pres_v(i,J) = 0.5*(pres(i,j,1) + pres(i,j+1,1))
           T_v(i,J) = 0.5*(T(i,j,1) + T(i,j+1,1))
           S_v(i,J) = 0.5*(S(i,j,1) + S(i,j+1,1))
         enddo
-        call calculate_density_derivs(T_v(:,J), S_v(:,J), pres_v(:,J), drho_dT_v(:,J), drho_dS_v(:,J), &
-                                      tv%eqn_of_state, EOSdom_v)
+        call calculate_density_derivs(T_v, S_v, pres_v, drho_dT_v, drho_dS_v, &
+                                      tv%eqn_of_state, reshape([is - (G%isd-1), jstart - (G%jsdB-1), &
+                                          ie - (G%isd-1), jend - (G%jsdB-1)], [2,2]))
       endif
-      do i=is,ie
+      do concurrent (J=jstart:jend, i=is:ie) local(drdjB, G_scale)
         vhD(i,J,1) = -vhtot(i,J)
 
         G_scale = GV%g_Earth * GV%H_to_Z
@@ -1549,7 +1568,7 @@ module subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt
     enddo
   endif
 
-  if (find_work) then ; do j=js,je ; do i=is,ie
+  if (find_work) then ; do concurrent (J=js:je, i=is:ie) local(Work_h)
     ! Note that the units of Work_v and Work_u are [R Z L4 T-3 ~> W], while Work_h is in [R Z L2 T-3 ~> W m-2].
     Work_h = 0.5 * G%IareaT(i,j) * &
       ((Work_u(I-1,j) + Work_u(I,j)) + (Work_v(i,J-1) + Work_v(i,J)))
@@ -1565,39 +1584,40 @@ module subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt
       enddo
       skeb_ebt_norm2(i,j) = GV%H_to_RZ * (skeb_ebt_norm2(i,j) + h_neglect)
     endif
-  enddo ; enddo ; endif
+  enddo ; endif
 
   if (skeb_use_gm) then
     ! This block spreads the GM work down through the column using the ebt vertical structure, squared.
     ! Note the sign convention.
-    do k=1,nz ; do j=js,je ; do i=is,ie
+    do concurrent (k=1:nz, j=js:je, i=is:ie)
       STOCH%skeb_diss(i,j,k) = STOCH%skeb_diss(i,j,k) - skeb_gm_work(i,j) * &
                                VarMix%ebt_struct(i,j,k)**2 / skeb_ebt_norm2(i,j)
-    enddo ; enddo ; enddo
+    enddo
   endif
 
   if (find_work .and. CS%GM_src_alt) then ; if (allocated(MEKE%GM_src)) then
     if (CS%MEKE_src_answer_date >= 20240601) then
-      do j=js,je ; do i=is,ie ; do k=nz,1,-1
+      do concurrent (j=js:je, i=is:ie) local(PE_release_h, k) ; do k=nz,1,-1
         PE_release_h = -0.25 * GV%H_to_RZ * &
                          ( ((KH_u(I,j,k)*(Slope_x_PE(I,j,k)**2) * hN2_x_PE(I,j,k)) + &
                             (Kh_u(I-1,j,k)*(Slope_x_PE(I-1,j,k)**2) * hN2_x_PE(I-1,j,k))) + &
                            ((Kh_v(i,J,k)*(Slope_y_PE(i,J,k)**2) * hN2_y_PE(i,J,k)) + &
                             (Kh_v(i,J-1,k)*(Slope_y_PE(i,J-1,k)**2) * hN2_y_PE(i,J-1,k))) )
         MEKE%GM_src(i,j) = MEKE%GM_src(i,j) + PE_release_h
-      enddo ; enddo ; enddo
+      enddo ; enddo
     else
-      do j=js,je ; do i=is,ie ; do k=nz,1,-1
+      do concurrent(j=js:je, i=is:ie) local(PE_release_h, k); do k=nz,1,-1
         PE_release_h = -0.25 * GV%H_to_RZ * &
                            ((KH_u(I,j,k)*(Slope_x_PE(I,j,k)**2) * hN2_x_PE(I,j,k)) + &
                             (Kh_u(I-1,j,k)*(Slope_x_PE(I-1,j,k)**2) * hN2_x_PE(I-1,j,k)) + &
                             (Kh_v(i,J,k)*(Slope_y_PE(i,J,k)**2) * hN2_y_PE(i,J,k)) + &
                             (Kh_v(i,J-1,k)*(Slope_y_PE(i,J-1,k)**2) * hN2_y_PE(i,J-1,k)))
         MEKE%GM_src(i,j) = MEKE%GM_src(i,j) + PE_release_h
-      enddo ; enddo ; enddo
+      enddo ; enddo
     endif
 
     if (CS%debug) then
+      !$omp target update from(MEKE%GM_src, Kh_u, Kh_v, Slope_x_PE, Slope_y_PE, hN2_x_PE, hN2_y_PE)
       call hchksum(MEKE%GM_src, 'MEKE%GM_src', G%HI, unscale=US%RZ3_T3_to_W_m2*US%L_to_Z**2)
       call uvchksum("KH_[uv]", Kh_u, Kh_v, G%HI, unscale=US%L_to_m**2*US%s_to_T, &
                     scalar_pair=.true.)
@@ -1607,12 +1627,25 @@ module subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt
     endif
   endif ; endif
 
+  !$omp target update from(diag_sfn_x) if (CS%id_sfn_x > 0)
+  !$omp target update from(diag_sfn_y) if (CS%id_sfn_y > 0)
+  !$omp target update from(diag_sfn_unlim_x) if (CS%id_sfn_unlim_x > 0)
+  !$omp target update from(diag_sfn_unlim_y) if (CS%id_sfn_unlim_y > 0)
   if (CS%id_slope_x > 0) call post_data(CS%id_slope_x, CS%diagSlopeX, CS%diag)
   if (CS%id_slope_y > 0) call post_data(CS%id_slope_y, CS%diagSlopeY, CS%diag)
   if (CS%id_sfn_x > 0) call post_data(CS%id_sfn_x, diag_sfn_x, CS%diag)
   if (CS%id_sfn_y > 0) call post_data(CS%id_sfn_y, diag_sfn_y, CS%diag)
   if (CS%id_sfn_unlim_x > 0) call post_data(CS%id_sfn_unlim_x, diag_sfn_unlim_x, CS%diag)
   if (CS%id_sfn_unlim_y > 0) call post_data(CS%id_sfn_unlim_y, diag_sfn_unlim_y, CS%diag)
+
+  !$omp target exit data &
+  !$omp   map(release: diag_sfn_x, diag_sfn_y, uhtot, Work_u, vhtot, Work_v, h_avail, h_avail_rsum, &
+  !$omp     h_frac, pres, dz, S, T, dzN2_u, Slope_x_PE, slope_x, slope2_Ratio_u, Sfn_unlim_u, &
+  !$omp     hN2_x_PE, drho_dT_u, drho_dT_dT_h, drho_dS_u, drdkDe_u, drdi_u, diag_sfn_unlim_x, pres_u, &
+  !$omp     T_u, S_u, dzN2_v, Slope_y_PE, slope_y, slope2_Ratio_v, Sfn_unlim_v, hN2_y_PE, &
+  !$omp     drho_dT_v, drho_dT_dT_hr, drho_dS_v, drdj_v, diag_sfn_unlim_y, T_v, S_v, pres_v, &
+  !$omp     drdkDe_v, tv, tv%T, tv%S, tv%p_surf, meke) &
+  !$omp   map(from: uhD, vhD, meke%gm_src)
 
 end subroutine thickness_diffuse_full
 

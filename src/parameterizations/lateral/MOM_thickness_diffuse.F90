@@ -204,7 +204,7 @@ end interface
 contains
 
 !> Tridiagonal solver for streamfunction at interfaces
-subroutine streamfn_solver(nk, c2_h, hN2, sfn)
+pure subroutine streamfn_solver(nk, c2_h, hN2, sfn)
   integer,               intent(in)    :: nk   !< Number of layers
   real, dimension(nk),   intent(in)    :: c2_h !< Wave speed squared over thickness in layers, rescaled to
                                                !! [H L2 Z-2 T-2 ~> m s-2 or kg m-2 s-2]
@@ -219,6 +219,7 @@ subroutine streamfn_solver(nk, c2_h, hN2, sfn)
   real :: b_denom ! A term in the denominator of beta [H L2 Z-2 T-2 ~> m s-2 or kg m-2 s-2]
   real :: beta    ! The normalization for the pivot [Z2 T2 H-1 L-2 ~> s2 m-1 or m2 s2 kg-1]
   integer :: k
+  !$omp declare target
 
   sfn(1) = 0.
   b_denom = hN2(2) + c2_h(1)
