@@ -852,6 +852,7 @@ subroutine calc_slope_functions(h, tv, dt, G, GV, US, CS, OBC)
     else
       !$omp target update from(e)
       call calc_slope_functions_using_just_e(h, G, GV, US, CS, e)
+      call cpu_clock_end(CS%id_clock_calc_slope_functions_using_just_e)
     endif
     !$omp target exit data map(delete: e)
   endif
@@ -1296,17 +1297,22 @@ subroutine calc_slope_functions_using_just_e(h, G, GV, US, CS, e)
 
   is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec ; nz = GV%ke
 
+  !$omp target enter data map(alloc: E_x, E_y, S2N2_u_local, S2N2_v_local)
+  !$omp target enter data map(alloc: E_x, E_y, S2N2_u_local, S2N2_v_local)
+  !$omp target enter data map(to: CS, CS%SN_u, CS%SN_v)
+
   h_neglect = GV%H_subroundoff
   H_cutoff = real(2*nz) * (GV%Angstrom_H + h_neglect)
   dZ_cutoff = real(2*nz) * (GV%Angstrom_Z + GV%dz_subroundoff)
 
   use_dztot = CS%full_depth_Eady_growth_rate ! .or. .not.(GV%Boussinesq or GV%semi_Boussinesq)
 
+  !$omp target enter data map(alloc: dz_tot) if (use_dztot)
+
   if (use_dztot) then
-    !$OMP parallel do default(shared)
-    do j=js-1,je+1 ; do i=is-1,ie+1
+    do concurrent( j=js-1:je+1, i=is-1:ie+1 )
       dz_tot(i,j) = e(i,j,1) - e(i,j,nz+1)
-    enddo ; enddo
+    enddo 
     ! The following mathematically equivalent expression is more expensive but is less
     ! sensitive to roundoff for large Z_ref:
     ! call thickness_to_dz(h, tv, dz, G, GV, US, halo_size=1)
@@ -1322,23 +1328,22 @@ subroutine calc_slope_functions_using_just_e(h, G, GV, US, CS, e)
   ! calculate the first-mode gravity wave speed and then blend the equatorial
   ! and midlatitude deformation radii, using calc_resoln_function as a template.
 
-  !$OMP parallel do default(shared) private(E_x,E_y,S2,Hdn,Hup,H_geom,N2)
   do k=nz,CS%VarMix_Ktop,-1
 
     ! Calculate the interface slopes E_x and E_y and u- and v- points respectively
-    do j=js-1,je+1 ; do I=is-1,ie
+    do concurrent( j=js-1:je+1, i=is-1:ie )
       E_x(I,j) = (e(i+1,j,K)-e(i,j,K))*G%IdxCu(I,j)
       ! Mask slopes where interface intersects topography
       if (min(h(i,j,k),h(i+1,j,k)) < H_cutoff) E_x(I,j) = 0.
-    enddo ; enddo
-    do J=js-1,je ; do i=is-1,ie+1
+    enddo
+    do concurrent( J=js-1:je, i=is-1:ie+1 )
       E_y(i,J) = (e(i,j+1,K)-e(i,j,K))*G%IdyCv(i,J)
       ! Mask slopes where interface intersects topography
       if (min(h(i,j,k),h(i,j+1,k)) < H_cutoff) E_y(i,J) = 0.
-    enddo ; enddo
+    enddo
 
     ! Calculate N*S*h from this layer and add to the sum
-    do j=js,je ; do I=is-1,ie
+    do concurrent( j=js:je, i=is-1:ie ) local( S2, Hdn, Hup, H_geom )
       S2 = ( E_x(I,j)**2  + 0.25*( &
             ((E_y(i,J)**2) + (E_y(i+1,J-1)**2)) + ((E_y(i+1,J)**2) + (E_y(i,J-1)**2)) ) )
       if (min(h(i,j,k-1), h(i+1,j,k-1), h(i,j,k), h(i+1,j,k)) < H_cutoff) S2 = 0.0
@@ -1348,8 +1353,8 @@ subroutine calc_slope_functions_using_just_e(h, G, GV, US, CS, e)
       H_geom = sqrt(Hdn*Hup)
       ! N2 = GV%g_prime(k) / (GV%H_to_Z * max(Hdn, Hup, CS%h_min_N2))
       S2N2_u_local(I,j,k) = (H_geom * S2) * (GV%g_prime(k) / max(Hdn, Hup, CS%h_min_N2) )
-    enddo ; enddo
-    do J=js-1,je ; do i=is,ie
+    enddo
+    do concurrent( J=js-1:je, i=is:ie ) local( S2, Hdn, Hup, H_geom )
       S2 = ( E_y(i,J)**2  + 0.25*( &
             ((E_x(I,j)**2) + (E_x(I-1,j+1)**2)) + ((E_x(I,j+1)**2) + (E_x(I-1,j)**2)) ) )
       if (min(h(i,j,k-1), h(i,j+1,k-1), h(i,j,k), h(i,j+1,k)) < H_cutoff) S2 = 0.0
@@ -1359,25 +1364,27 @@ subroutine calc_slope_functions_using_just_e(h, G, GV, US, CS, e)
       H_geom = sqrt(Hdn*Hup)
       ! N2 = GV%g_prime(k) / (GV%H_to_Z * max(Hdn, Hup, CS%h_min_N2))
       S2N2_v_local(i,J,k) = (H_geom * S2) * (GV%g_prime(k) / (max(Hdn, Hup, CS%h_min_N2)))
-    enddo ; enddo
+    enddo
 
   enddo ! k
 
-  !$OMP parallel do default(shared)
+  !do concurrent( j=js:je )
   do j=js,je
-    do I=is-1,ie ; CS%SN_u(I,j) = 0.0 ; enddo
-    do k=nz,CS%VarMix_Ktop,-1 ; do I=is-1,ie
+    do concurrent( I=is-1:ie )
+      CS%SN_u(I,j) = 0.0
+    enddo
+    do k=nz,CS%VarMix_Ktop,-1 ; do concurrent( I=is-1:ie )
       CS%SN_u(I,j) = CS%SN_u(I,j) + S2N2_u_local(I,j,k)
     enddo ; enddo
     ! SN above contains S^2*N^2*H, convert to vertical average of S*N
 
     if (use_dztot) then
-      do I=is-1,ie
+      do concurrent( I=is-1:ie )
         CS%SN_u(I,j) = G%OBCmaskCu(I,j) * sqrt( CS%SN_u(I,j) / &
                                                 max(dz_tot(i,j), dz_tot(i+1,j), GV%dz_subroundoff) )
       enddo
     else
-      do I=is-1,ie
+      do concurrent( I=is-1:ie ) local( h1, h2 )
         h1 = max(G%meanSL(i,j) + G%bathyT(i,j), 0.0)
         h2 = max(G%meanSL(i+1,j) + G%bathyT(i+1,j), 0.0)
         if ( min(h1, h2) > dZ_cutoff ) then
@@ -1388,19 +1395,22 @@ subroutine calc_slope_functions_using_just_e(h, G, GV, US, CS, e)
       enddo
     endif
   enddo
-  !$OMP parallel do default(shared)
+
+  !do concurrent( J=js-1:je )
   do J=js-1,je
-    do i=is,ie ; CS%SN_v(i,J) = 0.0 ; enddo
-    do k=nz,CS%VarMix_Ktop,-1 ; do i=is,ie
+    do concurrent( i=is:ie )
+      CS%SN_v(i,J) = 0.0
+    enddo
+    do k=nz,CS%VarMix_Ktop,-1 ; do concurrent( i=is:ie )
       CS%SN_v(i,J) = CS%SN_v(i,J) + S2N2_v_local(i,J,k)
     enddo ; enddo
     if (use_dztot) then
-      do i=is,ie
+      do concurrent( i=is:ie )
         CS%SN_v(i,J) = G%OBCmaskCv(i,J) * sqrt( CS%SN_v(i,J) / &
                                                 max(dz_tot(i,j), dz_tot(i,j+1), GV%dz_subroundoff) )
       enddo
     else
-      do i=is,ie
+      do concurrent( i=is:ie ) local( h1, h2 )
         ! There is a primordial horizontal indexing bug on the following line from the previous
         ! versions of the code.  This comment should be deleted by the end of 2024.
         ! if ( min(G%bathyT(i,j), G%bathyT(i+1,j)) + G%Z_ref > dZ_cutoff ) then
@@ -1414,6 +1424,12 @@ subroutine calc_slope_functions_using_just_e(h, G, GV, US, CS, e)
       enddo
     endif
   enddo
+
+  !$omp target exit data map(delete: dz_tot) if (use_dztot)
+
+  !$omp target exit data map(delete: E_x, E_y, S2N2_u_local, S2N2_v_local)
+  !$omp target exit data map(from: CS%SN_u, CS%SN_v)
+  !$omp target exit data map(release: CS)
 
 end subroutine calc_slope_functions_using_just_e
 
@@ -1963,6 +1979,10 @@ subroutine VarMix_init(Time, G, GV, US, param_file, diag, CS)
                    do_not_log=CS%use_stored_slopes)
     endif
   endif
+
+  ! Move Ktop to device
+  !$omp target enter data map(to: CS%VarMix_Ktop)
+  !$omp target enter data map(to: CS%h_min_N2)
 
   if (KhTr_Slope_Cff>0. .or. KhTh_Slope_Cff>0.) then
     in_use = .true.
