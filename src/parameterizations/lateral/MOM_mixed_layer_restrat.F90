@@ -843,7 +843,11 @@ subroutine mixedlayer_restrat_Bodner(CS, G, GV, US, h, uhtr, vhtr, tv, forces, d
   real :: wpupf_l(SZI_(G),SZJ_(G)) ! Plain local copy of CS%wpup_filtered for clean device mapping [L H T-2 ~> m2 s-2]
   real :: l_mstar, l_nstar, l_min_wstar2 ! Local copies of Bodner CS scalars for GPU kernels [nondim]/[Z2 T-2]
   real :: zL_zH ! Local copy of the US%Z_to_L * GV%Z_to_H rescaling factor [nondim]
-  real :: rho3d(SZI_(G),SZJ_(G),SZK_(GV)) ! Host-computed p=0 (sigma_0) density for the GPU integral [R ~> kg m-3]
+  real :: rho3d(SZI_(G),SZJ_(G),SZK_(GV)) ! p=0 (sigma_0) density for the GPU integral [R ~> kg m-3]
+  real :: T_l(SZI_(G),SZJ_(G),SZK_(GV)) ! Plain local copy of tv%T for the device 3D EOS call [C ~> degC]
+  real :: S_l(SZI_(G),SZJ_(G),SZK_(GV)) ! Plain local copy of tv%S for the device 3D EOS call [S ~> ppt]
+  real :: p3d(SZI_(G),SZJ_(G),SZK_(GV)) ! A pressure of 0 (sigma_0) for the device 3D EOS call [R L2 T-2 ~> Pa]
+  integer :: EOSdom3d(3,2) ! The 3D (i,j,k) computational domain for the equation of state
   real :: Rml_i  ! Per-column running density integral through "big H" [R H ~> kg m-2]
   real :: htot_i ! Per-column running mixed-layer thickness [H ~> m or kg m-2]
   real :: l_Angstrom ! Local copy of GV%Angstrom_H for GPU kernels [H ~> m or kg m-2]
@@ -1045,21 +1049,26 @@ subroutine mixedlayer_restrat_Bodner(CS, G, GV, US, h, uhtr, vhtr, tv, forces, d
   l_Angstrom = GV%Angstrom_H
   l_MLE_tail_dh = CS%MLE_tail_dh
   Cr_l(:,:) = CS%Cr_space(:,:)
+  ! Inputs for the device 3D EOS density (p=0 / sigma_0).  tv%T/tv%S are copied to plain locals so
+  ! they map cleanly; the 3D domain mirrors the 1D EOS_domain extended over j (halo 1) and k.
+  T_l(:,:,:) = tv%T(:,:,:) ; S_l(:,:,:) = tv%S(:,:,:)
+  p3d(:,:,:) = 0.0
+  EOSdom3d(1,:) = EOS_domain(G%HI, halo=1)
+  EOSdom3d(2,:) = [(js-1) - (G%jsd-1), (je+1) - (G%jsd-1)]
+  EOSdom3d(3,:) = [1, nz]
 
   ! One persistent device region spanning the mixed-layer integral, the U/V components and the h
   ! update.  Inputs produced by the earlier host-side loops are mapped in once; the integral outputs
   ! (htot/buoy_av/vol_dt_avail) stay resident for U/V, and uhml/vhml stay resident for the h update.
   !$omp target data &
-  !$omp   map(to: little_h, big_H, wpup, Cr_l) map(alloc: rho3d) &
+  !$omp   map(to: little_h, big_H, wpup, Cr_l, T_l, S_l, p3d) map(alloc: rho3d) &
   !$omp   map(from: vol_dt_avail, htot, buoy_av, uhml, vhml, uDml_diag, vDml_diag)
 
   if ((GV%Boussinesq .or. GV%semi_Boussinesq) .and. .not.CS%use_Stanley_ML) then
-    ! Active path: density at p=0 (sigma_0) computed on the HOST into rho3d (the polymorphic EOS
-    ! dispatch stays on the host), then the per-column mixed-layer integral is offloaded.
-    do k=1,nz ; do j=js-1,je+1
-      call calculate_density(tv%T(:,j,k), tv%S(:,j,k), p0, rho3d(:,j,k), tv%eqn_of_state, EOSdom)
-    enddo ; enddo
-    !$omp target update to(rho3d)
+    ! Active path: density at p=0 (sigma_0) computed ON THE DEVICE via the 3D EOS interface (the
+    ! polymorphic dispatch is resolved host-side, the per-element evaluation runs in do concurrent),
+    ! then the per-column mixed-layer integral is offloaded.
+    call calculate_density(T_l, S_l, p3d, rho3d, tv%eqn_of_state, EOSdom3d)
 
     do concurrent (k=1:nz, j=js-1:je+1, i=is-1:ie+1)
       vol_dt_avail(i,j,k) = max(I4dt*G%areaT(i,j)*(h(i,j,k)-l_Angstrom), 0.0)
