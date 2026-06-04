@@ -1298,21 +1298,21 @@ subroutine calc_slope_functions_using_just_e(h, G, GV, US, CS, e)
   is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec ; nz = GV%ke
 
   !$omp target enter data map(alloc: E_x, E_y, S2N2_u_local, S2N2_v_local)
-  !$omp target enter data map(alloc: E_x, E_y, S2N2_u_local, S2N2_v_local)
+  !$omp target update to(CS%h_min_N2, CS%VarMix_Ktop)
   !$omp target enter data map(to: CS, CS%SN_u, CS%SN_v)
 
   h_neglect = GV%H_subroundoff
   H_cutoff = real(2*nz) * (GV%Angstrom_H + h_neglect)
   dZ_cutoff = real(2*nz) * (GV%Angstrom_Z + GV%dz_subroundoff)
 
+  !$omp target enter data map(to:dZ_cutoff)
+
   use_dztot = CS%full_depth_Eady_growth_rate ! .or. .not.(GV%Boussinesq or GV%semi_Boussinesq)
 
-  !$omp target enter data map(alloc: dz_tot) if (use_dztot)
-
   if (use_dztot) then
-    do concurrent( j=js-1:je+1, i=is-1:ie+1 )
+    do j=js-1,je+1 ; do i=is-1,ie+1 
       dz_tot(i,j) = e(i,j,1) - e(i,j,nz+1)
-    enddo 
+    enddo ; enddo
     ! The following mathematically equivalent expression is more expensive but is less
     ! sensitive to roundoff for large Z_ref:
     ! call thickness_to_dz(h, tv, dz, G, GV, US, halo_size=1)
@@ -1368,23 +1368,32 @@ subroutine calc_slope_functions_using_just_e(h, G, GV, US, CS, e)
 
   enddo ! k
 
-  !do concurrent( j=js:je )
+  !UMW NOTE: For some reason, do concurrents in the following loops change answers
+  ! or segfault. 
+
+  !$omp target teams
   do j=js,je
-    do concurrent( I=is-1:ie )
+    !$omp loop
+    do I=is-1,ie 
       CS%SN_u(I,j) = 0.0
     enddo
-    do k=nz,CS%VarMix_Ktop,-1 ; do concurrent( I=is-1:ie )
-      CS%SN_u(I,j) = CS%SN_u(I,j) + S2N2_u_local(I,j,k)
-    enddo ; enddo
+    do k=nz,CS%VarMix_Ktop,-1
+      !$omp loop 
+      do I=is-1,ie
+        CS%SN_u(I,j) = CS%SN_u(I,j) + S2N2_u_local(I,j,k)
+      enddo
+    enddo
     ! SN above contains S^2*N^2*H, convert to vertical average of S*N
 
     if (use_dztot) then
-      do concurrent( I=is-1:ie )
+      !$omp loop
+      do I=is-1,ie
         CS%SN_u(I,j) = G%OBCmaskCu(I,j) * sqrt( CS%SN_u(I,j) / &
                                                 max(dz_tot(i,j), dz_tot(i+1,j), GV%dz_subroundoff) )
       enddo
     else
-      do concurrent( I=is-1:ie ) local( h1, h2 )
+      !$omp loop private(h1,h2)
+      do I=is-1,ie
         h1 = max(G%meanSL(i,j) + G%bathyT(i,j), 0.0)
         h2 = max(G%meanSL(i+1,j) + G%bathyT(i+1,j), 0.0)
         if ( min(h1, h2) > dZ_cutoff ) then
@@ -1395,22 +1404,29 @@ subroutine calc_slope_functions_using_just_e(h, G, GV, US, CS, e)
       enddo
     endif
   enddo
+  !$omp end target teams
 
-  !do concurrent( J=js-1:je )
+  !$omp target teams
   do J=js-1,je
-    do concurrent( i=is:ie )
+    !$omp loop
+    do i=is,ie
       CS%SN_v(i,J) = 0.0
     enddo
-    do k=nz,CS%VarMix_Ktop,-1 ; do concurrent( i=is:ie )
-      CS%SN_v(i,J) = CS%SN_v(i,J) + S2N2_v_local(i,J,k)
-    enddo ; enddo
+    do k=nz,CS%VarMix_Ktop,-1
+      !$omp loop
+      do i=is,ie
+        CS%SN_v(i,J) = CS%SN_v(i,J) + S2N2_v_local(i,J,k)
+      enddo
+    enddo
     if (use_dztot) then
-      do concurrent( i=is:ie )
+      !$omp loop
+      do i=is,ie
         CS%SN_v(i,J) = G%OBCmaskCv(i,J) * sqrt( CS%SN_v(i,J) / &
                                                 max(dz_tot(i,j), dz_tot(i,j+1), GV%dz_subroundoff) )
       enddo
     else
-      do concurrent( i=is:ie ) local( h1, h2 )
+      !$omp loop private(h1,h2)
+      do i=is,ie
         ! There is a primordial horizontal indexing bug on the following line from the previous
         ! versions of the code.  This comment should be deleted by the end of 2024.
         ! if ( min(G%bathyT(i,j), G%bathyT(i+1,j)) + G%Z_ref > dZ_cutoff ) then
@@ -1424,12 +1440,10 @@ subroutine calc_slope_functions_using_just_e(h, G, GV, US, CS, e)
       enddo
     endif
   enddo
+  !$omp end target teams
 
-  !$omp target exit data map(delete: dz_tot) if (use_dztot)
-
-  !$omp target exit data map(delete: E_x, E_y, S2N2_u_local, S2N2_v_local)
+  !$omp target exit data map(delete: E_x, E_y, S2N2_u_local, S2N2_v_local, dZ_cutoff)
   !$omp target exit data map(from: CS%SN_u, CS%SN_v)
-  !$omp target exit data map(release: CS)
 
 end subroutine calc_slope_functions_using_just_e
 
@@ -1980,10 +1994,6 @@ subroutine VarMix_init(Time, G, GV, US, param_file, diag, CS)
     endif
   endif
 
-  ! Move Ktop to device
-  !$omp target enter data map(to: CS%VarMix_Ktop)
-  !$omp target enter data map(to: CS%h_min_N2)
-
   if (KhTr_Slope_Cff>0. .or. KhTh_Slope_Cff>0.) then
     in_use = .true.
     call get_param(param_file, mdl, "VISBECK_L_SCALE", CS%Visbeck_L_scale, &
@@ -2332,6 +2342,8 @@ subroutine VarMix_end(CS)
   if (allocated(CS%Laplac3_const_v)) deallocate(CS%Laplac3_const_v)
   if (allocated(CS%KH_u_QG)) deallocate(CS%KH_u_QG)
   if (allocated(CS%KH_v_QG)) deallocate(CS%KH_v_QG)
+  ! Delete control structure from device
+  !$omp target exit data map(delete: CS)
 
 end subroutine VarMix_end
 
