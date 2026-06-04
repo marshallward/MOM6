@@ -13,10 +13,21 @@ use MOM_diag_mediator,  only : post_data
 use MOM_diag_mediator,  only : post_data_3d_by_column, post_data_3d_final
 use MOM_domains,        only : create_group_pass, do_group_pass, group_pass_type
 use MOM_interface_heights, only : thickness_to_dz
-use MOM_intrinsic_functions, only : cuberoot
+!use MOM_intrinsic_functions, only : cuberoot
 use MOM_wave_interface, only : get_Langmuir_Number
 
 implicit none
+
+integer, parameter :: bias = maxexponent(1.) - 1
+  !< The double precision exponent offset
+integer, parameter :: signbit = storage_size(1.) - 1
+  !< Position of sign bit
+integer, parameter :: explen = 1 + ceiling(log(real(bias))/log(2.))
+  !< Bit size of exponent
+integer, parameter :: expbit = signbit - explen
+  !< Position of lowest exponent bit
+integer, parameter :: fraclen = expbit
+  !< Length of fractional part
 
 ! A note on unit descriptions in comments: MOM6 uses units that can be rescaled
 ! for dimensional consistency testing. These are noted in comments with units
@@ -882,6 +893,8 @@ subroutine ePBL_column_3d(h, dz, u, v, T0, S0, dSV_dT, dSV_dS, SpV_dt, TKE_forci
   real,          optional, intent(in)    :: TKE_diss_stoch !< random factor used to perturb TKE dissipation [nondim]
   real, dimension(SZI_(G),SZJ_(G),SZK_(GV)+1), optional, intent(out) :: tmpval
 
+  real :: tmp
+
 !    This subroutine determines the diffusivities in a single column from the integrated energetics
 !  planetary boundary layer (ePBL) model.  It assumes that heating, cooling and freshwater fluxes
 !  have already been applied.  All calculations are done implicitly, and there
@@ -1196,13 +1209,13 @@ subroutine ePBL_column_3d(h, dz, u, v, T0, S0, dSV_dT, dSV_dS, SpV_dt, TKE_forci
 
     !/ Here we get mstar, which is the ratio of convective TKE driven mixing to UStar**3
     if (CS%Use_LT) then
-      call get_Langmuir_Number(LA, G, GV, US, abs(MLD_guess), u_star_mean, &
-          i, j, dz(i,j,:), Waves, U_H=u, V_H=v)
+      !call get_Langmuir_Number(LA, G, GV, US, abs(MLD_guess), u_star_mean, &
+      !    i, j, dz(i,j,:), Waves, U_H=u, V_H=v)
       call find_mstar(CS, US, B_flux, u_star, MLD_guess, absf, .false., &
                       mstar_total, Langmuir_Number=La, Convect_Langmuir_Number=LAmod,&
                       mstar_LT=mstar_LT)
     else
-      call find_mstar(CS, US, B_flux, u_star, MLD_guess, absf, .false., mstar_total)
+      !call find_mstar(CS, US, B_flux, u_star, MLD_guess, absf, .false., mstar_total)
     endif
 
     !/ Apply mstar to get mech_TKE
@@ -1259,7 +1272,7 @@ subroutine ePBL_column_3d(h, dz, u, v, T0, S0, dSV_dT, dSV_dS, SpV_dt, TKE_forci
       dz_rsum = 0.0
       MixLen_shape(1) = 1.0
       if (CS%eqdisc) then ! update Kd as per Machine Learning equation discovery
-        call kappa_eqdisc(MixLen_shape, CS, GV, h, absf, B_flux, u_star, MLD_guess)
+        call kappa_eqdisc(MixLen_shape, CS, GV, h(i,j,:), absf, B_flux, u_star, MLD_guess)
       else
         do K=2,nz+1
           dz_rsum = dz_rsum + dz(i,j,k-1)
@@ -1542,7 +1555,7 @@ subroutine ePBL_column_3d(h, dz, u, v, T0, S0, dSV_dT, dSV_dS, SpV_dt, TKE_forci
                    dT_to_dPE_a(k-1), dS_to_dPE_a(k-1), &
                    pres_Z(K), dT_to_dColHt(k), dS_to_dColHt(k), &
                    dT_to_dColHt_a(k-1), dS_to_dColHt_a(k-1), &
-                   PE_chg=PE_chg_g0, dPE_max=PE_chg_max, dPEc_dKd_0=dPEc_dKd_Kd0 )
+                   PE_chg_g0, tmp, PE_chg_max, dPEc_dKd_Kd0 )
           convectively_unstable =  (PE_chg_g0 < 0.0) .or. ((vstar == 0.0) .and. (dPEc_dKd_Kd0 < 0.0))
           MKE_src = dMKE_max*(1.0 - exp(-Kddt_h_g0 * MKE2_Hharm))
         else
@@ -1551,7 +1564,7 @@ subroutine ePBL_column_3d(h, dz, u, v, T0, S0, dSV_dT, dSV_dS, SpV_dt, TKE_forci
                    dT_to_dPE_a(k-1), dS_to_dPE_a(k-1), dT_to_dPE(k), dS_to_dPE(k), &
                    pres_Z(K), dT_to_dColHt_a(k-1), dS_to_dColHt_a(k-1), &
                    dT_to_dColHt(k), dS_to_dColHt(k), &
-                   PE_chg=PE_chg_g0, dPE_max=PE_chg_max, dPEc_dKd_0=dPEc_dKd_Kd0 )
+                   PE_chg_g0, tmp, PE_chg_max, dPEc_dKd_Kd0, tmp)
           convectively_unstable =  (PE_chg_g0 < 0.0) .or. ((vstar == 0.0) .and. (dPEc_dKd_Kd0 < 0.0))
           MKE_src = dMKE_max*(1.0 - exp(-Kddt_h_g0 * MKE2_Hharm))
         endif
@@ -1604,14 +1617,14 @@ subroutine ePBL_column_3d(h, dz, u, v, T0, S0, dSV_dT, dSV_dS, SpV_dt, TKE_forci
                        dT_to_dPE_a(k-1), dS_to_dPE_a(k-1), &
                        pres_Z(K), dT_to_dColHt(k), dS_to_dColHt(k), &
                        dT_to_dColHt_a(k-1), dS_to_dColHt_a(k-1), &
-                       PE_chg=dPE_conv)
+                       dPE_conv, tmp, tmp, tmp)
             else
               call find_PE_chg(0.0, Kd(i,j,K)*dt_h, hp_a(k-1), h(i,j,k), &
                        Th_a(k-1), Sh_a(k-1), Th_b(k), Sh_b(k), &
                        dT_to_dPE_a(k-1), dS_to_dPE_a(k-1), dT_to_dPE(k), dS_to_dPE(k), &
                        pres_Z(K), dT_to_dColHt_a(k-1), dS_to_dColHt_a(k-1), &
                        dT_to_dColHt(k), dS_to_dColHt(k), &
-                       PE_chg=dPE_conv)
+                       dPE_conv, tmp, tmp, tmp, tmp)
             endif
             ! Should this be iterated to convergence for Kd?
             if (dPE_conv > 0.0) then
@@ -1715,14 +1728,14 @@ subroutine ePBL_column_3d(h, dz, u, v, T0, S0, dSV_dT, dSV_dS, SpV_dt, TKE_forci
                        dT_to_dPE_a(k-1), dS_to_dPE_a(k-1), &
                        pres_Z(K), dT_to_dColHt(k), dS_to_dColHt(k), &
                        dT_to_dColHt_a(k-1), dS_to_dColHt_a(k-1), &
-                       PE_chg=PE_chg, dPEc_dKd=dPEc_dKd )
+                       PE_chg, dPEc_dKd, tmp, tmp)
             else
               call find_PE_chg(0.0, Kddt_h_guess, hp_a(k-1), h(i,j,k), &
                        Th_a(k-1), Sh_a(k-1), Th_b(k), Sh_b(k), &
                        dT_to_dPE_a(k-1), dS_to_dPE_a(k-1), dT_to_dPE(k), dS_to_dPE(k), &
                        pres_Z(K), dT_to_dColHt_a(k-1), dS_to_dColHt_a(k-1), &
                        dT_to_dColHt(k), dS_to_dColHt(k), &
-                       PE_chg=PE_chg, dPEc_dKd=dPEc_dKd)
+                       PE_chg, dPEc_dKd, tmp, tmp, tmp)
             endif
             MKE_src = dMKE_max * (1.0 - exp(-MKE2_Hharm * Kddt_h_guess))
             dMKE_src_dK = dMKE_max * MKE2_Hharm * exp(-MKE2_Hharm * Kddt_h_guess)
@@ -2287,7 +2300,7 @@ subroutine ePBL_column(h, dz, u, v, T0, S0, dSV_dT, dSV_dS, SpV_dt, TKE_forcing,
                       mstar_total, Langmuir_Number=La, Convect_Langmuir_Number=LAmod,&
                       mstar_LT=mstar_LT)
     else
-      call find_mstar(CS, US, B_flux, u_star, MLD_guess, absf, .false., mstar_total)
+      !call find_mstar(CS, US, B_flux, u_star, MLD_guess, absf, .false., mstar_total)
     endif
 
     !/ Apply mstar to get mech_TKE
@@ -2615,21 +2628,21 @@ subroutine ePBL_column(h, dz, u, v, T0, S0, dSV_dT, dSV_dS, SpV_dt, TKE_forcing,
           PE_chg_g0 = TKE_used  ! This is only used in the convectively unstable limit.
           MKE_src = 0.0
         elseif (CS%orig_PE_calc) then
-          call find_PE_chg_orig(Kddt_h_g0, h(k), hp_a(k-1), dTe_term, dSe_term, &
-                   dT_km1_t2, dS_km1_t2, dT_to_dPE(k), dS_to_dPE(k), &
-                   dT_to_dPE_a(k-1), dS_to_dPE_a(k-1), &
-                   pres_Z(K), dT_to_dColHt(k), dS_to_dColHt(k), &
-                   dT_to_dColHt_a(k-1), dS_to_dColHt_a(k-1), &
-                   PE_chg=PE_chg_g0, dPE_max=PE_chg_max, dPEc_dKd_0=dPEc_dKd_Kd0 )
+          !call find_PE_chg_orig(Kddt_h_g0, h(k), hp_a(k-1), dTe_term, dSe_term, &
+          !         dT_km1_t2, dS_km1_t2, dT_to_dPE(k), dS_to_dPE(k), &
+          !         dT_to_dPE_a(k-1), dS_to_dPE_a(k-1), &
+          !         pres_Z(K), dT_to_dColHt(k), dS_to_dColHt(k), &
+          !         dT_to_dColHt_a(k-1), dS_to_dColHt_a(k-1), &
+          !         PE_chg=PE_chg_g0, dPE_max=PE_chg_max, dPEc_dKd_0=dPEc_dKd_Kd0 )
           convectively_unstable =  (PE_chg_g0 < 0.0) .or. ((vstar == 0.0) .and. (dPEc_dKd_Kd0 < 0.0))
           MKE_src = dMKE_max*(1.0 - exp(-Kddt_h_g0 * MKE2_Hharm))
         else
-          call find_PE_chg(0.0, Kddt_h_g0, hp_a(k-1), h(k), &
-                   Th_a(k-1), Sh_a(k-1), Th_b(k), Sh_b(k), &
-                   dT_to_dPE_a(k-1), dS_to_dPE_a(k-1), dT_to_dPE(k), dS_to_dPE(k), &
-                   pres_Z(K), dT_to_dColHt_a(k-1), dS_to_dColHt_a(k-1), &
-                   dT_to_dColHt(k), dS_to_dColHt(k), &
-                   PE_chg=PE_chg_g0, dPE_max=PE_chg_max, dPEc_dKd_0=dPEc_dKd_Kd0 )
+          !call find_PE_chg(0.0, Kddt_h_g0, hp_a(k-1), h(k), &
+          !         Th_a(k-1), Sh_a(k-1), Th_b(k), Sh_b(k), &
+          !         dT_to_dPE_a(k-1), dS_to_dPE_a(k-1), dT_to_dPE(k), dS_to_dPE(k), &
+          !         pres_Z(K), dT_to_dColHt_a(k-1), dS_to_dColHt_a(k-1), &
+          !         dT_to_dColHt(k), dS_to_dColHt(k), &
+          !         PE_chg=PE_chg_g0, dPE_max=PE_chg_max, dPEc_dKd_0=dPEc_dKd_Kd0 )
           convectively_unstable =  (PE_chg_g0 < 0.0) .or. ((vstar == 0.0) .and. (dPEc_dKd_Kd0 < 0.0))
           MKE_src = dMKE_max*(1.0 - exp(-Kddt_h_g0 * MKE2_Hharm))
         endif
@@ -2677,19 +2690,19 @@ subroutine ePBL_column(h, dz, u, v, T0, S0, dSV_dT, dSV_dS, SpV_dt, TKE_forcing,
             mixvel(K) = vstar
 
             if (CS%orig_PE_calc) then
-              call find_PE_chg_orig(Kd(K)*dt_h, h(k), hp_a(k-1), dTe_term, dSe_term, &
-                       dT_km1_t2, dS_km1_t2, dT_to_dPE(k), dS_to_dPE(k), &
-                       dT_to_dPE_a(k-1), dS_to_dPE_a(k-1), &
-                       pres_Z(K), dT_to_dColHt(k), dS_to_dColHt(k), &
-                       dT_to_dColHt_a(k-1), dS_to_dColHt_a(k-1), &
-                       PE_chg=dPE_conv)
+              !call find_PE_chg_orig(Kd(K)*dt_h, h(k), hp_a(k-1), dTe_term, dSe_term, &
+              !         dT_km1_t2, dS_km1_t2, dT_to_dPE(k), dS_to_dPE(k), &
+              !         dT_to_dPE_a(k-1), dS_to_dPE_a(k-1), &
+              !         pres_Z(K), dT_to_dColHt(k), dS_to_dColHt(k), &
+              !         dT_to_dColHt_a(k-1), dS_to_dColHt_a(k-1), &
+              !         PE_chg=dPE_conv)
             else
-              call find_PE_chg(0.0, Kd(K)*dt_h, hp_a(k-1), h(k), &
-                       Th_a(k-1), Sh_a(k-1), Th_b(k), Sh_b(k), &
-                       dT_to_dPE_a(k-1), dS_to_dPE_a(k-1), dT_to_dPE(k), dS_to_dPE(k), &
-                       pres_Z(K), dT_to_dColHt_a(k-1), dS_to_dColHt_a(k-1), &
-                       dT_to_dColHt(k), dS_to_dColHt(k), &
-                       PE_chg=dPE_conv)
+              !call find_PE_chg(0.0, Kd(K)*dt_h, hp_a(k-1), h(k), &
+              !         Th_a(k-1), Sh_a(k-1), Th_b(k), Sh_b(k), &
+              !         dT_to_dPE_a(k-1), dS_to_dPE_a(k-1), dT_to_dPE(k), dS_to_dPE(k), &
+              !         pres_Z(K), dT_to_dColHt_a(k-1), dS_to_dColHt_a(k-1), &
+              !         dT_to_dColHt(k), dS_to_dColHt(k), &
+              !         PE_chg=dPE_conv)
             endif
             ! Should this be iterated to convergence for Kd?
             if (dPE_conv > 0.0) then
@@ -2788,19 +2801,19 @@ subroutine ePBL_column(h, dz, u, v, T0, S0, dSV_dT, dSV_dS, SpV_dt, TKE_forcing,
           endif
           do itt=1,max_itt
             if (CS%orig_PE_calc) then
-              call find_PE_chg_orig(Kddt_h_guess, h(k), hp_a(k-1), dTe_term, dSe_term, &
-                       dT_km1_t2, dS_km1_t2, dT_to_dPE(k), dS_to_dPE(k), &
-                       dT_to_dPE_a(k-1), dS_to_dPE_a(k-1), &
-                       pres_Z(K), dT_to_dColHt(k), dS_to_dColHt(k), &
-                       dT_to_dColHt_a(k-1), dS_to_dColHt_a(k-1), &
-                       PE_chg=PE_chg, dPEc_dKd=dPEc_dKd )
+              !call find_PE_chg_orig(Kddt_h_guess, h(k), hp_a(k-1), dTe_term, dSe_term, &
+              !         dT_km1_t2, dS_km1_t2, dT_to_dPE(k), dS_to_dPE(k), &
+              !         dT_to_dPE_a(k-1), dS_to_dPE_a(k-1), &
+              !         pres_Z(K), dT_to_dColHt(k), dS_to_dColHt(k), &
+              !         dT_to_dColHt_a(k-1), dS_to_dColHt_a(k-1), &
+              !         PE_chg=PE_chg, dPEc_dKd=dPEc_dKd )
             else
-              call find_PE_chg(0.0, Kddt_h_guess, hp_a(k-1), h(k), &
-                       Th_a(k-1), Sh_a(k-1), Th_b(k), Sh_b(k), &
-                       dT_to_dPE_a(k-1), dS_to_dPE_a(k-1), dT_to_dPE(k), dS_to_dPE(k), &
-                       pres_Z(K), dT_to_dColHt_a(k-1), dS_to_dColHt_a(k-1), &
-                       dT_to_dColHt(k), dS_to_dColHt(k), &
-                       PE_chg=PE_chg, dPEc_dKd=dPEc_dKd)
+              !call find_PE_chg(0.0, Kddt_h_guess, hp_a(k-1), h(k), &
+              !         Th_a(k-1), Sh_a(k-1), Th_b(k), Sh_b(k), &
+              !         dT_to_dPE_a(k-1), dS_to_dPE_a(k-1), dT_to_dPE(k), dS_to_dPE(k), &
+              !         pres_Z(K), dT_to_dColHt_a(k-1), dS_to_dColHt_a(k-1), &
+              !         dT_to_dColHt(k), dS_to_dColHt(k), &
+              !         PE_chg=PE_chg, dPEc_dKd=dPEc_dKd)
             endif
             MKE_src = dMKE_max * (1.0 - exp(-MKE2_Hharm * Kddt_h_guess))
             dMKE_src_dK = dMKE_max * MKE2_Hharm * exp(-MKE2_Hharm * Kddt_h_guess)
@@ -3551,12 +3564,12 @@ subroutine ePBL_BBL_column(h, dz, u, v, T0, S0, dSV_dT, dSV_dS, SpV_dt, absf, &
             Kddt_h_prev = Kd(K) * dt_h
             Kddt_h_g0 = Kd_guess0 * dt_h
             ! Find the change in PE with the guess at the added bottom boundary layer mixing.
-            call find_PE_chg(Kddt_h_prev, Kddt_h_g0, hp_a(k-1), hp_b(k), &
-                       Th_a(k-1), Sh_a(k-1), Th_b(k), Sh_b(k), &
-                       dT_to_dPE_a(k-1), dS_to_dPE_a(k-1), dT_to_dPE_b(k), dS_to_dPE_b(k), &
-                       pres_Z(K), dT_to_dColHt_a(k-1), dS_to_dColHt_a(k-1), &
-                       dT_to_dColHt_b(k), dS_to_dColHt_b(k), &
-                       PE_chg=PE_chg_g0, dPEc_dKd_0=dPEc_dKd_Kd0 )
+            !call find_PE_chg(Kddt_h_prev, Kddt_h_g0, hp_a(k-1), hp_b(k), &
+            !           Th_a(k-1), Sh_a(k-1), Th_b(k), Sh_b(k), &
+            !           dT_to_dPE_a(k-1), dS_to_dPE_a(k-1), dT_to_dPE_b(k), dS_to_dPE_b(k), &
+            !           pres_Z(K), dT_to_dColHt_a(k-1), dS_to_dColHt_a(k-1), &
+            !           dT_to_dColHt_b(k), dS_to_dColHt_b(k), &
+            !           PE_chg=PE_chg_g0, dPEc_dKd_0=dPEc_dKd_Kd0 )
 
             ! MKE_src = 0.0 ! Enable later?: = dMKE_max*(1.0 - exp(-Kddt_h_g0 * MKE2_Hharm))
 
@@ -3619,12 +3632,12 @@ subroutine ePBL_BBL_column(h, dz, u, v, T0, S0, dSV_dT, dSV_dS, SpV_dt, absf, &
                 Kddt_h_itt(:) = 0.0 ! ; MKE_src_itt(:) = 0.0
               endif
               do itt=1,max_itt
-                call find_PE_chg(Kddt_h_prev, Kddt_h_guess, hp_a(k-1), hp_b(k), &
-                           Th_a(k-1), Sh_a(k-1), Th_b(k), Sh_b(k), &
-                           dT_to_dPE_a(k-1), dS_to_dPE_a(k-1), dT_to_dPE_b(k), dS_to_dPE_b(k), &
-                           pres_Z(K), dT_to_dColHt_a(k-1), dS_to_dColHt_a(k-1), &
-                           dT_to_dColHt_b(k), dS_to_dColHt_b(k), &
-                           PE_chg=PE_chg, dPEc_dKd=dPEc_dKd)
+                !call find_PE_chg(Kddt_h_prev, Kddt_h_guess, hp_a(k-1), hp_b(k), &
+                !           Th_a(k-1), Sh_a(k-1), Th_b(k), Sh_b(k), &
+                !           dT_to_dPE_a(k-1), dS_to_dPE_a(k-1), dT_to_dPE_b(k), dS_to_dPE_b(k), &
+                !           pres_Z(K), dT_to_dColHt_a(k-1), dS_to_dColHt_a(k-1), &
+                !           dT_to_dColHt_b(k), dS_to_dColHt_b(k), &
+                !           PE_chg=PE_chg, dPEc_dKd=dPEc_dKd)
                 ! Enable conversion from MKE to TKE in the bottom boundary layer later?
                 ! MKE_src = dMKE_max * (1.0 - exp(-MKE2_Hharm * Kddt_h_guess))
                 ! dMKE_src_dK = dMKE_max * MKE2_Hharm * exp(-MKE2_Hharm * Kddt_h_guess)
@@ -4182,14 +4195,14 @@ subroutine find_PE_chg(Kddt_h0, dKddt_h, hp_a, hp_b, Th_a, Sh_a, Th_b, Sh_b, &
 
   real, intent(out) :: PE_chg   !< The change in column potential energy from applying
                                 !! dKddt_h at the present interface [R Z3 T-2 ~> J m-2].
-  real, optional, intent(out) :: dPEc_dKd !< The partial derivative of PE_chg with dKddt_h
+  real, intent(out) :: dPEc_dKd !< The partial derivative of PE_chg with dKddt_h
                                           !! [R Z3 T-2 H-1 ~> J m-3 or J kg-1].
-  real, optional, intent(out) :: dPE_max  !< The maximum change in column potential energy that could
+  real, intent(out) :: dPE_max  !< The maximum change in column potential energy that could
                                           !! be realized by applying a huge value of dKddt_h at the
                                           !! present interface [R Z3 T-2 ~> J m-2].
-  real, optional, intent(out) :: dPEc_dKd_0 !< The partial derivative of PE_chg with dKddt_h in the
+  real, intent(out) :: dPEc_dKd_0 !< The partial derivative of PE_chg with dKddt_h in the
                                             !! limit where dKddt_h = 0 [R Z3 T-2 H-1 ~> J m-3 or J kg-1].
-  real, optional, intent(out) :: PE_ColHt_cor !< The correction to PE_chg that is made due to a net
+  real, intent(out) :: PE_ColHt_cor !< The correction to PE_chg that is made due to a net
                                             !! change in the column height [R Z3 T-2 ~> J m-2].
 
   ! Local variables
@@ -4229,31 +4242,31 @@ subroutine find_PE_chg(Kddt_h0, dKddt_h, hp_a, hp_b, Th_a, Sh_a, Th_b, Sh_b, &
   ColHt_chg = ColHt_core * y1_3
   if (ColHt_chg < 0.0) PE_chg = PE_chg - pres_Z * ColHt_chg
 
-  if (present(PE_ColHt_cor)) PE_ColHt_cor = -pres_Z * min(ColHt_chg, 0.0)
+  !if (present(PE_ColHt_cor)) PE_ColHt_cor = -pres_Z * min(ColHt_chg, 0.0)
 
-  if (present(dPEc_dKd)) then
+  !if (present(dPEc_dKd)) then
     ! Find the derivative of the potential energy change with dKddt_h.
     y1_4 = 1.0 / (bdt1 + dKddt_h * hps)**2
     dPEc_dKd = PEc_core * y1_4
     ColHt_chg = ColHt_core * y1_4
     if (ColHt_chg < 0.0) dPEc_dKd = dPEc_dKd - pres_Z * ColHt_chg
-  endif
+  !endif
 
-  if (present(dPE_max)) then
+  !if (present(dPE_max)) then
     ! This expression is the limit of PE_chg for infinite dKddt_h.
     y1_3 = 1.0 / (bdt1 * hps)
     dPE_max = PEc_core * y1_3
     ColHt_chg = ColHt_core * y1_3
     if (ColHt_chg < 0.0) dPE_max = dPE_max - pres_Z * ColHt_chg
-  endif
+  !endif
 
-  if (present(dPEc_dKd_0)) then
+  !if (present(dPEc_dKd_0)) then
     ! This expression is the limit of dPEc_dKd for dKddt_h = 0.
     y1_4 = 1.0 / bdt1**2
     dPEc_dKd_0 = PEc_core * y1_4
     ColHt_chg = ColHt_core * y1_4
     if (ColHt_chg < 0.0) dPEc_dKd_0 = dPEc_dKd_0 - pres_Z * ColHt_chg
-  endif
+  !endif
 
 end subroutine find_PE_chg
 
@@ -4467,12 +4480,12 @@ subroutine find_PE_chg_orig(Kddt_h, h_k, b_den_1, dTe_term, dSe_term, &
 
   real, intent(out) :: PE_chg    !< The change in column potential energy from applying
                                  !! Kddt_h at the present interface [R Z3 T-2 ~> J m-2].
-  real, optional, intent(out) :: dPEc_dKd !< The partial derivative of PE_chg with Kddt_h
+  real, intent(out) :: dPEc_dKd !< The partial derivative of PE_chg with Kddt_h
                                           !! [R Z3 T-2 H-1 ~> J m-3 or J kg-1].
-  real, optional, intent(out) :: dPE_max  !< The maximum change in column potential energy that could
+  real, intent(out) :: dPE_max  !< The maximum change in column potential energy that could
                                           !! be realized by applying a huge value of Kddt_h at the
                                           !! present interface [R Z3 T-2 ~> J m-2].
-  real, optional, intent(out) :: dPEc_dKd_0 !< The partial derivative of PE_chg with Kddt_h in the
+  real, intent(out) :: dPEc_dKd_0 !< The partial derivative of PE_chg with Kddt_h in the
                                           !! limit where Kddt_h = 0 [R Z3 T-2 H-1 ~> J m-3 or J kg-1].
 
 !   This subroutine determines the total potential energy change due to mixing
@@ -4522,7 +4535,6 @@ subroutine find_PE_chg_orig(Kddt_h, h_k, b_den_1, dTe_term, dSe_term, &
               (dS_to_dColHt_k * dS_k + dS_to_dColHta * dS_km1)
   if (ColHt_chg < 0.0) PE_chg = PE_chg - pres_Z * ColHt_chg
 
-  if (present(dPEc_dKd)) then
     ! Find the derivatives of the temperature and salinity changes with Kddt_h.
     dKr_dKd = (h_k*b_den_1) * I_Kr_denom**2
 
@@ -4537,9 +4549,7 @@ subroutine find_PE_chg_orig(Kddt_h, h_k, b_den_1, dTe_term, dSe_term, &
     dColHt_dKd = (dT_to_dColHt_k * ddT_k_dKd + dT_to_dColHta * ddT_km1_dKd) + &
                  (dS_to_dColHt_k * ddS_k_dKd + dS_to_dColHta * ddS_km1_dKd)
     if (dColHt_dKd < 0.0) dPEc_dKd = dPEc_dKd - pres_Z * dColHt_dKd
-  endif
 
-  if (present(dPE_max)) then
     ! This expression is the limit of PE_chg for infinite Kddt_h.
     dPE_max = (dT_to_dPEa * dT_km1_t2 + dS_to_dPEa * dS_km1_t2) + &
               ((dT_to_dPE_k + dT_to_dPEa) * dTe_term + &
@@ -4548,16 +4558,13 @@ subroutine find_PE_chg_orig(Kddt_h, h_k, b_den_1, dTe_term, dSe_term, &
               ((dT_to_dColHt_k + dT_to_dColHta) * dTe_term + &
                (dS_to_dColHt_k + dS_to_dColHta) * dSe_term) / (b_den_1 + h_k)
     if (dColHt_max < 0.0) dPE_max = dPE_max - pres_Z*dColHt_max
-  endif
 
-  if (present(dPEc_dKd_0)) then
     ! This expression is the limit of dPEc_dKd for Kddt_h = 0.
     dPEc_dKd_0 = (dT_to_dPEa * dT_km1_t2 + dS_to_dPEa * dS_km1_t2) / (b_den_1) + &
                  (dT_to_dPE_k * dTe_term + dS_to_dPE_k * dSe_term) / (h_k*b_den_1)
     dColHt_dKd = (dT_to_dColHta * dT_km1_t2 + dS_to_dColHta * dS_km1_t2) / (b_den_1) + &
                  (dT_to_dColHt_k * dTe_term + dS_to_dColHt_k * dSe_term) / (h_k*b_den_1)
     if (dColHt_dKd < 0.0) dPEc_dKd_0 = dPEc_dKd_0 - pres_Z*dColHt_dKd
-  endif
 
 end subroutine find_PE_chg_orig
 
@@ -4749,6 +4756,226 @@ subroutine mstar_Langmuir(CS, US, Abs_Coriolis, Buoyancy_Flux, UStar, BLD, Langm
   mstar = mstar*enhance_mstar + mstar_LT_add
 
 end subroutine mstar_Langmuir
+
+elemental function cuberoot(x) result(root)
+  !$omp declare target
+  real, intent(in) :: x !< The argument of cuberoot in arbitrary units cubed [A3]
+  real :: root !< The real cube root of x in arbitrary units [A]
+
+  real :: asx ! The absolute value of x rescaled by an integer power of 8 to put it into
+              ! the range from 0.125 < asx <= 1.0, in ambiguous units cubed [B3]
+  real :: root_asx ! The cube root of asx [B]
+  real :: ra_3 ! root_asx cubed [B3]
+  real :: num ! The numerator of an expression for the evolving estimate of the cube root of asx
+              ! in arbitrary units that can grow or shrink with each iteration [B C]
+  real :: den ! The denominator of an expression for the evolving estimate of the cube root of asx
+              ! in arbitrary units that can grow or shrink with each iteration [C]
+  real :: num_prev ! The numerator of an expression for the previous iteration of the evolving estimate
+              ! of the cube root of asx in arbitrary units that can grow or shrink with each iteration [B D]
+  real :: np_3 ! num_prev cubed  [B3 D3]
+  real :: den_prev ! The denominator of an expression for the previous iteration of the evolving estimate of
+              ! the cube root of asx in arbitrary units that can grow or shrink with each iteration [D]
+  real :: dp_3 ! den_prev cubed  [C3]
+  real :: r0  ! Initial value of the iterative solver. [B C]
+  real :: r0_3 ! r0 cubed [B3 C3]
+  integer :: itt
+
+  integer(kind=int64) :: e_x, s_x
+
+  if ((x >= 0.0) .eqv. (x <= 0.0)) then
+    ! Return 0 for an input of 0, or NaN for a NaN input.
+    root = x
+  else
+    call rescale_cbrt(x, asx, e_x, s_x)
+
+    !   Iteratively determine root_asx = asx**1/3 using Halley's method and then Newton's method,
+    ! noting that Halley's method onverges monotonically and needs no bounding.  Halley's method is
+    ! slightly more complicated that Newton's method, but converges in a third fewer iterations.
+    !   Keeping the estimates in a fractional form Root = num / den allows this calculation with
+    ! no real divisions during the iterations before doing a single real division at the end,
+    ! and it is therefore more computationally efficient.
+
+    ! This first estimate gives the same magnitude of errors for 0.125 and 1.0 after two iterations.
+    ! The first iteration is applied explicitly.
+    r0 = 0.707106
+    r0_3 = r0 * r0 * r0
+    num = r0 * (r0_3 + 2.0 * asx)
+    den = 2.0 * r0_3 + asx
+
+    do itt=1,2
+      ! Halley's method iterates estimates as Root = Root * (Root**3 + 2.*asx) / (2.*Root**3 + asx).
+      num_prev = num ; den_prev = den
+
+      ! Pre-compute these as integer powers, to avoid `pow()`-like intrinsics.
+      np_3 = num_prev * num_prev * num_prev
+      dp_3 = den_prev * den_prev * den_prev
+
+      num = num_prev * (np_3 + 2.0 * asx * dp_3)
+      den = den_prev * (2.0 * np_3 + asx * dp_3)
+      ! Equivalent to:  root_asx = root_asx * (root_asx**3 + 2.*asx) / (2.*root_asx**3 + asx)
+    enddo
+    ! At this point the error in root_asx is better than 1 part in 3e14.
+    root_asx = num / den
+
+    ! One final iteration with Newton's method polishes up the root and gives a solution
+    ! that is within the last bit of the true solution.
+    ra_3 = root_asx * root_asx * root_asx
+    root_asx = root_asx - (ra_3 - asx) / (3.0 * (root_asx * root_asx))
+
+    root = descale(root_asx, e_x, s_x)
+  endif
+end function cuberoot
+
+
+!> Bit-stable n-th root of x for x in (0, +inf) and integer n >= 1, suitable
+!! for evaluation inside `!$omp target` / `do concurrent` offloaded regions.
+!!
+!! Lowering `x**(1.0/n)` via the compiler produces `exp((1.0/n)*log(x))` — two
+!! transcendentals whose last-bit rounding differs between host libm and CUDA
+!! libdevice. This routine avoids that path entirely: it uses fixed-iteration
+!! Newton on y^n - x = 0, with y^(n-1) evaluated as repeated multiplication,
+!! and one bit-precision-polishing iteration at the end.
+!!
+!! For x in [0, 1] (the case in `MOM_barotropic.F90`'s `bt_rem = av_rem**Instep`)
+!! convergence is rapid because the linear initial guess y0 = 1 - (1-x)/n is
+!! already within a few percent of the true root.
+elemental function nth_root(x, n) result(root)
+  !$omp declare target
+  real,    intent(in) :: x  !< Argument, x >= 0 [arbitrary]
+  integer, intent(in) :: n  !< Root index, n >= 1
+  real :: root              !< x**(1/n) in the same units as x
+
+  integer, parameter :: maxitt = 20  ! Fixed (deterministic) iteration count
+  real    :: y, ypow_nm1
+  real    :: x_n_r, x_nm1_r
+  integer :: itt, k
+
+  ! Trivial cases — return early to keep loop tight and avoid 0/0 below.
+  if (n <= 1) then
+    root = x
+    return
+  endif
+  if (x == 0.0) then
+    root = 0.0
+    return
+  endif
+
+  x_n_r   = real(n)
+  x_nm1_r = real(n - 1)
+
+  ! Linear initial guess valid for x in [0, 1] and decent for moderate x > 1.
+  ! For our caller (av_rem in [0, 1], typically near 1), this is within ~1%.
+  y = 1.0 - (1.0 - x) / x_n_r
+
+  ! Newton iteration:  y_{k+1} = ((n-1)*y_k + x / y_k^{n-1}) / n
+  ! All ops are *, +, /. Integer power y^{n-1} is repeated multiplication,
+  ! so there is no `pow`/`exp/log` lowering anywhere in the iteration.
+  do itt = 1, maxitt
+    ypow_nm1 = 1.0
+    do k = 1, n - 1
+      ypow_nm1 = ypow_nm1 * y
+    enddo
+    y = (x_nm1_r * y + x / ypow_nm1) / x_n_r
+  enddo
+
+  root = y
+end function nth_root
+
+
+!> Rescale `a` to the range [0.125, 1) and compute its cube-root exponent.
+!!
+!! This function decomposes `a` into the form `s * x * 2**e` so that `x` is
+!! in the desired range.  This is accomplished by computing the integral cube
+!! root of `e` (as a division) and applying the residual to `x`.
+pure subroutine rescale_cbrt(a, x, e_r, s_a)
+  !$omp declare target
+  real, intent(in) :: a
+    !< The number to be rescaled for cube-root computation [A3]
+  real, intent(out) :: x
+    !< The rescaled value of `a` in the range [0.125, 1) [B3]
+  integer(kind=int64), intent(out) :: e_r
+    !< The integral component of the cube-root exponent of `a`.
+  integer(kind=int64), intent(out) :: s_a
+    !< Sign bit of `a`.  A nonzero value indicates negative sign.
+
+  integer(kind=int64) :: xb
+    ! Floating point integer representation of `a`
+  integer(kind=int64) :: e_a
+    ! Exponent of `a`
+  integer(kind=int64) :: e_x
+    ! Exponent of `x`
+
+  ! Pack bits of a into xb and extract its exponent and sign.
+  xb = transfer(a, 1_int64)
+  s_a = ibits(xb, signbit, 1)
+  e_a = ibits(xb, expbit, explen) - bias
+
+  ! The floating-point form of `a` with exponent `e` is
+  !
+  !   a = s * (1 + m) * 2**e
+  !
+  ! where (1+m) ∈ [1,2).  We want to split 2**e so that (1+m) is rescaled to
+  ! the range [0.125, 1); that is, [2**-3, 2**0).
+  !
+  ! First decompose the exponent `e` into quotient-remainder form:
+  !
+  !   e = 3⌊e/3⌋ + modulo(e,3)
+  !
+  ! Since modulo(e,3) ∈ {0,1,2}, the second term of the following expression is
+  ! in {-3,-2,-1}.
+  !
+  !   e = 3 * (⌊e/3⌋ + 1) + (modulo(e,3) - 3).
+  !
+  ! Here, (modulo(e,3) - 3) is in the range [2**-3, 1) and holds the
+  ! floating-point exponent of `x`.
+  !
+  ! Fortran integer division is round-to-zero.  To convert to floor division,
+  ! we use the sign() intrinsic to shift negative values downward.
+  !
+  !   ⌊e/3⌋ = (e + sign(1,e) - 1) / 3
+  !
+  ! ⌊e/3⌋ + 1 reduces to the form below.  This is what we call the integral
+  ! cube-root of `a` in the description above.
+
+  e_r = (e_a + sign(1_int64, e_a) + 2) / 3
+
+  ! modulo() is not implemented on all systems, so compute the remainder as
+  ! r = n - 3*q.
+
+  e_x = e_a - e_r * 3
+
+  ! Insert the new 11-bit exponent into xb and write to x and extend the
+  ! bitcount to 12, so that the sign bit is zero and x is always positive.
+  call mvbits(e_x + bias, 0, explen + 1, xb, fraclen)
+  x = transfer(xb, 1.)
+end subroutine rescale_cbrt
+
+
+!> Undo the rescaling of a real number back to its original base.
+pure function descale(x, e_a, s_a) result(a)
+  !$omp declare target
+  real, intent(in) :: x
+    !< The rescaled value which is to be restored in ambiguous units [B]
+  integer(kind=int64), intent(in) :: e_a
+    !< Exponent of the unscaled value
+  integer(kind=int64), intent(in) :: s_a
+    !< Sign bit of the unscaled value
+  real :: a
+    !< Restored value with the corrected exponent and sign in arbitrary units [A]
+
+  integer(kind=int64) :: xb
+    ! Bit-packed real number into integer form
+  integer(kind=int64) :: e_x
+    ! Biased exponent of x
+
+  ! Apply the corrected exponent and sign to x.
+  xb = transfer(x, 1_int64)
+  e_x = ibits(xb, expbit, explen)
+  call mvbits(e_a + e_x, 0, explen, xb, expbit)
+  call mvbits(s_a, 0, 1, xb, signbit)
+  a = transfer(xb, 1.)
+end function descale
+
 
 
 !> \namespace MOM_energetic_PBL
