@@ -701,7 +701,7 @@ subroutine vert_fill_TS(h, T_in, S_in, kappa_dt, T_f, S_f, G, GV, US, halo_here,
       T_f(i,j,k) = T_in(i,j,k) ; S_f(i,j,k) = S_in(i,j,k)
     enddo
   else
-    !$omp target teams distribute parallel do private( ent, b1, d1, c1 )
+    !$omp target teams loop private( ent, b1, d1, c1 )
     do j=js,je
       do concurrent( i=is:ie )
         ent(i,2) = kap_dt_x2 / ((h(i,j,1)+h(i,j,2)) + h0)
