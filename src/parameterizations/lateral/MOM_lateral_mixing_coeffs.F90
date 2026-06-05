@@ -232,18 +232,16 @@ subroutine calc_depth_function(G, CS)
   ! For efficiency, the reciprocal of H0 should be used instead.
   H0 = CS%depth_scaled_khth_h0
   expo = CS%depth_scaled_khth_exp
-!$OMP do
-  do j=js,je ; do I=is-1,Ieq
+  do concurrent( j=js:je, i=is-1:Ieq ) local(h1,h2)
     h1 = max(G%meanSL(i,j) + G%bathyT(i,j), 0.0)
     h2 = max(G%meanSL(i+1,j) + G%bathyT(i+1,j), 0.0)
     CS%Depth_fn_u(I,j) = (MIN(1.0, (0.5 * (h1 + h2)) / H0))**expo
-  enddo ; enddo
-!$OMP do
-  do J=js-1,Jeq ; do i=is,ie
+  enddo
+  do concurrent( J=js-1:Jeq, i=is:ie ) local(h1,h2)
     h1 = max(G%meanSL(i,j) + G%bathyT(i,j), 0.0)
     h2 = max(G%meanSL(i,j+1) + G%bathyT(i,j+1), 0.0)
     CS%Depth_fn_v(i,J) = (MIN(1.0, (0.5 * (h1 + h2)) / H0))**expo
-  enddo ; enddo
+  enddo
 
 end subroutine calc_depth_function
 
@@ -2131,7 +2129,11 @@ subroutine VarMix_init(Time, G, GV, US, param_file, diag, CS)
       oneOrTwo = 2.0
     endif
 
-    do J=js-1,Jeq ; do I=is-1,Ieq
+    !$omp target enter data map(alloc: CS%f2_dx2_q, CS%beta_dx2_q, &
+    !$omp&                             CS%f2_dx2_u, CS%beta_dx2_u, &
+    !$omp&                             CS%f2_dx2_v, CS%beta_dx2_v)
+
+    do concurrent( J=js-1:Jeq, I=is-1:Ieq )
       CS%f2_dx2_q(I,J) = ((G%dxBu(I,J)**2) + (G%dyBu(I,J)**2)) * &
                          max(G%Coriolis2Bu(I,J), absurdly_small_freq**2)
       CS%beta_dx2_q(I,J) = oneOrTwo * ((G%dxBu(I,J)**2) + (G%dyBu(I,J)**2)) * (sqrt(0.5 * &
@@ -2139,9 +2141,9 @@ subroutine VarMix_init(Time, G, GV, US, param_file, diag, CS)
              (((G%CoriolisBu(I+1,J)-G%CoriolisBu(I,J)) * G%IdxCv(i+1,J))**2)) + &
             ((((G%CoriolisBu(I,J)-G%CoriolisBu(I,J-1)) * G%IdyCu(I,j))**2) + &
              (((G%CoriolisBu(I,J+1)-G%CoriolisBu(I,J)) * G%IdyCu(I,j+1))**2)) ) ))
-    enddo ; enddo
+    enddo
 
-    do j=js,je ; do I=is-1,Ieq
+    do concurrent( j=js:je, I=is-1:Ieq )
       CS%f2_dx2_u(I,j) = ((G%dxCu(I,j)**2) + (G%dyCu(I,j)**2)) * &
           max(0.5* (G%Coriolis2Bu(I,J)+G%Coriolis2Bu(I,J-1)), absurdly_small_freq**2)
       CS%beta_dx2_u(I,j) = oneOrTwo * ((G%dxCu(I,j)**2) + (G%dyCu(I,j)**2)) * (sqrt( &
@@ -2150,9 +2152,9 @@ subroutine VarMix_init(Time, G, GV, US, param_file, diag, CS)
                   (((G%CoriolisBu(I+1,J)-G%CoriolisBu(I,J)) * G%IdxCv(i+1,J))**2)) + &
                  ((((G%CoriolisBu(I+1,J-1)-G%CoriolisBu(I,J-1)) * G%IdxCv(i+1,J-1))**2) + &
                   (((G%CoriolisBu(I,J)-G%CoriolisBu(I-1,J)) * G%IdxCv(i,J))**2)) ) ))
-    enddo ; enddo
+    enddo
 
-    do J=js-1,Jeq ; do i=is,ie
+    do concurrent( J=js-1:Jeq, i=is:ie )
       CS%f2_dx2_v(i,J) = ((G%dxCv(i,J)**2) + (G%dyCv(i,J)**2)) * &
           max(0.5*(G%Coriolis2Bu(I,J)+G%Coriolis2Bu(I-1,J)), absurdly_small_freq**2)
       CS%beta_dx2_v(i,J) = oneOrTwo * ((G%dxCv(i,J)**2) + (G%dyCv(i,J)**2)) * (sqrt( &
@@ -2161,7 +2163,7 @@ subroutine VarMix_init(Time, G, GV, US, param_file, diag, CS)
                   (((G%CoriolisBu(I-1,J+1)-G%CoriolisBu(I-1,J)) * G%IdyCu(I-1,j+1))**2)) + &
                  ((((G%CoriolisBu(I,J+1)-G%CoriolisBu(I,J)) * G%IdyCu(I,j+1))**2) + &
                   (((G%CoriolisBu(I-1,J)-G%CoriolisBu(I-1,J-1)) * G%IdyCu(I-1,j))**2)) ) ))
-    enddo ; enddo
+    enddo
 
   endif
 
@@ -2187,7 +2189,10 @@ subroutine VarMix_init(Time, G, GV, US, param_file, diag, CS)
     allocate(CS%Rd_dx_h(isd:ied,jsd:jed), source=0.0)
     allocate(CS%beta_dx2_h(isd:ied,jsd:jed), source=0.0)
     allocate(CS%f2_dx2_h(isd:ied,jsd:jed), source=0.0)
-    do j=js-1,je+1 ; do i=is-1,ie+1
+
+    !$omp target enter data map(alloc: CS%f2_dx2_h, CS%beta_dx2_h)
+
+    do concurrent(j=js-1:je+1, i=is-1:ie+1)
       CS%f2_dx2_h(i,j) = ((G%dxT(i,j)**2) + (G%dyT(i,j)**2)) * &
           max(0.25 * ((G%Coriolis2Bu(I,J) + G%Coriolis2Bu(I-1,J-1)) + &
                       (G%Coriolis2Bu(I-1,J) + G%Coriolis2Bu(I,J-1))), &
@@ -2197,7 +2202,7 @@ subroutine VarMix_init(Time, G, GV, US, param_file, diag, CS)
              (((G%CoriolisBu(I,J-1)-G%CoriolisBu(I-1,J-1)) * G%IdxCv(i,J-1))**2)) + &
             ((((G%CoriolisBu(I,J)-G%CoriolisBu(I,J-1)) * G%IdyCu(I,j))**2) + &
              (((G%CoriolisBu(I-1,J)-G%CoriolisBu(I-1,J-1)) * G%IdyCu(I-1,j))**2)) ) ))
-    enddo ; enddo
+    enddo
   endif
 
   if (CS%calculate_cg1) then
@@ -2293,6 +2298,7 @@ subroutine VarMix_end(CS)
   !$omp&                             CS%f2_dx2_q, CS%beta_dx2_q, CS%f2_dx2_u, CS%beta_dx2_u, &
   !$omp&                             CS%f2_dx2_v, CS%beta_dx2_v)
   !$omp target exit data map(delete: CS%Rd_dx_h, CS%f2_dx2_h, CS%beta_dx2_h)
+  !$omp target exit data map(delete: CS%Depth_fn_u, CS%Depth_fn_v)
   !$omp target exit data map(delete: CS%cg1)
 
   if (allocated(CS%ebt_struct))  deallocate(CS%ebt_struct)
