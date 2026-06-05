@@ -24,11 +24,10 @@ use MOM_open_boundary,     only : ocean_OBC_type, OBC_NONE
 use MOM_open_boundary,     only : OBC_DIRECTION_E, OBC_DIRECTION_W, OBC_DIRECTION_N, OBC_DIRECTION_S
 use MOM_MEKE_types,        only : MEKE_type
 
-!$ use omp_lib, only: omp_get_num_devices
-
 implicit none ; private
 
 #include <MOM_memory.h>
+#include "do_concurrent_compat.h"
 
 !> Variable mixing coefficients
 type, public :: VarMix_CS
@@ -232,12 +231,12 @@ subroutine calc_depth_function(G, CS)
   ! For efficiency, the reciprocal of H0 should be used instead.
   H0 = CS%depth_scaled_khth_h0
   expo = CS%depth_scaled_khth_exp
-  do concurrent( j=js:je, i=is-1:Ieq ) local(h1,h2)
+  do concurrent( j=js:je, i=is-1:Ieq ) DO_LOCALITY(local(h1,h2))
     h1 = max(G%meanSL(i,j) + G%bathyT(i,j), 0.0)
     h2 = max(G%meanSL(i+1,j) + G%bathyT(i+1,j), 0.0)
     CS%Depth_fn_u(I,j) = (MIN(1.0, (0.5 * (h1 + h2)) / H0))**expo
   enddo
-  do concurrent( J=js-1:Jeq, i=is:ie ) local(h1,h2)
+  do concurrent( J=js-1:Jeq, i=is:ie ) DO_LOCALITY(local(h1,h2))
     h1 = max(G%meanSL(i,j) + G%bathyT(i,j), 0.0)
     h2 = max(G%meanSL(i,j+1) + G%bathyT(i,j+1), 0.0)
     CS%Depth_fn_v(i,J) = (MIN(1.0, (0.5 * (h1 + h2)) / H0))**expo
@@ -247,7 +246,7 @@ end subroutine calc_depth_function
 
 !> Calculates and stores the non-dimensional resolution functions
 subroutine calc_resoln_function(h, tv, G, GV, US, CS, MEKE, OBC, dt)
-  type(ocean_grid_type),                     intent(inout) :: G  !< Ocean grid structure
+  type(ocean_grid_type),                     intent(in)    :: G  !< Ocean grid structure
   type(verticalGrid_type),                   intent(in)    :: GV !< Vertical grid structure
   real, dimension(SZI_(G),SZJ_(G),SZK_(GV)), intent(in)    :: h  !< Layer thickness [H ~> m or kg m-2]
   type(thermo_var_ptrs),                     intent(in)    :: tv !< Thermodynamic variables
@@ -359,9 +358,11 @@ subroutine calc_resoln_function(h, tv, G, GV, US, CS, MEKE, OBC, dt)
       CS%Rd_dx_h(i,j) = CS%cg1(i,j) / &
             (sqrt(CS%f2_dx2_h(i,j) + CS%cg1(i,j)*CS%beta_dx2_h(i,j)))
     enddo
-    !$omp target update from(CS%Rd_dx_h)
     if (query_averaging_enabled(CS%diag)) then
-      if (CS%id_Rd_dx > 0) call post_data(CS%id_Rd_dx, CS%Rd_dx_h, CS%diag)
+      if (CS%id_Rd_dx > 0) then
+        !$omp target update from(CS%Rd_dx_h)
+        call post_data(CS%id_Rd_dx, CS%Rd_dx_h, CS%diag)
+      endif
     endif
   endif
 
@@ -415,7 +416,7 @@ subroutine calc_resoln_function(h, tv, G, GV, US, CS, MEKE, OBC, dt)
   else
     do concurrent( J=js-1:Jeq, I=is-1:Ieq )
       cg1_q(I,J) = 0.25 * ((CS%cg1(i,j) + CS%cg1(i+1,j+1)) + (CS%cg1(i+1,j) + CS%cg1(i,j+1)))
-    enddo 
+    enddo
   endif
 
   !   Do this calculation on the extent used in MOM_hor_visc.F90, and
@@ -438,11 +439,11 @@ subroutine calc_resoln_function(h, tv, G, GV, US, CS, MEKE, OBC, dt)
       endif
     enddo ; enddo
   elseif (CS%Res_fn_power_visc == 2) then
-    do concurrent( j=js-1:je+1, i=is-1:ie+1 ) local(dx_term)
+    do concurrent( j=js-1:je+1, i=is-1:ie+1 ) DO_LOCALITY(local(dx_term))
       dx_term = CS%f2_dx2_h(i,j) + CS%cg1(i,j)*CS%beta_dx2_h(i,j)
       CS%Res_fn_h(i,j) = dx_term / (dx_term + (CS%Res_coef_visc * CS%cg1(i,j))**2)
     enddo
-    do concurrent( J=js-1:Jeq, I=is-1:Ieq ) local(dx_term)
+    do concurrent( J=js-1:Jeq, I=is-1:Ieq ) DO_LOCALITY(local(dx_term))
       dx_term = CS%f2_dx2_q(I,J) +  cg1_q(I,J) * CS%beta_dx2_q(I,J)
       CS%Res_fn_q(I,J) = dx_term / (dx_term + (CS%Res_coef_visc * cg1_q(I,J))**2)
     enddo
@@ -541,15 +542,15 @@ subroutine calc_resoln_function(h, tv, G, GV, US, CS, MEKE, OBC, dt)
         endif
       enddo ; enddo
     elseif (CS%Res_fn_power_khth == 2) then
-      do concurrent( j=js:je, I=is-1:Ieq ) local(dx_term)
+      do concurrent( j=js:je, I=is-1:Ieq ) DO_LOCALITY(local(dx_term))
         dx_term = CS%f2_dx2_u(I,j) + cg1_u(I,j) * CS%beta_dx2_u(I,j)
         CS%Res_fn_u(I,j) = dx_term / (dx_term + (CS%Res_coef_khth * cg1_u(I,j))**2)
       enddo
-      do concurrent( J=js-1:Jeq, i=is:ie ) local(dx_term)
+      do concurrent( J=js-1:Jeq, i=is:ie ) DO_LOCALITY(local(dx_term))
         dx_term = CS%f2_dx2_v(i,J) + cg1_v(i,J) * CS%beta_dx2_v(i,J)
         CS%Res_fn_v(i,J) = dx_term / (dx_term + (CS%Res_coef_khth * cg1_v(i,J))**2)
       enddo
-      do concurrent( J=js-1:Jeq, i=is:ie ) local(dx_term)
+      do concurrent( J=js-1:Jeq, i=is:ie ) DO_LOCALITY(local(dx_term))
         dx_term = CS%f2_dx2_v(i,J) + cg1_v(i,J) * CS%beta_dx2_v(i,J)
         CS%Res_fn_v(i,J) = dx_term / (dx_term + (CS%Res_coef_khth * cg1_v(i,J))**2)
       enddo
@@ -583,8 +584,10 @@ subroutine calc_resoln_function(h, tv, G, GV, US, CS, MEKE, OBC, dt)
 
 
   if (query_averaging_enabled(CS%diag)) then
-    !$omp target update from(CS%Res_fn_h, CS%Res_fn_q, CS%Res_fn_u, CS%Res_fn_v)
-    if (CS%id_Res_fn > 0) call post_data(CS%id_Res_fn, CS%Res_fn_h, CS%diag)
+    if (CS%id_Res_fn > 0) then
+     !$omp target update from(CS%Res_fn_h)
+      call post_data(CS%id_Res_fn, CS%Res_fn_h, CS%diag)
+    endif
     if (CS%id_BS_struct > 0) call post_data(CS%id_BS_struct, CS%BS_struct, CS%diag)
     if (CS%id_khth_struct > 0) call post_data(CS%id_khth_struct, CS%khth_struct, CS%diag)
     if (CS%id_khtr_struct > 0) call post_data(CS%id_khtr_struct, CS%khtr_struct, CS%diag)
@@ -602,7 +605,7 @@ end subroutine calc_resoln_function
 
 !> Calculates and stores functions of SQG mode
 subroutine calc_sqg_struct(h, tv, G, GV, US, CS, dt, MEKE, OBC)
-  type(ocean_grid_type),                     intent(inout) :: G  !< Ocean grid structure
+  type(ocean_grid_type),                     intent(in)    :: G  !< Ocean grid structure
   type(verticalGrid_type),                   intent(in)    :: GV !< Vertical grid structure
   type(unit_scale_type),                     intent(in)    :: US !< A dimensional unit scaling type
   real, dimension(SZI_(G),SZJ_(G),SZK_(GV)), intent(in)    :: h  !< Layer thickness [H ~> m or kg m-2]
@@ -770,10 +773,10 @@ end subroutine calc_sqg_struct
 !> Calculates and stores functions of isopycnal slopes, e.g. Sx, Sy, S*N, mostly used in the Visbeck et al.
 !! style scaling of diffusivity
 subroutine calc_slope_functions(h, tv, dt, G, GV, US, CS, OBC)
-  type(ocean_grid_type),                     intent(inout) :: G  !< Ocean grid structure
+  type(ocean_grid_type),                     intent(in)    :: G  !< Ocean grid structure
   type(verticalGrid_type),                   intent(in)    :: GV !< Vertical grid structure
   type(unit_scale_type),                     intent(in)    :: US !< A dimensional unit scaling type
-  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)), intent(inout) :: h  !< Layer thickness [H ~> m or kg m-2]
+  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)), intent(in)    :: h  !< Layer thickness [H ~> m or kg m-2]
   type(thermo_var_ptrs),                     intent(in)    :: tv !< Thermodynamic variables
   real,                                      intent(in)    :: dt !< Time increment [T ~> s]
   type(VarMix_CS),                           intent(inout) :: CS !< Variable mixing control structure
@@ -836,7 +839,6 @@ subroutine calc_slope_functions(h, tv, dt, G, GV, US, CS, OBC)
     else
       !$omp target update from(e)
       call calc_slope_functions_using_just_e(h, G, GV, US, CS, e)
-      call cpu_clock_end(CS%id_clock_calc_slope_functions_using_just_e)
     endif
     !$omp target exit data map(delete: e)
   endif
@@ -860,7 +862,7 @@ end subroutine calc_slope_functions
 !! This is on older implementation that is susceptible to large values of Eady growth rate
 !! for incropping layers.
 subroutine calc_Visbeck_coeffs_old(h, slope_x, slope_y, N2_u, N2_v, G, GV, US, CS, OBC)
-  type(ocean_grid_type),                        intent(inout) :: G  !< Ocean grid structure
+  type(ocean_grid_type),                        intent(in)    :: G  !< Ocean grid structure
   type(verticalGrid_type),                      intent(in)    :: GV !< Vertical grid structure
   real, dimension(SZI_(G),SZJ_(G),SZK_(GV)),    intent(in)    :: h  !< Layer thickness [H ~> m or kg m-2]
   real, dimension(SZIB_(G),SZJ_(G),SZK_(GV)+1), intent(in)    :: slope_x !< Zonal isoneutral slope [Z L-1 ~> nondim]
@@ -974,13 +976,13 @@ subroutine calc_Visbeck_coeffs_old(h, slope_x, slope_y, N2_u, N2_v, G, GV, US, C
   ! calculate the first-mode gravity wave speed and then blend the equatorial
   ! and midlatitude deformation radii, using calc_resoln_function as a template.
 
-  ! UMW NOTE: H_u should be local, but this causes segfaults.
+  ! UMW NOTE: H_u should be local, but this causes segfaults with nvfortran 26.3
   do concurrent(j=js:je) !local( H_u )
     do concurrent(I=is-1:ie)
       CS%SN_u(I,j) = 0. ; H_u(I) = 0. ; S2_u(I,j) = 0.
     enddo
     do K=2,nz ; do concurrent(I=is-1:ie) &
-      & local(Hdn, Hup, H_geom, wSE, wNW, wNE, wSW, S2, N2)
+        DO_LOCALITY(local(Hdn, Hup, H_geom, wSE, wNW, wNE, wSW, S2, N2))
       Hdn = sqrt( h(i,j,k) * h(i+1,j,k) )
       Hup = sqrt( h(i,j,k-1) * h(i+1,j,k-1) )
       H_geom = sqrt( Hdn * Hup )
@@ -1018,13 +1020,13 @@ subroutine calc_Visbeck_coeffs_old(h, slope_x, slope_y, N2_u, N2_v, G, GV, US, C
     enddo
   enddo
 
-  ! UMW NOTE: H_v should be local, but this causes segfaults. 
+  ! UMW NOTE: H_v should be local, but this causes segfaults with nvfortran 26.3
   do concurrent(J=js-1:je) !local( H_v )
     do concurrent(i=is:ie)
       CS%SN_v(i,J) = 0. ; H_v(i) = 0. ; S2_v(i,J) = 0.
     enddo
     do K=2,nz ; do concurrent(i=is:ie) &
-      & local(Hdn, Hup, H_geom, wSE, wNW, wNE, wSW, S2, N2)
+      & DO_LOCALITY(local(Hdn, Hup, H_geom, wSE, wNW, wNE, wSW, S2, N2))
       Hdn = sqrt( h(i,j,k) * h(i,j+1,k) )
       Hup = sqrt( h(i,j,k-1) * h(i,j+1,k-1) )
       H_geom = sqrt( Hdn * Hup )
@@ -1069,6 +1071,7 @@ subroutine calc_Visbeck_coeffs_old(h, slope_x, slope_y, N2_u, N2_v, G, GV, US, C
   endif
 
   if (CS%debug) then
+    !$omp target update from(slope_x, slope_y, N2_u, N2_v, CS%SN_u, CS%SN_v)
     call uvchksum("calc_Visbeck_coeffs_old slope_[xy]", slope_x, slope_y, G%HI, &
                   unscale=US%Z_to_L, haloshift=1)
     ! call uvchksum("calc_Visbeck_coeffs_old S2_[uv]", S2_u, S2_v, G%HI, &
@@ -1240,9 +1243,9 @@ end subroutine calc_Eady_growth_rate_2D
 !> The original calc_slope_function() that calculated slopes using
 !! interface positions only, not accounting for density variations.
 subroutine calc_slope_functions_using_just_e(h, G, GV, US, CS, e)
-  type(ocean_grid_type),                       intent(inout) :: G  !< Ocean grid structure
+  type(ocean_grid_type),                       intent(in)    :: G  !< Ocean grid structure
   type(verticalGrid_type),                     intent(in)    :: GV !< Vertical grid structure
-  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)),   intent(inout) :: h  !< Layer thickness [H ~> m or kg m-2]
+  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)),   intent(in)    :: h  !< Layer thickness [H ~> m or kg m-2]
   type(unit_scale_type),                       intent(in)    :: US !< A dimensional unit scaling type
   type(VarMix_CS),                             intent(inout) :: CS !< Variable mixing control structure
   real, dimension(SZI_(G),SZJ_(G),SZK_(GV)+1), intent(in)    :: e  !< Interface position [Z ~> m]
@@ -1294,7 +1297,7 @@ subroutine calc_slope_functions_using_just_e(h, G, GV, US, CS, e)
   use_dztot = CS%full_depth_Eady_growth_rate ! .or. .not.(GV%Boussinesq or GV%semi_Boussinesq)
 
   if (use_dztot) then
-    do j=js-1,je+1 ; do i=is-1,ie+1 
+    do j=js-1,je+1 ; do i=is-1,ie+1
       dz_tot(i,j) = e(i,j,1) - e(i,j,nz+1)
     enddo ; enddo
     ! The following mathematically equivalent expression is more expensive but is less
@@ -1327,7 +1330,7 @@ subroutine calc_slope_functions_using_just_e(h, G, GV, US, CS, e)
     enddo
 
     ! Calculate N*S*h from this layer and add to the sum
-    do concurrent( j=js:je, i=is-1:ie ) local( S2, Hdn, Hup, H_geom )
+    do concurrent( j=js:je, i=is-1:ie ) DO_LOCALITY(local( S2, Hdn, Hup, H_geom ))
       S2 = ( E_x(I,j)**2  + 0.25*( &
             ((E_y(i,J)**2) + (E_y(i+1,J-1)**2)) + ((E_y(i+1,J)**2) + (E_y(i,J-1)**2)) ) )
       if (min(h(i,j,k-1), h(i+1,j,k-1), h(i,j,k), h(i+1,j,k)) < H_cutoff) S2 = 0.0
@@ -1338,7 +1341,7 @@ subroutine calc_slope_functions_using_just_e(h, G, GV, US, CS, e)
       ! N2 = GV%g_prime(k) / (GV%H_to_Z * max(Hdn, Hup, CS%h_min_N2))
       S2N2_u_local(I,j,k) = (H_geom * S2) * (GV%g_prime(k) / max(Hdn, Hup, CS%h_min_N2) )
     enddo
-    do concurrent( J=js-1:je, i=is:ie ) local( S2, Hdn, Hup, H_geom )
+    do concurrent( J=js-1:je, i=is:ie ) DO_LOCALITY(local( S2, Hdn, Hup, H_geom ))
       S2 = ( E_y(i,J)**2  + 0.25*( &
             ((E_x(I,j)**2) + (E_x(I-1,j+1)**2)) + ((E_x(I,j+1)**2) + (E_x(I-1,j)**2)) ) )
       if (min(h(i,j,k-1), h(i,j+1,k-1), h(i,j,k), h(i,j+1,k)) < H_cutoff) S2 = 0.0
@@ -1353,16 +1356,16 @@ subroutine calc_slope_functions_using_just_e(h, G, GV, US, CS, e)
   enddo ! k
 
   !UMW NOTE: For some reason, do concurrents in the following loops change answers
-  ! or segfault. 
+  ! or segfault.
 
   !$omp target teams
   do j=js,je
     !$omp loop
-    do I=is-1,ie 
+    do I=is-1,ie
       CS%SN_u(I,j) = 0.0
     enddo
     do k=nz,CS%VarMix_Ktop,-1
-      !$omp loop 
+      !$omp loop
       do I=is-1,ie
         CS%SN_u(I,j) = CS%SN_u(I,j) + S2N2_u_local(I,j,k)
       enddo
