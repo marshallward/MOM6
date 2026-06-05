@@ -273,6 +273,8 @@ subroutine calc_resoln_function(h, tv, G, GV, US, CS, MEKE, OBC, dt)
   is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec ; nz = GV%ke
   Isq = G%IscB ; Ieq = G%IecB ; Jsq = G%JscB ; Jeq = G%JecB
 
+  !$omp target enter data map(alloc: cg1_q, cg1_u, cg1_v, dx_term)
+
   if (.not. CS%initialized) call MOM_error(FATAL, "calc_resoln_function: "// &
          "Module must be initialized before it is used.")
 
@@ -300,6 +302,7 @@ subroutine calc_resoln_function(h, tv, G, GV, US, CS, MEKE, OBC, dt)
 
     call create_group_pass(CS%pass_cg1, CS%cg1, G%Domain)
     call do_group_pass(CS%pass_cg1, G%Domain)
+    !$omp target update to(CS%cg1)
   endif
 
   if (CS%BS_use_sqg_struct .or. CS%khth_use_sqg_struct .or. CS%khtr_use_sqg_struct &
@@ -354,11 +357,11 @@ subroutine calc_resoln_function(h, tv, G, GV, US, CS, MEKE, OBC, dt)
   if (CS%calculate_rd_dx) then
     if (.not. allocated(CS%Rd_dx_h)) call MOM_error(FATAL, &
       "calc_resoln_function: %Rd_dx_h is not associated with calculate_rd_dx.")
-    !$OMP parallel do default(shared)
-    do j=js-1,je+1 ; do i=is-1,ie+1
+    do concurrent( j=js-1:je+1, i=is-1:ie+1 )
       CS%Rd_dx_h(i,j) = CS%cg1(i,j) / &
             (sqrt(CS%f2_dx2_h(i,j) + CS%cg1(i,j)*CS%beta_dx2_h(i,j)))
-    enddo ; enddo
+    enddo
+    !$omp target update from(CS%Rd_dx_h)
     if (query_averaging_enabled(CS%diag)) then
       if (CS%id_Rd_dx > 0) call post_data(CS%id_Rd_dx, CS%Rd_dx_h, CS%diag)
     endif
@@ -397,10 +400,7 @@ subroutine calc_resoln_function(h, tv, G, GV, US, CS, MEKE, OBC, dt)
     apply_v_OBC = OBC%v_OBCs_on_PE
   endif
 
-  !$OMP parallel default(shared) private(dx_term,power_2)
-
   if (apply_u_OBC .or. apply_v_OBC) then
-    !$OMP do
     do J=js-1,Jeq ; do I=is-1,Ieq
       if ((OBC%segnum_u(I,j) /= 0) .or. (OBC%segnum_u(I,j+1) /= 0) .or. &
           (OBC%segnum_v(i,J) /= 0) .or. (OBC%segnum_u(i+1,J) /= 0)) then
@@ -415,16 +415,14 @@ subroutine calc_resoln_function(h, tv, G, GV, US, CS, MEKE, OBC, dt)
       endif
     enddo ; enddo
   else
-    !$OMP do
-    do J=js-1,Jeq ; do I=is-1,Ieq
+    do concurrent( J=js-1:Jeq, I=is-1:Ieq )
       cg1_q(I,J) = 0.25 * ((CS%cg1(i,j) + CS%cg1(i+1,j+1)) + (CS%cg1(i+1,j) + CS%cg1(i,j+1)))
-    enddo ; enddo
+    enddo 
   endif
 
   !   Do this calculation on the extent used in MOM_hor_visc.F90, and
   ! MOM_tracer.F90 so that no halo update is needed.
   if (CS%Res_fn_power_visc >= 100) then
-    !$OMP do
     do j=js-1,je+1 ; do i=is-1,ie+1
       dx_term = CS%f2_dx2_h(i,j) + CS%cg1(i,j)*CS%beta_dx2_h(i,j)
       if ((CS%Res_coef_visc * CS%cg1(i,j))**2 > dx_term) then
@@ -433,7 +431,6 @@ subroutine calc_resoln_function(h, tv, G, GV, US, CS, MEKE, OBC, dt)
         CS%Res_fn_h(i,j) = 1.0
       endif
     enddo ; enddo
-    !$OMP do
     do J=js-1,Jeq ; do I=is-1,Ieq
       dx_term = CS%f2_dx2_q(I,J) +  cg1_q(I,J) * CS%beta_dx2_q(I,J)
       if ((CS%Res_coef_visc * cg1_q(I,J))**2 > dx_term) then
@@ -443,39 +440,33 @@ subroutine calc_resoln_function(h, tv, G, GV, US, CS, MEKE, OBC, dt)
       endif
     enddo ; enddo
   elseif (CS%Res_fn_power_visc == 2) then
-    !$OMP do
-    do j=js-1,je+1 ; do i=is-1,ie+1
+    do concurrent( j=js-1:je+1, i=is-1:ie+1 ) local(dx_term)
       dx_term = CS%f2_dx2_h(i,j) + CS%cg1(i,j)*CS%beta_dx2_h(i,j)
       CS%Res_fn_h(i,j) = dx_term / (dx_term + (CS%Res_coef_visc * CS%cg1(i,j))**2)
-    enddo ; enddo
-    !$OMP do
-    do J=js-1,Jeq ; do I=is-1,Ieq
+    enddo
+    do concurrent( J=js-1:Jeq, I=is-1:Ieq ) local(dx_term)
       dx_term = CS%f2_dx2_q(I,J) +  cg1_q(I,J) * CS%beta_dx2_q(I,J)
       CS%Res_fn_q(I,J) = dx_term / (dx_term + (CS%Res_coef_visc * cg1_q(I,J))**2)
-    enddo ; enddo
+    enddo
   elseif (mod(CS%Res_fn_power_visc, 2) == 0) then
     power_2 = CS%Res_fn_power_visc / 2
-    !$OMP do
     do j=js-1,je+1 ; do i=is-1,ie+1
       dx_term = (US%L_T_to_m_s**2*(CS%f2_dx2_h(i,j) + CS%cg1(i,j)*CS%beta_dx2_h(i,j)))**power_2
       CS%Res_fn_h(i,j) = dx_term / &
           (dx_term + (CS%Res_coef_visc * US%L_T_to_m_s*CS%cg1(i,j))**CS%Res_fn_power_visc)
     enddo ; enddo
-    !$OMP do
     do J=js-1,Jeq ; do I=is-1,Ieq
       dx_term = (US%L_T_to_m_s**2*(CS%f2_dx2_q(I,J) + cg1_q(I,J) * CS%beta_dx2_q(I,J)))**power_2
       CS%Res_fn_q(I,J) = dx_term / &
           (dx_term + (CS%Res_coef_visc * US%L_T_to_m_s*cg1_q(I,J))**CS%Res_fn_power_visc)
     enddo ; enddo
   else
-    !$OMP do
     do j=js-1,je+1 ; do i=is-1,ie+1
       dx_term = (US%L_T_to_m_s*sqrt(CS%f2_dx2_h(i,j) + &
                                     CS%cg1(i,j)*CS%beta_dx2_h(i,j)))**CS%Res_fn_power_visc
       CS%Res_fn_h(i,j) = dx_term / &
          (dx_term + (CS%Res_coef_visc * US%L_T_to_m_s*CS%cg1(i,j))**CS%Res_fn_power_visc)
     enddo ; enddo
-    !$OMP do
     do J=js-1,Jeq ; do I=is-1,Ieq
       dx_term = (US%L_T_to_m_s*sqrt(CS%f2_dx2_q(I,J) + &
                                     cg1_q(I,J) * CS%beta_dx2_q(I,J)))**CS%Res_fn_power_visc
@@ -511,35 +502,30 @@ subroutine calc_resoln_function(h, tv, G, GV, US, CS, MEKE, OBC, dt)
 
   else ! .not.CS%interpolate_Res_fn
     if (apply_u_OBC) then
-      !$OMP do
       do j=js,je ; do I=is-1,Ieq
         cg1_u(I,j) = 0.5 * (CS%cg1(i,j) + CS%cg1(i+1,j))
         if (OBC%segnum_u(I,j) > 0) cg1_u(I,j) = CS%cg1(i,j) ! Eastern OBC
         if (OBC%segnum_u(I,j) < 0) cg1_u(I,j) = CS%cg1(i+1,j) ! Western OBC
       enddo ; enddo
     else
-      !$OMP do
-      do j=js,je ; do I=is-1,Ieq
+      do concurrent( j=js:je, I=is-1:Ieq )
         cg1_u(I,j) = 0.5 * (CS%cg1(i,j) + CS%cg1(i+1,j))
-      enddo ; enddo
+      enddo
     endif
 
     if (apply_v_OBC) then
-      !$OMP do
       do J=js-1,Jeq ; do i=is,ie
         cg1_v(i,J) = 0.5 * (CS%cg1(i,j) + CS%cg1(i,j+1))
         if (OBC%segnum_v(i,J) > 0) cg1_v(i,J) = CS%cg1(i,j) ! Northern OBC
         if (OBC%segnum_v(i,J) < 0) cg1_v(i,J) = CS%cg1(i,j+1) ! Southern OBC
       enddo ; enddo
     else
-      !$OMP do
-      do J=js-1,Jeq ; do i=is,ie
+      do concurrent( J=js-1:Jeq, i=is:ie )
         cg1_v(i,J) = 0.5 * (CS%cg1(i,j) + CS%cg1(i,j+1))
-      enddo ; enddo
+      enddo
     endif
 
     if (CS%Res_fn_power_khth >= 100) then
-      !$OMP do
       do j=js,je ; do I=is-1,Ieq
         dx_term = CS%f2_dx2_u(I,j) + cg1_u(I,j) * CS%beta_dx2_u(I,j)
         if ((CS%Res_coef_khth * cg1_u(I,j))**2 > dx_term) then
@@ -548,7 +534,6 @@ subroutine calc_resoln_function(h, tv, G, GV, US, CS, MEKE, OBC, dt)
           CS%Res_fn_u(I,j) = 1.0
         endif
       enddo ; enddo
-      !$OMP do
       do J=js-1,Jeq ; do i=is,ie
         dx_term = CS%f2_dx2_v(i,J) + cg1_v(i,J) * CS%beta_dx2_v(i,J)
         if ((CS%Res_coef_khth * cg1_v(i,J))**2 > dx_term) then
@@ -558,39 +543,37 @@ subroutine calc_resoln_function(h, tv, G, GV, US, CS, MEKE, OBC, dt)
         endif
       enddo ; enddo
     elseif (CS%Res_fn_power_khth == 2) then
-      !$OMP do
-      do j=js,je ; do I=is-1,Ieq
+      do concurrent( j=js:je, I=is-1:Ieq ) local(dx_term)
         dx_term = CS%f2_dx2_u(I,j) + cg1_u(I,j) * CS%beta_dx2_u(I,j)
         CS%Res_fn_u(I,j) = dx_term / (dx_term + (CS%Res_coef_khth * cg1_u(I,j))**2)
-      enddo ; enddo
-      !$OMP do
-      do J=js-1,Jeq ; do i=is,ie
+      enddo
+      do concurrent( J=js-1:Jeq, i=is:ie ) local(dx_term)
         dx_term = CS%f2_dx2_v(i,J) + cg1_v(i,J) * CS%beta_dx2_v(i,J)
         CS%Res_fn_v(i,J) = dx_term / (dx_term + (CS%Res_coef_khth * cg1_v(i,J))**2)
-      enddo ; enddo
+      enddo
+      do concurrent( J=js-1:Jeq, i=is:ie ) local(dx_term)
+        dx_term = CS%f2_dx2_v(i,J) + cg1_v(i,J) * CS%beta_dx2_v(i,J)
+        CS%Res_fn_v(i,J) = dx_term / (dx_term + (CS%Res_coef_khth * cg1_v(i,J))**2)
+      enddo
     elseif (mod(CS%Res_fn_power_khth, 2) == 0) then
       power_2 = CS%Res_fn_power_khth / 2
-      !$OMP do
       do j=js,je ; do I=is-1,Ieq
         dx_term = (US%L_T_to_m_s**2 * (CS%f2_dx2_u(I,j) + cg1_u(I,j) * CS%beta_dx2_u(I,j)))**power_2
         CS%Res_fn_u(I,j) = dx_term / &
             (dx_term + (CS%Res_coef_khth * US%L_T_to_m_s*cg1_u(I,j))**CS%Res_fn_power_khth)
       enddo ; enddo
-      !$OMP do
       do J=js-1,Jeq ; do i=is,ie
         dx_term = (US%L_T_to_m_s**2 * (CS%f2_dx2_v(i,J) + cg1_v(i,J) * CS%beta_dx2_v(i,J)))**power_2
         CS%Res_fn_v(i,J) = dx_term / &
             (dx_term + (CS%Res_coef_khth * US%L_T_to_m_s*cg1_v(i,J))**CS%Res_fn_power_khth)
       enddo ; enddo
     else
-      !$OMP do
       do j=js,je ; do I=is-1,Ieq
         dx_term = (US%L_T_to_m_s*sqrt(CS%f2_dx2_u(I,j) + &
                                       cg1_u(I,j) * CS%beta_dx2_u(I,j)))**CS%Res_fn_power_khth
         CS%Res_fn_u(I,j) = dx_term / &
             (dx_term + (CS%Res_coef_khth * US%L_T_to_m_s*cg1_u(I,j))**CS%Res_fn_power_khth)
       enddo ; enddo
-      !$OMP do
       do J=js-1,Jeq ; do i=is,ie
         dx_term = (US%L_T_to_m_s*sqrt(CS%f2_dx2_v(i,J) + &
                                       cg1_v(i,J) * CS%beta_dx2_v(i,J)))**CS%Res_fn_power_khth
@@ -599,9 +582,10 @@ subroutine calc_resoln_function(h, tv, G, GV, US, CS, MEKE, OBC, dt)
       enddo ; enddo
     endif
   endif
-  !$OMP end parallel
+
 
   if (query_averaging_enabled(CS%diag)) then
+    !$omp target update from(CS%Res_fn_h, CS%Res_fn_q, CS%Res_fn_u, CS%Res_fn_v)
     if (CS%id_Res_fn > 0) call post_data(CS%id_Res_fn, CS%Res_fn_h, CS%diag)
     if (CS%id_BS_struct > 0) call post_data(CS%id_BS_struct, CS%BS_struct, CS%diag)
     if (CS%id_khth_struct > 0) call post_data(CS%id_khth_struct, CS%khth_struct, CS%diag)
@@ -610,10 +594,12 @@ subroutine calc_resoln_function(h, tv, G, GV, US, CS, MEKE, OBC, dt)
   endif
 
   if (CS%debug) then
+    !$omp target update from(CS%cg1, CS%Res_fn_u, CS%Res_fn_v)
     call hchksum(CS%cg1, "calc_resoln_fn cg1", G%HI, haloshift=1, unscale=US%L_T_to_m_s)
     call uvchksum("Res_fn_[uv]", CS%Res_fn_u, CS%Res_fn_v, G%HI, haloshift=0, &
                   unscale=1.0, scalar_pair=.true.)
   endif
+  !$omp target exit data map(delete: cg1_q, cg1_u, cg1_v, dx_term)
 end subroutine calc_resoln_function
 
 !> Calculates and stores functions of SQG mode
@@ -2301,6 +2287,13 @@ end subroutine VarMix_init
 !> Destructor for VarMix control structure
 subroutine VarMix_end(CS)
   type(VarMix_CS), intent(inout) :: CS
+
+  ! Remove component arrays from device before host deallocation;
+  !$omp target exit data map(delete: CS%Res_fn_h, CS%Res_fn_q, CS%Res_fn_u, CS%Res_fn_v, &
+  !$omp&                             CS%f2_dx2_q, CS%beta_dx2_q, CS%f2_dx2_u, CS%beta_dx2_u, &
+  !$omp&                             CS%f2_dx2_v, CS%beta_dx2_v)
+  !$omp target exit data map(delete: CS%Rd_dx_h, CS%f2_dx2_h, CS%beta_dx2_h)
+  !$omp target exit data map(delete: CS%cg1)
 
   if (allocated(CS%ebt_struct))  deallocate(CS%ebt_struct)
   if (allocated(CS%sqg_struct))  deallocate(CS%sqg_struct)
