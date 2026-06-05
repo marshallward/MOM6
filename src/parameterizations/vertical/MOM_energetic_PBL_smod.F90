@@ -397,6 +397,20 @@ module subroutine energetic_PBL(h_3d, u_3d, v_3d, tv, fluxes, visc, dt, Kd_int, 
   ! 3d version of dz
   call thickness_to_dz(h_3d, tv, dz_3d, G, GV, US)
 
+  ! Set the inverse density used to translating local TKE into a turbulence velocity
+  SpV_dt(:) = 0.0
+  if ((dt > 0.0) .and. GV%Boussinesq .or. .not.allocated(tv%SpV_avg)) then
+    if (CS%answer_date < 20240101) then
+      do K=1,nz+1
+        SpV_dt(K) = 1.0 / (dt*GV%Rho0)
+      enddo
+    else
+      do K=1,nz+1
+        SpV_dt(K) = I_rho0dt
+      enddo
+    endif
+  endif
+
   ! Needed?
   !*!!$omp target update to(fluxes%ustar)
 
@@ -418,10 +432,15 @@ module subroutine energetic_PBL(h_3d, u_3d, v_3d, tv, fluxes, visc, dt, Kd_int, 
   !**!!$omp target loop private(h_2d, dz_2d, u_2d, v_2d, T_2d, S_2d) &
   !**!!$omp   private(TKE_forced_2d, dSV_dT_2d, dSV_dS_2d, Kd_2d) &
 
-  !$omp target loop private(SpV_dt)
-  do j=js,je
+  !!$omp target loop private(SpV_dt)
+  !do j=js,je
+
   !!$omp target loop private(SpV_dt) collapse(2)
+  !!$omp target loop collapse(2)
   !do j=js,je ; do i=is,ie ; if (G%mask2dT(i,j) > 0.0) then
+  do concurrent (j=js:je, i=is:ie)
+
+    if (G%mask2dT(i,j) > 0.) then
     !**!! Copy the thicknesses and other fields to 2-d arrays.
     !**!!$omp loop
     !**!do i=is,ie ; do k=1,nz
@@ -432,19 +451,19 @@ module subroutine energetic_PBL(h_3d, u_3d, v_3d, tv, fluxes, visc, dt, Kd_int, 
     !**!enddo ; enddo
     !**!call thickness_to_dz(h_3d, tv, dz_2d, j, G, GV)
 
-    ! Set the inverse density used to translating local TKE into a turbulence velocity
-    SpV_dt(:) = 0.0
-    if ((dt > 0.0) .and. GV%Boussinesq .or. .not.allocated(tv%SpV_avg)) then
-      if (CS%answer_date < 20240101) then
-        do K=1,nz+1
-          SpV_dt(K) = 1.0 / (dt*GV%Rho0)
-        enddo
-      else
-        do K=1,nz+1
-          SpV_dt(K) = I_rho0dt
-        enddo
-      endif
-    endif
+    !**!! Set the inverse density used to translating local TKE into a turbulence velocity
+    !**!SpV_dt(:) = 0.0
+    !**!if ((dt > 0.0) .and. GV%Boussinesq .or. .not.allocated(tv%SpV_avg)) then
+    !**!  if (CS%answer_date < 20240101) then
+    !**!    do K=1,nz+1
+    !**!      SpV_dt(K) = 1.0 / (dt*GV%Rho0)
+    !**!    enddo
+    !**!  else
+    !**!    do K=1,nz+1
+    !**!      SpV_dt(K) = I_rho0dt
+    !**!    enddo
+    !**!  endif
+    !**!endif
 
     !   Determine the initial mech_TKE and conv_PErel, including the energy required
     ! to mix surface heating through the topmost cell, the energy released by mixing
@@ -458,8 +477,8 @@ module subroutine energetic_PBL(h_3d, u_3d, v_3d, tv, fluxes, visc, dt, Kd_int, 
     !**!!$omp   private(Kd_BBL, mixvel_BBL, mixlen_BBL) &
     !**!!$omp   private(Kd_1, Kd_2) &
     !**!!$omp   private(kd_guess_col)
-    !$omp loop
-    do i=is,ie ; if (G%mask2dT(i,j) > 0.0) then
+    !!$omp loop
+    !do i=is,ie ; if (G%mask2dT(i,j) > 0.0) then
 
       !**!! Copy the thicknesses and other fields to 1-d arrays.
       !**!do k=1,nz
@@ -681,10 +700,12 @@ module subroutine energetic_PBL(h_3d, u_3d, v_3d, tv, fluxes, visc, dt, Kd_int, 
       do K=1,nz+1 ; Kd_int(i,j,K) = 0. ; enddo
       CS%ML_depth(i,j) = 0.0
       CS%BBL_depth(i,j) = 0.0
-    endif ; enddo ! Close of i-loop - Note the unusual loop order, with k-loops inside i-loops.
+    endif
+    !endif ; enddo ! Close of i-loop - Note the unusual loop order, with k-loops inside i-loops.
 
     !**!!$omp loop
     !**!Do i=is,ie ; do K=1,nz+1 ; Kd_int(i,j,K) = Kd_2d(i,K) ; enddo ; enddo
+  !enddo ; enddo ! j-loop
   enddo ! j-loop
 
   !$omp target exit data map(delete: CS%ML_depth, CS%BBL_depth)
@@ -833,7 +854,7 @@ end subroutine energetic_PBL
 
 !> This subroutine determines the diffusivities from the integrated energetics
 !!  mixed layer model for a single column of water.
-subroutine ePBL_column_3d(h, dz, u, v, T0, S0, dSV_dT, dSV_dS, SpV_dt, TKE_forcing, B_flux, absf, &
+pure subroutine ePBL_column_3d(h, dz, u, v, T0, S0, dSV_dT, dSV_dS, SpV_dt, TKE_forcing, B_flux, absf, &
                        u_star, u_star_mean, mech_TKE_in, dt, MLD_io, Kd, mixvel, mixlen, GV, US, CS, eCD, &
                        Waves, G, i, j, TKE_gen_stoch, TKE_diss_stoch, tmpval)
   type(ocean_grid_type),   intent(in)    :: G      !< The ocean's grid structure.
@@ -1932,7 +1953,7 @@ end subroutine ePBL_column_3d
 
 !> This subroutine determines the diffusivities from the integrated energetics
 !!  mixed layer model for a single column of water.
-subroutine ePBL_column(h, dz, u, v, T0, S0, dSV_dT, dSV_dS, SpV_dt, TKE_forcing, B_flux, absf, &
+pure subroutine ePBL_column(h, dz, u, v, T0, S0, dSV_dT, dSV_dS, SpV_dt, TKE_forcing, B_flux, absf, &
                        u_star, u_star_mean, mech_TKE_in, dt, MLD_io, Kd, mixvel, mixlen, GV, US, CS, eCD, &
                        Waves, G, i, j, TKE_gen_stoch, TKE_diss_stoch, tmpval)
   type(verticalGrid_type), intent(in)    :: GV     !< The ocean's vertical grid structure.
@@ -3009,7 +3030,7 @@ end subroutine ePBL_column
 
 !> This subroutine determines the diffusivities from a bottom boundary layer version of
 !! the integrated energetics mixed layer model for a single column of water.
-subroutine ePBL_BBL_column(h, dz, u, v, T0, S0, dSV_dT, dSV_dS, SpV_dt, absf, &
+pure subroutine ePBL_BBL_column(h, dz, u, v, T0, S0, dSV_dT, dSV_dS, SpV_dt, absf, &
                            dt, Kd, BBL_TKE_in, u_star_BBL, u_star_BBL_z_t, b_flux_BBL, Kd_BBL, BBLD_io, mixvel_BBL, &
                            mixlen_BBL, GV, US, CS, eCD)
   type(verticalGrid_type),   intent(in)  :: GV     !< The ocean's vertical grid structure.
@@ -3806,7 +3827,7 @@ end subroutine ePBL_BBL_column
 
 !> Gives shape function that sets the vertical structure of OSBL diffusivity
 !! as described in Sane et al. 2025
-subroutine kappa_eqdisc(shape_func, CS, GV, dz, absf, B_flux, u_star, MLD_guess)
+pure subroutine kappa_eqdisc(shape_func, CS, GV, dz, absf, B_flux, u_star, MLD_guess)
 
   type(verticalGrid_type), intent(in) :: GV     !< The ocean's vertical grid structure.
   type(energetic_PBL_CS),  intent(in) :: CS     !< Energetic PBL control struct
@@ -3923,7 +3944,7 @@ subroutine kappa_eqdisc(shape_func, CS, GV, dz, absf, B_flux, u_star, MLD_guess)
 end subroutine kappa_eqdisc
 
 !> Gives velocity scale (v_0) using equations that approximate neural network of Sane et al. 2023
-subroutine get_eqdisc_v0(CS, absf, B_flux, u_star, v0_dummy)
+pure subroutine get_eqdisc_v0(CS, absf, B_flux, u_star, v0_dummy)
   type(energetic_PBL_CS),  intent(in) :: CS     !< Energetic PBL control struct
   real, intent(in) :: B_flux !< The surface buoyancy flux [Z2 T-3 ~> m2 s-3]
   real, intent(in) :: u_star !< The surface friction velocity [Z T-1 ~> m s-1]
@@ -3994,7 +4015,7 @@ end subroutine get_eqdisc_v0
 
 !> Gives velocity scale (v_0^h) using equations that with using boundary layer depth as one of its inputs
 !! These equations are different than those set in get_eqdisc_v0 subroutine
-subroutine get_eqdisc_v0h(CS, B_flux, u_star, MLD_guess, v0_dummy)
+pure subroutine get_eqdisc_v0h(CS, B_flux, u_star, MLD_guess, v0_dummy)
   type(energetic_PBL_CS),  intent(in) :: CS     !< Energetic PBL control struct
   real, intent(in) :: B_flux !< The surface buoyancy flux [Z2 T-3 ~> m2 s-3]
   real, intent(in) :: u_star !< The surface friction velocity [Z T-1 ~> m s-1]
@@ -4126,7 +4147,7 @@ end function exp_decay_TKE_adjust
 
 !> This subroutine calculates the change in potential energy and or derivatives
 !! for several changes in an interface's diapycnal diffusivity times a timestep.
-subroutine find_PE_chg(Kddt_h0, dKddt_h, hp_a, hp_b, Th_a, Sh_a, Th_b, Sh_b, &
+pure subroutine find_PE_chg(Kddt_h0, dKddt_h, hp_a, hp_b, Th_a, Sh_a, Th_b, Sh_b, &
                        dT_to_dPE_a, dS_to_dPE_a, dT_to_dPE_b, dS_to_dPE_b, &
                        pres_Z, dT_to_dColHt_a, dS_to_dColHt_a, dT_to_dColHt_b, dS_to_dColHt_b, &
                        PE_chg, dPEc_dKd, dPE_max, dPEc_dKd_0, PE_ColHt_cor)
@@ -4276,7 +4297,7 @@ end subroutine find_PE_chg
 !! diffusivity, returning both the added diffusivity and the realized potential energy change, and
 !! optionally also the maximum change in potential energy that would be realized for an infinitely
 !! large diffusivity.
-subroutine find_Kd_from_PE_chg(Kd_prev, dKd_max, dt_h, max_PE_chg, hp_a, hp_b, Th_a, Sh_a, Th_b, Sh_b, &
+pure subroutine find_Kd_from_PE_chg(Kd_prev, dKd_max, dt_h, max_PE_chg, hp_a, hp_b, Th_a, Sh_a, Th_b, Sh_b, &
                        dT_to_dPE_a, dS_to_dPE_a, dT_to_dPE_b, dS_to_dPE_b, pres_Z, &
                        dT_to_dColHt_a, dS_to_dColHt_a, dT_to_dColHt_b, dS_to_dColHt_b, &
                        Kd_add, PE_chg, dPE_max, frac_dKd_max_PE)
@@ -4421,7 +4442,7 @@ end subroutine find_Kd_from_PE_chg
 !> This subroutine calculates the change in potential energy and or derivatives
 !! for several changes in an interface's diapycnal diffusivity times a timestep
 !! using the original form used in the first version of ePBL.
-subroutine find_PE_chg_orig(Kddt_h, h_k, b_den_1, dTe_term, dSe_term, &
+pure subroutine find_PE_chg_orig(Kddt_h, h_k, b_den_1, dTe_term, dSe_term, &
                        dT_km1_t2, dS_km1_t2, dT_to_dPE_k, dS_to_dPE_k, &
                        dT_to_dPEa, dS_to_dPEa, pres_Z, dT_to_dColHt_k, &
                        dS_to_dColHt_k, dT_to_dColHta, dS_to_dColHta, PE_chg, &
@@ -4569,7 +4590,7 @@ subroutine find_PE_chg_orig(Kddt_h, h_k, b_den_1, dTe_term, dSe_term, &
 end subroutine find_PE_chg_orig
 
 !> This subroutine finds the mstar value for ePBL
-subroutine find_mstar(CS, US, Buoyancy_Flux, UStar, &
+pure subroutine find_mstar(CS, US, Buoyancy_Flux, UStar, &
                       BLD, Abs_Coriolis, Is_BBL, mstar, &
                       Langmuir_Number, mstar_LT, Convect_Langmuir_Number)
   !$omp declare target
@@ -4667,7 +4688,7 @@ subroutine find_mstar(CS, US, Buoyancy_Flux, UStar, &
 end subroutine Find_mstar
 
 !> This subroutine modifies the mstar value if the Langmuir number is present
-subroutine mstar_Langmuir(CS, US, Abs_Coriolis, Buoyancy_Flux, UStar, BLD, Langmuir_Number, &
+pure subroutine mstar_Langmuir(CS, US, Abs_Coriolis, Buoyancy_Flux, UStar, BLD, Langmuir_Number, &
                           mstar, mstar_LT, Convect_Langmuir_Number)
   !$omp declare target
   type(energetic_PBL_CS), intent(in) :: CS    !< Energetic PBL control structure
