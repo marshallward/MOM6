@@ -1196,7 +1196,8 @@ subroutine step_MOM(forces_in, fluxes_in, sfc_state, Time_start, time_int_in, CS
                               G, US, CS%sum_output_CSp)
 
   if (MOM_state_is_synchronized(CS)) then
-    !$omp target update from(u, v, h)
+    ! TODO: remove me
+    !!$omp target update from(u, v, h)
     call write_energy(CS%u, CS%v, CS%h, CS%tv, Time_local, CS%nstep_tot, &
                       G, GV, US, CS%sum_output_CSp, CS%tracer_flow_CSp, &
                       dt_forcing=real_to_time(time_interval, unscale=US%T_to_s) )
@@ -3976,6 +3977,7 @@ subroutine finish_MOM_initialization(Time, dirs, CS)
     deallocate(restart_CSp_tmp)
   endif
 
+  !$omp target update to(CS%u, CS%v, CS%h)
   call write_energy(CS%u, CS%v, CS%h, CS%tv, Time, 0, G, GV, US, &
                     CS%sum_output_CSp, CS%tracer_flow_CSp)
 

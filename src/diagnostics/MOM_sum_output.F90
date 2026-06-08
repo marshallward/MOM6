@@ -3,6 +3,7 @@
 ! SPDX-License-Identifier: Apache-2.0
 
 #include "do_concurrent_compat.h"
+
 !> Reports integrated quantities for monitoring the model state
 module MOM_sum_output
 
@@ -554,15 +555,19 @@ subroutine write_energy(u, v, h, tv, day, n, G, GV, US, CS, tracer_CSp, dt_forci
          "write_energy: Module must be initialized before it is used.")
 
   !$omp target enter data map(alloc: areaTm, tmp1, PE_pt, Salt_int, Temp_int, eta, Z_0APE)
-  !$omp target update to(h)
+  ! TODO: Should be unneeded
+  !!$omp target update to(h)
 
   do concurrent (j=js:je, i=is:ie)
     areaTm(i,j) = G%mask2dT(i,j)*G%areaT(i,j)
   enddo
 
-  do concurrent (k=1:nz, j=1:size(tmp1,2), i=1:size(tmp1,1))
-    tmp1(i,j,k) = 0.0
+  ! TODO: Removable? Do we need halos?
+  !do concurrent (k=1:nz, j=1:size(tmp1,2), i=1:size(tmp1,1))
+  do concurrent (k=1:nz, j=G%jsd:G%jed, i=G%isd:G%ied)
+    tmp1(i,j,k) = 0.
   enddo
+
   do concurrent (k=1:nz, j=js:je, i=is:ie)
     tmp1(i,j,k) = h(i,j,k) * (GV%H_to_RZ*areaTm(i,j))
   enddo
@@ -579,6 +584,8 @@ subroutine write_energy(u, v, h, tv, day, n, G, GV, US, CS, tracer_CSp, dt_forci
       vol_tot = reproducing_sum(tmp1, isr, ier, jsr, jer, sums=vol_lay, unscale=US%Z_to_m*US%L_to_m**2)
     endif
   endif ! Boussinesq
+
+  ! TODO: tracer stocks?  Needed?
 
   nTr_stocks = 0
   Tr_minmax_avail(:) = .false.
@@ -751,10 +758,14 @@ subroutine write_energy(u, v, h, tv, day, n, G, GV, US, CS, tracer_CSp, dt_forci
   endif
 
   ! Calculate the Kinetic Energy integrated over each layer.
-  !$omp target update to(u, v)
-  do concurrent (k=1:nz, j=1:size(tmp1,2), i=1:size(tmp1,1))
-    tmp1(i,j,k) = 0.0
+  ! TODO: already on device
+  ! TODO: can we skip initialization?
+  !!$omp target update to(u, v)
+  !do concurrent (k=1:nz, j=1:size(tmp1,2), i=1:size(tmp1,1))
+  do concurrent (k=1:nz, j=G%jsd:G%jed, i=G%isd:G%ied)
+    tmp1(i,j,k) = 0.
   enddo
+
   do concurrent (k=1:nz, j=js:je, i=is:ie)
     tmp1(i,j,k) = (0.25 * GV%H_to_RZ*(areaTm(i,j) * h(i,j,k))) * &
             (((u(I-1,j,k)**2) + (u(I,j,k)**2)) + ((v(i,J-1,k)**2) + (v(i,J,k)**2)))
