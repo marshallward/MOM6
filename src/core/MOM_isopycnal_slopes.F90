@@ -18,6 +18,7 @@ use MOM_open_boundary, only : OBC_DIRECTION_E, OBC_DIRECTION_W, OBC_DIRECTION_N,
 implicit none ; private
 
 #include <MOM_memory.h>
+#include "do_concurrent_compat.h"
 
 public calc_isoneutral_slopes, vert_fill_TS
 
@@ -81,7 +82,7 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
                   ! [T2 S-1 L-2 ~> kg m-3 ppt-1 Pa-1] and [T2 C-1 L-2 ~> kg m-3 degC-1 Pa-1].
   !UMW Test: Promote to 3d to factor out calculate_density_derivs() calls
   real, dimension(SZIB_(G), SZJB_(G), SZK_(GV)) :: &
-    drho_dT, &      ! The derivative of density with temperature calculated at  
+    drho_dT, &      ! The derivative of density with temperature calculated at
                     ! both u and v points [R C-1 ~> kg m-3 degC-1].
     drho_dS, &      ! The derivative of density with salinity calculated at
                     ! both u and v points [R S-1 ~> kg m-3 ppt-1].
@@ -243,7 +244,7 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
   ! Calculate density derviatves outside of slope calculation since
   ! deferred EOS subroutines cannot be called on the GPU
   if (use_EOS) then
-    ! Calculate density derivatives using T,S,and P at u points. 
+    ! Calculate density derivatives using T,S,and P at u points.
     do concurrent(j=js:je, K=2:nz, I=is-1:ie)
       pres_uvh(I,j,K) = 0.5*(pres(i,j,K) + pres(i+1,j,K))
       T_uvh(I,j,K) = 0.25*((T(i,j,k) + T(i+1,j,k)) + (T(i,j,k-1) + T(i+1,j,k-1)))
@@ -316,13 +317,13 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
                    scrap, scrap, drho_dT_dT_h(:,j,K), scrap, scrap, &
                    tv%eqn_of_state, dom=EOSdom_h1)
       enddo ; enddo
-    
+
     endif ! end use_stanley
 
   ! If not using EOS, gradients are handled inside the do concurrent loop below
   endif
 
-  do concurrent( j=js:je , K=2:nz , I=is-1:ie ) local(drdkL, drdkR, drdiA, drdiB)
+  do concurrent( j=js:je , K=2:nz , I=is-1:ie ) DO_LOCALITY(local(drdkL, drdkR, drdiA, drdiB))
     ! UMW: Since stanley parameterization requies EOS anyways, putting
     ! the use_stanley loop inside of the use_EOS loop
     if (use_EOS) then
@@ -448,7 +449,7 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
   ! deferred EOS subroutines cannot be called on the GPU, but this time in the
   ! meridional direciton
   if (use_EOS) then
-    ! Calculate density derivatives using T,S,and P at v points. 
+    ! Calculate density derivatives using T,S,and P at v points.
     do concurrent(J=js-1:je, K=2:nz, i=is:ie)
       pres_uvh(i,J,K) = 0.5*(pres(i,j,K) + pres(i,j+1,K))
       T_uvh(i,J,K) = 0.25*((T(i,j,K) + T(i,j+1,K)) + (T(i,j,K-1) + T(i,j+1,K-1)))
@@ -518,19 +519,19 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
       ! The second line below would correspond to arguments
       !            drho_dS_dS, drho_dS_dT, drho_dT_dT, drho_dS_dP, drho_dT_dP, &
       ! UMW NOTE: changed J bounds from js-1:je to js-1:je+1 to account for extra J access below
-      ! when calculate drdj 
+      ! when calculate drdj
       do J=js-1,je+1 ; do K=nz,2,-1
         call calculate_density_second_derivs(T_uvh(:,J,K), S_uvh(:,J,K), pres_uvh(:,J,K), &
                    scrap, scrap, drho_dT_dT_h(:,J,K), scrap, scrap, &
                    tv%eqn_of_state, dom=EOSdom_h1)
       enddo ; enddo
-    
+
     endif ! end use_stanley
 
   ! If not using EOS, gradients are handled inside the do concurrent loop below
   endif
 
-  do concurrent(J=js-1:je, K=2:nz, i=is:ie) local(drdkL, drdkR, drdjA, drdjB)
+  do concurrent(J=js-1:je, K=2:nz, i=is:ie) DO_LOCALITY(local(drdkL, drdkR, drdjA, drdjB))
 
     if (use_EOS) then
       ! Estimate the horizontal density gradients along layers.

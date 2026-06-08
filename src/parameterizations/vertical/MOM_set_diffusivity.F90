@@ -463,7 +463,7 @@ subroutine set_diffusivity(u, v, h, u_h, v_h, tv, fluxes, optics, visc, dt, Kd_i
     !$omp target enter data map(to: tv%T, tv%S, h)
     !$omp target enter data map(alloc: T_f, S_f)
     call vert_fill_TS(h, tv%T, tv%S, kappa_dt_fill, T_f, S_f, G, GV, US, larger_h_denom=.true.)
-    !$omp target exit data map(from: T_f, S_f) 
+    !$omp target exit data map(from: T_f, S_f)
     !$omp target exit data map(release: tv%T, tv%S, h)
     if (CS%debug) then
       call hchksum(tv%T, "after vert_fill_TS tv%T", G%HI, unscale=US%C_to_degC)
