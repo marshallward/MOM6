@@ -1882,11 +1882,11 @@ subroutine ML_MEKE_calculate_features(G, GV, US, CS, Rd_dx_h, u, v, tv, h, dt, f
   ! UMW: Below is untested
   !$omp target enter data map(to: tv, tv%T, tv%S, slope_x, slope_y, e)
   !$omp target enter data map(to: tv%SpV_avg) if (allocated(tv%SpV_avg))
-  !$omp target enter data map(to: tv%p_surf) if (allocated(tv%p_surf))
+  !$omp target enter data map(to: tv%p_surf) if (associated(tv%p_surf))
   call calc_isoneutral_slopes(G, GV, US, h, e, tv, dt*1.e-7*GV%m2_s_to_HZ_T, .false., slope_x, slope_y)
   !$omp target exit data map(release: tv, tv%T, tv%S, e)
   !$omp target exit data map(release: tv%SpV_avg) if (allocated(tv%SpV_avg))
-  !$omp target exit data map(release: tv%p_surf) if (allocated(tv%p_surf))
+  !$omp target exit data map(release: tv%p_surf) if (associated(tv%p_surf))
   !$omp target exit data map(from: slope_x, slope_y)
   call pass_vector(slope_x, slope_y, G%Domain)
   do j=js-1,je+1 ; do i=is-1,ie+1
