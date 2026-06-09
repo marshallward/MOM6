@@ -317,10 +317,8 @@ $(BUILD)/opt_target: | $(TARGET_CODEBASE)
 $(BUILD)/%/Makefile: $(BUILD)/%/config.status
 	cd $(@D) && ./config.status
 
-$(BUILD)/%/config.status: $(DEPS)/lib/libFMS.a
-$(BUILD)/%/config.status: $(DEPS)/lib/libgsw.a
-$(BUILD)/%/config.status: $(DEPS)/lib/libcvmix.a
-$(BUILD)/%/config.status: | $(BUILD)/%/
+$(BUILD)/%/config.status: \
+      $(foreach l,libFMS.a libgsw.a libcvmix.a,$(DEPS)/lib/$(l)) | $(BUILD)/%/
 	cd $(@D) && $(MOM_ENV) ../../../configure -n $(MOM_ACFLAGS) \
 	 || (cat config.log && false)
 
@@ -549,11 +547,11 @@ preproc: tc4/Makefile
 preproc-compile: tc4/Makefile
 	cd tc4 && $(MAKE) executables
 
-tc4/Makefile: tc4/configure tc4/Makefile.in
-	cd $(@D) && ./configure || (cat config.log && false)
+tc4/Makefile: tc4/Makefile.in
+	cd $(@D) && ../../configure || (cat config.log && false)
 
-tc4/configure: tc4/configure.ac
-	cd $(@D) && autoreconf -if
+#tc4/configure: tc4/configure.ac
+#	cd $(@D) && autoreconf -if
 
 
 #---
