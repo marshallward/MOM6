@@ -14,11 +14,7 @@ AC_CONFIG_MACRO_DIR([../../ac/m4])
 # Explicitly assume free-form Fortran
 AC_LANG([Fortran])
 AC_FC_SRCEXT([f90])
-
-# We do not need MPI, but we want to emulate the executable used in MOM6
-AX_MPI([], [AC_MSG_ERROR([Could not find MPI launcher.])])
-AC_SUBST([FC], [$MPIFC])
-AC_SUBST([LD], [$MPILD])
+AC_SUBST([LD],[$FC])
 
 
 # netCDF configuration
@@ -76,5 +72,5 @@ MOM6_FC_CHECK_LIB([netcdff], [nf90_create], [netcdf], [path,cmode,ncid], [rc], [
 )
 
 
-AC_CONFIG_FILES([Makefile])
+AC_CONFIG_FILES([Makefile:Makefile.in])
 AC_OUTPUT

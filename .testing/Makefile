@@ -542,7 +542,7 @@ $(foreach c,$(CONFIGS),$(eval $(call CONFIG_DIM_RULE,$(c))))
 
 #---
 # Preprocessing
-# NOTE: This only support tc4, but can be generalized over all tests.
+# NOTE: This only supports tc4, but can be generalized over all tests.
 .PHONY: preproc
 preproc: tc4/Makefile
 	cd tc4 && $(MAKE) LAUNCHER="$(MPIRUN)"
