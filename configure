@@ -599,6 +599,7 @@ ac_ct_CC
 CPPFLAGS
 CFLAGS
 CC
+MAKEDEP_DIRS
 MAKEDEP_FLAGS
 MAKEDEP
 PYTHON
@@ -5297,15 +5298,17 @@ then :
 
 fi
 
-SRC_DIRS="\\
+MAKEDEP_FLAGS="${MAKEDEP_FLAGS}"
+
+MAKEDEP_FLAGS="${MAKEDEP_FLAGS# }"
+
+
+MAKEDEP_DIRS="\\
   ${srcdir}/src \\
   ${MODEL_FRAMEWORK} \\
   ${srcdir}/config_src/external \\
   ${DRIVER_DIR} \\
   ${MOM_MEMORY_DIR}"
-MAKEDEP_FLAGS="${MAKEDEP_FLAGS} ${SRC_DIRS}"
-
-MAKEDEP_FLAGS="${MAKEDEP_FLAGS# }"
 
 
 # Add makedep to config.status
@@ -5555,7 +5558,7 @@ printf '%s\n' "$ax_fc_cv_bind_c_siglongjmp" >&6; }
 then :
   SIGLONGJMP="siglongjmp"
 else case e in #(
-  e) SETJMP="siglongjmp_missing"
+  e) SIGLONGJMP="siglongjmp_missing"
  ;;
 esac
 fi
