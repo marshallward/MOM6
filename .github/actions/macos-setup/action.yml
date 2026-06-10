@@ -15,7 +15,6 @@ runs:
       run: |
         echo "::group::Install packages"
         brew reinstall gcc
-        brew install automake
         brew install netcdf
         brew install netcdf-fortran
         brew install mpich

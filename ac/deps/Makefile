@@ -64,7 +64,7 @@ lib/$(1): $(2)/build/$(1)
 $(2)/build/$(1): $(2)/build/Makefile
 	$$(MAKE) -C $$(@D) $(1)
 
-$(2)/build/Makefile: $(2)/build/Makefile.in $(2)/build/configure
+$(2)/build/Makefile: $(2)/build/Makefile.in
 	cd $$(@D) && { \
 	  MAKEDEP=$$(MAKEDEP) \
 	  ./configure --srcdir=../src \
@@ -77,6 +77,7 @@ $(2)/build/Makefile: $(2)/build/Makefile.in $(2)/build/configure
 $(2)/build/Makefile.in: Makefile.$(2).in | $(2)/build
 	cp $$< $$@
 
+# NOTE: configure is not automatically updated
 $(2)/build/configure: $(2)/build/configure.ac $(3) | $(2)/src
 	autoreconf $$(@D)
 

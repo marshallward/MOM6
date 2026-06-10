@@ -549,9 +549,10 @@ preproc: tc4/Makefile
 preproc-compile: tc4/Makefile
 	cd tc4 && $(MAKE) executables
 
-tc4/Makefile: tc4/configure tc4/Makefile.in
+tc4/Makefile: tc4/Makefile.in
 	cd $(@D) && ./configure || (cat config.log && false)
 
+# NOTE: configure is not automatically updated
 tc4/configure: tc4/configure.ac
 	cd $(@D) && autoreconf -if
 
