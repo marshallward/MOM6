@@ -313,6 +313,7 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
       ! The second line below would correspond to arguments
       !            drho_dS_dS, drho_dS_dT, drho_dT_dT, drho_dS_dP, drho_dT_dP, &
       do j=js,je ; do K=nz,2,-1
+        ! UMW TODO: Implement 2d version of this subroutine
         call calculate_density_second_derivs(T_uvh(:,j,K), S_uvh(:,j,K), pres_uvh(:,j,K), &
                    scrap, scrap, drho_dT_dT_h(:,j,K), scrap, scrap, &
                    tv%eqn_of_state, dom=EOSdom_h1)
@@ -323,7 +324,10 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
   ! If not using EOS, gradients are handled inside the do concurrent loop below
   endif
 
-  do concurrent( j=js:je , K=2:nz , I=is-1:ie ) DO_LOCALITY(local(drdkL, drdkR, drdiA, drdiB))
+  do concurrent( j=js:je , K=2:nz , I=is-1:ie ) DO_LOCALITY(local(drdkL, drdkR, drdiA, drdiB)) &
+                                                DO_LOCALITY(local(hg2A, hg2B, hg2L, hg2R, haA, haB, haL, haR)) &
+                                                DO_LOCALITY(local(dzaL, dzaR, wtA, wtB, wtL, wtR, drdx, drdz)) &
+                                                DO_LOCALITY(local(slope, mag_grad2))
     ! UMW: Since stanley parameterization requies EOS anyways, putting
     ! the use_stanley loop inside of the use_EOS loop
     if (use_EOS) then
@@ -521,6 +525,7 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
       ! UMW NOTE: changed J bounds from js-1:je to js-1:je+1 to account for extra J access below
       ! when calculate drdj
       do J=js-1,je+1 ; do K=nz,2,-1
+        ! UMW TODO: Implement 2d version of this subroutine
         call calculate_density_second_derivs(T_uvh(:,J,K), S_uvh(:,J,K), pres_uvh(:,J,K), &
                    scrap, scrap, drho_dT_dT_h(:,J,K), scrap, scrap, &
                    tv%eqn_of_state, dom=EOSdom_h1)
@@ -531,7 +536,10 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
   ! If not using EOS, gradients are handled inside the do concurrent loop below
   endif
 
-  do concurrent(J=js-1:je, K=2:nz, i=is:ie) DO_LOCALITY(local(drdkL, drdkR, drdjA, drdjB))
+  do concurrent(J=js-1:je, K=2:nz, i=is:ie) DO_LOCALITY(local(drdkL, drdkR, drdjA, drdjB)) &
+                                            DO_LOCALITY(local( hg2A, hg2B, hg2L, hg2R, haA, haB, haL, haR)) &
+                                            DO_LOCALITY(local( dzaL, dzaR, wtA, wtB, wtL, wtR, drdy, drdz)) &
+                                            DO_LOCALITY(local( slope, mag_grad2))
 
     if (use_EOS) then
       ! Estimate the horizontal density gradients along layers.
