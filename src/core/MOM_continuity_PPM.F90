@@ -697,6 +697,7 @@ subroutine zonal_mass_flux(u, h_in, h_W, h_E, uh, dt, G, GV, US, CS, OBC, por_fa
     do jj=1,j_end-j_start+1 ; do ii=1,i_end-i_start+1
       do_I(ii,jj) = .true.
     enddo ; enddo
+
     ! Set uh and duhdu.
     do k=1,nz
       if (use_visc_rem) then
@@ -706,52 +707,20 @@ subroutine zonal_mass_flux(u, h_in, h_W, h_E, uh, dt, G, GV, US, CS, OBC, por_fa
         enddo ; enddo
       endif
 
-      !**!do j=j_start,j_end ; do i=i_start,i_end
-      !**!  ii=i-i_start+1 ; jj=j-j_start+1
-      !**!  call flux_elem(u(i,j,k),h_in(i,j,k),h_in(i+1,j,k),h_W(i,j,k),h_W(i+1,j,k),h_E(i,j,k),&
-      !**!                 h_E(i+1,j,k),uh_t(ii,jj,k),duhdu(ii,jj,k),visc_rem(ii,jj,k),G%dy_Cu(i,j),&
-      !**!                 G%IareaT(i,j),G%IareaT(i+1,j),G%IdxT(i,j),G%IdxT(i+1,j),dt,CS%vol_CFL,&
-      !**!                 por_face_areaU(I,j,k))
-      !**!  if (local_open_BC) &
-      !**!    call flux_elem_OBC(u(i,j,k),h_in(i,j,k),h_in(i+1,j,k),uh_t(ii,jj,k),duhdu(ii,jj,k),&
-      !**!                       visc_rem(ii,jj,k),por_face_areaU(i,j,k),G%dy_Cu(i,j),OBC,&
-      !**!                       OBC%segnum_u(i,j))
-      !**!enddo ; enddo
-      do concurrent (j=j_start:j_end, i=i_start:i_end, u(i,j,k) > 0)
+      do j=j_start,j_end ; do i=i_start,i_end
         ii=i-i_start+1 ; jj=j-j_start+1
-        call flux_elem_plus(u(i,j,k),h_in(i,j,k),h_in(i+1,j,k),h_W(i,j,k),h_W(i+1,j,k),h_E(i,j,k),&
-                       h_E(i+1,j,k),uh_t(ii,jj,k),duhdu(ii,jj,k),visc_rem(ii,jj,k),G%dy_Cu(i,j),&
-                       G%IareaT(i,j),G%IareaT(i+1,j),G%IdxT(i,j),G%IdxT(i+1,j),dt,CS%vol_CFL,&
-                       por_face_areaU(I,j,k))
-        !*!if (local_open_BC) &
-        !*!  call flux_elem_OBC(u(i,j,k),h_in(i,j,k),h_in(i+1,j,k),uh_t(ii,jj,k),duhdu(ii,jj,k),&
-        !*!                     visc_rem(ii,jj,k),por_face_areaU(i,j,k),G%dy_Cu(i,j),OBC,&
-        !*!                     OBC%segnum_u(i,j))
-      enddo
 
-      do concurrent (j=j_start:j_end, i=i_start:i_end, u(i,j,k) < 0)
-        ii=i-i_start+1 ; jj=j-j_start+1
-        call flux_elem_minus(u(i,j,k),h_in(i,j,k),h_in(i+1,j,k),h_W(i,j,k),h_W(i+1,j,k),h_E(i,j,k),&
-                       h_E(i+1,j,k),uh_t(ii,jj,k),duhdu(ii,jj,k),visc_rem(ii,jj,k),G%dy_Cu(i,j),&
-                       G%IareaT(i,j),G%IareaT(i+1,j),G%IdxT(i,j),G%IdxT(i+1,j),dt,CS%vol_CFL,&
-                       por_face_areaU(I,j,k))
-        !*!if (local_open_BC) &
-        !*!  call flux_elem_OBC(u(i,j,k),h_in(i,j,k),h_in(i+1,j,k),uh_t(ii,jj,k),duhdu(ii,jj,k),&
-        !*!                     visc_rem(ii,jj,k),por_face_areaU(i,j,k),G%dy_Cu(i,j),OBC,&
-        !*!                     OBC%segnum_u(i,j))
-      enddo
+        call flux_elem(u(i,j,k), h_in(i,j,k), h_in(i+1,j,k), &
+            h_W(i,j,k), h_W(i+1,j,k), h_E(i,j,k), h_E(i+1,j,k), &
+            uh_t(ii,jj,k), duhdu(ii,jj,k), visc_rem(ii,jj,k), G%dy_Cu(i,j), &
+            G%IareaT(i,j), G%IareaT(i+1,j), G%IdxT(i,j), G%IdxT(i+1,j), dt, &
+            CS%vol_CFL, por_face_areaU(I,j,k))
 
-      do concurrent (j=j_start:j_end, i=i_start:i_end, u(i,j,k) == 0)
-        ii=i-i_start+1 ; jj=j-j_start+1
-        call flux_elem_zero(u(i,j,k),h_in(i,j,k),h_in(i+1,j,k),h_W(i,j,k),h_W(i+1,j,k),h_E(i,j,k),&
-                       h_E(i+1,j,k),uh_t(ii,jj,k),duhdu(ii,jj,k),visc_rem(ii,jj,k),G%dy_Cu(i,j),&
-                       G%IareaT(i,j),G%IareaT(i+1,j),G%IdxT(i,j),G%IdxT(i+1,j),dt,CS%vol_CFL,&
-                       por_face_areaU(I,j,k))
-        !*!if (local_open_BC) &
-        !*!  call flux_elem_OBC(u(i,j,k),h_in(i,j,k),h_in(i+1,j,k),uh_t(ii,jj,k),duhdu(ii,jj,k),&
-        !*!                     visc_rem(ii,jj,k),por_face_areaU(i,j,k),G%dy_Cu(i,j),OBC,&
-        !*!                     OBC%segnum_u(i,j))
-      enddo
+        if (local_open_BC) &
+          call flux_elem_OBC(u(i,j,k),h_in(i,j,k),h_in(i+1,j,k),uh_t(ii,jj,k),duhdu(ii,jj,k),&
+                             visc_rem(ii,jj,k),por_face_areaU(i,j,k),G%dy_Cu(i,j),OBC,&
+                             OBC%segnum_u(i,j))
+      enddo ; enddo
 
       if (local_specified_BC) then
         do j=j_start,j_end ; do i=i_start,i_end ; if (OBC%segnum_u(I,j) /= 0) then
@@ -1148,154 +1117,6 @@ elemental subroutine flux_elem(u, h, h_p1, h_L, h_L_p1, h_R, h_R_p1, uh, duhdu, 
   duhdu = tmp * h_marg * visc_rem
 end subroutine flux_elem
 
-!> Evaluates the zonal mass or volume fluxes in an element.
-!DIR$ ATTRIBUTES FORCEINLINE :: flux_elem_plus
-elemental subroutine flux_elem_plus(u, h, h_p1, h_L, h_L_p1, h_R, h_R_p1, uh, duhdu, visc_rem, &
-                               G_dy_Cu, G_IareaT, G_IareaT_p1, G_IdxT, G_IdxT_p1, dt, &
-                               vol_CFL, por_face_area)
-  real,                    intent(in)  :: u        !< Zonal or meridional velocity [L T-1 ~> m s-1].
-  real,                    intent(in)  :: visc_rem !< Both the fraction of the
-                        !! momentum originally in a layer that remains after a time-step
-                        !! of viscosity, and the fraction of a time-step's worth of a barotropic
-                        !! acceleration that a layer experiences after viscosity is applied [nondim].
-                        !! Visc_rem is between 0 (at the bottom) and 1 (far above the bottom).
-  real,                    intent(in)  :: h        !< Layer thickness [H ~> m or kg m-2].
-  real,                    intent(in)  :: h_p1     !< Layer thickness - offset by 1 [ H ~> m or kg m-2].
-  real,                    intent(in)  :: h_L      !< West/South edge thickness [H ~> m or kg m-2].
-  real,                    intent(in)  :: h_L_p1   !< West/South edge thickness - offset by 1 [H ~> m or kg m-2].
-  real,                    intent(in)  :: h_R      !< East/North edge thickness [H ~> m or kg m-2].
-  real,                    intent(in)  :: h_R_p1   !< East/North edge thickness - offset by 1 [H ~> m or kg m-2].
-  real,                    intent(out) :: uh       !< Zonal or meridional mass or volume transport
-                                                   !! [H L2 T-1 ~> m3 s-1 or kg s-1].
-  real,                    intent(out) :: duhdu    !< Partial derivative of uh
-                                                   !! with u [H L ~> m2 or kg m-1].
-  real,                    intent(in)  :: dt       !< Time increment [T ~> s]
-  logical,                 intent(in)  :: vol_CFL  !< If true, rescale the ratio of face areas to the
-                                                   !! cell areas when estimating the CFL number.
-  real,                    intent(in)  :: por_face_area !< fractional open area of U/V-faces [nondim].
-  real,                    intent(in)  :: G_dy_Cu  !< The grid cell's unblocked lengths of the u/v-faces
-                                                   !! of the h-cell [L ~> m].
-  real,                    intent(in)  :: G_IareaT !< The grid cell's 1/areaT [L-2 ~> m-2].
-  real,                    intent(in)  :: G_IareaT_p1 !< The grid cell's 1/areaT - offset by 1 [L-2 ~> m-2].
-  real,                    intent(in)  :: G_IdxT   !< The grid cell's 1/dxT [L-1 ~> m-1].
-  real,                    intent(in)  :: G_IdxT_p1 !< The grid cell's 1/dxT - offset by 1 [L-1 ~> m-1].
-  ! Local variables
-  real :: CFL  ! The CFL number based on the local velocity and grid spacing [nondim]
-  real :: curv_3 ! A measure of the thickness curvature over a grid length [H ~> m or kg m-2]
-  real :: h_marg ! The marginal thickness of a flux [H ~> m or kg m-2].
-  real :: tmp ! temporary variable to store precalculted values
-  real :: dh ! h differential between E/W
-
-  ! Set new values of uh and duhdu.
-  tmp = G_dy_Cu * por_face_area ! precalculate things
-  !if (vol_CFL) then ; CFL = (u * dt) * (G_dy_Cu * G_IareaT)
-  !else ; CFL = u * dt * G_IdxT ; endif
-  CFL = u * dt * G_IdxT
-  curv_3 = (h_L + h_R) - 2.0*h
-  dh = h_L - h_R
-  uh = tmp * u * &
-      (h_R + CFL * (0.5*dh + curv_3*(CFL - 1.5)))
-  h_marg = h_R + CFL * (dh + 3.0*curv_3*(CFL - 1.0))
-  duhdu = tmp * h_marg * visc_rem
-end subroutine flux_elem_plus
-
-!> Evaluates the zonal mass or volume fluxes in an element.
-!DIR$ ATTRIBUTES FORCEINLINE :: flux_elem_minus
-elemental subroutine flux_elem_minus(u, h, h_p1, h_L, h_L_p1, h_R, h_R_p1, uh, duhdu, visc_rem, &
-                               G_dy_Cu, G_IareaT, G_IareaT_p1, G_IdxT, G_IdxT_p1, dt, &
-                               vol_CFL, por_face_area)
-  real,                    intent(in)  :: u        !< Zonal or meridional velocity [L T-1 ~> m s-1].
-  real,                    intent(in)  :: visc_rem !< Both the fraction of the
-                        !! momentum originally in a layer that remains after a time-step
-                        !! of viscosity, and the fraction of a time-step's worth of a barotropic
-                        !! acceleration that a layer experiences after viscosity is applied [nondim].
-                        !! Visc_rem is between 0 (at the bottom) and 1 (far above the bottom).
-  real,                    intent(in)  :: h        !< Layer thickness [H ~> m or kg m-2].
-  real,                    intent(in)  :: h_p1     !< Layer thickness - offset by 1 [ H ~> m or kg m-2].
-  real,                    intent(in)  :: h_L      !< West/South edge thickness [H ~> m or kg m-2].
-  real,                    intent(in)  :: h_L_p1   !< West/South edge thickness - offset by 1 [H ~> m or kg m-2].
-  real,                    intent(in)  :: h_R      !< East/North edge thickness [H ~> m or kg m-2].
-  real,                    intent(in)  :: h_R_p1   !< East/North edge thickness - offset by 1 [H ~> m or kg m-2].
-  real,                    intent(out) :: uh       !< Zonal or meridional mass or volume transport
-                                                   !! [H L2 T-1 ~> m3 s-1 or kg s-1].
-  real,                    intent(out) :: duhdu    !< Partial derivative of uh
-                                                   !! with u [H L ~> m2 or kg m-1].
-  real,                    intent(in)  :: dt       !< Time increment [T ~> s]
-  logical,                 intent(in)  :: vol_CFL  !< If true, rescale the ratio of face areas to the
-                                                   !! cell areas when estimating the CFL number.
-  real,                    intent(in)  :: por_face_area !< fractional open area of U/V-faces [nondim].
-  real,                    intent(in)  :: G_dy_Cu  !< The grid cell's unblocked lengths of the u/v-faces
-                                                   !! of the h-cell [L ~> m].
-  real,                    intent(in)  :: G_IareaT !< The grid cell's 1/areaT [L-2 ~> m-2].
-  real,                    intent(in)  :: G_IareaT_p1 !< The grid cell's 1/areaT - offset by 1 [L-2 ~> m-2].
-  real,                    intent(in)  :: G_IdxT   !< The grid cell's 1/dxT [L-1 ~> m-1].
-  real,                    intent(in)  :: G_IdxT_p1 !< The grid cell's 1/dxT - offset by 1 [L-1 ~> m-1].
-  ! Local variables
-  real :: CFL  ! The CFL number based on the local velocity and grid spacing [nondim]
-  real :: curv_3 ! A measure of the thickness curvature over a grid length [H ~> m or kg m-2]
-  real :: h_marg ! The marginal thickness of a flux [H ~> m or kg m-2].
-  real :: tmp ! temporary variable to store precalculted values
-  real :: dh ! h differential between E/W
-
-  ! Set new values of uh and duhdu.
-  tmp = G_dy_Cu * por_face_area ! precalculate things
-
-  !if (vol_CFL) then ; CFL = (-u * dt) * (G_dy_Cu * G_IareaT_p1)
-  !else ; CFL = -u * dt * G_IdxT_p1 ; endif
-  CFL = -u * dt * G_IdxT_p1
-  curv_3 = (h_L_p1 + h_R_p1) - 2.0*h_p1
-  dh = h_R_p1-h_L_p1
-  uh = tmp * u * &
-      (h_L_p1 + CFL * (0.5*dh + curv_3*(CFL - 1.5)))
-  h_marg = h_L_p1 + CFL * (dh + 3.0*curv_3*(CFL - 1.0))
-
-  duhdu = tmp * h_marg * visc_rem
-end subroutine flux_elem_minus
-
-!> Evaluates the zonal mass or volume fluxes in an element.
-!DIR$ ATTRIBUTES FORCEINLINE :: flux_elem_zero
-elemental subroutine flux_elem_zero(u, h, h_p1, h_L, h_L_p1, h_R, h_R_p1, uh, duhdu, visc_rem, &
-                               G_dy_Cu, G_IareaT, G_IareaT_p1, G_IdxT, G_IdxT_p1, dt, &
-                               vol_CFL, por_face_area)
-  real,                    intent(in)  :: u        !< Zonal or meridional velocity [L T-1 ~> m s-1].
-  real,                    intent(in)  :: visc_rem !< Both the fraction of the
-                        !! momentum originally in a layer that remains after a time-step
-                        !! of viscosity, and the fraction of a time-step's worth of a barotropic
-                        !! acceleration that a layer experiences after viscosity is applied [nondim].
-                        !! Visc_rem is between 0 (at the bottom) and 1 (far above the bottom).
-  real,                    intent(in)  :: h        !< Layer thickness [H ~> m or kg m-2].
-  real,                    intent(in)  :: h_p1     !< Layer thickness - offset by 1 [ H ~> m or kg m-2].
-  real,                    intent(in)  :: h_L      !< West/South edge thickness [H ~> m or kg m-2].
-  real,                    intent(in)  :: h_L_p1   !< West/South edge thickness - offset by 1 [H ~> m or kg m-2].
-  real,                    intent(in)  :: h_R      !< East/North edge thickness [H ~> m or kg m-2].
-  real,                    intent(in)  :: h_R_p1   !< East/North edge thickness - offset by 1 [H ~> m or kg m-2].
-  real,                    intent(out) :: uh       !< Zonal or meridional mass or volume transport
-                                                   !! [H L2 T-1 ~> m3 s-1 or kg s-1].
-  real,                    intent(out) :: duhdu    !< Partial derivative of uh
-                                                   !! with u [H L ~> m2 or kg m-1].
-  real,                    intent(in)  :: dt       !< Time increment [T ~> s]
-  logical,                 intent(in)  :: vol_CFL  !< If true, rescale the ratio of face areas to the
-                                                   !! cell areas when estimating the CFL number.
-  real,                    intent(in)  :: por_face_area !< fractional open area of U/V-faces [nondim].
-  real,                    intent(in)  :: G_dy_Cu  !< The grid cell's unblocked lengths of the u/v-faces
-                                                   !! of the h-cell [L ~> m].
-  real,                    intent(in)  :: G_IareaT !< The grid cell's 1/areaT [L-2 ~> m-2].
-  real,                    intent(in)  :: G_IareaT_p1 !< The grid cell's 1/areaT - offset by 1 [L-2 ~> m-2].
-  real,                    intent(in)  :: G_IdxT   !< The grid cell's 1/dxT [L-1 ~> m-1].
-  real,                    intent(in)  :: G_IdxT_p1 !< The grid cell's 1/dxT - offset by 1 [L-1 ~> m-1].
-  ! Local variables
-  real :: CFL  ! The CFL number based on the local velocity and grid spacing [nondim]
-  real :: curv_3 ! A measure of the thickness curvature over a grid length [H ~> m or kg m-2]
-  real :: h_marg ! The marginal thickness of a flux [H ~> m or kg m-2].
-  real :: tmp ! temporary variable to store precalculted values
-  real :: dh ! h differential between E/W
-
-  ! Set new values of uh and duhdu.
-  tmp = G_dy_Cu * por_face_area ! precalculate things
-  uh = 0.0
-  h_marg = 0.5 * (h_L_p1 + h_R)
-  duhdu = tmp * h_marg * visc_rem
-end subroutine flux_elem_zero
 
 !DIR$ ATTRIBUTES FORCEINLINE :: flux_elem_OBC
 elemental subroutine flux_elem_OBC(u, h, h_p1, uh, duhdu, visc_rem, por_face_area, &
@@ -1935,6 +1756,7 @@ subroutine meridional_mass_flux(v, h_in, h_S, h_N, vh, dt, G, GV, US, CS, OBC, p
 
       do J=j_start,j_end ; do i=i_start,i_end
         ii=i-i_start+1 ; jj=j-j_start+1
+
         call flux_elem(v(i,J,k),h_in(i,J,k),h_in(i,J+1,k),h_S(i,J,k),h_S(i,J+1,k),&
                        h_N(i,J,k),h_N(i,J+1,k),vh_t(ii,JJ,k),dvhdv(ii,JJ,k),visc_rem(ii,JJ,k),&
                        G%dx_Cv(i,J),G%IareaT(i,J),G%IareaT(i,J+1),G%IdyT(i,J),G%IdyT(i,J+1),dt,CS%vol_CFL,&
@@ -1944,6 +1766,7 @@ subroutine meridional_mass_flux(v, h_in, h_S, h_N, vh, dt, G, GV, US, CS, OBC, p
                              visc_rem(ii,JJ,k),por_face_areaV(i,J,k),G%dx_Cv(i,J),OBC,&
                              OBC%segnum_v(i,J))
       enddo ; enddo
+
       if (local_specified_BC) then
         do J=J_start,J_end ; do i=i_start,i_end ; if (OBC%segnum_v(i,J) /= 0) then
           l_seg = abs(OBC%segnum_v(i,J))
@@ -3138,7 +2961,6 @@ subroutine PPM_limit_CW84(h_in, h_L, h_R, G, GV, iis, iie, jis, jie, ks, ke)
 end subroutine PPM_limit_CW84
 
 !> Return the maximum ratio of a/b or maxrat.
-!NVF$ INLINE
 pure function ratio_max(a, b, maxrat) result(ratio)
   real, intent(in) :: a       !< Numerator, in arbitrary units [A]
   real, intent(in) :: b       !< Denominator, in arbitrary units [B]
