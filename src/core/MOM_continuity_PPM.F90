@@ -837,7 +837,6 @@ subroutine zonal_mass_flux(u, h_in, h_W, h_E, uh, dt, G, GV, US, CS, OBC, por_fa
       any_simple_OBC = .false.
       if (present(uhbt) .or. set_BT_cont) then
         if (local_specified_BC .or. local_Flather_OBC) then
-          ! TODO: restore serial any_simple_OBC compute?
           do j=j_start,j_end ; do I=i_start,i_end
             ii=I-i_start+1 ; jj=j-j_start+1
             l_seg = abs(OBC%segnum_u(I,j))
@@ -1879,7 +1878,6 @@ subroutine meridional_mass_flux(v, h_in, h_S, h_N, vh, dt, G, GV, US, CS, OBC, p
       any_simple_OBC = .false.
       if (present(vhbt) .or. set_BT_cont) then
         if (local_specified_BC .or. local_Flather_OBC) then
-          ! TODO: restore any_simple_OBC compute
           do J=J_start,J_end ; do i=i_start,i_end
             ii=i-i_start+1 ; jj=J-j_start+1
             l_seg = abs(OBC%segnum_v(i,J))
@@ -2679,20 +2677,38 @@ subroutine PPM_reconstruction_x(h_in, h_W, h_E, G, GV, LB, nkblock, h_min, monot
         if (.not. segment%on_pe) cycle
         if (segment%direction == OBC_DIRECTION_E) then
           I=segment%HI%IsdB
-          do k=ks,ke ; do j=segment%HI%jsd,segment%HI%jed
-            h_W(i+1,j,k) = h_in(i,j,k)
-            h_E(i+1,j,k) = h_in(i,j,k)
-            h_W(i,j,k) = h_in(i,j,k)
-            h_E(i,j,k) = h_in(i,j,k)
-          enddo ; enddo
+          if (associated(segment%h_Reg)) then
+            do k=ks,ke ; do j=segment%HI%jsd,segment%HI%jed
+              h_W(i+1,j,k) = segment%h_Reg%h_res(i,j,k)
+              h_E(i+1,j,k) = segment%h_Reg%h_res(i,j,k)
+              h_W(i,j,k) = segment%h_Reg%h_res(i,j,k)
+              h_E(i,j,k) = segment%h_Reg%h_res(i,j,k)
+            enddo ; enddo
+          else
+            do k=ks,ke ; do j=segment%HI%jsd,segment%HI%jed
+              h_W(i+1,j,k) = h_in(i,j,k)
+              h_E(i+1,j,k) = h_in(i,j,k)
+              h_W(i,j,k) = h_in(i,j,k)
+              h_E(i,j,k) = h_in(i,j,k)
+            enddo ; enddo
+          endif
         elseif (segment%direction == OBC_DIRECTION_W) then
           I=segment%HI%IsdB
-          do k=ks,ke ; do j=segment%HI%jsd,segment%HI%jed
-            h_W(i,j,k) = h_in(i+1,j,k)
-            h_E(i,j,k) = h_in(i+1,j,k)
-            h_W(i+1,j,k) = h_in(i+1,j,k)
-            h_E(i+1,j,k) = h_in(i+1,j,k)
-          enddo ; enddo
+          if (associated(segment%h_Reg)) then
+            do k=ks,ke ; do j=segment%HI%jsd,segment%HI%jed
+              h_W(i,j,k) = segment%h_Reg%h_res(i,j,k)
+              h_E(i,j,k) = segment%h_Reg%h_res(i,j,k)
+              h_W(i+1,j,k) = segment%h_Reg%h_res(i,j,k)
+              h_E(i+1,j,k) = segment%h_Reg%h_res(i,j,k)
+            enddo ; enddo
+          else
+            do k=ks,ke ; do j=segment%HI%jsd,segment%HI%jed
+              h_W(i,j,k) = h_in(i+1,j,k)
+              h_E(i,j,k) = h_in(i+1,j,k)
+              h_W(i+1,j,k) = h_in(i+1,j,k)
+              h_E(i+1,j,k) = h_in(i+1,j,k)
+            enddo ; enddo
+          endif
         endif
       enddo
     endif
@@ -2823,20 +2839,38 @@ subroutine PPM_reconstruction_y(h_in, h_S, h_N, G, GV, LB, nkblock, h_min, monot
         if (.not. segment%on_pe) cycle
         if (segment%direction == OBC_DIRECTION_N) then
           J=segment%HI%JsdB
-          do k=ks,ke ; do i=segment%HI%isd,segment%HI%ied
-            h_S(i,j+1,k) = h_in(i,j,k)
-            h_N(i,j+1,k) = h_in(i,j,k)
-            h_S(i,j,k) = h_in(i,j,k)
-            h_N(i,j,k) = h_in(i,j,k)
-          enddo ; enddo
+          if (associated(segment%h_Reg)) then
+            do k=ks,ke ; do i=segment%HI%isd,segment%HI%ied
+              h_S(i,j+1,k) = segment%h_Reg%h_res(i,j,k)
+              h_N(i,j+1,k) = segment%h_Reg%h_res(i,j,k)
+              h_S(i,j,k) = segment%h_Reg%h_res(i,j,k)
+              h_N(i,j,k) = segment%h_Reg%h_res(i,j,k)
+            enddo ; enddo
+          else
+            do k=ks,ke ; do i=segment%HI%isd,segment%HI%ied
+              h_S(i,j+1,k) = h_in(i,j,k)
+              h_N(i,j+1,k) = h_in(i,j,k)
+              h_S(i,j,k) = h_in(i,j,k)
+              h_N(i,j,k) = h_in(i,j,k)
+            enddo ; enddo
+          endif
         elseif (segment%direction == OBC_DIRECTION_S) then
           J=segment%HI%JsdB
-          do k=ks,ke ; do i=segment%HI%isd,segment%HI%ied
-            h_S(i,j,k) = h_in(i,j+1,k)
-            h_N(i,j,k) = h_in(i,j+1,k)
-            h_S(i,j+1,k) = h_in(i,j+1,k)
-            h_N(i,j+1,k) = h_in(i,j+1,k)
-          enddo ; enddo
+          if (associated(segment%h_Reg)) then
+            do k=ks,ke ; do i=segment%HI%isd,segment%HI%ied
+              h_S(i,j,k) = segment%h_Reg%h_res(i,j,k)
+              h_N(i,j,k) = segment%h_Reg%h_res(i,j,k)
+              h_S(i,j+1,k) = segment%h_Reg%h_res(i,j,k)
+              h_N(i,j+1,k) = segment%h_Reg%h_res(i,j,k)
+            enddo ; enddo
+          else
+            do k=ks,ke ; do i=segment%HI%isd,segment%HI%ied
+              h_S(i,j,k) = h_in(i,j+1,k)
+              h_N(i,j,k) = h_in(i,j+1,k)
+              h_S(i,j+1,k) = h_in(i,j+1,k)
+              h_N(i,j+1,k) = h_in(i,j+1,k)
+            enddo ; enddo
+          endif
         endif
       enddo
     endif
