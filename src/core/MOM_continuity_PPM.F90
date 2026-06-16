@@ -29,10 +29,6 @@ public zonal_flux_thickness, meridional_flux_thickness
 public zonal_BT_mass_flux, meridional_BT_mass_flux
 public set_continuity_loop_bounds
 
-!*!! These were found to give best performance in limited tests.
-!*!integer, parameter :: default_niblock = 32 !< Default i block size for array calculations [nondim].
-!*!integer, parameter :: default_njblock = 4  !< Default j block size for array calculations [nondim].
-
 !>@{ CPU time clock IDs
 integer :: id_clock_reconstruct, id_clock_update, id_clock_correct
 !>@}
@@ -166,8 +162,6 @@ subroutine continuity_PPM(u, v, hin, h, uh, vh, dt, G, GV, US, CS, OBC, pbv, uhb
 
   niblock = CS%niblock
   njblock = CS%njblock
-  !*!if (niblock == 0) niblock = default_niblock
-  !*!if (njblock == 0) njblock = default_njblock
 
   h_min = GV%Angstrom_H
 
@@ -185,8 +179,8 @@ subroutine continuity_PPM(u, v, hin, h, uh, vh, dt, G, GV, US, CS, OBC, pbv, uhb
     !  First advect zonally, with loop bounds that accomodate the subsequent meridional advection.
     LB = set_continuity_loop_bounds(G, CS, i_stencil=.false., j_stencil=.true.)
     ! set whole-domain block sizes when ni/jblock is 0
-    if (niblock == 0) niblock = LB%ieh-LB%ish+2
-    if (njblock == 0) njblock = LB%jeh-LB%jsh+1
+    if (niblock == 0) niblock = LB%ieh - LB%ish + 2
+    if (njblock == 0) njblock = LB%jeh - LB%jsh + 1
 
     call zonal_edge_thickness(hin, h_W, h_E, G, GV, US, CS, OBC, LB)
     call zonal_mass_flux(u, hin, h_W, h_E, uh, dt, G, GV, US, CS, OBC, pbv%por_face_areaU, &
@@ -196,8 +190,8 @@ subroutine continuity_PPM(u, v, hin, h, uh, vh, dt, G, GV, US, CS, OBC, pbv, uhb
     !  Now advect meridionally, using the updated thicknesses to determine the fluxes.
     LB = set_continuity_loop_bounds(G, CS, i_stencil=.false., j_stencil=.false.)
 
-    if (niblock == 0) niblock = LB%ieh-LB%ish+1
-    if (njblock == 0) njblock = LB%jeh-LB%jsh+2
+    if (niblock == 0) niblock = LB%ieh - LB%ish + 1
+    if (njblock == 0) njblock = LB%jeh - LB%jsh + 2
 
     call meridional_edge_thickness(h, h_S, h_N, G, GV, US, CS, OBC, LB)
     call meridional_mass_flux(v, h, h_S, h_N, vh, dt, G, GV, US, CS, OBC, pbv%por_face_areaV, &
@@ -208,8 +202,8 @@ subroutine continuity_PPM(u, v, hin, h, uh, vh, dt, G, GV, US, CS, OBC, pbv, uhb
 
     !  First advect meridionally, with loop bounds that accomodate the subsequent zonal advection.
     LB = set_continuity_loop_bounds(G, CS, i_stencil=.true., j_stencil=.false.)
-    if (niblock == 0) niblock = LB%ieh-LB%ish+1
-    if (njblock == 0) njblock = LB%jeh-LB%jsh+2
+    if (niblock == 0) niblock = LB%ieh - LB%ish + 1
+    if (njblock == 0) njblock = LB%jeh - LB%jsh + 2
     call meridional_edge_thickness(hin, h_S, h_N, G, GV, US, CS, OBC, LB)
     call meridional_mass_flux(v, hin, h_S, h_N, vh, dt, G, GV, US, CS, OBC, pbv%por_face_areaV, &
                               niblock, njblock, LB, vhbt, visc_rem_v, v_cor, BT_cont, dv_cor)
@@ -217,8 +211,8 @@ subroutine continuity_PPM(u, v, hin, h, uh, vh, dt, G, GV, US, CS, OBC, pbv, uhb
 
     !  Now advect zonally, using the updated thicknesses to determine the fluxes.
     LB = set_continuity_loop_bounds(G, CS, i_stencil=.false., j_stencil=.false.)
-    if (niblock == 0) niblock = LB%ieh-LB%ish+2
-    if (njblock == 0) njblock = LB%jeh-LB%jsh+1
+    if (niblock == 0) niblock = LB%ieh - LB%ish + 2
+    if (njblock == 0) njblock = LB%jeh - LB%jsh + 1
     call zonal_edge_thickness(h, h_W, h_E, G, GV, US, CS, OBC, LB)
     call zonal_mass_flux(u, h, h_W, h_E, uh, dt, G, GV, US, CS, OBC, pbv%por_face_areaU, &
                          niblock, njblock, LB, uhbt, visc_rem_u, u_cor, BT_cont, du_cor)
@@ -256,25 +250,25 @@ subroutine continuity_3d_fluxes(u, v, h, uh, vh, dt, G, GV, US, CS, OBC, pbv)
   real :: h_E(SZI_(G),SZJ_(G),SZK_(GV)) ! East edge thicknesses in the zonal PPM reconstruction [H ~> m or kg m-2]
   real :: h_S(SZI_(G),SZJ_(G),SZK_(GV)) ! South edge thicknesses in the meridional PPM reconstruction [H ~> m or kg m-2]
   real :: h_N(SZI_(G),SZJ_(G),SZK_(GV)) ! North edge thicknesses in the meridional PPM reconstruction [H ~> m or kg m-2]
-  integer :: niblock !< i block size for array calculations [nondim].
-  integer :: njblock !< j block size for array calculations [nondim].
+  integer :: niblock
+    ! i block size for array calculations [nondim].
+  integer :: njblock
+    ! j block size for array calculations [nondim].
 
   niblock = CS%niblock
   njblock = CS%njblock
-  !*!if (niblock == 0) niblock = default_niblock
-  !*!if (njblock == 0) njblock = default_njblock
 
   call zonal_edge_thickness(h, h_W, h_E, G, GV, US, CS, OBC)
-  if (niblock == 0) niblock = G%iec-G%isc+2
-  if (njblock == 0) njblock = G%jec-G%jsc+1
-  call zonal_mass_flux(u, h, h_W, h_E, uh, dt, G, GV, US, CS, OBC, pbv%por_face_areaU, &
-                       niblock=niblock, njblock=njblock)
+  if (niblock == 0) niblock = G%iec - G%isc + 2
+  if (njblock == 0) njblock = G%jec - G%jsc + 1
+  call zonal_mass_flux(u, h, h_W, h_E, uh, dt, G, GV, US, CS, OBC, &
+      pbv%por_face_areaU, niblock=niblock, njblock=njblock)
 
   call meridional_edge_thickness(h, h_S, h_N, G, GV, US, CS, OBC)
-  if (niblock == 0) niblock = G%iec-G%isc+1
-  if (njblock == 0) njblock = G%jec-G%jsc+2
-  call meridional_mass_flux(v, h, h_S, h_N, vh, dt, G, GV, US, CS, OBC, pbv%por_face_areaV, &
-                            niblock=niblock, njblock=njblock)
+  if (niblock == 0) niblock = G%iec - G%isc + 1
+  if (njblock == 0) njblock = G%jec - G%jsc + 2
+  call meridional_mass_flux(v, h, h_S, h_N, vh, dt, G, GV, US, CS, OBC, &
+      pbv%por_face_areaV, niblock=niblock, njblock=njblock)
 
 end subroutine continuity_3d_fluxes
 
@@ -373,13 +367,13 @@ subroutine continuity_adjust_vel(u, v, h, dt, G, GV, US, CS, OBC, pbv, uhbt, vhb
   real :: h_E(SZI_(G),SZJ_(G),SZK_(GV)) ! East edge thicknesses in the zonal PPM reconstruction [H ~> m or kg m-2]
   real :: h_S(SZI_(G),SZJ_(G),SZK_(GV)) ! South edge thicknesses in the meridional PPM reconstruction [H ~> m or kg m-2]
   real :: h_N(SZI_(G),SZJ_(G),SZK_(GV)) ! North edge thicknesses in the meridional PPM reconstruction [H ~> m or kg m-2]
-  integer :: niblock !< i block size for array calculations [nondim].
-  integer :: njblock !< j block size for array calculations [nondim].
+  integer :: niblock
+    ! i block size for array calculations [nondim].
+  integer :: njblock
+    ! j block size for array calculations [nondim].
 
   niblock = CS%niblock
   njblock = CS%njblock
-  !*!if (niblock == 0) niblock = default_niblock
-  !*!if (njblock == 0) njblock = default_njblock
 
   ! It might not be necessary to separate the input velocity array from the adjusted velocities,
   ! but it seems safer to do so, even if it might be less efficient.
@@ -387,18 +381,18 @@ subroutine continuity_adjust_vel(u, v, h, dt, G, GV, US, CS, OBC, pbv, uhbt, vhb
   v_in(:,:,:) = v(:,:,:)
 
   call zonal_edge_thickness(h, h_W, h_E, G, GV, US, CS, OBC)
-  if (niblock == 0) niblock = G%iec-G%isc+2
-  if (njblock == 0) njblock = G%jec-G%jsc+1
+
+  if (niblock == 0) niblock = G%iec - G%isc + 2
+  if (njblock == 0) njblock = G%jec - G%jsc + 1
   call zonal_mass_flux(u_in, h, h_W, h_E, uh, dt, G, GV, US, CS, OBC, pbv%por_face_areaU, &
-                       niblock=niblock, njblock=njblock, &
-                       uhbt=uhbt, visc_rem_u=visc_rem_u, u_cor=u)
+      niblock=niblock, njblock=njblock, uhbt=uhbt, visc_rem_u=visc_rem_u, u_cor=u)
 
   call meridional_edge_thickness(h, h_S, h_N, G, GV, US, CS, OBC)
-  if (niblock == 0) niblock = G%iec-G%isc+1
-  if (njblock == 0) njblock = G%jec-G%jsc+2
+
+  if (niblock == 0) niblock = G%iec - G%isc + 1
+  if (njblock == 0) njblock = G%jec - G%jsc + 2
   call meridional_mass_flux(v_in, h, h_S, h_N, vh, dt, G, GV, US, CS, OBC, pbv%por_face_areaV, &
-                            niblock=niblock, njblock=njblock, &
-                            vhbt=vhbt, visc_rem_v=visc_rem_v, v_cor=v)
+      niblock=niblock, njblock=njblock, vhbt=vhbt, visc_rem_v=visc_rem_v, v_cor=v)
 
 end subroutine continuity_adjust_vel
 
@@ -432,7 +426,6 @@ subroutine continuity_zonal_convergence(h, uh, dt, G, GV, LB, hin, hmin)
       h(i,j,k) = max( hin(i,j,k) - dt * G%IareaT(i,j) * (uh(I,j,k) - uh(I-1,j,k)), h_min )
     enddo ; enddo ; enddo
   else
-    ! untested
     do k=1,nz ; do j=jsh,jeh ; do i=ish,ieh
       h(i,j,k) = max( h(i,j,k) - dt * G%IareaT(i,j) * (uh(I,j,k) - uh(I-1,j,k)), h_min )
     enddo ; enddo ; enddo
@@ -467,7 +460,6 @@ subroutine continuity_merdional_convergence(h, vh, dt, G, GV, LB, hin, hmin)
   h_min = 0.0 ; if (present(hmin)) h_min = hmin
 
   if (present(hin)) then
-    ! untested
     do k=1,nz ; do j=jsh,jeh ; do i=ish,ieh
       h(i,j,k) = max( hin(i,j,k) - dt * G%IareaT(i,j) * (vh(i,J,k) - vh(i,J-1,k)), h_min )
     enddo ; enddo ; enddo
@@ -518,8 +510,8 @@ subroutine zonal_edge_thickness(h_in, h_W, h_E, G, GV, US, CS, OBC, LB_in)
       h_W(i,j,k) = h_in(i,j,k) ; h_E(i,j,k) = h_in(i,j,k)
     enddo ; enddo ; enddo
   else
-    call PPM_reconstruction_x(h_in, h_W, h_E, G, GV, LB, &
-                              nkblock, 2.0*GV%Angstrom_H, CS%monotonic, CS%simple_2nd, OBC)
+    call PPM_reconstruction_x(h_in, h_W, h_E, G, GV, LB, nkblock, &
+        2.0*GV%Angstrom_H, CS%monotonic, CS%simple_2nd, OBC)
   endif
 
   call cpu_clock_end(id_clock_reconstruct)
@@ -559,13 +551,12 @@ subroutine meridional_edge_thickness(h_in, h_S, h_N, G, GV, US, CS, OBC, LB_in)
   if (nkblock == 0) nkblock = nz
 
   if (CS%upwind_1st) then
-    ! untested
     do k=1,nz ; do j=jsh-1,jeh+1 ; do i=ish,ieh
       h_S(i,j,k) = h_in(i,j,k) ; h_N(i,j,k) = h_in(i,j,k)
     enddo ; enddo ; enddo
   else
-    call PPM_reconstruction_y(h_in, h_S, h_N, G, GV, LB, &
-                              nkblock, 2.0*GV%Angstrom_H, CS%monotonic, CS%simple_2nd, OBC)
+    call PPM_reconstruction_y(h_in, h_S, h_N, G, GV, LB, nkblock, &
+        2.0*GV%Angstrom_H, CS%monotonic, CS%simple_2nd, OBC)
   endif
 
   call cpu_clock_end(id_clock_reconstruct)
@@ -576,8 +567,6 @@ end subroutine meridional_edge_thickness
 !> Calculates the mass or volume fluxes through the zonal faces, and other related quantities.
 subroutine zonal_mass_flux(u, h_in, h_W, h_E, uh, dt, G, GV, US, CS, OBC, por_face_areaU, &
                            niblock, njblock, LB_in, uhbt, visc_rem_u, u_cor, BT_cont, du_cor)
-  integer,                 intent(in)    :: niblock !< i block size for array calculations [nondim].
-  integer,                 intent(in)    :: njblock !< j block size for array calculations [nondim].
   type(ocean_grid_type),   intent(in)    :: G    !< Ocean's grid structure.
   type(verticalGrid_type), intent(in)    :: GV   !< Ocean's vertical grid structure.
   real, dimension(SZIB_(G),SZJ_(G),SZK_(GV)), &
@@ -597,6 +586,8 @@ subroutine zonal_mass_flux(u, h_in, h_W, h_E, uh, dt, G, GV, US, CS, OBC, por_fa
   type(ocean_OBC_type),    pointer       :: OBC  !< Open boundaries control structure.
   real, dimension(SZIB_(G), SZJ_(G), SZK_(G)), &
                            intent(in)    :: por_face_areaU !< fractional open area of U-faces [nondim]
+  integer,                 intent(in)    :: niblock !< i block size for array calculations [nondim].
+  integer,                 intent(in)    :: njblock !< j block size for array calculations [nondim].
   type(cont_loop_bounds_type), &
                  optional, intent(in)    :: LB_in !< Loop bounds structure.
   real, dimension(SZIB_(G),SZJ_(G)), &
@@ -691,8 +682,8 @@ subroutine zonal_mass_flux(u, h_in, h_W, h_E, uh, dt, G, GV, US, CS, OBC, por_fa
   endif
 
   do j_start=jsh,jeh,njblock ; do i_start=ish-1,ieh,niblock
-    i_end = min(i_start+niblock-1,ieh)
-    j_end = min(j_start+njblock-1,jeh)
+    i_end = min(i_start + niblock - 1, ieh)
+    j_end = min(j_start + njblock - 1, jeh)
 
     do jj=1,j_end-j_start+1 ; do ii=1,i_end-i_start+1
       do_I(ii,jj) = .true.
@@ -717,15 +708,16 @@ subroutine zonal_mass_flux(u, h_in, h_W, h_E, uh, dt, G, GV, US, CS, OBC, por_fa
             CS%vol_CFL, por_face_areaU(I,j,k))
 
         if (local_open_BC) &
-          call flux_elem_OBC(u(i,j,k),h_in(i,j,k),h_in(i+1,j,k),uh_t(ii,jj,k),duhdu(ii,jj,k),&
-                             visc_rem(ii,jj,k),por_face_areaU(i,j,k),G%dy_Cu(i,j),OBC,&
-                             OBC%segnum_u(i,j))
+          call flux_elem_OBC(u(i,j,k), h_in(i,j,k), h_in(i+1,j,k), &
+              uh_t(ii,jj,k), duhdu(ii,jj,k), visc_rem(ii,jj,k), &
+              por_face_areaU(i,j,k), G%dy_Cu(i,j), OBC, OBC%segnum_u(i,j))
       enddo ; enddo
 
       if (local_specified_BC) then
         do j=j_start,j_end ; do i=i_start,i_end ; if (OBC%segnum_u(I,j) /= 0) then
           l_seg = abs(OBC%segnum_u(I,j))
-          if (OBC%segment(l_seg)%specified) uh_t(I-i_start+1,j-j_start+1,k) = OBC%segment(l_seg)%normal_trans(I,j,k)
+          if (OBC%segment(l_seg)%specified) &
+            uh_t(I-i_start+1,j-j_start+1,k) = OBC%segment(l_seg)%normal_trans(I,j,k)
         endif ; enddo ; enddo
       endif
     enddo
@@ -1141,7 +1133,6 @@ elemental subroutine flux_elem_OBC(u, h, h_p1, uh, duhdu, visc_rem, por_face_are
   type(ocean_OBC_type),     intent(in)    :: OBC !< Open boundaries control structure.
   integer, intent(in) :: l_seg !< Segment index.
 
-  ! untested
   if (l_seg /= 0) then
     if (OBC%segment(abs(l_seg))%open) then
       if (l_seg > 0) then !  OBC_DIRECTION_E or OBC_DIRECTION_N
@@ -1241,7 +1232,6 @@ subroutine zonal_flux_thickness(u, h, h_W, h_E, h_u, dt, G, GV, US, LB, vol_CFL,
   local_open_BC = .false.
   if (associated(OBC)) local_open_BC = OBC%open_u_BCs_exist_globally
   if (local_open_BC) then
-    ! untested
     do n = 1, OBC%number_of_segments
       if (OBC%segment(n)%open .and. OBC%segment(n)%is_E_or_W) then
         I = OBC%segment(n)%HI%IsdB
@@ -2186,7 +2176,7 @@ subroutine meridional_flux_thickness(v, h, h_S, h_N, h_v, dt, G, GV, US, LB, vol
 
   local_open_BC = .false.
   if (associated(OBC)) local_open_BC = OBC%open_v_BCs_exist_globally
-  ! untested - will need to be refactored to be performant on GPUs
+
   if (local_open_BC) then
     do n = 1, OBC%number_of_segments
       if (OBC%segment(n)%open .and. OBC%segment(n)%is_N_or_S) then
@@ -2630,7 +2620,6 @@ subroutine PPM_reconstruction_x(h_in, h_W, h_E, G, GV, LB, nkblock, h_min, monot
     ke = min(ks + nkblock - 1, nz)
 
     if (simple_2nd) then
-      ! untested
       do k=ks,ke ; do j=jsl,jel ; do i=isl,iel
         h_im1 = G%mask2dT(i-1,j) * h_in(i-1,j,k) + (1.0-G%mask2dT(i-1,j)) * h_in(i,j,k)
         h_ip1 = G%mask2dT(i+1,j) * h_in(i+1,j,k) + (1.0-G%mask2dT(i+1,j)) * h_in(i,j,k)
@@ -2654,7 +2643,6 @@ subroutine PPM_reconstruction_x(h_in, h_W, h_E, G, GV, LB, nkblock, h_min, monot
       enddo ; enddo ; enddo
 
       if (local_open_BC) then
-        ! untested
         do n=1, OBC%number_of_segments
           segment => OBC%segment(n)
           if (.not. segment%on_pe) cycle
@@ -2686,7 +2674,6 @@ subroutine PPM_reconstruction_x(h_in, h_W, h_E, G, GV, LB, nkblock, h_min, monot
     endif
 
     if (local_open_BC) then
-      ! untested
       do n=1, OBC%number_of_segments
         segment => OBC%segment(n)
         if (.not. segment%on_pe) cycle
@@ -2711,7 +2698,6 @@ subroutine PPM_reconstruction_x(h_in, h_W, h_E, G, GV, LB, nkblock, h_min, monot
     endif
 
     if (monotonic) then
-      ! untested
       call PPM_limit_CW84(h_in, h_W, h_E, G, GV, isl, iel, jsl, jel, ks, ke)
     else
       call PPM_limit_pos(h_in, h_W, h_E, h_min, G, GV, isl, iel, jsl, jel, ks, ke)
@@ -2758,7 +2744,7 @@ subroutine PPM_reconstruction_y(h_in, h_S, h_N, G, GV, LB, nkblock, h_min, monot
     local_open_BC = OBC%open_v_BCs_exist_globally
   endif
 
-  isl = LB%ish ; iel = LB%ieh ; jsl = LB%jsh-1 ; jel = LB%jeh+1 ; nz = G%ke
+  isl = LB%ish ; iel = LB%ieh ; jsl = LB%jsh-1 ; jel = LB%jeh+1 ; nz = GV%ke
 
   ! This is the stencil of the reconstruction, not the scheme overall.
   stencil = 2 ; if (simple_2nd) stencil = 1
@@ -2780,7 +2766,6 @@ subroutine PPM_reconstruction_y(h_in, h_S, h_N, G, GV, LB, nkblock, h_min, monot
     ke = min(ks + nkblock - 1, nz)
 
     if (simple_2nd) then
-      ! untested
       do k=ks,ke ; do j=jsl,jel ; do i=isl,iel
         h_jm1 = G%mask2dT(i,j-1) * h_in(i,j-1,k) + (1.0-G%mask2dT(i,j-1)) * h_in(i,j,k)
         h_jp1 = G%mask2dT(i,j+1) * h_in(i,j+1,k) + (1.0-G%mask2dT(i,j+1)) * h_in(i,j,k)
@@ -2804,7 +2789,6 @@ subroutine PPM_reconstruction_y(h_in, h_S, h_N, G, GV, LB, nkblock, h_min, monot
       enddo ; enddo ; enddo
 
       if (local_open_BC) then
-        ! untested
         do n=1, OBC%number_of_segments
           segment => OBC%segment(n)
           if (.not. segment%on_pe) cycle
@@ -2834,7 +2818,6 @@ subroutine PPM_reconstruction_y(h_in, h_S, h_N, G, GV, LB, nkblock, h_min, monot
     endif
 
     if (local_open_BC) then
-      ! untested
       do n=1, OBC%number_of_segments
         segment => OBC%segment(n)
         if (.not. segment%on_pe) cycle
@@ -2859,7 +2842,6 @@ subroutine PPM_reconstruction_y(h_in, h_S, h_N, G, GV, LB, nkblock, h_min, monot
     endif
 
     if (monotonic) then
-      ! untested
       call PPM_limit_CW84(h_in, h_S, h_N, G, GV, isl, iel, jsl, jel, ks, ke)
     else
       call PPM_limit_pos(h_in, h_S, h_N, h_min, G, GV, isl, iel, jsl, jel, ks, ke)
@@ -2942,7 +2924,6 @@ subroutine PPM_limit_CW84(h_in, h_L, h_R, G, GV, iis, iie, jis, jie, ks, ke)
   real    :: FunFac   ! A curious product of the thickness slope and curvature [H2 ~> m2 or kg2 m-4]
   integer :: i, j, k
 
-  ! untested
   do k=ks,ke ; do j=jis,jie ; do i=iis,iie
     ! This limiter monotonizes the parabola following
     ! Colella and Woodward, 1984, Eq. 1.10
