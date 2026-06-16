@@ -384,15 +384,17 @@ subroutine continuity_adjust_vel(u, v, h, dt, G, GV, US, CS, OBC, pbv, uhbt, vhb
 
   if (niblock == 0) niblock = G%iec - G%isc + 2
   if (njblock == 0) njblock = G%jec - G%jsc + 1
-  call zonal_mass_flux(u_in, h, h_W, h_E, uh, dt, G, GV, US, CS, OBC, pbv%por_face_areaU, &
-      niblock=niblock, njblock=njblock, uhbt=uhbt, visc_rem_u=visc_rem_u, u_cor=u)
+  call zonal_mass_flux(u_in, h, h_W, h_E, uh, dt, G, GV, US, CS, OBC, &
+                       pbv%por_face_areaU, niblock, njblock, &
+                       uhbt=uhbt, visc_rem_u=visc_rem_u, u_cor=u)
 
   call meridional_edge_thickness(h, h_S, h_N, G, GV, US, CS, OBC)
 
   if (niblock == 0) niblock = G%iec - G%isc + 1
   if (njblock == 0) njblock = G%jec - G%jsc + 2
-  call meridional_mass_flux(v_in, h, h_S, h_N, vh, dt, G, GV, US, CS, OBC, pbv%por_face_areaV, &
-      niblock=niblock, njblock=njblock, vhbt=vhbt, visc_rem_v=visc_rem_v, v_cor=v)
+  call meridional_mass_flux(v_in, h, h_S, h_N, vh, dt, G, GV, US, CS, OBC, &
+                            pbv%por_face_areaV, niblock, njblock, &
+                            vhbt=vhbt, visc_rem_v=visc_rem_v, v_cor=v)
 
 end subroutine continuity_adjust_vel
 
@@ -3074,8 +3076,10 @@ subroutine continuity_PPM_init(Time, G, GV, US, param_file, diag, CS, OBC)
   character(len=256) :: mesg
   character(len=10) :: niblock_dflt_str, njblock_dflt_str, nkblock_dflt_str
   ! These were found to give best performance in limited tests.
-  integer, parameter :: default_niblock = 32 !< Default i block size for array calculations [nondim].
-  integer, parameter :: default_njblock = 4  !< Default j block size for array calculations [nondim].
+  !*!integer, parameter :: default_niblock = 32 !< Default i block size for array calculations [nondim].
+  !*!integer, parameter :: default_njblock = 4  !< Default j block size for array calculations [nondim].
+  integer, parameter :: default_niblock = 64 !< Default i block size for array calculations [nondim].
+  integer, parameter :: default_njblock = 1  !< Default j block size for array calculations [nondim].
   integer, parameter :: default_nkblock = 1  !< Default k block size for reconstruction calculations [nondim].
 
   CS%initialized = .true.
