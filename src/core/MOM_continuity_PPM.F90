@@ -1020,13 +1020,15 @@ subroutine zonal_BT_mass_flux(u, h_in, h_W, h_E, uhbt, dt, G, GV, US, CS, OBC, p
 
   ! This sets uh and duhdu.
   do k=1,nz ; do j=jsh,jeh ; do I=ish-1,ieh
-    call flux_elem(u(I,j,k), h_in(I,j,k), h_in(I+1,j,k), h_W(I,j,k), h_W(I+1,j,k), h_E(I,j,k), &
-                   h_E(I+1,j,k), uh(I,j,k), duhdu(I,j,k), 1.0, G%dy_Cu(I,j), G%IareaT(I,j), &
-                   G%IareaT(I+1,j), G%IdxT(I,j), G%IdxT(I+1,j), dt, CS%vol_CFL, &
-                   por_face_areaU(I,j,k))
+    call flux_elem(u(I,j,k), h_in(I,j,k), h_in(I+1,j,k), &
+        h_W(I,j,k), h_W(I+1,j,k), h_E(I,j,k), h_E(I+1,j,k), &
+        uh(I,j,k), duhdu(I,j,k), 1.0, G%dy_Cu(I,j), &
+        G%IareaT(I,j), G%IareaT(I+1,j), G%IdxT(I,j), G%IdxT(I+1,j), dt, &
+        CS%vol_CFL, por_face_areaU(I,j,k))
     if (local_specified_BC) &
-      call flux_elem_OBC(u(I,j,k), h_in(I,j,k), h_in(I+1,j,k), uh(I,j,k), duhdu(I,j,k), 1.0, &
-                         por_face_areaU(I,j,k), G%dy_Cu(I,j), OBC, OBC%segnum_u(I,j))
+      call flux_elem_OBC(u(I,j,k), h_in(I,j,k), h_in(I+1,j,k), &
+          uh(I,j,k), duhdu(I,j,k), 1.0, por_face_areaU(I,j,k), G%dy_Cu(I,j), &
+          OBC, OBC%segnum_u(I,j))
   enddo ; enddo ; enddo
 
   do k=1,nz ; do j=jsh,jeh ; do i=ish-1,ieh
@@ -1045,43 +1047,64 @@ subroutine zonal_BT_mass_flux(u, h_in, h_W, h_E, uhbt, dt, G, GV, US, CS, OBC, p
 
 end subroutine zonal_BT_mass_flux
 
+
 !> Evaluates the zonal mass or volume fluxes in an element.
 !DIR$ ATTRIBUTES FORCEINLINE :: flux_elem
-elemental subroutine flux_elem(u, h, h_p1, h_L, h_L_p1, h_R, h_R_p1, uh, duhdu, visc_rem, &
-                               G_dy_Cu, G_IareaT, G_IareaT_p1, G_IdxT, G_IdxT_p1, dt, &
-                               vol_CFL, por_face_area)
-  real,                    intent(in)  :: u        !< Zonal or meridional velocity [L T-1 ~> m s-1].
-  real,                    intent(in)  :: visc_rem !< Both the fraction of the
-                        !! momentum originally in a layer that remains after a time-step
-                        !! of viscosity, and the fraction of a time-step's worth of a barotropic
-                        !! acceleration that a layer experiences after viscosity is applied [nondim].
-                        !! Visc_rem is between 0 (at the bottom) and 1 (far above the bottom).
-  real,                    intent(in)  :: h        !< Layer thickness [H ~> m or kg m-2].
-  real,                    intent(in)  :: h_p1     !< Layer thickness - offset by 1 [ H ~> m or kg m-2].
-  real,                    intent(in)  :: h_L      !< West/South edge thickness [H ~> m or kg m-2].
-  real,                    intent(in)  :: h_L_p1   !< West/South edge thickness - offset by 1 [H ~> m or kg m-2].
-  real,                    intent(in)  :: h_R      !< East/North edge thickness [H ~> m or kg m-2].
-  real,                    intent(in)  :: h_R_p1   !< East/North edge thickness - offset by 1 [H ~> m or kg m-2].
-  real,                    intent(out) :: uh       !< Zonal or meridional mass or volume transport
-                                                   !! [H L2 T-1 ~> m3 s-1 or kg s-1].
-  real,                    intent(out) :: duhdu    !< Partial derivative of uh
-                                                   !! with u [H L ~> m2 or kg m-1].
-  real,                    intent(in)  :: dt       !< Time increment [T ~> s]
-  logical,                 intent(in)  :: vol_CFL  !< If true, rescale the ratio of face areas to the
-                                                   !! cell areas when estimating the CFL number.
-  real,                    intent(in)  :: por_face_area !< fractional open area of U/V-faces [nondim].
-  real,                    intent(in)  :: G_dy_Cu  !< The grid cell's unblocked lengths of the u/v-faces
-                                                   !! of the h-cell [L ~> m].
-  real,                    intent(in)  :: G_IareaT !< The grid cell's 1/areaT [L-2 ~> m-2].
-  real,                    intent(in)  :: G_IareaT_p1 !< The grid cell's 1/areaT - offset by 1 [L-2 ~> m-2].
-  real,                    intent(in)  :: G_IdxT   !< The grid cell's 1/dxT [L-1 ~> m-1].
-  real,                    intent(in)  :: G_IdxT_p1 !< The grid cell's 1/dxT - offset by 1 [L-1 ~> m-1].
-  ! Local variables
-  real :: CFL  ! The CFL number based on the local velocity and grid spacing [nondim]
-  real :: curv_3 ! A measure of the thickness curvature over a grid length [H ~> m or kg m-2]
-  real :: h_marg ! The marginal thickness of a flux [H ~> m or kg m-2].
-  real :: tmp ! temporary variable to store precalculted values
-  real :: dh ! h differential between E/W
+elemental subroutine flux_elem(u, h, h_p1, h_L, h_L_p1, h_R, h_R_p1, uh, &
+    duhdu, visc_rem, G_dy_Cu, G_IareaT, G_IareaT_p1, G_IdxT, G_IdxT_p1, dt, &
+    vol_CFL, por_face_area)
+  real, intent(in) :: u
+    !< Zonal or meridional velocity [L T-1 ~> m s-1].
+  real, intent(in) :: visc_rem
+    !< Both the fraction of the momentum originally in a layer that remains
+    !! after a time-step of viscosity, and the fraction of a time-step's worth
+    !! of a barotropic acceleration that a layer experiences after viscosity is
+    !! applied.  Visc_rem is between 0 (at the bottom) and 1 (far above the
+    !! bottom).  [nondim]
+  real, intent(in) :: h
+    !< Layer thickness [H ~> m or kg m-2].
+  real, intent(in) :: h_p1
+    !< Layer thickness - offset by 1 [ H ~> m or kg m-2].
+  real, intent(in) :: h_L
+    !< West/South edge thickness [H ~> m or kg m-2].
+  real, intent(in) :: h_L_p1
+    !< West/South edge thickness - offset by 1 [H ~> m or kg m-2].
+  real, intent(in) :: h_R
+    !< East/North edge thickness [H ~> m or kg m-2].
+  real, intent(in) :: h_R_p1
+    !< East/North edge thickness - offset by 1 [H ~> m or kg m-2].
+  real, intent(out) :: uh
+    !< Zonal or meridional mass or volume transport [H L2 T-1 ~> m3 s-1 or kg s-1].
+  real, intent(out) :: duhdu
+    !< Partial derivative of uh with u [H L ~> m2 or kg m-1].
+  real, intent(in) :: dt
+    !< Time increment [T ~> s]
+  logical, intent(in) :: vol_CFL
+    !< If true, rescale the ratio of face areas to the cell areas when
+    !! estimating the CFL number.
+  real, intent(in) :: por_face_area
+    !< fractional open area of U/V-faces [nondim].
+  real, intent(in) :: G_dy_Cu
+    !< The grid cell's unblocked lengths of the u/v-faces of the h-cell [L ~> m].
+  real, intent(in) :: G_IareaT
+    !< The grid cell's 1/areaT [L-2 ~> m-2].
+  real, intent(in) :: G_IareaT_p1
+    !< The grid cell's 1/areaT - offset by 1 [L-2 ~> m-2].
+  real, intent(in) :: G_IdxT
+    !< The grid cell's 1/dxT [L-1 ~> m-1].
+  real, intent(in) :: G_IdxT_p1
+    !< The grid cell's 1/dxT - offset by 1 [L-1 ~> m-1].
+
+  real :: CFL
+    ! CFL number based on the local velocity and grid spacing [nondim]
+  real :: curv_3
+    ! Measure of the thickness curvature over a grid length [H ~> m or kg m-2]
+  real :: h_marg
+    ! Marginal thickness of a flux [H ~> m or kg m-2].
+  real :: tmp
+    ! temporary variable to store precalculated values
+  real :: dh
+    ! h differential between E/W
 
   ! Set new values of uh and duhdu.
   tmp = G_dy_Cu * por_face_area ! precalculate things
@@ -1110,40 +1133,47 @@ end subroutine flux_elem
 
 
 !DIR$ ATTRIBUTES FORCEINLINE :: flux_elem_OBC
-elemental subroutine flux_elem_OBC(u, h, h_p1, uh, duhdu, visc_rem, por_face_area, &
-                                     G_dy_Cu, OBC, l_seg)
-  real,                     intent(in)    :: u        !< Zonal/meridional velocity [L T-1 ~> m s-1].
-  real,                     intent(in)    :: visc_rem !< Both the fraction of the
-                        !! momentum originally in a layer that remains after a time-step
-                        !! of viscosity, and the fraction of a time-step's worth of a barotropic
-                        !! acceleration that a layer experiences after viscosity is applied [nondim].
-                        !! Visc_rem is between 0 (at the bottom) and 1 (far above the bottom).
-  real,                     intent(in)    :: h        !< Layer thickness [H ~> m or kg m-2].
-  real,                     intent(in)    :: h_p1     !< Layer thickness offset by 1 [H ~> m or kg m-2].
-  real,                     intent(inout) :: uh       !< Zonal/meridional mass or volume
-                                                      !! transport [H L2 T-1 ~> m3 s-1 or kg s-1].
-  real,                     intent(inout) :: duhdu    !< Partial derivative of uh
-                                                      !! with u [H L ~> m2 or kg m-1].
-  real,                     intent(in)    :: por_face_area !< fractional open area of U/V-faces
-                                                            !! [nondim].
-  real,                     intent(in)    :: G_dy_Cu  !< The grid cell's unblocked lengths of the
-                                                      !! u/v-faces of the h-cell [L ~> m].
-          !! ratio of face areas to the cell areas when estimating the CFL number.
-  type(ocean_OBC_type),     intent(in)    :: OBC !< Open boundaries control structure.
-  integer, intent(in) :: l_seg !< Segment index.
+elemental subroutine flux_elem_OBC(u, h, h_p1, uh, duhdu, visc_rem, &
+    por_face_area, G_dy_Cu, OBC, l_seg)
+  real, intent(in) :: u
+    !< Zonal/meridional velocity [L T-1 ~> m s-1].
+  real, intent(in) :: visc_rem
+    !< Both the fraction of the momentum originally in a layer that remains
+    !! after a time-step of viscosity, and the fraction of a time-step's worth
+    !! of a barotropic acceleration that a layer experiences after viscosity is
+    !! applied.  Visc_rem is between 0 (at the bottom) and 1 (far above the
+    !! bottom).  [nondim]
+  real, intent(in) :: h
+    !< Layer thickness [H ~> m or kg m-2].
+  real, intent(in) :: h_p1
+    !< Layer thickness offset by 1 [H ~> m or kg m-2].
+  real, intent(inout) :: uh
+    !< Zonal/meridional mass or volume transport [H L2 T-1 ~> m3 s-1 or kg s-1].
+  real, intent(inout) :: duhdu
+    !< Partial derivative of uh with u [H L ~> m2 or kg m-1].
+  real, intent(in) :: por_face_area
+    !< fractional open area of U/V-faces [nondim].
+  real, intent(in) :: G_dy_Cu
+    !< The grid cell's unblocked lengths of the u/v-faces of the h-cell [L ~> m].
+    !! ratio of face areas to the cell areas when estimating the CFL number.
+  type(ocean_OBC_type), intent(in) :: OBC
+    !< Open boundaries control structure.
+  integer, intent(in) :: l_seg
+    !< Segment index.
 
   if (l_seg /= 0) then
     if (OBC%segment(abs(l_seg))%open) then
-      if (l_seg > 0) then !  OBC_DIRECTION_E or OBC_DIRECTION_N
+      if (l_seg > 0) then
+        ! OBC_DIRECTION_E or OBC_DIRECTION_N
         uh = (G_dy_Cu * por_face_area) * u * h
         duhdu = (G_dy_Cu * por_face_area) * h * visc_rem
-      else !  OBC_DIRECTION_W or OBC_DIRECTION_S
+      else
+        ! OBC_DIRECTION_W or OBC_DIRECTION_S
         uh = (G_dy_Cu * por_face_area) * u * h_p1
         duhdu = (G_dy_Cu* por_face_area) * h_p1 * visc_rem
       endif
     endif
   endif
-
 end subroutine flux_elem_OBC
 
 
@@ -1401,14 +1431,18 @@ subroutine zonal_flux_adjust(u, h_in, h_W, h_E, uhbt, uh_tot_0, duhdu_tot_0, &
         ii=i-i_start+1 ; jj=j-j_start+1
         if (do_I(ii,jj)) then
           u_new = u(i,j,k) + du(ii,jj) * visc_rem(ii,jj,k)
-          call flux_elem(u_new,h_in(i,j,k),h_in(i+1,j,k),h_W(i,j,k),h_W(i+1,j,k),h_E(i,j,k),&
-                         h_E(i+1,j,k),uh_3d(ii,jj,k),duhdu,visc_rem(ii,jj,k),G%dy_Cu(i,j),&
-                         G%IareaT(i,j),G%IareaT(i+1,j),G%IdxT(i,j),G%IdxT(i+1,j),dt,CS%vol_CFL,&
-                         por_face_areaU(i,j,k))
+
+          call flux_elem(u_new, h_in(i,j,k), h_in(i+1,j,k), &
+              h_W(i,j,k), h_W(i+1,j,k), h_E(i,j,k), h_E(i+1,j,k), &
+              uh_3d(ii,jj,k), duhdu, visc_rem(ii,jj,k), G%dy_Cu(i,j), &
+              G%IareaT(i,j), G%IareaT(i+1,j), G%IdxT(i,j), G%IdxT(i+1,j), &
+              dt, CS%vol_CFL, por_face_areaU(i,j,k))
+
           if (local_open_BC) &
-            call flux_elem_OBC(u_new,h_in(i,j,k),h_in(i+1,j,k),uh_3d(ii,jj,k),duhdu,&
-                               visc_rem(ii,jj,k),por_face_areaU(i,j,k),G%dy_Cu(i,j),OBC,&
-                               OBC%segnum_u(i,j))
+            call flux_elem_OBC(u_new, h_in(i,j,k), h_in(i+1,j,k), &
+                uh_3d(ii,jj,k), duhdu, visc_rem(ii,jj,k), &
+                por_face_areaU(i,j,k), G%dy_Cu(i,j), OBC, OBC%segnum_u(i,j))
+
           uh_err(ii,jj) = uh_err(ii,jj) + uh_3d(ii,jj,k)
           duhdu_tot(ii,jj) = duhdu_tot(ii,jj) + duhdu
         endif
@@ -1553,18 +1587,27 @@ subroutine set_zonal_BT_cont(u, h_in, h_W, h_E, BT_cont, uh_tot_0, duhdu_tot_0, 
         u_L = u(i,j,k) + duL(ii,jj) * visc_rem(ii,jj,k)
         u_R = u(i,j,k) + duR(ii,jj) * visc_rem(ii,jj,k)
         u_0 = u(i,j,k) + du0(ii,jj) * visc_rem(ii,jj,k)
-        call flux_elem(u_0,h_in(i,j,k),h_in(i+1,j,k),h_W(i,j,k),h_W(i+1,j,k),h_E(i,j,k),&
-                       h_E(i+1,j,k),uh_0,duhdu_0,visc_rem(ii,jj,k),G%dy_Cu(i,j),&
-                       G%IareaT(i,j),G%IareaT(i+1,j),G%IdxT(i,j),G%IdxT(i+1,j),dt,CS%vol_CFL,&
-                       por_face_areaU(i,j,k))
-        call flux_elem(u_L,h_in(i,j,k),h_in(i+1,j,k),h_W(i,j,k),h_W(i+1,j,k),h_E(i,j,k),&
-                       h_E(i+1,j,k),uh_L,duhdu_L,visc_rem(ii,jj,k),G%dy_Cu(i,j),&
-                       G%IareaT(i,j),G%IareaT(i+1,j),G%IdxT(i,j),G%IdxT(i+1,j),dt,CS%vol_CFL,&
-                       por_face_areaU(i,j,k))
-        call flux_elem(u_R,h_in(i,j,k),h_in(i+1,j,k),h_W(i,j,k),h_W(i+1,j,k),h_E(i,j,k),&
-                       h_E(i+1,j,k),uh_R,duhdu_R,visc_rem(ii,jj,k),G%dy_Cu(i,j),&
-                       G%IareaT(i,j),G%IareaT(i+1,j),G%IdxT(i,j),G%IdxT(i+1,j),dt,CS%vol_CFL,&
-                       por_face_areaU(i,j,k))
+
+        call flux_elem(u_0, h_in(i,j,k), h_in(i+1,j,k), &
+            h_W(i,j,k), h_W(i+1,j,k), h_E(i,j,k), h_E(i+1,j,k), &
+            uh_0, duhdu_0, visc_rem(ii,jj,k), G%dy_Cu(i,j), &
+            G%IareaT(i,j), G%IareaT(i+1,j), &
+            G%IdxT(i,j), G%IdxT(i+1,j), dt, CS%vol_CFL, &
+            por_face_areaU(i,j,k))
+
+        call flux_elem(u_L, h_in(i,j,k), h_in(i+1,j,k), &
+            h_W(i,j,k), h_W(i+1,j,k), h_E(i,j,k), h_E(i+1,j,k), &
+            uh_L, duhdu_L, visc_rem(ii,jj,k), G%dy_Cu(i,j), &
+            G%IareaT(i,j), G%IareaT(i+1,j), &
+            G%IdxT(i,j), G%IdxT(i+1,j), dt, CS%vol_CFL, &
+            por_face_areaU(i,j,k))
+
+        call flux_elem(u_R, h_in(i,j,k), h_in(i+1,j,k), &
+            h_W(i,j,k), h_W(i+1,j,k), h_E(i,j,k), h_E(i+1,j,k), &
+            uh_R, duhdu_R, visc_rem(ii,jj,k), G%dy_Cu(i,j), &
+            G%IareaT(i,j), G%IareaT(i+1,j), &
+            G%IdxT(i,j), G%IdxT(i+1,j), dt, CS%vol_CFL, por_face_areaU(i,j,k))
+
         ! XXX: Bracket duhdu to suppress FMA optimization
         FAmt_0(ii,jj) = FAmt_0(ii,jj) + (duhdu_0)
         FAmt_L(ii,jj) = FAmt_L(ii,jj) + (duhdu_L)
@@ -1746,14 +1789,16 @@ subroutine meridional_mass_flux(v, h_in, h_S, h_N, vh, dt, G, GV, US, CS, OBC, p
       do J=j_start,j_end ; do i=i_start,i_end
         ii=i-i_start+1 ; jj=j-j_start+1
 
-        call flux_elem(v(i,J,k),h_in(i,J,k),h_in(i,J+1,k),h_S(i,J,k),h_S(i,J+1,k),&
-                       h_N(i,J,k),h_N(i,J+1,k),vh_t(ii,JJ,k),dvhdv(ii,JJ,k),visc_rem(ii,JJ,k),&
-                       G%dx_Cv(i,J),G%IareaT(i,J),G%IareaT(i,J+1),G%IdyT(i,J),G%IdyT(i,J+1),dt,CS%vol_CFL,&
-                       por_face_areaV(i,J,k))
+        call flux_elem(v(i,J,k), h_in(i,J,k), h_in(i,J+1,k), &
+            h_S(i,J,k), h_S(i,J+1,k), h_N(i,J,k), h_N(i,J+1,k), &
+            vh_t(ii,JJ,k), dvhdv(ii,JJ,k), visc_rem(ii,JJ,k), G%dx_Cv(i,J), &
+            G%IareaT(i,J), G%IareaT(i,J+1), G%IdyT(i,J), G%IdyT(i,J+1), dt, &
+            CS%vol_CFL, por_face_areaV(i,J,k))
+
         if (local_open_BC) &
-          call flux_elem_OBC(v(i,J,k),h_in(i,J,k),h_in(i,J+1,k),vh_t(ii,JJ,k),dvhdv(ii,JJ,k),&
-                             visc_rem(ii,JJ,k),por_face_areaV(i,J,k),G%dx_Cv(i,J),OBC,&
-                             OBC%segnum_v(i,J))
+          call flux_elem_OBC(v(i,J,k), h_in(i,J,k), h_in(i,J+1,k), &
+              vh_t(ii,JJ,k), dvhdv(ii,JJ,k), visc_rem(ii,JJ,k), &
+              por_face_areaV(i,J,k), G%dx_Cv(i,J), OBC, OBC%segnum_v(i,J))
       enddo ; enddo
 
       if (local_specified_BC) then
@@ -2062,13 +2107,16 @@ subroutine meridional_BT_mass_flux(v, h_in, h_S, h_N, vhbt, dt, G, GV, US, CS, O
 
   ! This sets vh and dvhdv.
   do k=1,nz ; do J=jsh-1,jeh ; do i=ish,ieh
-    call flux_elem(v(i,J,k), h_in(i,J,k), h_in(i,J+1,k), h_S(i,J,k), h_S(i,J+1,k), &
-                   h_N(i,J,k), h_N(i,J+1,k), vh(i,J,k), dvhdv(i,J,k), 1.0, G%dx_Cv(I,j), &
-                   G%IareaT(i,J), G%IareaT(i,J+1), G%IdyT(i,J), G%IdyT(i,J+1), dt, &
-                   CS%vol_CFL, por_face_areaV(i,J,k))
+    call flux_elem(v(i,J,k), h_in(i,J,k), h_in(i,J+1,k), &
+        h_S(i,J,k), h_S(i,J+1,k), h_N(i,J,k), h_N(i,J+1,k), &
+        vh(i,J,k), dvhdv(i,J,k), 1.0, G%dx_Cv(I,j), &
+        G%IareaT(i,J), G%IareaT(i,J+1), G%IdyT(i,J), G%IdyT(i,J+1), dt, &
+        CS%vol_CFL, por_face_areaV(i,J,k))
+
     if (local_specified_BC) &
-      call flux_elem_OBC(v(i,J,k), h_in(i,J,k), h_in(i,J+1,k), vh(i,J,k), dvhdv(i,J,k), 1.0, &
-                         por_face_areaV(i,J,k), G%dx_Cv(i,J), OBC, OBC%segnum_v(i,J))
+      call flux_elem_OBC(v(i,J,k), h_in(i,J,k), h_in(i,J+1,k), vh(i,J,k), &
+          dvhdv(i,J,k), 1.0, por_face_areaV(i,J,k), G%dx_Cv(i,J), OBC, &
+          OBC%segnum_v(i,J))
   enddo ; enddo ; enddo
 
   do k=1,nz ; do j=jsh-1,jeh ; do i=ish,ieh
@@ -2351,14 +2399,17 @@ subroutine meridional_flux_adjust(v, h_in, h_S, h_N, vhbt, vh_tot_0, dvhdv_tot_0
         ii=i-i_start+1 ; jj=j-j_start+1
         if (do_I(ii,JJ)) then
           v_new = v(i,J,k) + dv(ii,JJ) * visc_rem(ii,JJ,k)
-          call flux_elem(v_new,h_in(i,J,k),h_in(i,J+1,k),h_S(i,J,k),h_S(i,J+1,k),h_N(i,J,k),&
-                         h_N(i,J+1,k),vh_3d(ii,JJ,k),dvhdv,visc_rem(ii,JJ,k),G%dx_Cv(i,J),&
-                         G%IareaT(i,J),G%IareaT(i,J+1),G%IdyT(i,J),G%IdyT(i,J+1),dt,CS%vol_CFL,&
-                         por_face_areaV(i,J,k))
+          call flux_elem(v_new, h_in(i,J,k), h_in(i,J+1,k), &
+              h_S(i,J,k), h_S(i,J+1,k), h_N(i,J,k), h_N(i,J+1,k), &
+              vh_3d(ii,JJ,k), dvhdv, visc_rem(ii,JJ,k), G%dx_Cv(i,J), &
+              G%IareaT(i,J), G%IareaT(i,J+1), G%IdyT(i,J), G%IdyT(i,J+1), dt, &
+              CS%vol_CFL, por_face_areaV(i,J,k))
+
           if (local_open_BC) &
-            call flux_elem_OBC(v_new,h_in(i,J,k),h_in(i,J+1,k),vh_3d(ii,JJ,k),dvhdv,&
-                               visc_rem(ii,JJ,k),por_face_areaV(i,J,k),G%dx_Cv(i,J),OBC,&
-                               OBC%segnum_v(i,J))
+            call flux_elem_OBC(v_new, h_in(i,J,k), h_in(i,J+1,k), &
+                vh_3d(ii,JJ,k), dvhdv, visc_rem(ii,JJ,k), &
+                por_face_areaV(i,J,k), G%dx_Cv(i,J), OBC, OBC%segnum_v(i,J))
+
           vh_err(ii,JJ) = vh_err(ii,JJ) + vh_3d(ii,JJ,k)
           dvhdv_tot(ii,JJ) = dvhdv_tot(ii,JJ) + dvhdv
         endif
@@ -2507,15 +2558,27 @@ subroutine set_merid_BT_cont(v, h_in, h_S, h_N, BT_cont, vh_tot_0, dvhdv_tot_0, 
         v_L = v(i,J,k) + dvL(ii,JJ) * visc_rem(ii,JJ,k)
         v_R = v(i,J,k) + dvR(ii,JJ) * visc_rem(ii,JJ,k)
         v_0 = v(i,J,k) + dv0(ii,JJ) * visc_rem(ii,JJ,k)
-        call flux_elem(v_0,h_in(i,J,k),h_in(i,J+1,k),h_S(i,J,k),h_S(i,J+1,k),h_N(i,J,k),&
-                        h_N(i,J+1,k),vh_0,dvhdv_0,visc_rem(ii,JJ,k),G%dx_Cv(i,J),G%IareaT(i,J),&
-                        G%IareaT(i,J+1),G%IdyT(i,J),G%IdyT(i,J+1),dt,CS%vol_CFL,por_face_areaV(i,J,k))
-        call flux_elem(v_L,h_in(i,J,k),h_in(i,J+1,k),h_S(i,J,k),h_S(i,J+1,k),h_N(i,J,k),&
-                        h_N(i,J+1,k),vh_L,dvhdv_L,visc_rem(ii,JJ,k),G%dx_Cv(i,J),G%IareaT(i,J),&
-                        G%IareaT(i,J+1),G%IdyT(i,J),G%IdyT(i,J+1),dt,CS%vol_CFL,por_face_areaV(i,J,k))
-        call flux_elem(v_R,h_in(i,J,k),h_in(i,J+1,k),h_S(i,J,k),h_S(i,J+1,k),h_N(i,J,k),&
-                        h_N(i,J+1,k),vh_R,dvhdv_R,visc_rem(ii,JJ,k),G%dx_Cv(i,J),G%IareaT(i,J),&
-                        G%IareaT(i,J+1),G%IdyT(i,J),G%IdyT(i,J+1),dt,CS%vol_CFL,por_face_areaV(i,J,k))
+
+        call flux_elem(v_0, h_in(i,J,k), h_in(i,J+1,k), &
+            h_S(i,J,k), h_S(i,J+1,k), h_N(i,J,k), h_N(i,J+1,k), &
+            vh_0, dvhdv_0, visc_rem(ii,JJ,k), G%dx_Cv(i,J), &
+            G%IareaT(i,J), G%IareaT(i,J+1), G%IdyT(i,J), G%IdyT(i,J+1), dt, &
+            CS%vol_CFL, por_face_areaV(i,J,k))
+
+        call flux_elem(v_L, h_in(i,J,k), h_in(i,J+1,k), &
+            h_S(i,J,k), h_S(i,J+1,k), &
+            h_N(i,J,k), h_N(i,J+1,k), &
+            vh_L, dvhdv_L, visc_rem(ii,JJ,k), G%dx_Cv(i,J), &
+            G%IareaT(i,J), G%IareaT(i,J+1), &
+            G%IdyT(i,J), G%IdyT(i,J+1), dt, CS%vol_CFL, &
+            por_face_areaV(i,J,k))
+
+        call flux_elem(v_R, h_in(i,J,k), h_in(i,J+1,k), &
+            h_S(i,J,k), h_S(i,J+1,k), h_N(i,J,k), h_N(i,J+1,k), &
+            vh_R, dvhdv_R, visc_rem(ii,JJ,k), G%dx_Cv(i,J), &
+            G%IareaT(i,J), G%IareaT(i,J+1), G%IdyT(i,J), G%IdyT(i,J+1), dt, &
+            CS%vol_CFL, por_face_areaV(i,J,k))
+
         ! XXX: Bracket duhdu to suppress FMA optimization
         FAmt_0(ii,JJ) = FAmt_0(ii,JJ) + (dvhdv_0)
         FAmt_L(ii,JJ) = FAmt_L(ii,JJ) + (dvhdv_L)
