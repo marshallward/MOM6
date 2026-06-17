@@ -1338,12 +1338,13 @@ subroutine zonal_flux_adjust(u, h_in, h_W, h_E, uhbt, uh_tot_0, duhdu_tot_0, &
                        !! A logical flag indicating which I values to work on.
   real, dimension(SZIB_(G), SZJ_(G), SZK_(G)), &
                                       intent(in) :: por_face_areaU !< fractional open area of U-faces [nondim]
-  real, dimension(niblock,njblock,SZK_(GV)), intent(inout) :: uh_3d !<
+  real, dimension(niblock,njblock,SZK_(GV)), intent(inout), optional :: uh_3d !<
                        !! Volume flux through zonal faces = u*h*dy [H L2 T-1 ~> m3 s-1 or kg s-1].
   type(ocean_OBC_type),            optional, pointer       :: OBC !< Open boundaries control structure.
   ! Local variables
   real :: &
     u_new, &   ! The velocity with the correction added [L T-1 ~> m s-1].
+    uh, &      ! The volume flux through a zonal face [H L2 T-1 ~> m3 s-1 or kg s-1].
     duhdu      ! Partial derivative of uh with u [H L ~> m2 or kg m-1].
   real, dimension(niblock,njblock) :: &
     uh_err, &  ! Difference between uhbt and the summed uh [H L2 T-1 ~> m3 s-1 or kg s-1].
@@ -1436,16 +1437,17 @@ subroutine zonal_flux_adjust(u, h_in, h_W, h_E, uhbt, uh_tot_0, duhdu_tot_0, &
 
           call flux_elem(u_new, h_in(i,j,k), h_in(i+1,j,k), &
               h_W(i,j,k), h_W(i+1,j,k), h_E(i,j,k), h_E(i+1,j,k), &
-              uh_3d(ii,jj,k), duhdu, visc_rem(ii,jj,k), G%dy_Cu(i,j), &
+              uh, duhdu, visc_rem(ii,jj,k), G%dy_Cu(i,j), &
               G%IareaT(i,j), G%IareaT(i+1,j), G%IdxT(i,j), G%IdxT(i+1,j), &
               dt, CS%vol_CFL, por_face_areaU(i,j,k))
 
           if (local_open_BC) &
             call flux_elem_OBC(u_new, h_in(i,j,k), h_in(i+1,j,k), &
-                uh_3d(ii,jj,k), duhdu, visc_rem(ii,jj,k), &
+                uh, duhdu, visc_rem(ii,jj,k), &
                 por_face_areaU(i,j,k), G%dy_Cu(i,j), OBC, OBC%segnum_u(i,j))
 
-          uh_err(ii,jj) = uh_err(ii,jj) + uh_3d(ii,jj,k)
+          if (present(uh_3d)) uh_3d(ii,jj,k) = uh
+          uh_err(ii,jj) = uh_err(ii,jj) + uh
           duhdu_tot(ii,jj) = duhdu_tot(ii,jj) + duhdu
         endif
       enddo ; enddo
@@ -1542,7 +1544,6 @@ subroutine set_zonal_BT_cont(u, h_in, h_W, h_E, BT_cont, uh_tot_0, duhdu_tot_0, 
                   ! flow is truly upwind [nondim]
   real :: Idt     ! The inverse of the time step [T-1 ~> s-1].
   integer :: i, j, k, nz, ii, jj !< Tile loop indices [nondim].
-  real, dimension(niblock,njblock,SZK_(GV)) :: uh_tmp
 
   nz = GV%ke ; Idt = 1.0 / dt
   min_visc_rem = 0.1 ; CFL_min = 1e-6
@@ -1553,7 +1554,8 @@ subroutine set_zonal_BT_cont(u, h_in, h_W, h_E, BT_cont, uh_tot_0, duhdu_tot_0, 
   enddo ; enddo
   call zonal_flux_adjust(u, h_in, h_W, h_E, zeros, uh_tot_0, duhdu_tot_0, du0, &
                         du_max_CFL, du_min_CFL, dt, G, GV, US, CS, visc_rem, &
-                        i_start, i_end, j_start, j_end, do_I, por_face_areaU, niblock, njblock, uh_tmp)
+                        i_start, i_end, j_start, j_end, do_I, por_face_areaU, &
+                        niblock, njblock)
 
   ! Determine the westerly- and easterly- fluxes.  Choose a sufficiently
   ! negative velocity correction for the easterly-flux, and a sufficiently
@@ -2320,6 +2322,7 @@ subroutine meridional_flux_adjust(v, h_in, h_S, h_N, vhbt, vh_tot_0, dvhdv_tot_0
     dv_min, &  ! Lower limit on dv correction based on CFL limits and previous iterations [L T-1 ~> m s-1]
     dv_max     ! Upper limit on dv correction based on CFL limits and previous iterations [L T-1 ~> m s-1]
   real :: &
+    vh, &      ! The volume flux through a meridional face [H L2 T-1 ~> m3 s-1 or kg s-1].
     v_new   ! The velocity with the correction added [L T-1 ~> m s-1].
   real :: dv_prev ! The previous value of dv [L T-1 ~> m s-1].
   real :: ddv     ! The change in dv from the previous iteration [L T-1 ~> m s-1].
@@ -2403,16 +2406,17 @@ subroutine meridional_flux_adjust(v, h_in, h_S, h_N, vhbt, vh_tot_0, dvhdv_tot_0
           v_new = v(i,J,k) + dv(ii,JJ) * visc_rem(ii,JJ,k)
           call flux_elem(v_new, h_in(i,J,k), h_in(i,J+1,k), &
               h_S(i,J,k), h_S(i,J+1,k), h_N(i,J,k), h_N(i,J+1,k), &
-              vh_3d(ii,JJ,k), dvhdv, visc_rem(ii,JJ,k), G%dx_Cv(i,J), &
+              vh, dvhdv, visc_rem(ii,JJ,k), G%dx_Cv(i,J), &
               G%IareaT(i,J), G%IareaT(i,J+1), G%IdyT(i,J), G%IdyT(i,J+1), dt, &
               CS%vol_CFL, por_face_areaV(i,J,k))
 
           if (local_open_BC) &
             call flux_elem_OBC(v_new, h_in(i,J,k), h_in(i,J+1,k), &
-                vh_3d(ii,JJ,k), dvhdv, visc_rem(ii,JJ,k), &
+                vh, dvhdv, visc_rem(ii,JJ,k), &
                 por_face_areaV(i,J,k), G%dx_Cv(i,J), OBC, OBC%segnum_v(i,J))
 
-          vh_err(ii,JJ) = vh_err(ii,JJ) + vh_3d(ii,JJ,k)
+          if (present(vh_3d)) vh_3d(ii,JJ,k) = vh
+          vh_err(ii,JJ) = vh_err(ii,JJ) + vh
           dvhdv_tot(ii,JJ) = dvhdv_tot(ii,JJ) + dvhdv
         endif
       enddo ; enddo
@@ -2511,7 +2515,6 @@ subroutine set_merid_BT_cont(v, h_in, h_S, h_N, BT_cont, vh_tot_0, dvhdv_tot_0, 
                   ! flow is truly upwind [nondim]
   real :: Idt     ! The inverse of the time step [T-1 ~> s-1].
   integer :: i, j, k, nz, ii, jj
-  real :: vh_tmp(niblock,njblock,SZK_(GV))
 
   nz = GV%ke ; Idt = 1.0 / dt
   min_visc_rem = 0.1 ; CFL_min = 1e-6
@@ -2524,7 +2527,7 @@ subroutine set_merid_BT_cont(v, h_in, h_S, h_N, BT_cont, vh_tot_0, dvhdv_tot_0, 
   call meridional_flux_adjust(v, h_in, h_S, h_N, zeros, vh_tot_0, dvhdv_tot_0, dv0, &
                               dv_max_CFL, dv_min_CFL, dt, G, GV, US, CS, visc_rem, &
                               i_start, i_end, j_start, j_end, do_I, por_face_areaV, &
-                              niblock, njblock, vh_tmp)
+                              niblock, njblock)
 
   !   Determine the southerly- and northerly- fluxes.  Choose a sufficiently
   ! negative velocity correction for the northerly-flux, and a sufficiently
