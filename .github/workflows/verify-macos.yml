@@ -339,7 +339,7 @@ jobs:
 
       - name: Run OpenMP test
         run: |
-          make -C .testing -j \
+          make -C .testing -j -k \
           -o build/symmetric/MOM6 \
           -o build/openmp/MOM6 \
           test.openmp
