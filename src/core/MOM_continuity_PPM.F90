@@ -1025,14 +1025,15 @@ subroutine zonal_BT_mass_flux(u, h_in, h_W, h_E, uhbt, dt, G, GV, US, CS, OBC, p
   real :: uh(SZIB_(G),SZJ_(G),SZK_(GV))      ! Volume flux through zonal faces = u*h*dy [H L2 T-1 ~> m3 s-1 or kg s-1]
   real :: duhdu(SZIB_(G),SZJ_(G),SZK_(GV))   ! Partial derivative of uh with u [H L ~> m2 or kg m-1].
   integer :: i, j, k, ish, ieh, jsh, jeh, nz, l_seg
-  logical :: local_specified_BC
+  logical :: local_specified_BC, local_open_BC
   logical, dimension(SZJ_(G)) :: OBC_in_row
 
   call cpu_clock_begin(id_clock_correct)
 
-  local_specified_BC = .false.
+  local_specified_BC = .false. ; local_open_BC = .false.
   if (associated(OBC)) then ; if (OBC%OBC_pe) then
     local_specified_BC = OBC%specified_u_BCs_exist_globally
+    local_open_BC = OBC%open_u_BCs_exist_globally
   endif ; endif
 
   if (present(LB_in)) then
@@ -1059,7 +1060,8 @@ subroutine zonal_BT_mass_flux(u, h_in, h_W, h_E, uhbt, dt, G, GV, US, CS, OBC, p
         uh(I,j,k), duhdu(I,j,k), 1.0, G%dy_Cu(I,j), &
         G%IareaT(I,j), G%IareaT(I+1,j), G%IdxT(I,j), G%IdxT(I+1,j), dt, &
         CS%vol_CFL, por_face_areaU(I,j,k), CS%h_marg_min)
-    if (local_specified_BC) &
+
+    if (local_open_BC) &
       call flux_elem_OBC(u(I,j,k), h_in(I,j,k), h_in(I+1,j,k), &
           uh(I,j,k), duhdu(I,j,k), 1.0, por_face_areaU(I,j,k), G%dy_Cu(I,j), &
           OBC, OBC%segnum_u(I,j), CS%h_marg_min)
@@ -1209,7 +1211,7 @@ elemental subroutine flux_elem_OBC(u, h, h_p1, uh, duhdu, visc_rem, &
       else
         ! OBC_DIRECTION_W or OBC_DIRECTION_S
         uh = (G_dy_Cu * por_face_area) * u * h_p1
-        duhdu = (G_dy_Cu* por_face_area) * max(h_p1, h_marg_min) * visc_rem
+        duhdu = (G_dy_Cu * por_face_area) * max(h_p1, h_marg_min) * visc_rem
       endif
     endif
   endif
@@ -2176,13 +2178,14 @@ subroutine meridional_BT_mass_flux(v, h_in, h_S, h_N, vhbt, dt, G, GV, US, CS, O
   real :: vh(SZI_(G),SZJB_(G),SZK_(GV)) ! Volume flux through meridional faces = v*h*dx [H L2 T-1 ~> m3 s-1 or kg s-1]
   real ::  dvhdv(SZI_(G),SZJB_(G),SZK_(GV))  ! Partial derivative of vh with v [H L ~> m2 or kg m-1].
   integer :: i, j, k, ish, ieh, jsh, jeh, nz, l_seg
-  logical :: local_specified_BC, OBC_in_row(SZJB_(G))
+  logical :: local_specified_BC, local_open_BC, OBC_in_row(SZJB_(G))
 
   call cpu_clock_begin(id_clock_correct)
 
-  local_specified_BC = .false.
+  local_specified_BC = .false. ; local_open_BC = .false.
   if (associated(OBC)) then ; if (OBC%OBC_pe) then
     local_specified_BC = OBC%specified_v_BCs_exist_globally
+    local_open_BC = OBC%open_v_BCs_exist_globally
   endif ; endif
 
   if (present(LB_in)) then
@@ -2209,7 +2212,7 @@ subroutine meridional_BT_mass_flux(v, h_in, h_S, h_N, vhbt, dt, G, GV, US, CS, O
         G%IareaT(i,J), G%IareaT(i,J+1), G%IdyT(i,J), G%IdyT(i,J+1), dt, &
         CS%vol_CFL, por_face_areaV(i,J,k), CS%h_marg_min)
 
-    if (local_specified_BC) &
+    if (local_open_BC) &
       call flux_elem_OBC(v(i,J,k), h_in(i,J,k), h_in(i,J+1,k), vh(i,J,k), &
           dvhdv(i,J,k), 1.0, por_face_areaV(i,J,k), G%dx_Cv(i,J), OBC, &
           OBC%segnum_v(i,J), CS%h_marg_min)
