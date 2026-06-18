@@ -3192,11 +3192,10 @@ subroutine continuity_PPM_init(Time, G, GV, US, param_file, diag, CS, OBC)
   character(len=40)  :: mdl = "MOM_continuity_PPM" ! This module's name.
   character(len=256) :: mesg
   character(len=10) :: niblock_dflt_str, njblock_dflt_str, nkblock_dflt_str
-  ! These were found to give best performance in limited tests.
-  !*!integer, parameter :: default_niblock = 32 !< Default i block size for array calculations [nondim].
-  !*!integer, parameter :: default_njblock = 4  !< Default j block size for array calculations [nondim].
+  ! Flux blocking
   integer, parameter :: default_niblock = 64 !< Default i block size for array calculations [nondim].
   integer, parameter :: default_njblock = 1  !< Default j block size for array calculations [nondim].
+  ! Reconstruction blocking
   integer, parameter :: default_nkblock = 1  !< Default k block size for reconstruction calculations [nondim].
 
   CS%initialized = .true.
