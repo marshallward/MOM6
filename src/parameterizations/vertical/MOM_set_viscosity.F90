@@ -41,7 +41,7 @@ implicit none ; private
 
 #include <MOM_memory.h>
 
-public set_viscous_BBL, set_viscous_ML, set_visc_init, set_visc_end
+public set_viscous_BBL, set_viscous_ML, viscous_ML_block_sizes, set_visc_init, set_visc_end
 public set_visc_register_restarts, set_u_at_v, set_v_at_u
 public remap_vertvisc_aux_vars
 
@@ -49,6 +49,13 @@ public remap_vertvisc_aux_vars
 ! consistency testing. These are noted in comments with units like Z, H, L, and T, along with
 ! their mks counterparts with notation like "a velocity [Z T-1 ~> m s-1]".  If the units
 ! vary with the Boussinesq approximation, the Boussinesq variant is given first.
+
+integer, parameter :: default_niblock = 0 !< Default i block size for array calculations [nondim].
+#ifdef __NVCOMPILER_OPENMP_GPU
+integer, parameter :: default_njblock = 0  !< Default j block size for array calculations [nondim].
+#else
+integer, parameter :: default_njblock = 1  !< Default j block size for array calculations [nondim].
+#endif
 
 !> Control structure for MOM_set_visc
 type, public :: set_visc_CS ; private
@@ -150,6 +157,8 @@ type, public :: set_visc_CS ; private
   integer :: id_nkml_visc_u = -1, id_nkml_visc_v = -1
   !>@}
   integer :: id_clock_ML = -1 !< CPU time clock id for set_viscous_ML
+  integer, public :: niblock = default_niblock !< The i block size used in array calculations [nondim].
+  integer, public :: njblock = default_njblock !< The j block size used in array calculations [nondim].
 end type set_visc_CS
 
 contains
@@ -2045,12 +2054,28 @@ pure function set_u_at_v(u, h, G, GV, i, j, k, mask2dCu, OBC)
 
 end function set_u_at_v
 
+!> Returns the i- and j-direction block sizes to use for the viscous mixed layer solver,
+!! substituting the full computational domain extent when the configured block size is zero.
+subroutine viscous_ML_block_sizes(CS, G, niblock, njblock)
+  type(set_visc_CS),     intent(in)  :: CS      !< The control structure returned by a previous
+                                                !! call to set_visc_init.
+  type(ocean_grid_type), intent(in)  :: G       !< The ocean's grid structure.
+  integer,               intent(out) :: niblock !< i block size for array calculations [nondim].
+  integer,               intent(out) :: njblock !< j block size for array calculations [nondim].
+
+  niblock = CS%niblock
+  if (niblock == 0) niblock = G%iedB-G%isdB+1
+  njblock = CS%njblock
+  if (njblock == 0) njblock = G%jedB-G%jsdB+1
+
+end subroutine viscous_ML_block_sizes
+
 !> Calculates the thickness of the surface boundary layer for applying an elevated viscosity.
 !!
 !! A bulk Richardson criterion or the thickness of the topmost NKML layers (with a bulk mixed layer)
 !! are currently used.  The thicknesses are given in terms of fractional layers, so that this
 !! thickness will move as the thickness of the topmost layers change.
-subroutine set_viscous_ML(u, v, h, tv, forces, visc, dt, G, GV, US, CS, TILE_SIZE_X, TILE_SIZE_Y)
+subroutine set_viscous_ML(u, v, h, tv, forces, visc, dt, G, GV, US, CS, niblock, njblock)
   type(ocean_grid_type),   intent(inout) :: G    !< The ocean's grid structure.
   type(verticalGrid_type), intent(in)    :: GV   !< The ocean's vertical grid structure.
   type(unit_scale_type),   intent(in)    :: US   !< A dimensional unit scaling type
@@ -2069,11 +2094,11 @@ subroutine set_viscous_ML(u, v, h, tv, forces, visc, dt, G, GV, US, CS, TILE_SIZ
   real,                    intent(in)    :: dt   !< Time increment [T ~> s].
   type(set_visc_CS),       intent(inout) :: CS   !< The control structure returned by a previous
                                                  !! call to set_visc_init.
-  integer,                 intent(in)    :: TILE_SIZE_X !< Size of loop tile in x dim
-  integer,                 intent(in)    :: TILE_SIZE_Y !< Size of loop tile in y dim
+  integer,                 intent(in)    :: niblock !< i block size for array calculations [nondim].
+  integer,                 intent(in)    :: njblock !< j block size for array calculations [nondim].
 
   ! Local variables
-  real, dimension(TILE_SIZE_X,TILE_SIZE_Y) :: &
+  real, dimension(niblock,njblock) :: &
     htot, &     !   The total thickness of the layers that are within the
                 ! surface mixed layer [H ~> m or kg m-2].
     dztot, &    !   The distance from the surface to the bottom of the layers that are
@@ -2113,13 +2138,13 @@ subroutine set_viscous_ML(u, v, h, tv, forces, visc, dt, G, GV, US, CS, TILE_SIZ
   real :: U_star_2d(SZI_(G),SZJ_(G)) ! The wind friction velocity in thickness-based units,
                 ! calculated using the Boussinesq reference density or the time-evolving
                 ! surface density in non-Boussinesq mode [H T-1 ~> m s-1 or kg m-2 s-1]
-  real :: h_at_vel(TILE_SIZE_X,TILE_SIZE_Y,SZK_(GV))! Layer thickness at velocity points,
+  real :: h_at_vel(niblock,njblock,SZK_(GV))! Layer thickness at velocity points,
                 ! using an upwind-biased second order accurate estimate based
                 ! on the previous velocity direction [H ~> m or kg m-2].
-  real :: dz_at_vel(TILE_SIZE_X,TILE_SIZE_Y,SZK_(GV)) ! Vertical extent of a layer at velocity points,
+  real :: dz_at_vel(niblock,njblock,SZK_(GV)) ! Vertical extent of a layer at velocity points,
                 ! using an upwind-biased second order accurate estimate based
                 ! on the previous velocity direction [Z ~> m].
-  integer :: k_massive(TILE_SIZE_X,TILE_SIZE_Y) ! The k-index of the deepest layer yet found
+  integer :: k_massive(niblock,njblock) ! The k-index of the deepest layer yet found
                 ! that has more than h_tiny thickness and will be in the
                 ! viscous mixed layer.
   real :: Uh2   ! The squared magnitude of the difference between the velocity
@@ -2184,11 +2209,11 @@ subroutine set_viscous_ML(u, v, h, tv, forces, visc, dt, G, GV, US, CS, TILE_SIZ
                      ! The 400 is a constant proposed by Killworth and Edwards, 1999.
   real :: ustar1    ! ustar [H T-1 ~> m s-1 or kg m-2 s-1]
   real :: h2f2      ! (h*2*f)^2 [H2 T-2 ~> m2 s-2 or kg2 m-4 s-2]
-  logical :: use_EOS, do_any, do_any_shelf, do_i(TILE_SIZE_X,TILE_SIZE_Y)
+  logical :: use_EOS, do_any, do_any_shelf, do_i(niblock,njblock)
   logical :: nonBous_ML  ! If true, use the non-Boussinesq form of some energy and
                          ! stratification calculations.
   integer :: i, j, k, is, ie, js, je, Isq, Ieq, Jsq, Jeq, nz, K2, nkmb, nkml, n, EOSdom(2,2)
-  integer :: jstart, jend, istart, iend, ii, jj ! tile indices
+  integer :: jstart, jend, istart, iend, ii, jj ! block indices
   type(ocean_OBC_type), pointer :: OBC => NULL()
 
   is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec ; nz = GV%ke
@@ -2289,8 +2314,8 @@ subroutine set_viscous_ML(u, v, h, tv, forces, visc, dt, G, GV, US, CS, TILE_SIZ
 
   endif
 
-  do jstart=js,je,TILE_SIZE_Y ; do istart=Isq,Ieq,TILE_SIZE_X  ! u-point loop
-    jend=min(je, jstart+TILE_SIZE_Y-1) ; iend = min(Ieq, istart+TILE_SIZE_X-1)
+  do jstart=js,je,njblock ; do istart=Isq,Ieq,niblock  ! u-point loop
+    jend=min(je, jstart+njblock-1) ; iend = min(Ieq, istart+niblock-1)
     EOSdom(1,1) = 1 ; EOSdom(1,2) = iend-istart+1
     EOSdom(2,1) = 1 ; EOSdom(2,2) = jend-jstart+1
     if (CS%dynamic_viscous_ML) then
@@ -2637,8 +2662,8 @@ subroutine set_viscous_ML(u, v, h, tv, forces, visc, dt, G, GV, US, CS, TILE_SIZ
     endif ! do_any_shelf
   enddo ; enddo
 
-  do jstart=Jsq,Jeq,TILE_SIZE_Y ; do istart=is,ie,TILE_SIZE_X
-    jend=min(Jeq,jstart+TILE_SIZE_Y-1) ; iend=min(Ieq,istart+TILE_SIZE_X-1)
+  do jstart=Jsq,Jeq,njblock ; do istart=is,ie,niblock
+    jend=min(Jeq,jstart+njblock-1) ; iend=min(Ieq,istart+niblock-1)
     EOSdom(1,1) = 1 ; EOSdom(1, 2) = iend-istart+1
     EOSdom(2,1) = 1 ; EOSdom(2, 2) = jend-jstart+1
     if (CS%dynamic_viscous_ML) then
@@ -3612,6 +3637,13 @@ subroutine set_visc_init(Time, G, GV, US, param_file, diag, visc, CS, restart_CS
     CS%id_nkml_visc_v = register_diag_field('ocean_model', 'nkml_visc_v', &
        diag%axesCv1, Time, 'Number of layers in viscous mixed layer at v points', 'nondim')
   endif
+
+  call get_param(param_file, mdl, "VISCOUS_ML_NIBLOCK", CS%niblock, &
+                 "The i-direction block size used in the viscous mixed layer solver. "//&
+                 "If 0, the full computational domain width is used.", default=default_niblock)
+  call get_param(param_file, mdl, "VISCOUS_ML_NJBLOCK", CS%njblock, &
+                 "The j-direction block size used in the viscous mixed layer solver. "//&
+                 "If 0, the full computational domain height is used.", default=default_njblock)
 
   call register_restart_field_as_obsolete('Kd_turb','Kd_shear', restart_CS)
   call register_restart_field_as_obsolete('Kv_turb','Kv_shear', restart_CS)

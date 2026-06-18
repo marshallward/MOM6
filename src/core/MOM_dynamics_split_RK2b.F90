@@ -64,7 +64,7 @@ use MOM_open_boundary,         only : open_boundary_test_extern_h, update_OBC_ra
 use MOM_open_boundary,         only : update_segment_thickness_reservoirs
 use MOM_PressureForce,         only : PressureForce, PressureForce_CS
 use MOM_PressureForce,         only : PressureForce_init
-use MOM_set_visc,              only : set_viscous_ML, set_visc_CS
+use MOM_set_visc,              only : set_viscous_ML, viscous_ML_block_sizes, set_visc_CS
 use MOM_thickness_diffuse,     only : thickness_diffuse_CS
 use MOM_self_attr_load,        only : SAL_CS
 use MOM_self_attr_load,        only : SAL_init, SAL_end
@@ -405,6 +405,7 @@ subroutine step_MOM_dyn_split_RK2b(u_av, v_av, h, tv, visc, Time_local, dt, forc
   logical :: showCallTree, sym
 
   integer :: i, j, k, is, ie, js, je, Isq, Ieq, Jsq, Jeq, nz
+  integer :: niblock, njblock  ! Block sizes for the viscous mixed layer solver [nondim].
   integer :: cont_stencil, obc_stencil
   integer :: cor_stencil
 
@@ -619,7 +620,9 @@ subroutine step_MOM_dyn_split_RK2b(u_av, v_av, h, tv, visc, Time_local, dt, forc
   enddo
 
   call enable_averages(dt, Time_local, CS%diag)
-  call set_viscous_ML(u_av, v_av, h, tv, forces, visc, dt, G, GV, US, CS%set_visc_CSp, 32, 4)
+  call viscous_ML_block_sizes(CS%set_visc_CSp, G, niblock, njblock)
+  call set_viscous_ML(u_av, v_av, h, tv, forces, visc, dt, G, GV, US, CS%set_visc_CSp, &
+      niblock, njblock)
   call disable_averaging(CS%diag)
 
   if (CS%debug) then
