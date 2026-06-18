@@ -149,6 +149,7 @@ type, public :: set_visc_CS ; private
   integer :: id_Ray_u = -1, id_Ray_v = -1
   integer :: id_nkml_visc_u = -1, id_nkml_visc_v = -1
   !>@}
+  integer :: id_clock_ML = -1 !< CPU time clock id for set_viscous_ML
 end type set_visc_CS
 
 contains
@@ -2198,6 +2199,8 @@ subroutine set_viscous_ML(u, v, h, tv, forces, visc, dt, G, GV, US, CS)
   if (.not.(CS%dynamic_viscous_ML .or. associated(forces%frac_shelf_u) .or. &
             associated(forces%frac_shelf_v)) ) return
 
+  call cpu_clock_begin(CS%id_clock_ML)
+
   ! NOTE: Requried since this is called by the GPU-enabled dycore, but it could
   !   also be implicitly fixing other functions.
   !$omp target update from(u, v)
@@ -2841,6 +2844,8 @@ subroutine set_viscous_ML(u, v, h, tv, forces, visc, dt, G, GV, US, CS)
   if (CS%id_nkml_visc_u > 0) call post_data(CS%id_nkml_visc_u, visc%nkml_visc_u, CS%diag)
   if (CS%id_nkml_visc_v > 0) call post_data(CS%id_nkml_visc_v, visc%nkml_visc_v, CS%diag)
 
+  call cpu_clock_end(CS%id_clock_ML)
+
 end subroutine set_viscous_ML
 
 !> Register any fields associated with the vertvisc_type.
@@ -3447,6 +3452,8 @@ subroutine set_visc_init(Time, G, GV, US, param_file, diag, visc, CS, restart_CS
 
   call register_restart_field_as_obsolete('Kd_turb','Kd_shear', restart_CS)
   call register_restart_field_as_obsolete('Kv_turb','Kv_shear', restart_CS)
+
+  CS%id_clock_ML = cpu_clock_id('(Ocean set_viscous_ML)', grain=CLOCK_ROUTINE)
 
 end subroutine set_visc_init
 
