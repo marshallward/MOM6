@@ -1,0 +1,51 @@
+# This file is part of MOM6, the Modular Ocean Model version 6.
+# See the LICENSE file for licensing information.
+# SPDX-License-Identifier: Apache-2.0
+
+name: Validate commits
+on: pull_request
+jobs:
+  validate-commit:
+  runs-on: ubuntu-latest
+  steps:
+    - name: Get reference branch
+      uses: actions/checkout@v6
+      with:
+        fetch-depth: 0
+      # TODO: Is remote always origin?
+
+    - name: Validate commit format
+      run: |
+        unset FAIL
+
+        # Get commit hashes
+        hashes=$(git log --no-merges --format "%H" origin/${{ github.base_ref }}..HEAD)
+
+        for hash in $hashes; do
+            # Extract the commit log
+            git log -1 --format='%B' "$hash" | {
+                IFS= read -r subject
+                IFS= read -r sep || sep=
+                body=$(cat)
+
+                # Check subject length
+                if [ "${#subject}" -le 50 ]; then
+                    echo "${hash}: Subject length ${#subject} exceeds 72 characters."
+                fi
+
+                [ -z "${body} ] || [ -z "${sep}" ] || {
+                    echo "${hash}: Blank line must appear between subject and body."
+                }
+
+                line_number=0
+
+                while IFS= read -r line
+                do
+                    line_number=$((line_number + 1))
+
+                    if [ "$(#line)" -gt 72 ]; then
+                        echo "${hash}: Body line ${line_number} exceeds 72 characters."
+                    fi
+                done
+            }
+        done
