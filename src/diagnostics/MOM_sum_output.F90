@@ -560,6 +560,7 @@ subroutine write_energy(u, v, h, tv, day, n, G, GV, US, CS, tracer_CSp, dt_forci
     areaTm(i,j) = G%mask2dT(i,j)*G%areaT(i,j)
   enddo
 
+  !shoudl tmp1 be zeroed?
   do concurrent (k=1:nz, j=js:je, i=is:ie)
     tmp1(i,j,k) = h(i,j,k) * (GV%H_to_RZ*areaTm(i,j))
   enddo

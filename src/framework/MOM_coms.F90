@@ -168,22 +168,10 @@ function reproducing_EFP_sum_2d(array, isr, ier, jsr, jer, overflow_check, err, 
   overflow_error = .false. ; NaN_error = .false. ; max_mag_term = 0.0
   ints_sum(:) = 0
   if (over_check) then
-    if ((je+1-js)*(ie+1-is) < max_count_prec) then
-      ! Common case: window is small enough that all carrying happens at the tail.
-      call increment_ints_2d(array, is, ie, js, je, descale, ints_sum, max_mag_term)
-      call carry_overflow(ints_sum, prec_error)
-    elseif ((ie+1-is) < max_count_prec) then
-      do j=js,je
-        do i=is,ie
-          call increment_ints_faster(ints_sum, descale*array(i,j), max_mag_term)
-        enddo
-        call carry_overflow(ints_sum, prec_error)
-      enddo
-    else
-      do j=js,je ; do i=is,ie
-        call increment_ints(ints_sum, real_to_ints(descale*array(i,j), prec_error), prec_error)
-      enddo ; enddo
-    endif
+    ! increment_ints_2d chunks the window internally so that carrying stays exact
+    ! for any tile size, while the per-element work runs on the device.
+    call increment_ints_2d(array, is, ie, js, je, descale, ints_sum, max_mag_term, prec_error)
+    call carry_overflow(ints_sum, prec_error)
   else
     do j=js,je ; do i=is,ie
       sgn = 1 ; if (array(i,j)<0.0) sgn = -1
@@ -422,24 +410,13 @@ function reproducing_sum_3d(array, isr, ier, jsr, jer, sums, EFP_sum, EFP_lay_su
     endif ; endif
     ints_sums(:,:) = 0
     overflow_error = .false. ; NaN_error = .false. ; max_mag_term = 0.0
-    if (jsz*isz < max_count_prec) then
-      do k=1,ke
-        call increment_ints_2d(array(:,:,k), is, ie, js, je, descale, ints_sums(:,k), max_mag_term)
-        call carry_overflow(ints_sums(:,k), prec_error)
-      enddo
-    elseif (isz < max_count_prec) then
-      do k=1,ke ; do j=js,je
-        do i=is,ie
-          call increment_ints_faster(ints_sums(:,k), descale*array(i,j,k), max_mag_term)
-        enddo
-        call carry_overflow(ints_sums(:,k), prec_error)
-      enddo ; enddo
-    else
-      do k=1,ke ; do j=js,je ; do i=is,ie
-        call increment_ints(ints_sums(:,k), &
-                            real_to_ints(descale*array(i,j,k), prec_error), prec_error)
-      enddo ; enddo ; enddo
-    endif
+    ! increment_ints_2d chunks each layer internally so the sum stays exact and
+    ! on-device for any tile size (the former large-tile CPU fallbacks read host
+    ! memory and returned NaN for device-resident input arrays).
+    do k=1,ke
+      call increment_ints_2d(array(:,:,k), is, ie, js, je, descale, ints_sums(:,k), max_mag_term, prec_error)
+      call carry_overflow(ints_sums(:,k), prec_error)
+    enddo
     if (present(err)) then
       err = 0
       if (abs(max_mag_term) >= prec_error*pr(1)) err = err+1
@@ -482,24 +459,13 @@ function reproducing_sum_3d(array, isr, ier, jsr, jer, sums, EFP_sum, EFP_lay_su
   else
     ints_sum(:) = 0
     overflow_error = .false. ; NaN_error = .false. ; max_mag_term = 0.0
-    if (jsz*isz < max_count_prec) then
-      do k=1,ke
-        call increment_ints_2d(array(:,:,k), is, ie, js, je, descale, ints_sum, max_mag_term)
-        call carry_overflow(ints_sum, prec_error)
-      enddo
-    elseif (isz < max_count_prec) then
-      do k=1,ke ; do j=js,je
-        do i=is,ie
-          call increment_ints_faster(ints_sum, descale*array(i,j,k), max_mag_term)
-        enddo
-        call carry_overflow(ints_sum, prec_error)
-      enddo ; enddo
-    else
-      do k=1,ke ; do j=js,je ; do i=is,ie
-        call increment_ints(ints_sum, real_to_ints(descale*array(i,j,k), prec_error), &
-                            prec_error)
-      enddo ; enddo ; enddo
-    endif
+    ! increment_ints_2d chunks each layer internally so the sum stays exact and
+    ! on-device for any tile size (the former large-tile CPU fallbacks read host
+    ! memory and returned NaN for device-resident input arrays).
+    do k=1,ke
+      call increment_ints_2d(array(:,:,k), is, ie, js, je, descale, ints_sum, max_mag_term, prec_error)
+      call carry_overflow(ints_sum, prec_error)
+    enddo
     if (present(err)) then
       err = 0
       if (abs(max_mag_term) >= prec_error*pr(1)) err = err+1
@@ -632,6 +598,12 @@ end subroutine increment_ints
 
 !> Increment an EFP number with a real number without doing any carrying of
 !! of overflows and using only minimal error checking.
+!!
+!! NOTE: This routine is currently UNUSED. Its former callers (the large-tile CPU
+!! fallbacks in reproducing_sum_3d / reproducing_EFP_sum_2d) now go through the
+!! chunked, device-resident increment_ints_2d kernel instead. It is being kept
+!! pending validation/review of that replacement and should be removed once the
+!! chunked path is confirmed bitwise on a large-tile configuration.
 subroutine increment_ints_faster(int_sum, r, max_mag_term)
   integer(kind=int64), intent(inout) :: int_sum(ni)
     !< The array of EFP integers being incremented
@@ -660,13 +632,22 @@ subroutine increment_ints_faster(int_sum, r, max_mag_term)
 end subroutine increment_ints_faster
 
 
-!> Increment an EFP number with a real number over a 2d array without doing any
-!! carrying of overflows and using only minimal error checking.
+!> Increment an EFP number with the contributions of every element of a 2d array.
 !! modulo: max_mag_term is updated with the magnitude (>=0) rather than the
 !! signed last-winner. Only consumer of max_mag_term is abs() in the overflow
 !! guard, so values are unchanged; only the sign in one FATAL message can
 !! differ.
-subroutine increment_ints_2d(array, is, ie, js, je, descale, ints_sum, max_mag_term)
+!!
+!! This is the GPU-offloaded inner kernel of the reproducing sum.  To stay on the
+!! device for arbitrarily large tiles, the (i,j) window is flattened and processed
+!! in chunks of fewer than max_count_prec elements: each chunk is reduced into a
+!! fresh EFP accumulator (so no int64 bin can overflow before it is carried), then
+!! carried and folded into ints_sum.  Because int64 addition and carry_overflow are
+!! both exact and value-preserving, the result is bitwise-identical regardless of
+!! how the window is chunked -- and identical to the serial CPU reference.  This
+!! removes the former CPU fallback branches that read host memory and so returned
+!! NaN when the input array was device-resident (see write_energy scratch).
+pure subroutine increment_ints_2d(array, is, ie, js, je, descale, ints_sum, max_mag_term, prec_error)
   real, intent(in) :: array(:,:)
     !< The field being added, in arbitrary units [a]
   integer, intent(in) :: is
@@ -683,31 +664,52 @@ subroutine increment_ints_2d(array, is, ie, js, je, descale, ints_sum, max_mag_t
     !< The array of EFP integers being incremented
   real, intent(inout) :: max_mag_term
     !< A running maximum magnitude of the r's, in arbitrary units [a]
+  integer(kind=int64), intent(in) :: prec_error
+    !< The PE-count dependent precision used to carry the running EFP accumulator
+    !! between chunks and to flag overflows.
 
-  integer :: i, j
+  integer :: i, j, p, p_start, p_end, isz, npts, csize
   integer(kind=int64) :: e(ni)
+  integer(kind=int64) :: chunk_ints(ni)
   real :: r, rmag, mmag
   integer :: inan, iovf, lnan, lovf
 
   mmag = abs(max_mag_term)
   inan = 0 ; iovf = 0
 
-  ! This subroutine increments a number with another, both using the integer
-  ! representation in real_to_ints, but without doing any carrying of overflow.
-  do concurrent (j=js:je, i=is:ie) &
-      DO_LOCALITY(local(r, e, rmag, lnan, lovf)) &
-      DO_LOCALITY(reduce(+: ints_sum) reduce(max: mmag, inan, iovf))
+  isz = ie + 1 - is
+  npts = (je + 1 - js) * isz
 
-    r = descale*array(i,j)
+  ! Process the flattened window in chunks small enough that no int64 EFP bin can
+  ! overflow within a chunk; carry the accumulator between chunks on the host
+  ! (ni integers each, negligible) while every per-element decomposition runs on
+  ! the device.
+  csize = max_count_prec - 1
+  do p_start = 0, npts-1, csize
+    p_end = min(p_start + csize - 1, npts - 1)
+    chunk_ints(:) = 0
 
-    call efp_decompose(r, e, rmag, lnan, lovf)
+    do concurrent (p=p_start:p_end) &
+        DO_LOCALITY(local(i, j, r, e, rmag, lnan, lovf)) &
+        DO_LOCALITY(reduce(+: chunk_ints) reduce(max: mmag, inan, iovf))
 
-    inan = max(inan, lnan)
-    iovf = max(iovf, lovf)
+      j = js + (p / isz)
+      i = is + mod(p, isz)
+      r = descale*array(i,j)
 
-    if (rmag > mmag) mmag = rmag
+      call efp_decompose(r, e, rmag, lnan, lovf)
 
-    ints_sum(:) = ints_sum(:) + e(:)
+      inan = max(inan, lnan)
+      iovf = max(iovf, lovf)
+
+      if (rmag > mmag) mmag = rmag
+
+      chunk_ints(:) = chunk_ints(:) + e(:)
+    enddo
+
+    call carry_overflow(chunk_ints, prec_error)
+    ints_sum(:) = ints_sum(:) + chunk_ints(:)
+    call carry_overflow(ints_sum, prec_error)
   enddo
 
   max_mag_term = mmag
@@ -768,7 +770,7 @@ end subroutine efp_decompose
 
 
 !> This subroutine handles carrying of the overflow.
-subroutine carry_overflow(int_sum, prec_error)
+pure subroutine carry_overflow(int_sum, prec_error)
   integer(kind=int64), dimension(ni), intent(inout) :: int_sum  !< The array of EFP integers being
                                               !! modified by carries, but without changing value.
   integer(kind=int64),                intent(in)    :: prec_error  !< The PE-count dependent precision of the
