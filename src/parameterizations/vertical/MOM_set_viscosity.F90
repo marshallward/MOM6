@@ -2899,8 +2899,6 @@ subroutine set_visc_register_restarts(HI, G, GV, US, param_file, visc, restart_C
   if (useKPP .or. useEPBL .or. use_CVMix_shear .or. use_CVMix_conv .or. &
       (use_kappa_shear .and. .not.KS_at_vertex )) then
     call safe_alloc_ptr(visc%Kv_shear, isd, ied, jsd, jed, nz+1)
-    !$omp target enter data map(alloc: visc%Kv_shear)
-
     call register_restart_field(visc%Kv_shear, "Kv_shear", .false., restart_CS, &
                   "Shear-driven turbulent viscosity at interfaces", &
                   units=Kv_units, conversion=GV%HZ_T_to_MKS, z_grid='i')
@@ -3321,7 +3319,15 @@ subroutine set_visc_init(Time, G, GV, US, param_file, diag, visc, CS, restart_CS
 
   CS%Hbbl = CS%dz_bbl * (US%Z_to_m * GV%m_to_H)  ! Rescaled for use in expressions in thickness units.
 
+  ! Update scalar data to device
+  !$omp target update to(visc)
   !$omp target update to(CS)
+
+  ! Now update arrays that were defined in set_visc_register_restarts()
+  !$omp target enter data map(to: visc%Kv_shear) &
+  !$omp   if (associated(visc%Kv_shear))
+  !$omp target enter data map(to: visc%Kv_shear_Bu) &
+  !$omp   if (associated(visc%Kv_shear_Bu))
 
   if (CS%RiNo_mix .and. kappa_shear_at_vertex(param_file)) then
     ! This is necessary for reproducibility across restarts in non-symmetric mode.

@@ -417,8 +417,8 @@ type, public :: MOM_control_struct ; private
     !< Control structure used for the interface height smoothing operator.
   type(mixedlayer_restrat_CS) :: mixedlayer_restrat_CSp
     !< Pointer to the control structure used for the mixed layer restratification
-  type(set_visc_CS)           :: set_visc_CSp
-    !< Pointer to the control structure used to set viscosities
+  type(set_visc_CS), allocatable :: set_visc_CSp
+    !< Control structure used to set viscosities
   type(diabatic_CS),             pointer :: diabatic_CSp => NULL()
     !< Pointer to the control structure for the diabatic driver
   type(MEKE_CS) :: MEKE_CSp
@@ -3706,8 +3706,10 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, &
   !$omp target enter data map(alloc: CS%VarMix)
   call VarMix_init(Time, G, GV, US, param_file, diag, CS%VarMix)
 
-  !$omp target enter data map(to: CS%visc, CS%set_visc_CSp)
+  allocate(CS%set_visc_CSp)
+  !$omp target enter data map(alloc: CS%set_visc_CSp)
   call set_visc_init(Time, G, GV, US, param_file, diag, CS%visc, CS%set_visc_CSp, restart_CSp, CS%OBC)
+
   call thickness_diffuse_init(Time, G, GV, US, param_file, diag, CS%CDp, CS%thickness_diffuse_CSp)
   if (CS%interface_filter) &
     call interface_filter_init(Time, G, GV, US, param_file, diag, CS%CDp, CS%interface_filter_CSp)
@@ -4746,6 +4748,7 @@ subroutine MOM_end(CS)
 
   call set_visc_end(CS%visc, CS%set_visc_CSp)
   !$omp target exit data map(delete: CS%visc, CS%set_visc_CSp)
+  deallocate(CS%set_visc_CSp)
   deallocate(CS%visc)
 
   call MEKE_end(CS%MEKE)
