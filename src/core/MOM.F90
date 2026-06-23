@@ -3275,7 +3275,6 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, &
   call MEKE_alloc_register_restart(HI, US, param_file, CS%MEKE, restart_CSp)
 
   allocate(CS%visc)
-  !$omp target enter data map(alloc: CS%visc)
   call set_visc_register_restarts(HI, G, GV, US, param_file, CS%visc, restart_CSp, use_ice_shelf)
 
   call mixedlayer_restrat_register_restarts(HI, GV, US, param_file, &
@@ -3706,8 +3705,11 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, &
   !$omp target enter data map(alloc: CS%VarMix)
   call VarMix_init(Time, G, GV, US, param_file, diag, CS%VarMix)
 
-  !$omp target enter data map(to: CS%visc, CS%set_visc_CSp)
   call set_visc_init(Time, G, GV, US, param_file, diag, CS%visc, CS%set_visc_CSp, restart_CSp, CS%OBC)
+  ! visc%Ray_u/v are initialized in set_visc_init and visc%Kv_shear, visc%Kv_shear_bu are
+  ! initiliazed in set_visc_register_restarts. Allocation/association status of these members
+  ! don't change from here. 
+  !$omp target enter data map(to: CS%set_visc_CSp, CS%visc, CS%visc%Kv_shear, CS%visc%Ray_u, CS%visc%Ray_v)
   call thickness_diffuse_init(Time, G, GV, US, param_file, diag, CS%CDp, CS%thickness_diffuse_CSp)
   if (CS%interface_filter) &
     call interface_filter_init(Time, G, GV, US, param_file, diag, CS%CDp, CS%interface_filter_CSp)
