@@ -647,7 +647,7 @@ end subroutine increment_ints_faster
 !! how the window is chunked -- and identical to the serial CPU reference.  This
 !! removes the former CPU fallback branches that read host memory and so returned
 !! NaN when the input array was device-resident (see write_energy scratch).
-pure subroutine increment_ints_2d(array, is, ie, js, je, descale, ints_sum, max_mag_term, prec_error)
+subroutine increment_ints_2d(array, is, ie, js, je, descale, ints_sum, max_mag_term, prec_error)
   real, intent(in) :: array(:,:)
     !< The field being added, in arbitrary units [a]
   integer, intent(in) :: is
@@ -770,7 +770,7 @@ end subroutine efp_decompose
 
 
 !> This subroutine handles carrying of the overflow.
-pure subroutine carry_overflow(int_sum, prec_error)
+subroutine carry_overflow(int_sum, prec_error)
   integer(kind=int64), dimension(ni), intent(inout) :: int_sum  !< The array of EFP integers being
                                               !! modified by carries, but without changing value.
   integer(kind=int64),                intent(in)    :: prec_error  !< The PE-count dependent precision of the
