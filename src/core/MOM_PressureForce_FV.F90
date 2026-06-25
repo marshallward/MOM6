@@ -39,13 +39,13 @@ public PressureForce_FV_Bouss, PressureForce_FV_nonBouss
 ! vary with the Boussinesq approximation, the Boussinesq variant is given first.
 
 #ifdef __NVCOMPILER_OPENMP_GPU
-integer, parameter :: default_nkblock = 0  !< Default k block size for PLM density integrals, 0 = full domain [nondim]
-integer, parameter :: default_njblock_plm = 0 !< Default j block size for PLM density integrals, 0 = full domain [nondim]
+integer, parameter :: default_nkblock = 0  !< Default k block size for PLM density integrals [nondim]
+integer, parameter :: default_njblock_plm = 0 !< Default j block size for PLM density integrals [nondim]
 #else
 integer, parameter :: default_nkblock = 1  !< Default k block size for PLM density integrals [nondim]
-integer, parameter :: default_njblock_plm = 1 !< Default j block size, 0 = full domain [nondim]
+integer, parameter :: default_njblock_plm = 1 !< Default j block size for PLM density integrals [nondim]
 #endif
-integer, parameter :: default_niblock_plm = 0 !< Default i block size for PLM density integrals, 0 = full domain [nondim]
+integer, parameter :: default_niblock_plm = 0 !< Default i block size for PLM density integrals [nondim]
 
 !> Finite volume pressure gradient control structure
 type, public :: PressureForce_FV_CS ; private

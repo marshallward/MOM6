@@ -2,6 +2,8 @@
 ! See the LICENSE file for licensing information.
 ! SPDX-License-Identifier: Apache-2.0
 
+#include <do_concurrent_compat.h>
+
 !> Provides integrals of density
 module MOM_density_integrals
 
@@ -35,67 +37,9 @@ public avg_specific_vol
 public find_depth_of_pressure_in_cell
 public diagnose_mass_weight_Z, diagnose_mass_weight_p
 
-interface
-!> Calls the appropriate subroutine to calculate analyti
-!> Compute pressure gradient force integrals by quadrature for the case where
-!! T and S are linear profiles.
-module subroutine int_density_dz_generic_plm(kstart, kend, tv, T_t, T_b, S_t, S_b, e, rho_ref, &
-                                      rho_0, G_e, dz_subroundoff, bathyT, HI, GV, EOS, US, use_stanley_eos, dpa, &
-                                      intz_dpa, intx_dpa, inty_dpa, MassWghtInterp, &
-                                      use_inaccurate_form, Z_0p, MassWghtInterpVanOnly, h_nv, &
-                                      niblock, njblock)
-  integer,              intent(in)  :: kstart,kend   !< Layer index to calculate integrals for
-  type(hor_index_type), intent(in)  :: HI  !< Ocean horizontal index structures for the input arrays
-  type(verticalGrid_type), intent(in) :: GV !< Vertical grid structure
-  type(thermo_var_ptrs), intent(in) :: tv  !< Thermodynamic variables
-  real, dimension(SZI_(HI),SZJ_(HI),SZK_(GV)), &
-                        intent(in)  :: T_t !< Potential temperature at the cell top [C ~> degC]
-  real, dimension(SZI_(HI),SZJ_(HI),SZK_(GV)), &
-                        intent(in)  :: T_b !< Potential temperature at the cell bottom [C ~> degC]
-  real, dimension(SZI_(HI),SZJ_(HI),SZK_(GV)), &
-                        intent(in)  :: S_t !< Salinity at the cell top [S ~> ppt]
-  real, dimension(SZI_(HI),SZJ_(HI),SZK_(GV)), &
-                        intent(in)  :: S_b !< Salinity at the cell bottom [S ~> ppt]
-  real, dimension(SZI_(HI),SZJ_(HI),SZK_(GV)+1), &
-                        intent(in)  :: e   !< Height of interfaces [Z ~> m]
-  real,                 intent(in)  :: rho_ref !< A mean density [R ~> kg m-3], that is subtracted
-                                           !! out to reduce the magnitude of each of the integrals.
-  real,                 intent(in)  :: rho_0 !< A density [R ~> kg m-3], that is used to calculate
-                                           !! the pressure (as p~=-z*rho_0*G_e) used in the equation of state.
-  real,                 intent(in)  :: G_e !< The Earth's gravitational acceleration [L2 Z-1 T-2 ~> m s-2]
-  real,                 intent(in)  :: dz_subroundoff !< A minuscule thickness change [Z ~> m]
-  real, dimension(SZI_(HI),SZJ_(HI)), &
-                        intent(in)  :: bathyT !< The depth of the bathymetry [Z ~> m]
-  type(EOS_type),       intent(in)  :: EOS !< Equation of state structure
-  type(unit_scale_type), intent(in) :: US !< A dimensional unit scaling type
-  logical,              intent(in) :: use_stanley_eos !< If true, turn on Stanley SGS T variance parameterization
-  real, dimension(SZI_(HI),SZJ_(HI),SZK_(GV)), &
-                        intent(inout) :: dpa !< The change in the pressure anomaly across the layer [R L2 T-2 ~> Pa]
-  real, dimension(SZI_(HI),SZJ_(HI),SZK_(GV)), &
-              optional, intent(inout) :: intz_dpa !< The integral through the thickness of the layer of
-                                           !! the pressure anomaly relative to the anomaly at the
-                                           !! top of the layer [R L2 Z T-2 ~> Pa m]
-  real, dimension(SZIB_(HI),SZJ_(HI),SZK_(GV)), &
-              optional, intent(inout) :: intx_dpa !< The integral in x of the difference between the
-                                           !! pressure anomaly at the top and bottom of the layer
-                                           !! divided by the x grid spacing [R L2 T-2 ~> Pa]
-  real, dimension(SZI_(HI),SZJB_(HI),SZK_(GV)), &
-              optional, intent(inout) :: inty_dpa !< The integral in y of the difference between the
-                                           !! pressure anomaly at the top and bottom of the layer
-                                           !! divided by the y grid spacing [R L2 T-2 ~> Pa]
-  integer,    optional, intent(in)  :: MassWghtInterp !< A flag indicating whether and how to use
-                                           !! mass weighting to interpolate T/S in integrals
-  logical,    optional, intent(in)  :: use_inaccurate_form !< If true, uses an inaccurate form of
-                                           !! density anomalies, as was used prior to March 2018.
-  logical,    optional, intent(in)  :: MassWghtInterpVanOnly !< If true, does not do mass weighting
-                                           !! of T/S unless one side smaller than h_nv (i.e. vanished)
-  real,       optional, intent(in)  :: h_nv !< Nonvanished height [Z ~> m]
-  real, dimension(HI%isd:HI%ied,HI%jsd:HI%jed), &
-              optional, intent(in)  :: Z_0p !< The height at which the pressure is 0 [Z ~> m]
-  integer,    optional, intent(in)  :: niblock !< i-tile size for horizontal blocking; 0 = full domain [nondim]
-  integer,    optional, intent(in)  :: njblock !< j-tile size for horizontal blocking; 0 = full domain [nondim]
-end subroutine int_density_dz_generic_plm
-end interface
+real, parameter :: wt_t(5) = [1.0, 0.75, 0.5, 0.25, 0.0] !< Top weights [nondim]
+real, parameter :: wt_b(5) = [0.0, 0.25, 0.5, 0.75, 1.0] !< Bottom weights [nondim]
+!$omp declare target to(wt_t, wt_b)
 
 contains
 
@@ -475,6 +419,763 @@ subroutine int_density_dz_generic_pcm(T, S, z_t, z_b, rho_ref, rho_0, G_e, HI, &
     enddo
   enddo ; endif
 end subroutine int_density_dz_generic_pcm
+
+
+!> Calls the appropriate subroutine to calculate analyti
+!> Compute pressure gradient force integrals by quadrature for the case where
+!! T and S are linear profiles.
+subroutine int_density_dz_generic_plm(kstart, kend, tv, T_t, T_b, S_t, S_b, e, rho_ref, &
+                                      rho_0, G_e, dz_subroundoff, bathyT, HI, GV, EOS, US, use_stanley_eos, dpa, &
+                                      intz_dpa, intx_dpa, inty_dpa, MassWghtInterp, &
+                                      use_inaccurate_form, Z_0p, MassWghtInterpVanOnly, h_nv, &
+                                      niblock, njblock)
+  integer,              intent(in)  :: kstart !< The index of the first layer to integrate over
+  integer,              intent(in)  :: kend   !< The index of the last layer to integrate over
+  type(hor_index_type), intent(in)  :: HI  !< Ocean horizontal index structures for the input arrays
+  type(verticalGrid_type), intent(in) :: GV !< Vertical grid structure
+  type(thermo_var_ptrs), intent(in) :: tv  !< Thermodynamic variables
+  real, dimension(SZI_(HI),SZJ_(HI),SZK_(GV)), &
+                        intent(in)  :: T_t !< Potential temperature at the cell top [C ~> degC]
+  real, dimension(SZI_(HI),SZJ_(HI),SZK_(GV)), &
+                        intent(in)  :: T_b !< Potential temperature at the cell bottom [C ~> degC]
+  real, dimension(SZI_(HI),SZJ_(HI),SZK_(GV)), &
+                        intent(in)  :: S_t !< Salinity at the cell top [S ~> ppt]
+  real, dimension(SZI_(HI),SZJ_(HI),SZK_(GV)), &
+                        intent(in)  :: S_b !< Salinity at the cell bottom [S ~> ppt]
+  real, dimension(SZI_(HI),SZJ_(HI),SZK_(GV)+1), &
+                        intent(in)  :: e   !< Height of interfaces [Z ~> m]
+  real,                 intent(in)  :: rho_ref !< A mean density [R ~> kg m-3], that is subtracted
+                                           !! out to reduce the magnitude of each of the integrals.
+  real,                 intent(in)  :: rho_0 !< A density [R ~> kg m-3], that is used to calculate
+                                           !! the pressure (as p~=-z*rho_0*G_e) used in the equation of state.
+  real,                 intent(in)  :: G_e !< The Earth's gravitational acceleration [L2 Z-1 T-2 ~> m s-2]
+  real,                 intent(in)  :: dz_subroundoff !< A minuscule thickness change [Z ~> m]
+  real, dimension(SZI_(HI),SZJ_(HI)), &
+                        intent(in)  :: bathyT !< The depth of the bathymetry [Z ~> m]
+  type(EOS_type),       intent(in)  :: EOS !< Equation of state structure
+  type(unit_scale_type), intent(in) :: US !< A dimensional unit scaling type
+  logical,              intent(in) :: use_stanley_eos !< If true, turn on Stanley SGS T variance parameterization
+  real, dimension(SZI_(HI),SZJ_(HI),SZK_(GV)), &
+                        intent(inout) :: dpa !< The change in the pressure anomaly across the layer [R L2 T-2 ~> Pa]
+  real, dimension(SZI_(HI),SZJ_(HI),SZK_(GV)), &
+              optional, intent(inout) :: intz_dpa !< The integral through the thickness of the layer of
+                                           !! the pressure anomaly relative to the anomaly at the
+                                           !! top of the layer [R L2 Z T-2 ~> Pa m]
+  real, dimension(SZIB_(HI),SZJ_(HI),SZK_(GV)), &
+              optional, intent(inout) :: intx_dpa !< The integral in x of the difference between the
+                                           !! pressure anomaly at the top and bottom of the layer
+                                           !! divided by the x grid spacing [R L2 T-2 ~> Pa]
+  real, dimension(SZI_(HI),SZJB_(HI),SZK_(GV)), &
+              optional, intent(inout) :: inty_dpa !< The integral in y of the difference between the
+                                           !! pressure anomaly at the top and bottom of the layer
+                                           !! divided by the y grid spacing [R L2 T-2 ~> Pa]
+  integer,    optional, intent(in)  :: MassWghtInterp !< A flag indicating whether and how to use
+                                           !! mass weighting to interpolate T/S in integrals
+  logical,    optional, intent(in)  :: use_inaccurate_form !< If true, uses an inaccurate form of
+                                           !! density anomalies, as was used prior to March 2018.
+  logical,    optional, intent(in)  :: MassWghtInterpVanOnly !< If true, does not do mass weighting
+                                           !! of T/S unless one side smaller than h_nv (i.e. vanished)
+  real,       optional, intent(in)  :: h_nv !< Nonvanished height [Z ~> m]
+  real, dimension(HI%isd:HI%ied,HI%jsd:HI%jed), &
+              optional, intent(in)  :: Z_0p !< The height at which the pressure is 0 [Z ~> m]
+  integer,    optional, intent(in)  :: niblock !< i-block size for horizontal blocking; 0 = full domain [nondim]
+  integer,    optional, intent(in)  :: njblock !< j-block size for horizontal blocking; 0 = full domain [nondim]
+
+! This subroutine calculates (by numerical quadrature) integrals of
+! pressure anomalies across layers, which are required for calculating the
+! finite-volume form pressure accelerations in a Boussinesq model.  The one
+! potentially dodgy assumption here is that rho_0 is used both in the denominator
+! of the accelerations, and in the pressure used to calculated density (the
+! latter being -z*rho_0*G_e).  These two uses could be separated if need be.
+!
+! It is assumed that the salinity and temperature profiles are linear in the
+! vertical. The top and bottom values within each layer are provided and
+! a linear interpolation is used to compute intermediate values.
+
+  ! Local variables
+  real :: GxRho      ! The product of the gravitational acceleration and reference density [R L2 Z-1 T-2 ~> Pa m-1]
+  real :: z0pres(HI%isd:HI%ied,HI%jsd:HI%jed) ! The height at which the pressure is zero [Z ~> m]
+  real :: massWeightToggle          ! A non-dimensional toggle factor for near-bottom mass weighting (0 or 1) [nondim]
+  real :: TopWeightToggle           ! A non-dimensional toggle factor for near-surface mass weighting (0 or 1) [nondim]
+  real :: massWeightNVonlyToggle    ! A non-dimensional toggle factor for only using mass weighting
+                                    ! if at least one side vanished (0 or 1) [nondim]
+  real :: h_nonvanished             ! nonvanished height [Z ~> m]
+  logical :: use_rho_ref ! Pass rho_ref to the equation of state for more accurate calculation
+                         ! of density anomalies.
+  logical :: use_varT, use_varS, use_covarTS ! Logicals for SGS variances fields
+  integer :: Isq, Ieq, Jsq, Jeq, i, j, n
+  integer :: ni_block, nj_block ! The i- and j-block sizes used to block the quadrature loops
+
+  Isq = HI%IscB ; Ieq = HI%IecB ; Jsq = HI%JscB ; Jeq = HI%JecB
+
+  !$omp target enter data map(alloc: z0pres)
+
+  GxRho = G_e * rho_0
+  if (present(Z_0p)) then
+    do concurrent (j=Jsq:Jeq+1, i=Isq:Ieq+1)
+      z0pres(i,j) = Z_0p(i,j)
+    enddo
+  else
+    do concurrent (j=HI%jsd:HI%jed, i=HI%isd:HI%ied)
+      z0pres(i,j) = 0.0
+    enddo
+  endif
+  massWeightToggle = 0. ; TopWeightToggle = 0.
+  if (present(MassWghtInterp)) then
+    if (BTEST(MassWghtInterp, 0)) massWeightToggle = 1.
+    if (BTEST(MassWghtInterp, 1)) TopWeightToggle = 1.
+  endif
+  massWeightNVonlyToggle = 1.
+  if (present(MassWghtInterpVanOnly)) then
+    if (MassWghtInterpVanOnly) massWeightNVonlyToggle = 0.
+  endif
+  h_nonvanished = 0.
+  if (present(h_nv)) then
+    h_nonvanished = h_nv
+  endif
+  use_rho_ref = .true.
+  if (present(use_inaccurate_form)) use_rho_ref = .not. use_inaccurate_form
+
+  use_varT = .false. !ensure initialized
+  use_covarTS = .false.
+  use_varS = .false.
+  if (use_stanley_eos) then
+    use_varT = associated(tv%varT)
+    use_covarTS = associated(tv%covarTS)
+    use_varS = associated(tv%varS)
+  endif
+  ! 1. Compute vertical integrals
+  ni_block = Ieq+1-Isq+1 ; nj_block = Jeq+1-Jsq+1
+  if (present(niblock)) then ; if (niblock > 0) ni_block = niblock ; endif
+  if (present(njblock)) then ; if (njblock > 0) nj_block = njblock ; endif
+  call generic_plm_update_dpa(ni_block, nj_block, kstart, kend, tv, T_t, T_b, S_t, S_b, e, &
+                              z0pres, dpa, intz_dpa, GxRho, G_e, &
+                              use_rho_ref, use_stanley_eos, use_varT, use_covarTS, use_varS, &
+                              rho_ref, EOS, HI, GV)
+
+  ! 2. Compute horizontal integrals in the x direction
+  if (present(intx_dpa)) then
+    ni_block = Ieq-Isq+1 ; nj_block = HI%jec-HI%jsc+1
+    if (present(niblock)) then ; if (niblock > 0) ni_block = niblock ; endif
+    if (present(njblock)) then ; if (njblock > 0) nj_block = njblock ; endif
+    call generic_plm_update_intx_dpa(ni_block, nj_block, kstart, kend, tv, T_t, T_b, S_t, S_b, e, &
+                                     bathyT, z0pres, dpa, intx_dpa, GxRho, G_e, dz_subroundoff, &
+                                     massWeightToggle, TopWeightToggle, massWeightNVonlyToggle, h_nonvanished, &
+                                     use_rho_ref, use_stanley_eos, use_varT, use_covarTS, use_varS, &
+                                     rho_ref, EOS, HI, GV)
+  endif
+
+  ! 3. Compute horizontal integrals in the y direction
+  if (present(inty_dpa)) then
+    ni_block = HI%iec-HI%isc+1 ; nj_block = Jeq-Jsq+1
+    if (present(niblock)) then ; if (niblock > 0) ni_block = niblock ; endif
+    if (present(njblock)) then ; if (njblock > 0) nj_block = njblock ; endif
+    call generic_plm_update_inty_dpa(ni_block, nj_block, kstart, kend, tv, T_t, T_b, S_t, S_b, e, &
+                                     bathyT, z0pres, dpa, inty_dpa, GxRho, G_e, dz_subroundoff, &
+                                     massWeightToggle, TopWeightToggle, massWeightNVonlyToggle, h_nonvanished, &
+                                     use_rho_ref, use_stanley_eos, use_varT, use_covarTS, use_varS, &
+                                     rho_ref, EOS, HI, GV)
+  endif
+
+  !$omp target exit data map(release: z0pres)
+
+end subroutine int_density_dz_generic_plm
+
+!> Computes the vertical (in-layer) integral of the pressure anomaly for a PLM reconstruction by
+!! 5-point Boole's-rule quadrature, filling dpa and optionally its vertical integral intz_dpa.
+subroutine generic_plm_update_dpa(niblock, njblock, kstart, kend, tv, T_t, T_b, S_t, S_b, e, &
+                                  z0pres, dpa, intz_dpa, GxRho, G_e, &
+                                  use_rho_ref, use_stanley_eos, use_varT, use_covarTS, use_varS, &
+                                  rho_ref, EOS, HI, GV)
+  integer,              intent(in)  :: niblock !< Number of columns per block in the i-direction
+  integer,              intent(in)  :: njblock !< Number of columns per block in the j-direction
+  integer,              intent(in)  :: kstart !< The index of the first layer to integrate over
+  integer,              intent(in)  :: kend !< The index of the last layer to integrate over
+  type(hor_index_type), intent(in)  :: HI  !< Ocean horizontal index structures for the arrays
+  type(verticalGrid_type), intent(in) :: GV !< Vertical grid structure
+  type(thermo_var_ptrs), intent(in) :: tv  !< Thermodynamic variables, used for the sub-grid
+                                           !! T and S variances when the Stanley EOS is active
+  real, dimension(SZI_(HI),SZJ_(HI),SZK_(GV)), &
+                        intent(in)  :: T_t !< Potential temperature at the top of the layer [C ~> degC]
+  real, dimension(SZI_(HI),SZJ_(HI),SZK_(GV)), &
+                        intent(in)  :: T_b !< Potential temperature at the bottom of the layer [C ~> degC]
+  real, dimension(SZI_(HI),SZJ_(HI),SZK_(GV)), &
+                        intent(in)  :: S_t !< Salinity at the top of the layer [S ~> ppt]
+  real, dimension(SZI_(HI),SZJ_(HI),SZK_(GV)), &
+                        intent(in)  :: S_b !< Salinity at the bottom of the layer [S ~> ppt]
+  real, dimension(SZI_(HI),SZJ_(HI),SZK_(GV)+1), &
+                        intent(in)  :: e   !< Height of interfaces between layers [Z ~> m]
+  real, dimension(HI%isd:HI%ied,HI%jsd:HI%jed), &
+                        intent(in)  :: z0pres !< The height at which the pressure is 0 [Z ~> m]
+  real, dimension(SZI_(HI),SZJ_(HI),SZK_(GV)), &
+                        intent(inout) :: dpa !< The change in the pressure anomaly across the layer
+                                           !! [R L2 T-2 ~> Pa]
+  real, dimension(SZI_(HI),SZJ_(HI),SZK_(GV)), &
+              optional, intent(inout) :: intz_dpa !< The vertical integral through the layer of the
+                                           !! pressure anomaly relative to the anomaly at the top of
+                                           !! the layer [R L2 T-2 Z ~> Pa m]
+  real,                 intent(in)  :: GxRho !< The gravitational acceleration times a mean density
+                                           !! used to convert heights to pressures [R L2 T-2 Z-1 ~> Pa m-1]
+  real,                 intent(in)  :: G_e !< The Earth's gravitational acceleration [L2 Z-1 T-2 ~> m s-2]
+  real,                 intent(in)  :: rho_ref !< A mean density [R ~> kg m-3] subtracted out to reduce
+                                           !! the magnitude of each of the integrals
+  logical,              intent(in)  :: use_rho_ref !< If true, subtract rho_ref inside the EOS call;
+                                           !! otherwise subtract it after computing the in-situ density
+  logical,              intent(in)  :: use_stanley_eos !< If true, use the Stanley parameterization that
+                                           !! accounts for the sub-grid T and S variances
+  logical,              intent(in)  :: use_varT !< If true, the temperature variance tv%varT is used
+  logical,              intent(in)  :: use_covarTS !< If true, the T-S covariance tv%covarTS is used
+  logical,              intent(in)  :: use_varS !< If true, the salinity variance tv%varS is used
+  type(EOS_type),       intent(in)  :: EOS !< Equation of state structure
+
+  real :: T5(5*niblock,njblock,kstart:kend)  ! Temperatures at an array of subgrid locations [C ~> degC]
+  real :: S5(5*niblock,njblock,kstart:kend)  ! Salinities at an array of subgrid locations [S ~> ppt]
+  real :: T25(5*niblock,njblock,kstart:kend) ! SGS temperature variance at an array of subgrid
+                                             ! locations [C2 ~> degC2]
+  real :: TS5(5*niblock,njblock,kstart:kend) ! SGS temp-salt covariance at an array of subgrid
+                                             ! locations [C S ~> degC ppt]
+  real :: S25(5*niblock,njblock,kstart:kend) ! SGS salinity variance at an array of subgrid
+                                             ! locations [S2 ~> ppt2]
+  real :: p5(5*niblock,njblock,kstart:kend)  ! Pressures at an array of subgrid locations [R L2 T-2 ~> Pa]
+  real :: r5(5*niblock,njblock,kstart:kend)  ! Density anomalies at an array of subgrid locations [R ~> kg m-3]
+  real :: u5(5*niblock,njblock,kstart:kend)  ! Density anomalies at an array of subgrid locations
+                                             ! (used for inaccurate form) [R ~> kg m-3]
+  real :: rho_anom                  ! A density anomaly [R ~> kg m-3]
+  real :: dz                        ! Layer thickness at a tracer point [Z ~> m]
+  real, parameter :: C1_90 = 1.0/90.0  ! A rational constant [nondim]
+  integer, dimension(3,2) :: EOSdom_h5  ! The 5-point h-point computational domain for the equation of state
+  integer :: Isq, Ieq, Jsq, Jeq, i, j, n, jstart, jend, istart, iend, ii, jj, k
+
+  Isq = HI%IscB ; Ieq = HI%IecB ; Jsq = HI%JscB ; Jeq = HI%JecB
+
+  !$omp target enter data map(alloc: T5, S5, T25, TS5, S25, p5, r5, u5)
+
+  do jstart=Jsq,Jeq+1,njblock ; do istart=Isq,Ieq+1,niblock
+    jend = min(Jeq+1, jstart+njblock-1)
+    iend = min(Ieq+1, istart+niblock-1)
+
+    do concurrent (k=kstart:kend, j=jstart:jend, i=istart:iend)
+      ii = i-istart+1 ; jj = j-jstart+1
+      dz = e(i,j,K) - e(i,j,K+1)
+      do n=1,5
+        p5((ii-1)*5+n,jj,k) = -GxRho*((e(i,j,K) - z0pres(i,j)) - 0.25*real(n-1)*dz)
+        ! Salinity and temperature points are linearly interpolated
+        S5((ii-1)*5+n,jj,k) = wt_t(n) * S_t(i,j,k) + wt_b(n) * S_b(i,j,k)
+        T5((ii-1)*5+n,jj,k) = wt_t(n) * T_t(i,j,k) + wt_b(n) * T_b(i,j,k)
+      enddo
+      if (use_varT)    T25((ii-1)*5+1:(ii-1)*5+5,jj,k) = tv%varT(i,j,k)
+      if (use_covarTS) TS5((ii-1)*5+1:(ii-1)*5+5,jj,k) = tv%covarTS(i,j,k)
+      if (use_varS)    S25((ii-1)*5+1:(ii-1)*5+5,jj,k) = tv%varS(i,j,k)
+    enddo
+
+    EOSdom_h5(1,1) = 1 ; EOSdom_h5(1,2) = 5*(iend-istart+1)
+    EOSdom_h5(2,1) = 1 ; EOSdom_h5(2,2) = jend-jstart+1
+    EOSdom_h5(3,1) = 1 ; EOSdom_h5(3,2) = kend-kstart+1
+
+    if (use_stanley_eos) then
+      do k=kstart,kend
+        call calculate_density(T5(:,:,k), S5(:,:,k), p5(:,:,k), T25(:,:,k), TS5(:,:,k), S25(:,:,k), r5(:,:,k), &
+                               EOS, EOSdom_h5(1:2,:), rho_ref=rho_ref)
+      enddo
+    else
+      if (use_rho_ref) then
+        call calculate_density(T5, S5, p5, r5, EOS, EOSdom_h5, rho_ref=rho_ref)
+      else
+        call calculate_density(T5, S5, p5, r5, EOS, EOSdom_h5)
+        do concurrent (k=kstart:kend, j=jstart:jend, i=istart:iend, n=1:5)
+          ii = i-istart+1 ; jj = j-jstart+1
+          u5((ii-1)*5+n,jj,k) = r5((ii-1)*5+n,jj,k) - rho_ref
+        enddo
+      endif
+    endif
+
+    if (use_rho_ref) then
+      do concurrent (k=kstart:kend, j=jstart:jend, i=istart:iend)
+        ii = i-istart+1 ; jj = j-jstart+1
+        dz = e(i,j,K) - e(i,j,K+1)
+        ! Use Boole's rule to estimate the pressure anomaly change.
+        rho_anom = C1_90*(7.0*(r5((ii-1)*5+1,jj,k)+r5((ii-1)*5+5,jj,k)) + &
+                          32.0*(r5((ii-1)*5+2,jj,k)+r5((ii-1)*5+4,jj,k)) + 12.0*r5((ii-1)*5+3,jj,k))
+        dpa(i,j,k) = G_e*dz*rho_anom
+        if (present(intz_dpa)) then
+          ! Use a Boole's-rule-like fifth-order accurate estimate of
+          ! the double integral of the pressure anomaly.
+          intz_dpa(i,j,k) = 0.5*G_e*dz**2 * &
+                  (rho_anom - C1_90*(16.0*(r5((ii-1)*5+4,jj,k)-r5((ii-1)*5+2,jj,k)) + &
+                                     7.0*(r5((ii-1)*5+5,jj,k)-r5((ii-1)*5+1,jj,k))) )
+        endif
+      enddo
+    else
+      do concurrent (k=kstart:kend, j=jstart:jend, i=istart:iend)
+        ii = i-istart+1 ; jj = j-jstart+1
+        dz = e(i,j,K) - e(i,j,K+1)
+        ! Use Boole's rule to estimate the pressure anomaly change.
+        rho_anom = C1_90*(7.0*(r5((ii-1)*5+1,jj,k)+r5((ii-1)*5+5,jj,k)) + &
+                          32.0*(r5((ii-1)*5+2,jj,k)+r5((ii-1)*5+4,jj,k)) + 12.0*r5((ii-1)*5+3,jj,k)) &
+                   - rho_ref
+        dpa(i,j,k) = G_e*dz*rho_anom
+        if (present(intz_dpa)) then
+          ! Use a Boole's-rule-like fifth-order accurate estimate of
+          ! the double integral of the pressure anomaly.
+          intz_dpa(i,j,k) = 0.5*G_e*dz**2 * &
+                  (rho_anom - C1_90*(16.0*(u5((ii-1)*5+4,jj,k)-u5((ii-1)*5+2,jj,k)) + &
+                                     7.0*(u5((ii-1)*5+5,jj,k)-u5((ii-1)*5+1,jj,k))) )
+        endif
+      enddo
+    endif
+
+    !$omp target exit data map(release: T5, S5, T25, TS5, S25, p5, r5, u5)
+
+  enddo ; enddo
+
+end subroutine generic_plm_update_dpa
+
+
+!> Computes the integral in the x-direction of the pressure anomaly difference for a PLM
+!! reconstruction by 5-point Boole's-rule quadrature, filling intx_dpa.
+subroutine generic_plm_update_intx_dpa(niblock, njblock, kstart, kend, tv, T_t, T_b, S_t, S_b, e, &
+                                       bathyT, z0pres, dpa, intx_dpa, GxRho, G_e, dz_subroundoff, &
+                                       massWeightToggle, TopWeightToggle, massWeightNVonlyToggle, h_nonvanished, &
+                                       use_rho_ref, use_stanley_eos, use_varT, use_covarTS, use_varS, &
+                                       rho_ref, EOS, HI, GV)
+  integer,              intent(in)  :: niblock !< Number of points per block in the i-direction
+  integer,              intent(in)  :: njblock !< Number of points per block in the j-direction
+  integer,              intent(in)  :: kstart !< The index of the first layer to integrate over
+  integer,              intent(in)  :: kend !< The index of the last layer to integrate over
+  type(hor_index_type), intent(in)  :: HI  !< Ocean horizontal index structures for the arrays
+  type(verticalGrid_type), intent(in) :: GV !< Vertical grid structure
+  type(thermo_var_ptrs), intent(in) :: tv  !< Thermodynamic variables, used for the sub-grid
+                                           !! T and S variances when the Stanley EOS is active
+  real, dimension(SZI_(HI),SZJ_(HI),SZK_(GV)), &
+                        intent(in)  :: T_t !< Potential temperature at the top of the layer [C ~> degC]
+  real, dimension(SZI_(HI),SZJ_(HI),SZK_(GV)), &
+                        intent(in)  :: T_b !< Potential temperature at the bottom of the layer [C ~> degC]
+  real, dimension(SZI_(HI),SZJ_(HI),SZK_(GV)), &
+                        intent(in)  :: S_t !< Salinity at the top of the layer [S ~> ppt]
+  real, dimension(SZI_(HI),SZJ_(HI),SZK_(GV)), &
+                        intent(in)  :: S_b !< Salinity at the bottom of the layer [S ~> ppt]
+  real, dimension(SZI_(HI),SZJ_(HI),SZK_(GV)+1), &
+                        intent(in)  :: e   !< Height of interfaces between layers [Z ~> m]
+  real, dimension(SZI_(HI),SZJ_(HI)), &
+                        intent(in)  :: bathyT !< The depth of the bathymetry [Z ~> m]
+  real, dimension(HI%isd:HI%ied,HI%jsd:HI%jed), &
+                        intent(in)  :: z0pres !< The height at which the pressure is 0 [Z ~> m]
+  real, dimension(SZI_(HI),SZJ_(HI),SZK_(GV)), &
+                        intent(in)  :: dpa !< The vertically-integrated pressure anomaly at the tracer
+                                           !! points, used as the horizontal end points [R L2 T-2 ~> Pa]
+  real, dimension(SZIB_(HI),SZJ_(HI),SZK_(GV)), &
+                        intent(inout) :: intx_dpa !< The integral in x of the difference between the
+                                           !! pressure anomaly at the top and bottom of the layer divided
+                                           !! by the x grid spacing [R L2 T-2 ~> Pa]
+  real,                 intent(in)  :: GxRho !< The gravitational acceleration times a mean density
+                                           !! used to convert heights to pressures [R L2 T-2 Z-1 ~> Pa m-1]
+  real,                 intent(in)  :: G_e !< The Earth's gravitational acceleration [L2 Z-1 T-2 ~> m s-2]
+  real,                 intent(in)  :: dz_subroundoff !< A negligible height difference used to avoid
+                                           !! division by zero in the mass weighting [Z ~> m]
+  real,                 intent(in)  :: rho_ref !< A mean density [R ~> kg m-3] subtracted out to reduce
+                                           !! the magnitude of each of the integrals
+  real,                 intent(in)  :: massWeightToggle !< 1 to enable bottom mass weighting of the
+                                           !! T and S edge values near topography, 0 to disable it
+  real,                 intent(in)  :: TopWeightToggle !< 1 to enable top mass weighting of the
+                                           !! T and S edge values, 0 to disable it
+  real,                 intent(in)  :: massWeightNVonlyToggle !< 0 to restrict mass weighting to
+                                           !! vanished layers only, 1 to allow it everywhere
+  real,                 intent(in)  :: h_nonvanished !< The layer thickness above which a layer is
+                                           !! considered non-vanished [Z ~> m]
+  logical,              intent(in)  :: use_rho_ref !< If true, subtract rho_ref inside the EOS call;
+                                           !! otherwise subtract it after computing the in-situ density
+  logical,              intent(in)  :: use_stanley_eos !< If true, use the Stanley parameterization that
+                                           !! accounts for the sub-grid T and S variances
+  logical,              intent(in)  :: use_varT !< If true, the temperature variance tv%varT is used
+  logical,              intent(in)  :: use_covarTS !< If true, the T-S covariance tv%covarTS is used
+  logical,              intent(in)  :: use_varS !< If true, the salinity variance tv%varS is used
+  type(EOS_type),       intent(in)  :: EOS !< Equation of state structure
+
+  real :: T15(15*niblock,njblock,kstart:kend)  ! Temperatures at an array of subgrid locations [C ~> degC]
+  real :: S15(15*niblock,njblock,kstart:kend)  ! Salinities at an array of subgrid locations [S ~> ppt]
+  real :: T215(15*niblock,njblock,kstart:kend) ! SGS temperature variance at an array of subgrid
+                                               ! locations [C2 ~> degC2]
+  real :: TS15(15*niblock,njblock,kstart:kend) ! SGS temp-salt covariance at an array of subgrid
+                                               ! locations [C S ~> degC ppt]
+  real :: S215(15*niblock,njblock,kstart:kend) ! SGS salinity variance at an array of subgrid
+                                               ! locations [S2 ~> ppt2]
+  real :: p15(15*niblock,njblock,kstart:kend)  ! Pressures at an array of subgrid locations [R L2 T-2 ~> Pa]
+  real :: r15(15*niblock,njblock,kstart:kend)  ! Densities at an array of subgrid locations [R ~> kg m-3]
+  real :: dz_x(5,niblock,njblock,kstart:kend)  ! Layer thicknesses along an x-line of subgrid locations [Z ~> m]
+  real :: intz(5)    ! The gravitational acceleration times the integrals of density
+                     ! with height at the 5 sub-column locations [R L2 T-2 ~> Pa]
+  real, parameter :: C1_90 = 1.0/90.0  ! A rational constant [nondim]
+  real :: w_left, w_right           ! Left and right weights [nondim]
+  real :: hWght                     ! A topographically limited thickness weight [Z ~> m]
+  real :: hWghtTop                  ! An ice draft limited thickness weight [Z ~> m]
+  real :: iDenom                    ! The denominator of the thickness weight expressions [Z-2 ~> m-2]
+  real :: hL, hR                    ! Thicknesses to the left and right [Z ~> m]
+  real :: Ttl, Tbl, Ttr, Tbr        ! Temperatures at the velocity cell corners [C ~> degC]
+  real :: Stl, Sbl, Str, Sbr        ! Salinities at the velocity cell corners [S ~> ppt]
+  integer, dimension(3,2) :: EOSdom_q15 ! The 3x5-point q-point computational domain for the equation of state
+  integer :: Isq, Ieq, Jsq, Jeq, i, j, k, m, n, pos, jstart, jend, istart, iend, ii, jj
+
+  Isq = HI%IscB ; Ieq = HI%IecB ; Jsq = HI%JscB ; Jeq = HI%JecB
+
+  !$omp target enter data map(alloc: T15, S15, T215, TS15, S215, p15, r15, dz_x)
+
+  do jstart=HI%jsc,HI%jec,njblock ; do istart=Isq,Ieq,niblock
+    jend = min(HI%jec, jstart+njblock-1) ; iend = min(Ieq, istart+niblock-1)
+
+    do concurrent (k=kstart:kend, j=jstart:jend, i=istart:iend) &
+        DO_LOCALITY(local(ii,jj,hWght,hWghtTop,hL,hR,iDenom,Ttl,Tbl,Ttr,Tbr,Stl,Sbl,Str,Sbr,w_left,pos))
+      ii = i-istart+1 ; jj = j-jstart+1
+      ! Corner values of T and S
+      ! hWght is the distance measure by which the cell is violation of
+      ! hydrostatic consistency. For large hWght we bias the interpolation
+      ! of T,S along the top and bottom integrals, almost like thickness
+      ! weighting.
+      ! Note: To work in terrain following coordinates we could offset
+      ! this distance by the layer thickness to replicate other models.
+      hWght = massWeightToggle * &
+              max(0., -bathyT(i,j)-e(i+1,j,K), -bathyT(i+1,j)-e(i,j,K))
+      ! CY: The below code just uses top interface, which may be bad in high res open ocean
+      ! We want something like if (pa(i+1,k+1)<pa(i,1)) or (pa(i+1,1) <pa(i,k+1)) then...
+      ! but pressures are not passed through to this submodule, and tv just has surface press.
+      !if ((p(i+1,j,k+1)<p(i,j,1)).or.(tv%p(i+1,j,k+1)<tv%p(i,j,1))) then
+      hWghtTop = TopWeightToggle * &
+              max(0., e(i+1,j,K+1)-e(i,j,1), e(i,j,K+1)-e(i+1,j,1))
+      !else ! pressure criteria not activated
+      !  hWghtTop = 0.
+      !endif
+      ! Set it to be max of the bottom and top hWghts:
+      hWght = max(hWght, hWghtTop)
+      ! If both sides are nonvanished, then set it back to zero.
+      if (((e(i,j,K) - e(i,j,K+1)) > h_nonvanished) .and. ((e(i+1,j,K) - e(i+1,j,K+1)) > h_nonvanished)) then
+        hWght = massWeightNVonlyToggle * hWght
+      endif
+      if (hWght > 0.) then
+        hL = (e(i,j,K) - e(i,j,K+1)) + dz_subroundoff
+        hR = (e(i+1,j,K) - e(i+1,j,K+1)) + dz_subroundoff
+        hWght = hWght * ( (hL-hR)/(hL+hR) )**2
+        iDenom = 1./( hWght*(hR + hL) + hL*hR )
+        Ttl = ( (hWght*hR)*T_t(i+1,j,k) + (hWght*hL + hR*hL)*T_t(i,j,k) ) * iDenom
+        Ttr = ( (hWght*hL)*T_t(i,j,k) + (hWght*hR + hR*hL)*T_t(i+1,j,k) ) * iDenom
+        Tbl = ( (hWght*hR)*T_b(i+1,j,k) + (hWght*hL + hR*hL)*T_b(i,j,k) ) * iDenom
+        Tbr = ( (hWght*hL)*T_b(i,j,k) + (hWght*hR + hR*hL)*T_b(i+1,j,k) ) * iDenom
+        Stl = ( (hWght*hR)*S_t(i+1,j,k) + (hWght*hL + hR*hL)*S_t(i,j,k) ) * iDenom
+        Str = ( (hWght*hL)*S_t(i,j,k) + (hWght*hR + hR*hL)*S_t(i+1,j,k) ) * iDenom
+        Sbl = ( (hWght*hR)*S_b(i+1,j,k) + (hWght*hL + hR*hL)*S_b(i,j,k) ) * iDenom
+        Sbr = ( (hWght*hL)*S_b(i,j,k) + (hWght*hR + hR*hL)*S_b(i+1,j,k) ) * iDenom
+      else
+        Ttl = T_t(i,j,k) ; Tbl = T_b(i,j,k) ; Ttr = T_t(i+1,j,k) ; Tbr = T_b(i+1,j,k)
+        Stl = S_t(i,j,k) ; Sbl = S_b(i,j,k) ; Str = S_t(i+1,j,k) ; Sbr = S_b(i+1,j,k)
+      endif
+
+      do m=2,4
+        w_left = wt_t(m) ; w_right = wt_b(m)
+        dz_x(m,ii,jj,k) = (w_left*(e(i,j,K) - e(i,j,K+1))) + (w_right*(e(i+1,j,K) - e(i+1,j,K+1)))
+
+        ! Salinity and temperature points are linearly interpolated in
+        ! the horizontal. The subscript (1) refers to the top value in
+        ! the vertical profile while subscript (5) refers to the bottom
+        ! value in the vertical profile.
+        pos = (ii-1)*15+(m-2)*5
+        T15(pos+1,jj,k) = (w_left*Ttl) + (w_right*Ttr)
+        T15(pos+5,jj,k) = (w_left*Tbl) + (w_right*Tbr)
+
+        S15(pos+1,jj,k) = (w_left*Stl) + (w_right*Str)
+        S15(pos+5,jj,k) = (w_left*Sbl) + (w_right*Sbr)
+
+        p15(pos+1,jj,k) = -GxRho * ((w_left*(e(i,j,K)-z0pres(i,j))) + (w_right*(e(i+1,j,K)-z0pres(i+1,j))))
+
+        ! Pressure
+        do n=2,5
+          p15(pos+n,jj,k) = p15(pos+n-1,jj,k) + GxRho*0.25*dz_x(m,ii,jj,k)
+        enddo
+
+        ! Salinity and temperature (linear interpolation in the vertical)
+        do n=2,4
+          S15(pos+n,jj,k) = wt_t(n) * S15(pos+1,jj,k) + wt_b(n) * S15(pos+5,jj,k)
+          T15(pos+n,jj,k) = wt_t(n) * T15(pos+1,jj,k) + wt_b(n) * T15(pos+5,jj,k)
+        enddo
+        if (use_varT) T215(pos+1:pos+5,jj,k) = (w_left*tv%varT(i,j,k)) + (w_right*tv%varT(i+1,j,k))
+        if (use_covarTS) TS15(pos+1:pos+5,jj,k) = (w_left*tv%covarTS(i,j,k)) + (w_right*tv%covarTS(i+1,j,k))
+        if (use_varS) S215(pos+1:pos+5,jj,k) = (w_left*tv%varS(i,j,k)) + (w_right*tv%varS(i+1,j,k))
+      enddo
+    enddo
+
+    EOSdom_q15(1,1) = 1 ; EOSdom_q15(1,2) = 15*(iend-istart+1)
+    EOSdom_q15(2,1) = 1 ; EOSdom_q15(2,2) = jend-jstart+1
+    EOSdom_q15(3,1) = 1 ; EOSdom_q15(3,2) = kend-kstart+1
+
+    if (use_stanley_eos) then
+      do k=kstart,kend
+        call calculate_density(T15(:,:,k), S15(:,:,k), p15(:,:,k), T215(:,:,k), TS15(:,:,k), S215(:,:,k), r15(:,:,k), &
+                               EOS, EOSdom_q15(1:2,:), rho_ref=rho_ref)
+      enddo
+    else
+      if (use_rho_ref) then
+        call calculate_density(T15, S15, p15, r15, EOS, EOSdom_q15, rho_ref=rho_ref)
+      else
+        call calculate_density(T15, S15, p15, r15, EOS, EOSdom_q15)
+      endif
+    endif
+
+    ! Use Boole's rule to estimate the pressure anomaly change.
+    if (use_rho_ref) then
+      do concurrent(k=kstart:kend, j=jstart:jend, I=istart:iend) DO_LOCALITY(local(intz, pos, ii, jj, m))
+        ii = i-istart+1 ; jj = j-jstart+1
+        intz(1) = dpa(i,j,k) ; intz(5) = dpa(i+1,j,k)
+        do m = 2,4
+          pos = (ii-1)*15+(m-2)*5
+          intz(m) = (G_e*dz_x(m,ii,jj,k)*( C1_90*(7.0*(r15(pos+1,jj,k)+r15(pos+5,jj,k)) + &
+                            32.0*(r15(pos+2,jj,k)+r15(pos+4,jj,k)) + &
+                            12.0*r15(pos+3,jj,k)) ))
+        enddo
+        ! Use Boole's rule to integrate the bottom pressure anomaly values in x.
+        intx_dpa(I,j,k) = C1_90*(7.0*(intz(1)+intz(5)) + 32.0*(intz(2)+intz(4)) + &
+                              12.0*intz(3))
+      enddo
+    else
+      do concurrent(k=kstart:kend, j=jstart:jend, I=istart:iend) DO_LOCALITY(local(intz, pos, ii, jj, m))
+        ii = i-istart+1 ; jj = j-jstart+1
+        intz(1) = dpa(i,j,k) ; intz(5) = dpa(i+1,j,k)
+        do m = 2,4
+          pos = (ii-1)*15+(m-2)*5
+          intz(m) = (G_e*dz_x(m,ii,jj,k)*( C1_90*(7.0*(r15(pos+1,jj,k)+r15(pos+5,jj,k)) + &
+                            32.0*(r15(pos+2,jj,k)+r15(pos+4,jj,k)) + &
+                            12.0*r15(pos+3,jj,k)) - rho_ref ))
+        enddo
+        ! Use Boole's rule to integrate the bottom pressure anomaly values in x.
+        intx_dpa(I,j,k) = C1_90*(7.0*(intz(1)+intz(5)) + 32.0*(intz(2)+intz(4)) + &
+                                 12.0*intz(3))
+      enddo
+    endif
+
+  enddo ; enddo
+
+  !$omp target exit data map(release: T15, S15, T215, TS15, S215, p15, r15, dz_x)
+
+end subroutine generic_plm_update_intx_dpa
+
+
+!> Computes the integral in the y-direction of the pressure anomaly difference for a PLM
+!! reconstruction by 5-point Boole's-rule quadrature, filling inty_dpa.
+subroutine generic_plm_update_inty_dpa(niblock, njblock, kstart, kend, tv, T_t, T_b, S_t, S_b, e, &
+                                       bathyT, z0pres, dpa, inty_dpa, GxRho, G_e, dz_subroundoff, &
+                                       massWeightToggle, TopWeightToggle, massWeightNVonlyToggle, h_nonvanished, &
+                                       use_rho_ref, use_stanley_eos, use_varT, use_covarTS, use_varS, &
+                                       rho_ref, EOS, HI, GV)
+  integer,              intent(in)  :: niblock !< Number of points per block in the i-direction
+  integer,              intent(in)  :: njblock !< Number of points per block in the j-direction
+  integer,              intent(in)  :: kstart !< The index of the first layer to integrate over
+  integer,              intent(in)  :: kend !< The index of the last layer to integrate over
+  type(hor_index_type), intent(in)  :: HI  !< Ocean horizontal index structures for the arrays
+  type(verticalGrid_type), intent(in) :: GV !< Vertical grid structure
+  type(thermo_var_ptrs), intent(in) :: tv  !< Thermodynamic variables, used for the sub-grid
+                                           !! T and S variances when the Stanley EOS is active
+  real, dimension(SZI_(HI),SZJ_(HI),SZK_(GV)), &
+                        intent(in)  :: T_t !< Potential temperature at the top of the layer [C ~> degC]
+  real, dimension(SZI_(HI),SZJ_(HI),SZK_(GV)), &
+                        intent(in)  :: T_b !< Potential temperature at the bottom of the layer [C ~> degC]
+  real, dimension(SZI_(HI),SZJ_(HI),SZK_(GV)), &
+                        intent(in)  :: S_t !< Salinity at the top of the layer [S ~> ppt]
+  real, dimension(SZI_(HI),SZJ_(HI),SZK_(GV)), &
+                        intent(in)  :: S_b !< Salinity at the bottom of the layer [S ~> ppt]
+  real, dimension(SZI_(HI),SZJ_(HI),SZK_(GV)+1), &
+                        intent(in)  :: e   !< Height of interfaces between layers [Z ~> m]
+  real, dimension(SZI_(HI),SZJ_(HI)), &
+                        intent(in)  :: bathyT !< The depth of the bathymetry [Z ~> m]
+  real, dimension(HI%isd:HI%ied,HI%jsd:HI%jed), &
+                        intent(in)  :: z0pres !< The height at which the pressure is 0 [Z ~> m]
+  real, dimension(SZI_(HI),SZJ_(HI),SZK_(GV)), &
+                        intent(in)  :: dpa !< The vertically-integrated pressure anomaly at the tracer
+                                           !! points, used as the horizontal end points [R L2 T-2 ~> Pa]
+  real, dimension(SZI_(HI),SZJB_(HI),SZK_(GV)), &
+                        intent(inout) :: inty_dpa !< The integral in y of the difference between the
+                                           !! pressure anomaly at the top and bottom of the layer divided
+                                           !! by the y grid spacing [R L2 T-2 ~> Pa]
+  real,                 intent(in)  :: GxRho !< The gravitational acceleration times a mean density
+                                           !! used to convert heights to pressures [R L2 T-2 Z-1 ~> Pa m-1]
+  real,                 intent(in)  :: G_e !< The Earth's gravitational acceleration [L2 Z-1 T-2 ~> m s-2]
+  real,                 intent(in)  :: dz_subroundoff !< A negligible height difference used to avoid
+                                           !! division by zero in the mass weighting [Z ~> m]
+  real,                 intent(in)  :: rho_ref !< A mean density [R ~> kg m-3] subtracted out to reduce
+                                           !! the magnitude of each of the integrals
+  real,                 intent(in)  :: massWeightToggle !< 1 to enable bottom mass weighting of the
+                                           !! T and S edge values near topography, 0 to disable it
+  real,                 intent(in)  :: TopWeightToggle !< 1 to enable top mass weighting of the
+                                           !! T and S edge values, 0 to disable it
+  real,                 intent(in)  :: massWeightNVonlyToggle !< 0 to restrict mass weighting to
+                                           !! vanished layers only, 1 to allow it everywhere
+  real,                 intent(in)  :: h_nonvanished !< The layer thickness above which a layer is
+                                           !! considered non-vanished [Z ~> m]
+  logical,              intent(in)  :: use_rho_ref !< If true, subtract rho_ref inside the EOS call;
+                                           !! otherwise subtract it after computing the in-situ density
+  logical,              intent(in)  :: use_stanley_eos !< If true, use the Stanley parameterization that
+                                           !! accounts for the sub-grid T and S variances
+  logical,              intent(in)  :: use_varT !< If true, the temperature variance tv%varT is used
+  logical,              intent(in)  :: use_covarTS !< If true, the T-S covariance tv%covarTS is used
+  logical,              intent(in)  :: use_varS !< If true, the salinity variance tv%varS is used
+  type(EOS_type),       intent(in)  :: EOS !< Equation of state structure
+
+  real :: T15(15*niblock,njblock,kstart:kend)  ! Temperatures at an array of subgrid locations [C ~> degC]
+  real :: S15(15*niblock,njblock,kstart:kend)  ! Salinities at an array of subgrid locations [S ~> ppt]
+  real :: T215(15*niblock,njblock,kstart:kend) ! SGS temperature variance at an array of subgrid
+                                               ! locations [C2 ~> degC2]
+  real :: TS15(15*niblock,njblock,kstart:kend) ! SGS temp-salt covariance at an array of subgrid
+                                               ! locations [C S ~> degC ppt]
+  real :: S215(15*niblock,njblock,kstart:kend) ! SGS salinity variance at an array of subgrid
+                                               ! locations [S2 ~> ppt2]
+  real :: p15(15*niblock,njblock,kstart:kend)  ! Pressures at an array of subgrid locations [R L2 T-2 ~> Pa]
+  real :: r15(15*niblock,njblock,kstart:kend)  ! Densities at an array of subgrid locations [R ~> kg m-3]
+  real :: dz_y(5,niblock,njblock,kstart:kend)  ! Layer thicknesses along a y-line of subgrid locations [Z ~> m]
+  real :: intz(5)    ! The gravitational acceleration times the integrals of density
+                     ! with height at the 5 sub-column locations [R L2 T-2 ~> Pa]
+  real, parameter :: C1_90 = 1.0/90.0  ! A rational constant [nondim]
+  real :: w_left, w_right           ! Left and right weights [nondim]
+  real :: hWght                     ! A topographically limited thickness weight [Z ~> m]
+  real :: hWghtTop                  ! An ice draft limited thickness weight [Z ~> m]
+  real :: iDenom                    ! The denominator of the thickness weight expressions [Z-2 ~> m-2]
+  real :: hL, hR                    ! Thicknesses to the left and right [Z ~> m]
+  real :: Ttl, Tbl, Ttr, Tbr        ! Temperatures at the velocity cell corners [C ~> degC]
+  real :: Stl, Sbl, Str, Sbr        ! Salinities at the velocity cell corners [S ~> ppt]
+  integer, dimension(3,2) :: EOSdom_h15 ! The 3x5-point h-point computational domain for the equation of state
+  integer :: Isq, Ieq, Jsq, Jeq, i, j, k, m, n, pos, jstart, jend, istart, iend, ii, jj
+
+  Isq = HI%IscB ; Ieq = HI%IecB ; Jsq = HI%JscB ; Jeq = HI%JecB
+
+  !$omp target enter data map(alloc: T15, S15, T215, TS15, S215, p15, r15, dz_y)
+
+  do jstart=Jsq,Jeq,njblock ; do istart=HI%isc,HI%iec,niblock
+    jend = min(Jeq, jstart+njblock-1) ; iend = min(HI%iec, istart+niblock-1)
+
+    do concurrent (k=kstart:kend, j=jstart:jend, i=istart:iend)
+      ii = i-istart+1 ; jj = j-jstart+1
+      ! Corner values of T and S
+      ! hWght is the distance measure by which the cell is violation of
+      ! hydrostatic consistency. For large hWght we bias the interpolation
+      ! of T,S along the top and bottom integrals, almost like thickness
+      ! weighting.
+      ! Note: To work in terrain following coordinates we could offset
+      ! this distance by the layer thickness to replicate other models.
+      hWght = massWeightToggle * &
+              max(0., -bathyT(i,j)-e(i,j+1,K), -bathyT(i,j+1)-e(i,j,K))
+      ! CY: The below code just uses top interface, which may be bad in high res open ocean
+      ! We want something like if (pa(j+1,k+1)<pa(j,1)) or (pa(j+1,1) <pa(i,j,k+1)) then...
+      ! but pressures are not passed through to this submodule, and tv just has surface press.
+      !if ((p(i,j+1,k+1)<p(i,j,1)).or.(tv%p(i,j+1,k+1)<tv%p(i,j,1))) then
+      hWghtTop = TopWeightToggle * &
+              max(0., e(i,j+1,K+1)-e(i,j,1), e(i,j,K+1)-e(i,j+1,1))
+      !else ! pressure criteria not activated
+      !  hWghtTop = 0.
+      !endif
+      ! Set it to be max of the bottom and top hWghts:
+      hWght = max(hWght, hWghtTop)
+      ! If both sides are nonvanished, then set it back to zero.
+      if (((e(i,j,K) - e(i,j,K+1)) > h_nonvanished) .and. ((e(i,j+1,K) - e(i,j+1,K+1)) > h_nonvanished)) then
+        hWght = massWeightNVonlyToggle * hWght
+      endif
+
+      if (hWght > 0.) then
+        hL = (e(i,j,K) - e(i,j,K+1)) + dz_subroundoff
+        hR = (e(i,j+1,K) - e(i,j+1,K+1)) + dz_subroundoff
+        hWght = hWght * ( (hL-hR)/(hL+hR) )**2
+        iDenom = 1./( hWght*(hR + hL) + hL*hR )
+        Ttl = ( (hWght*hR)*T_t(i,j+1,k) + (hWght*hL + hR*hL)*T_t(i,j,k) ) * iDenom
+        Ttr = ( (hWght*hL)*T_t(i,j,k) + (hWght*hR + hR*hL)*T_t(i,j+1,k) ) * iDenom
+        Tbl = ( (hWght*hR)*T_b(i,j+1,k) + (hWght*hL + hR*hL)*T_b(i,j,k) ) * iDenom
+        Tbr = ( (hWght*hL)*T_b(i,j,k) + (hWght*hR + hR*hL)*T_b(i,j+1,k) ) * iDenom
+        Stl = ( (hWght*hR)*S_t(i,j+1,k) + (hWght*hL + hR*hL)*S_t(i,j,k) ) * iDenom
+        Str = ( (hWght*hL)*S_t(i,j,k) + (hWght*hR + hR*hL)*S_t(i,j+1,k) ) * iDenom
+        Sbl = ( (hWght*hR)*S_b(i,j+1,k) + (hWght*hL + hR*hL)*S_b(i,j,k) ) * iDenom
+        Sbr = ( (hWght*hL)*S_b(i,j,k) + (hWght*hR + hR*hL)*S_b(i,j+1,k) ) * iDenom
+      else
+        Ttl = T_t(i,j,k) ; Tbl = T_b(i,j,k) ; Ttr = T_t(i,j+1,k) ; Tbr = T_b(i,j+1,k)
+        Stl = S_t(i,j,k) ; Sbl = S_b(i,j,k) ; Str = S_t(i,j+1,k) ; Sbr = S_b(i,j+1,k)
+      endif
+
+      do m=2,4
+        w_left = wt_t(m) ; w_right = wt_b(m)
+        dz_y(m,ii,jj,k) = (w_left*(e(i,j,K) - e(i,j,K+1))) + (w_right*(e(i,j+1,K) - e(i,j+1,K+1)))
+
+        ! Salinity and temperature points are linearly interpolated in
+        ! the horizontal. The subscript (1) refers to the top value in
+        ! the vertical profile while subscript (5) refers to the bottom
+        ! value in the vertical profile.
+        pos = (ii-1)*15+(m-2)*5
+        T15(pos+1,jj,k) = (w_left*Ttl) + (w_right*Ttr)
+        T15(pos+5,jj,k) = (w_left*Tbl) + (w_right*Tbr)
+
+        S15(pos+1,jj,k) = (w_left*Stl) + (w_right*Str)
+        S15(pos+5,jj,k) = (w_left*Sbl) + (w_right*Sbr)
+
+        p15(pos+1,jj,k) = -GxRho * ((w_left*(e(i,j,K)-z0pres(i,j))) + (w_right*(e(i,j+1,K)-z0pres(i,j+1))))
+
+        ! Pressure
+        do n=2,5
+          p15(pos+n,jj,k) = p15(pos+n-1,jj,k) + GxRho*0.25*dz_y(m,ii,jj,k)
+        enddo
+
+        ! Salinity and temperature (linear interpolation in the vertical)
+        do n=2,4
+          S15(pos+n,jj,k) = wt_t(n) * S15(pos+1,jj,k) + wt_b(n) * S15(pos+5,jj,k)
+          T15(pos+n,jj,k) = wt_t(n) * T15(pos+1,jj,k) + wt_b(n) * T15(pos+5,jj,k)
+        enddo
+        if (use_varT) T215(pos+1:pos+5,jj,k) = (w_left*tv%varT(i,j,k)) + (w_right*tv%varT(i,j+1,k))
+        if (use_covarTS) TS15(pos+1:pos+5,jj,k) = (w_left*tv%covarTS(i,j,k)) + (w_right*tv%covarTS(i,j+1,k))
+        if (use_varS) S215(pos+1:pos+5,jj,k) = (w_left*tv%varS(i,j,k)) + (w_right*tv%varS(i,j+1,k))
+      enddo
+    enddo
+
+    EOSdom_h15(1,1) = 1 ; EOSdom_h15(1,2) = 15*(iend-istart+1)
+    EOSdom_h15(2,1) = 1 ; EOSdom_h15(2,2) = jend-jstart+1
+    EOSdom_h15(3,1) = 1 ; EOSdom_h15(3,2) = kend-kstart+1
+
+    if (use_stanley_eos) then
+      do k=kstart,kend
+        call calculate_density(T15(:,:,k), S15(:,:,k), p15(:,:,k), T215(:,:,k), TS15(:,:,k), S215(:,:,k), r15(:,:,k), &
+                               EOS, EOSdom_h15(1:2,:), rho_ref=rho_ref)
+      enddo
+    else
+      if (use_rho_ref) then
+        call calculate_density(T15, S15, p15, r15, EOS, EOSdom_h15, rho_ref=rho_ref)
+      else
+        call calculate_density(T15, S15, p15, r15, EOS, EOSdom_h15)
+      endif
+    endif
+
+    ! Use Boole's rule to estimate the pressure anomaly change.
+    if (use_rho_ref) then
+      do concurrent (k=kstart:kend, j=jstart:jend, i=istart:iend) DO_LOCALITY(local(ii,jj,intz,pos))
+        ii = i-istart+1 ; jj = j-jstart+1
+        intz(1) = dpa(i,j,k) ; intz(5) = dpa(i,j+1,k)
+        do m = 2,4
+          pos = (ii-1)*15+(m-2)*5
+          intz(m) = (G_e*dz_y(m,ii,jj,k)*( C1_90*(7.0*(r15(pos+1,jj,k)+r15(pos+5,jj,k)) + &
+                                          32.0*(r15(pos+2,jj,k)+r15(pos+4,jj,k)) + &
+                                          12.0*r15(pos+3,jj,k)) ))
+        enddo
+        ! Use Boole's rule to integrate the values.
+        inty_dpa(i,J,k) = C1_90*(7.0*(intz(1)+intz(5)) + 32.0*(intz(2)+intz(4)) + &
+                              12.0*intz(3))
+      enddo
+    else
+      do concurrent (k=kstart:kend, j=jstart:jend, i=istart:iend) DO_LOCALITY(local(ii,jj,intz,pos))
+        ii = i-istart+1 ; jj = j-jstart+1
+        intz(1) = dpa(i,j,k) ; intz(5) = dpa(i,j+1,k)
+        do m = 2,4
+          pos = (ii-1)*15+(m-2)*5
+          intz(m) = (G_e*dz_y(m,ii,jj,k)*( C1_90*(7.0*(r15(pos+1,jj,k)+r15(pos+5,jj,k)) + &
+                                          32.0*(r15(pos+2,jj,k)+r15(pos+4,jj,k)) + &
+                                          12.0*r15(pos+3,jj,k)) - rho_ref ))
+        enddo
+        ! Use Boole's rule to integrate the values.
+        inty_dpa(i,J,k) = C1_90*(7.0*(intz(1)+intz(5)) + 32.0*(intz(2)+intz(4)) + &
+                                 12.0*intz(3))
+      enddo
+    endif
+  enddo ; enddo
+
+  !$omp target exit data map(release: T15, S15, T215, TS15, S215, p15, r15, dz_y)
+
+end subroutine generic_plm_update_inty_dpa
 
 
 !> Compute pressure gradient force integrals for layer "k" and the case where T and S
