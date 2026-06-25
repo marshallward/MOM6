@@ -25,8 +25,9 @@ public calc_isoneutral_slopes, vert_fill_TS
 ! Default tile sizes for loop blocking. For CPU runs these small values improve cache reuse
 ! by working over small sub-domains at a time. For GPU runs, calc_isoneutral_slopes overrides
 ! these to cover the full computational domain in a single tile (see niblock/njblock below).
-integer, parameter :: default_niblock = 32 !< Default i-direction loop-tile size [nondim].
-integer, parameter :: default_njblock = 4  !< Default j-direction loop-tile size [nondim].
+integer, parameter :: default_niblock = 64 !< Default i-direction loop-tile size [nondim].
+integer, parameter :: default_njblock = 1  !< Default j-direction loop-tile size [nondim].
+integer, parameter :: default_nkblock = 1  !< Default k-direction loop-tile size [nondim].
 
 ! A note on unit descriptions in comments: MOM6 uses units that can be rescaled for dimensional
 ! consistency testing. These are noted in comments with units like Z, H, L, and T, along with
@@ -87,7 +88,7 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
   ! the Stanley h-point fills (which need one extra column/row beyond the u/v tile extent)
   ! fit without a separate buffer. drho_dT and drho_dS only ever need niblock x njblock,
   ! but are dimensioned +1 for alignment with the rest.
-  real, dimension(default_niblock+1, default_njblock+1, SZK_(GV)) :: &
+  real, dimension(default_niblock+1, default_njblock+1, default_nkblock) :: &
     drho_dT, &      ! The derivative of density with temperature [R C-1 ~> kg m-3 degC-1].
     drho_dS, &      ! The derivative of density with salinity [R S-1 ~> kg m-3 ppt-1].
     drho_dT_dT_h, & ! The second derivative of density with temperature at h points [R C-2 ~> kg m-3 degC-2]
@@ -133,9 +134,11 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
   integer :: i, j, k
   integer :: niblock_loc  !< i-direction tile size for the current subroutine call [nondim].
   integer :: njblock_loc  !< j-direction tile size for the current subroutine call [nondim].
+  integer :: nkblock_loc  !< k-direction tile size for the current subroutine call [nondim].
   integer :: istart, iend !< First and last global i (or I) indices of the current tile [nondim].
   integer :: jstart, jend !< First and last global j (or J) indices of the current tile [nondim].
-  integer :: ii, jj       !< Tile-local 1-based i and j indices [nondim].
+  integer :: kstart, kend !< First and last global K (or K) indices of the current tile [nondim].
+  integer :: ii, jj,kk       !< Tile-local 1-based i, j, and k indices [nondim].
 
   ! Allocate locals on device
   !$omp target enter data map(alloc: T, S, pres, T_uvh, S_uvh, pres_uvh, GxSpV_uvh, &
@@ -148,9 +151,9 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
     is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec
     EOSdom_h1(:) = EOS_domain(G%HI, halo=1)
   endif
-  ! For zonal loop: u-points for i, tracer points for j
-  EOSdom(1,1) = is-1 - (G%IsdB-1) ; EOSdom(1,2) = ie - (G%IsdB-1)
-  EOSdom(2,1) = js - (G%Jsdb-1) ; EOSdom(2,2) = je - (G%Jsdb-1)
+  !! For zonal loop: u-points for i, tracer points for j
+  !EOSdom(1,1) = is-1 - (G%IsdB-1) ; EOSdom(1,2) = ie - (G%IsdB-1)
+  !EOSdom(2,1) = js - (G%Jsdb-1) ; EOSdom(2,2) = je - (G%Jsdb-1)
 
   nz = GV%ke ; IsdB = G%IsdB
 
@@ -159,7 +162,7 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
   ! in a single tile, maximising parallelism. The zonal pass uses I=is-1:ie (extent
   ! ie-is+2) and the meridional pass uses J=js-1:je (extent je-js+2); using these as
   ! niblock_loc/njblock_loc ensures a single tile covers each pass on the GPU.
-  niblock_loc = default_niblock ; njblock_loc = default_njblock
+  niblock_loc = default_niblock ; njblock_loc = default_njblock ; nkblock_loc = default_nkblock
   !$ if (omp_get_num_devices() > 0) then
   !$   niblock_loc = ie - is + 2  ! = (ie) - (is-1) + 1: covers I=is-1:ie in one tile
   !$   njblock_loc = je - js + 2  ! = (je) - (js-1) + 1: covers J=js-1:je in one tile
@@ -270,30 +273,33 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
   !   6. If use_stanley: refill at h-points, call calculate_density_second_derivs.
   !   7. Transfer derivatives to device (target update to).
   !   8. Compute slopes in do concurrent using tile-local indices.
-  do jstart=js, je, njblock_loc ; do istart=is-1, ie, niblock_loc
+  do jstart=js, je, njblock_loc ; do istart=is-1, ie, niblock_loc ; do kstart=2,nz, nkblock_loc
     iend = min(istart + niblock_loc - 1, ie)
     jend = min(jstart + njblock_loc - 1, je)
+    kend = min(kstart + nkblock_loc - 1, nz)
     EOSdom_tile(1) = 1 ; EOSdom_tile(2) = iend - istart + 1
 
     ! Initialise GxSpV tile to the Boussinesq default G/rho0; overwritten below if
     ! non-Boussinesq SpV_avg is available.
-    do concurrent( jj=1:jend-jstart+1, k=1:nz, ii=1:iend-istart+1 )
-      GxSpV_uvh(ii,jj,k) = G_Rho0
+    do concurrent( jj=1:jend-jstart+1, kk=1:kend-kstart+1, ii=1:iend-istart+1 )
+      GxSpV_uvh(ii,jj,kk) = G_Rho0
     enddo
 
     if (use_EOS) then
       ! Fill tile T_uvh/S_uvh/pres_uvh at u-points (u-face = average of i and i+1)
-      do concurrent(jj=1:jend-jstart+1, K=2:nz, ii=1:iend-istart+1)
+      do concurrent(jj=1:jend-jstart+1, kk=1:kend-kstart+1, ii=1:iend-istart+1)
         i = istart + ii - 1  ! global I (u-face index)
         j = jstart + jj - 1  ! global j
-        pres_uvh(ii,jj,K) = 0.5*(pres(i,j,K) + pres(i+1,j,K))
-        T_uvh(ii,jj,K) = 0.25*((T(i,j,k) + T(i+1,j,k)) + (T(i,j,k-1) + T(i+1,j,k-1)))
-        S_uvh(ii,jj,K) = 0.25*((S(i,j,k) + S(i+1,j,k)) + (S(i,j,k-1) + S(i+1,j,k-1)))
+        k = kstart + kk - 1  ! global k
+        pres_uvh(ii,jj,kk) = 0.5*(pres(i,j,K) + pres(i+1,j,K))
+        T_uvh(ii,jj,kk) = 0.25*((T(i,j,k) + T(i+1,j,k)) + (T(i,j,k-1) + T(i+1,j,k-1)))
+        S_uvh(ii,jj,kk) = 0.25*((S(i,j,k) + S(i+1,j,k)) + (S(i,j,k-1) + S(i+1,j,k-1)))
       enddo
 
       ! Apply OBC overrides: at open boundary faces use only the interior cell's T/S/P
       ! rather than the two-cell average computed above. Runs on CPU because it requires
       ! access to OBC%segnum_u, a derived-type component not mapped to the device.
+      ! UMW TODO: fix the indices in these two loops
       if (OBC_friendly) then
         ! East-facing open boundaries: interior cell is at i (=istart+ii-1), use pres/T/S(i,j,K)
         if (OBC%u_E_OBCs_on_PE) then
@@ -333,18 +339,20 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
       ! adjacent layers. Individual OBC faces may override this inside the slope loop.
       if (present_N2_u .or. present(dzSxN)) then
         if (allocated(tv%SpV_avg)) then
-          do jj=1, jend-jstart+1 ; do K=2,nz ; do ii=1, iend-istart+1
-            i = istart + ii - 1 ; j = jstart + jj - 1
-            GxSpV_uvh(ii,jj,K) = GV%g_Earth * 0.25 * ((tv%SpV_avg(i,j,K) + tv%SpV_avg(i+1,j,K)) + &
+          do jj=1, jend-jstart+1 ; do kk=1,kend-kstart+1 ; do ii=1, iend-istart+1
+            i = istart + ii - 1
+            j = jstart + jj - 1
+            k = kstart + kk - 1
+            GxSpV_uvh(ii,jj,kk) = GV%g_Earth * 0.25 * ((tv%SpV_avg(i,j,K) + tv%SpV_avg(i+1,j,K)) + &
                                                         (tv%SpV_avg(i,j,K-1) + tv%SpV_avg(i+1,j,K-1)))
           enddo ; enddo ; enddo
         endif
       endif
 
       ! Density derivatives at u-points. EOSdom_tile is 1-based so no IsdB offset is needed.
-      do jj=1,jend-jstart+1 ; do K=nz,2,-1
-        call calculate_density_derivs(T_uvh(:,jj,K), S_uvh(:,jj,K), pres_uvh(:,jj,K), &
-                                      drho_dT(:,jj,K), drho_dS(:,jj,K), &
+      do jj=1,jend-jstart+1 ; do kk=1,kend-kstart+1
+        call calculate_density_derivs(T_uvh(:,jj,kk), S_uvh(:,jj,kk), pres_uvh(:,jj,kk), &
+                                      drho_dT(:,jj,kk), drho_dS(:,jj,kk), &
                                       tv%eqn_of_state, EOSdom_tile)
       enddo ; enddo
 
@@ -353,16 +361,18 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
         ! The fill extends one extra column (ii up to iend-istart+2) because the slope compute
         ! accesses drho_dT_dT_h(ii,jj,K) and drho_dT_dT_h(ii+1,jj,K) simultaneously.
         EOSdom_tile_h1(1) = 1 ; EOSdom_tile_h1(2) = iend - istart + 2
-        do concurrent(jj=1:jend-jstart+1, K=2:nz, ii=1:iend-istart+2)
-          i = istart + ii - 1 ; j = jstart + jj - 1
-          pres_uvh(ii,jj,K) = pres(i,j,K)
-          T_uvh(ii,jj,K) = 0.5*(T(i,j,K) + T(i,j,K-1))
-          S_uvh(ii,jj,K) = 0.5*(S(i,j,K) + S(i,j,K-1))
+        do concurrent(jj=1:jend-jstart+1, kk=1:kend-kstart+1, ii=1:iend-istart+2)
+          i = istart + ii - 1
+          j = jstart + jj - 1
+          k = kstart + kk - 1
+          pres_uvh(ii,jj,kk) = pres(i,j,K)
+          T_uvh(ii,jj,kk) = 0.5*(T(i,j,K) + T(i,j,K-1))
+          S_uvh(ii,jj,kk) = 0.5*(S(i,j,K) + S(i,j,K-1))
         enddo
 
-        do jj=1,jend-jstart+1 ; do K=nz,2,-1
-          call calculate_density_second_derivs(T_uvh(:,jj,K), S_uvh(:,jj,K), pres_uvh(:,jj,K), &
-                     scrap, scrap, drho_dT_dT_h(:,jj,K), scrap, scrap, &
+        do jj=1,jend-jstart+1 ; do kk=1,kend-kstart+1
+          call calculate_density_second_derivs(T_uvh(:,jj,kk), S_uvh(:,jj,kk), pres_uvh(:,jj,kk), &
+                     scrap, scrap, drho_dT_dT_h(:,jj,kk), scrap, scrap, &
                      tv%eqn_of_state, dom=EOSdom_tile_h1)
         enddo ; enddo
       endif ! end use_stanley
@@ -370,26 +380,26 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
     endif ! end use_EOS for zonal tile
 
     ! Zonal slope compute over the tile
-    do concurrent( jj=1:jend-jstart+1, K=2:nz, ii=1:iend-istart+1 ) &
+    do concurrent( jj=1:jend-jstart+1, kk=1:kend-kstart+1, ii=1:iend-istart+1 ) &
         local(drdkL, drdkR, drdiA, drdiB, I, j)
       I = istart + ii - 1  ! global I (u-face)
       j = jstart + jj - 1  ! global j (h-point)
-      i = I                 ! i = I for C-grid u-faces
+      k = kstart + kk - 1  ! global k
 
       if (use_EOS) then
-        drdiA = drho_dT(ii,jj,K) * (T(i+1,j,k-1)-T(i,j,k-1)) + &
-                drho_dS(ii,jj,K) * (S(i+1,j,k-1)-S(i,j,k-1))
-        drdiB = drho_dT(ii,jj,K) * (T(i+1,j,k)-T(i,j,k)) + &
-                drho_dS(ii,jj,K) * (S(i+1,j,k)-S(i,j,k))
-        drdkL = (drho_dT(ii,jj,K) * (T(i,j,k)-T(i,j,k-1)) + &
-                  drho_dS(ii,jj,K) * (S(i,j,k)-S(i,j,k-1)))
-        drdkR = (drho_dT(ii,jj,K) * (T(i+1,j,k)-T(i+1,j,k-1)) + &
-                  drho_dS(ii,jj,K) * (S(i+1,j,k)-S(i+1,j,k-1)))
+        drdiA = drho_dT(ii,jj,kk) * (T(i+1,j,k-1)-T(i,j,k-1)) + &
+                drho_dS(ii,jj,kk) * (S(i+1,j,k-1)-S(i,j,k-1))
+        drdiB = drho_dT(ii,jj,kk) * (T(i+1,j,k)-T(i,j,k)) + &
+                drho_dS(ii,jj,kk) * (S(i+1,j,k)-S(i,j,k))
+        drdkL = (drho_dT(ii,jj,kk) * (T(i,j,k)-T(i,j,k-1)) + &
+                  drho_dS(ii,jj,kk) * (S(i,j,k)-S(i,j,k-1)))
+        drdkR = (drho_dT(ii,jj,kk) * (T(i+1,j,k)-T(i+1,j,k-1)) + &
+                  drho_dS(ii,jj,kk) * (S(i+1,j,k)-S(i+1,j,k-1)))
         if (use_stanley) then
-          drdiA = drdiA + 0.5 * ((drho_dT_dT_h(ii+1,jj,K) * tv%varT(i+1,j,K-1)) - &
-                                (drho_dT_dT_h(ii,jj,K) * tv%varT(i,j,K-1)) )
-          drdiB = drdiB + 0.5 * ((drho_dT_dT_h(ii+1,jj,K) * tv%varT(i+1,j,K)) - &
-                                (drho_dT_dT_h(ii,jj,K) * tv%varT(i,j,K)) )
+          drdiA = drdiA + 0.5 * ((drho_dT_dT_h(ii+1,jj,kk) * tv%varT(i+1,j,K-1)) - &
+                                (drho_dT_dT_h(ii,jj,kk) * tv%varT(i,j,K-1)) )
+          drdiB = drdiB + 0.5 * ((drho_dT_dT_h(ii+1,jj,kk) * tv%varT(i+1,j,K)) - &
+                                (drho_dT_dT_h(ii,jj,kk) * tv%varT(i,j,K)) )
         endif
       else ! .not. use_EOS: layers are constant density
         drdiA = 0.0 ; drdiB = 0.0
@@ -427,7 +437,7 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
               GxSpV_uvh(ii,jj,k) = GV%g_Earth * 0.5 * (tv%SpV_avg(i+1,j,k) + tv%SpV_avg(i+1,j,k-1))
           endif
         endif ; endif
-        N2_u(I,j,K) = GxSpV_uvh(ii,jj,k) * drdz * G%mask2dCu(I,j)
+        N2_u(I,j,K) = GxSpV_uvh(ii,jj,kk) * drdz * G%mask2dCu(I,j)
       endif
 
       if (use_EOS) then
@@ -452,11 +462,11 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
 
       slope_x(I,j,K) = slope
       if (present(dzSxN)) &
-        dzSxN(I,j,K) = sqrt( GxSpV_uvh(ii,jj,k) * max(0., (wtL * ( dzaL * drdkL )) &
+        dzSxN(I,j,K) = sqrt( GxSpV_uvh(ii,jj,kk) * max(0., (wtL * ( dzaL * drdkL )) &
                                                 + (wtR * ( dzaR * drdkR ))) / (wtL + wtR) ) &
                         * abs(slope) * G%mask2dCu(I,j)
     enddo ! end zonal tile do concurrent
-  enddo ; enddo ! end zonal outer tile loops
+    enddo ; enddo ; enddo ! end zonal outer tile loops
 
   ! ============================================================
   ! Meridional tiling loop: compute meridional isopycnal slopes
@@ -464,28 +474,31 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
   ! Structure mirrors the zonal loop above, but tiling over (i=is:ie, J=js-1:je).
   ! The Stanley second-derivative fill extends to jend+1 in J because the slope
   ! compute accesses drho_dT_dT_h(ii,jj,K) and drho_dT_dT_h(ii,jj+1,K) simultaneously.
-  do jstart=js-1, je, njblock_loc ; do istart=is, ie, niblock_loc
+  do jstart=js-1, je, njblock_loc ; do istart=is, ie, niblock_loc ; do kstart=2,nz, nkblock_loc
     iend = min(istart + niblock_loc - 1, ie)
     jend = min(jstart + njblock_loc - 1, je)
+    kend = min(kstart + nkblock_loc - 1, nz)
     EOSdom_tile(1) = 1 ; EOSdom_tile(2) = iend - istart + 1
 
     ! Re-initialise GxSpV tile: the zonal pass may have set entries here, so reset to
     ! G_Rho0 before the meridional fills.
-    do concurrent( jj=1:jend-jstart+1, k=1:nz, ii=1:iend-istart+1 )
-      GxSpV_uvh(ii,jj,k) = G_Rho0
+    do concurrent( jj=1:jend-jstart+1, kk=1:kend-kstart+1, ii=1:iend-istart+1 )
+      GxSpV_uvh(ii,jj,kk) = G_Rho0
     enddo
 
     if (use_EOS) then
       ! Fill tile T_uvh/S_uvh/pres_uvh at v-points (v-face = average of j and j+1)
-      do concurrent(jj=1:jend-jstart+1, K=2:nz, ii=1:iend-istart+1)
+      do concurrent(jj=1:jend-jstart+1, kk=1:kend-kstart+1, ii=1:iend-istart+1)
         i = istart + ii - 1  ! global i (h-point)
         j = jstart + jj - 1  ! global J (v-face index)
-        pres_uvh(ii,jj,K) = 0.5*(pres(i,j,K) + pres(i,j+1,K))
-        T_uvh(ii,jj,K) = 0.25*((T(i,j,K) + T(i,j+1,K)) + (T(i,j,K-1) + T(i,j+1,K-1)))
-        S_uvh(ii,jj,K) = 0.25*((S(i,j,K) + S(i,j+1,K)) + (S(i,j,K-1) + S(i,j+1,K-1)))
+        k = kstart + kk - 1  ! global k
+        pres_uvh(ii,jj,kk) = 0.5*(pres(i,j,K) + pres(i,j+1,K))
+        T_uvh(ii,jj,kk) = 0.25*((T(i,j,K) + T(i,j+1,K)) + (T(i,j,K-1) + T(i,j+1,K-1)))
+        S_uvh(ii,jj,kk) = 0.25*((S(i,j,K) + S(i,j+1,K)) + (S(i,j,K-1) + S(i,j+1,K-1)))
       enddo
 
       ! Apply OBC overrides at v-points: north-facing uses interior (j), south-facing uses j+1.
+      ! UMW TODO: Fix indices here
       if (OBC_friendly) then
         if (OBC%v_N_OBCs_on_PE) then
           do j = max(jstart, OBC%Js_v_N_obc), min(jend, OBC%Je_v_N_obc)
@@ -522,18 +535,20 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
       ! Pre-fill GxSpV at v-points.
       if (present_N2_v .or. present(dzSyN)) then
         if (allocated(tv%SpV_avg)) then
-          do jj=1, jend-jstart+1 ; do K=2,nz ; do ii=1, iend-istart+1
-            i = istart + ii - 1 ; j = jstart + jj - 1
-            GxSpV_uvh(ii,jj,K) = GV%g_Earth * 0.25 * ((tv%SpV_avg(i,j,K) + tv%SpV_avg(i,j+1,K)) + &
+          do jj=1, jend-jstart+1 ; do kk=1, kend-kstart+1 ; do ii=1, iend-istart+1
+            i = istart + ii - 1
+            j = jstart + jj - 1
+            k = kstart + kk - 1
+            GxSpV_uvh(ii,jj,kk) = GV%g_Earth * 0.25 * ((tv%SpV_avg(i,j,K) + tv%SpV_avg(i,j+1,K)) + &
                                                         (tv%SpV_avg(i,j,K-1) + tv%SpV_avg(i,j+1,K-1)))
           enddo ; enddo ; enddo
         endif
       endif
 
       ! Density derivatives at v-points.
-      do jj=1,jend-jstart+1 ; do K=nz,2,-1
-        call calculate_density_derivs(T_uvh(:,jj,K), S_uvh(:,jj,K), pres_uvh(:,jj,K), &
-                                      drho_dT(:,jj,K), drho_dS(:,jj,K), &
+      do jj=1,jend-jstart+1 ; do kk=1,kend-kstart+1
+        call calculate_density_derivs(T_uvh(:,jj,kk), S_uvh(:,jj,kk), pres_uvh(:,jj,kk), &
+                                      drho_dT(:,jj,kk), drho_dS(:,jj,kk), &
                                       tv%eqn_of_state, EOSdom_tile)
       enddo ; enddo
 
@@ -541,16 +556,18 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
         ! Refill at h-points for Stanley second derivatives. Extend to jend+1 in J because
         ! the slope compute reads drho_dT_dT_h(ii,jj+1,K) (the J+1 neighbour).
         EOSdom_tile_h1(1) = 1 ; EOSdom_tile_h1(2) = iend - istart + 1
-        do concurrent(jj=1:jend-jstart+2, K=2:nz, ii=1:iend-istart+1)
-          i = istart + ii - 1 ; j = jstart + jj - 1
-          pres_uvh(ii,jj,K) = pres(i,j,K)
-          T_uvh(ii,jj,K) = 0.5*(T(i,j,K) + T(i,j,K-1))
-          S_uvh(ii,jj,K) = 0.5*(S(i,j,K) + S(i,j,K-1))
+        do concurrent(jj=1:jend-jstart+2, kk=1:kend-kstart, ii=1:iend-istart+1)
+          i = istart + ii - 1
+          j = jstart + jj - 1
+          k = kstart + kk - 1
+          pres_uvh(ii,jj,kk) = pres(i,j,K)
+          T_uvh(ii,jj,kk) = 0.5*(T(i,j,K) + T(i,j,K-1))
+          S_uvh(ii,jj,kk) = 0.5*(S(i,j,K) + S(i,j,K-1))
         enddo
 
-        do jj=1,jend-jstart+2 ; do K=nz,2,-1
-          call calculate_density_second_derivs(T_uvh(:,jj,K), S_uvh(:,jj,K), pres_uvh(:,jj,K), &
-                     scrap, scrap, drho_dT_dT_h(:,jj,K), scrap, scrap, &
+        do jj=1,jend-jstart+2 ; do kk=1,kend-kstart+1
+          call calculate_density_second_derivs(T_uvh(:,jj,kk), S_uvh(:,jj,kk), pres_uvh(:,jj,kk), &
+                     scrap, scrap, drho_dT_dT_h(:,jj,kk), scrap, scrap, &
                      tv%eqn_of_state, dom=EOSdom_tile_h1)
         enddo ; enddo
       endif ! end use_stanley
@@ -558,26 +575,26 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
     endif ! end use_EOS for meridional tile
 
     ! Meridional slope compute over the tile
-    do concurrent( jj=1:jend-jstart+1, K=2:nz, ii=1:iend-istart+1 ) &
+    do concurrent( jj=1:jend-jstart+1, kk=1:kend-kstart, ii=1:iend-istart+1 ) &
         local(drdkL, drdkR, drdjA, drdjB, i, J)
       i = istart + ii - 1  ! global i (h-point)
       J = jstart + jj - 1  ! global J (v-face)
-      j = J                 ! j = J for C-grid v-faces
+      K = kstart + kk - 1  ! global k
 
       if (use_EOS) then
-        drdjA = drho_dT(ii,jj,K) * (T(i,j+1,k-1)-T(i,j,k-1)) + &
-                drho_dS(ii,jj,K) * (S(i,j+1,k-1)-S(i,j,k-1))
-        drdjB = drho_dT(ii,jj,K) * (T(i,j+1,k)-T(i,j,k)) + &
-                drho_dS(ii,jj,K) * (S(i,j+1,k)-S(i,j,k))
-        drdkL = (drho_dT(ii,jj,K) * (T(i,j,K)-T(i,j,K-1)) + &
-                  drho_dS(ii,jj,K) * (S(i,j,K)-S(i,j,K-1)))
-        drdkR = (drho_dT(ii,jj,K) * (T(i,j+1,K)-T(i,j+1,K-1)) + &
-                  drho_dS(ii,jj,K) * (S(i,j+1,K)-S(i,j+1,K-1)))
+        drdjA = drho_dT(ii,jj,kk) * (T(i,j+1,k-1)-T(i,j,k-1)) + &
+                drho_dS(ii,jj,kk) * (S(i,j+1,k-1)-S(i,j,k-1))
+        drdjB = drho_dT(ii,jj,kk) * (T(i,j+1,k)-T(i,j,k)) + &
+                drho_dS(ii,jj,kk) * (S(i,j+1,k)-S(i,j,k))
+        drdkL = (drho_dT(ii,jj,kk) * (T(i,j,K)-T(i,j,K-1)) + &
+                  drho_dS(ii,jj,kk) * (S(i,j,K)-S(i,j,K-1)))
+        drdkR = (drho_dT(ii,jj,kk) * (T(i,j+1,K)-T(i,j+1,K-1)) + &
+                  drho_dS(ii,jj,kk) * (S(i,j+1,K)-S(i,j+1,K-1)))
         if (use_stanley) then
-          drdjA = drdjA + 0.5 * ((drho_dT_dT_h(ii,jj+1,K) * tv%varT(i,j+1,K-1)) - &
-                                (drho_dT_dT_h(ii,jj,K) * tv%varT(i,j,K-1)) )
-          drdjB = drdjB + 0.5 * ((drho_dT_dT_h(ii,jj+1,K) * tv%varT(i,j+1,K)) - &
-                                (drho_dT_dT_h(ii,jj,K) * tv%varT(i,j,K)) )
+          drdjA = drdjA + 0.5 * ((drho_dT_dT_h(ii,jj+1,kk) * tv%varT(i,j+1,K-1)) - &
+                                (drho_dT_dT_h(ii,jj,kk) * tv%varT(i,j,K-1)) )
+          drdjB = drdjB + 0.5 * ((drho_dT_dT_h(ii,jj+1,kk) * tv%varT(i,j+1,K)) - &
+                                (drho_dT_dT_h(ii,jj,kk) * tv%varT(i,j,K)) )
         endif
       else
         drdjA = 0.0 ; drdjB = 0.0
@@ -608,14 +625,14 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
           if (OBC%segnum_v(i,J) > 0) then !  OBC_DIRECTION_N
             drdz = drdkL / dzaL
             if (use_EOS .and. allocated(tv%SpV_avg)) &
-              GxSpV_uvh(ii,jj,k) = GV%g_Earth * 0.5 * (tv%SpV_avg(i,j,k) + tv%SpV_avg(i,j,k-1))
+              GxSpV_uvh(ii,jj,kk) = GV%g_Earth * 0.5 * (tv%SpV_avg(i,j,k) + tv%SpV_avg(i,j,k-1))
           elseif (OBC%segnum_v(i,J) < 0) then !  OBC_DIRECTION_S
             drdz = drdkL / dzaL
             if (use_EOS .and. allocated(tv%SpV_avg)) &
-              GxSpV_uvh(ii,jj,k) = GV%g_Earth * 0.5 * (tv%SpV_avg(i,j+1,k) + tv%SpV_avg(i,j+1,k-1))
+              GxSpV_uvh(ii,jj,kk) = GV%g_Earth * 0.5 * (tv%SpV_avg(i,j+1,k) + tv%SpV_avg(i,j+1,k-1))
           endif
         endif ; endif
-        N2_v(i,J,K) = GxSpV_uvh(ii,jj,k) * drdz * G%mask2dCv(i,J)
+        N2_v(i,J,K) = GxSpV_uvh(ii,jj,kk) * drdz * G%mask2dCv(i,J)
       endif
 
       if (use_EOS) then
@@ -639,11 +656,11 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
       endif
       slope_y(i,J,K) = slope
       if (present(dzSyN)) &
-        dzSyN(i,J,K) = sqrt( GxSpV_uvh(ii,jj,k) * max(0., (wtL * ( dzaL * drdkL )) &
+        dzSyN(i,J,K) = sqrt( GxSpV_uvh(ii,jj,kk) * max(0., (wtL * ( dzaL * drdkL )) &
                                                 + (wtR * ( dzaR * drdkR ))) / (wtL + wtR) ) &
                         * abs(slope) * G%mask2dCv(i,J)
     enddo ! end meridional tile do concurrent
-  enddo ; enddo ! end meridional outer tile loops
+  enddo ; enddo ; enddo! end meridional outer tile loops
 
   ! Delete all tile and field arrays from device
   !$omp target exit data map(delete: T, S, pres, T_uvh, S_uvh, pres_uvh, GxSpV_uvh, &
