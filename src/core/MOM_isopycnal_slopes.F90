@@ -227,7 +227,7 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
       pres(i,j,1) = 0.0
     enddo
   endif
-  ! UMW NOTE: K must be serial
+
   do concurrent( j=js-1:je+1 )
     do k=1,nz
       do concurrent( i=is-1:ie+1 )
@@ -242,13 +242,11 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
   ! Outer loop tiles the (I=is-1:ie, j=js:je) domain into niblock x njblock patches.
   ! Within each tile:
   !   1. Fill tile-sized T_uvh/S_uvh/pres_uvh at u-points on device (do concurrent).
-  !   2. Transfer tile arrays to host (target update from) for CPU-only EOS calls.
-  !   3. Apply OBC overrides (CPU, host-side OBC derived types).
-  !   4. Pre-fill GxSpV_uvh at u-points.
-  !   5. Call calculate_density_derivs over tile.
-  !   6. If use_stanley: refill at h-points, call calculate_density_second_derivs.
-  !   7. Transfer derivatives to device (target update to).
-  !   8. Compute slopes in do concurrent using tile-local indices.
+  !   2. Apply OBC overrides (CPU, host-side OBC derived types).
+  !   3. Pre-fill GxSpV_uvh at u-points.
+  !   4. Call calculate_density_derivs over tile.
+  !   5. If use_stanley: refill at h-points, call calculate_density_second_derivs.
+  !   6. Compute slopes in do concurrent using tile-local indices.
   do jstart=js, je, njblock ; do istart=is-1, ie, niblock ; do kstart=2,nz, nkblock
     iend = min(istart + niblock - 1, ie)
     jend = min(jstart + njblock - 1, je)
@@ -273,22 +271,25 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
         S_uvh(ii,jj,kk) = 0.25*((S(i,j,k) + S(i+1,j,k)) + (S(i,j,k-1) + S(i+1,j,k-1)))
       enddo
 
+      ! UMW NOTE: Vibecoded and untested
       ! Apply OBC overrides: at open boundary faces use only the interior cell's T/S/P
       ! rather than the two-cell average computed above. Runs on CPU because it requires
       ! access to OBC%segnum_u, a derived-type component not mapped to the device.
-      ! UMW TODO: fix the indices in these two loops
       if (OBC_friendly) then
+        !$omp target update from(T_uvh, S_uvh, pres_uvh)
+
         ! East-facing open boundaries: interior cell is at i (=istart+ii-1), use pres/T/S(i,j,K)
         if (OBC%u_E_OBCs_on_PE) then
-          do j = max(jstart, OBC%js_u_E_obc), min(jend, OBC%je_u_E_obc)
-            jj = j - jstart + 1
-            do K = nz, 2, -1
-              do i = max(istart, OBC%Is_u_E_obc), min(iend, OBC%Ie_u_E_obc)
-                ii = i - istart + 1
+          do jj = max(jstart, OBC%js_u_E_obc), min(jend, OBC%je_u_E_obc)
+            j = j - jstart + 1
+            do kk = 1, kend-kstart+1
+              k = kstart + kk - 1
+              do ii = max(istart, OBC%Is_u_E_obc), min(iend, OBC%Ie_u_E_obc)
+                i = i - istart + 1
                 if (OBC%segnum_u(i,j) > 0) then ! OBC_DIRECTION_E
-                  pres_uvh(ii,jj,K) = pres(i,j,K)
-                  T_uvh(ii,jj,K) = 0.5*(T(i,j,K) + T(i,j,K-1))
-                  S_uvh(ii,jj,K) = 0.5*(S(i,j,K) + S(i,j,K-1))
+                  pres_uvh(ii,jj,kk) = pres(i,j,K)
+                  T_uvh(ii,jj,kk) = 0.5*(T(i,j,K) + T(i,j,K-1))
+                  S_uvh(ii,jj,kk) = 0.5*(S(i,j,K) + S(i,j,K-1))
                 endif
               enddo
             enddo
@@ -296,20 +297,23 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
         endif
         ! West-facing open boundaries: interior cell is at i+1, use pres/T/S(i+1,j,K)
         if (OBC%u_W_OBCs_on_PE) then
-          do j = max(jstart, OBC%js_u_W_obc), min(jend, OBC%je_u_W_obc)
-            jj = j - jstart + 1
-            do K = nz, 2, -1
-              do i = max(istart, OBC%Is_u_W_obc), min(iend, OBC%Ie_u_W_obc)
-                ii = i - istart + 1
+          do jj = max(jstart, OBC%js_u_W_obc), min(jend, OBC%je_u_W_obc)
+            j = j - jstart + 1
+            do kk = 1, kend-kstart+1
+              k = kstart + kk - 1
+              do ii = max(istart, OBC%Is_u_W_obc), min(iend, OBC%Ie_u_W_obc)
+                i = i - istart + 1
                 if (OBC%segnum_u(i,j) < 0) then ! OBC_DIRECTION_W
-                  pres_uvh(ii,jj,K) = pres(i+1,j,K)
-                  T_uvh(ii,jj,K) = 0.5*(T(i+1,j,K) + T(i+1,j,K-1))
-                  S_uvh(ii,jj,K) = 0.5*(S(i+1,j,K) + S(i+1,j,K-1))
+                  pres_uvh(ii,jj,kk) = pres(i+1,j,K)
+                  T_uvh(ii,jj,kk) = 0.5*(T(i+1,j,K) + T(i+1,j,K-1))
+                  S_uvh(ii,jj,kk) = 0.5*(S(i+1,j,K) + S(i+1,j,K-1))
                 endif
               enddo
             enddo
           enddo
         endif
+
+        !$omp target update to(T_uvh, S_uvh, pres_uvh)
       endif
 
       ! Pre-fill GxSpV at u-points: four-cell SpV average over the u-face and the two
@@ -403,6 +407,7 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
 
       drdz = ((wtL * drdkL) + (wtR * drdkR)) / ((dzaL*wtL) + (dzaR*wtR))
       if (present_N2_u) then
+        !UMW NOTE: Vibecoded and untested
         if (OBC_friendly) then ; if (OBC%segnum_u(I,j) /= 0) then
           if (OBC%segnum_u(I,j) > 0) then !  OBC_DIRECTION_E
             drdz = drdkL / dzaL
@@ -475,39 +480,45 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
         S_uvh(ii,jj,kk) = 0.25*((S(i,j,K) + S(i,j+1,K)) + (S(i,j,K-1) + S(i,j+1,K-1)))
       enddo
 
+      ! UMW NOTE: Vibecoded and untested
       ! Apply OBC overrides at v-points: north-facing uses interior (j), south-facing uses j+1.
-      ! UMW TODO: Fix indices here
       if (OBC_friendly) then
+        !$omp target update from(T_uvh, S_uvh, pres_uvh)
+
         if (OBC%v_N_OBCs_on_PE) then
-          do j = max(jstart, OBC%Js_v_N_obc), min(jend, OBC%Je_v_N_obc)
-            jj = j - jstart + 1
-            do K = nz, 2, -1
-              do i = max(istart, OBC%is_v_N_obc), min(iend, OBC%ie_v_N_obc)
-                ii = i - istart + 1
+          do jj = max(jstart, OBC%Js_v_N_obc), min(jend, OBC%Je_v_N_obc)
+            j = j - jstart + 1
+            do kk = 1, kend-kstart+1
+              k = kstart + kk - 1
+              do ii = max(istart, OBC%is_v_N_obc), min(iend, OBC%ie_v_N_obc)
+                i = i - istart + 1
                 if (OBC%segnum_v(i,j) > 0) then ! OBC_DIRECTION_N
-                  pres_uvh(ii,jj,K) = pres(i,j,K)
-                  T_uvh(ii,jj,K) = 0.5*(T(i,j,K) + T(i,j,K-1))
-                  S_uvh(ii,jj,K) = 0.5*(S(i,j,K) + S(i,j,K-1))
+                  pres_uvh(ii,jj,kk) = pres(i,j,K)
+                  T_uvh(ii,jj,kk) = 0.5*(T(i,j,K) + T(i,j,K-1))
+                  S_uvh(ii,jj,kk) = 0.5*(S(i,j,K) + S(i,j,K-1))
                 endif
               enddo
             enddo
           enddo
         endif
         if (OBC%v_S_OBCs_on_PE) then
-          do j = max(jstart, OBC%Js_v_S_obc), min(jend, OBC%Je_v_S_obc)
-            jj = j - jstart + 1
-            do K = nz, 2, -1
-              do i = max(istart, OBC%is_v_S_obc), min(iend, OBC%ie_v_S_obc)
-                ii = i - istart + 1
+          do jj = max(jstart, OBC%Js_v_S_obc), min(jend, OBC%Je_v_S_obc)
+            j = j - jstart + 1
+            do kk = 1, kend-kstart+1
+              k = kstart + kk - 1
+              do ii = max(istart, OBC%is_v_S_obc), min(iend, OBC%ie_v_S_obc)
+                i = i - istart + 1
                 if (OBC%segnum_v(i,j) < 0) then ! OBC_DIRECTION_S
-                  pres_uvh(ii,jj,K) = pres(i,j+1,K)
-                  T_uvh(ii,jj,K) = 0.5*(T(i,j+1,K) + T(i,j+1,K-1))
-                  S_uvh(ii,jj,K) = 0.5*(S(i,j+1,K) + S(i,j+1,K-1))
+                  pres_uvh(ii,jj,kk) = pres(i,j+1,K)
+                  T_uvh(ii,jj,kk) = 0.5*(T(i,j+1,K) + T(i,j+1,K-1))
+                  S_uvh(ii,jj,kk) = 0.5*(S(i,j+1,K) + S(i,j+1,K-1))
                 endif
               enddo
             enddo
           enddo
         endif
+
+        !$omp target update to(T_uvh, S_uvh, pres_uvh)
       endif
 
       ! Pre-fill GxSpV at v-points.
@@ -599,6 +610,7 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
 
       drdz = ((wtL * drdkL) + (wtR * drdkR)) / ((dzaL*wtL) + (dzaR*wtR))
       if (present_N2_v) then
+        ! UMW note: vibecoded and untested
         if (OBC_friendly) then ; if (OBC%segnum_v(i,J) /= 0) then
           if (OBC%segnum_v(i,J) > 0) then !  OBC_DIRECTION_N
             drdz = drdkL / dzaL
