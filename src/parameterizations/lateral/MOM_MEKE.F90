@@ -35,6 +35,7 @@ use MOM_variables,         only : vertvisc_type, thermo_var_ptrs
 use MOM_verticalGrid,      only : verticalGrid_type
 use MOM_MEKE_types,        only : MEKE_type
 
+!$ use omp_lib, only: omp_get_num_devices
 
 implicit none ; private
 
@@ -167,6 +168,11 @@ type, public :: MEKE_CS ; private
   integer :: id_slope_x = -1 !< Diagnostic id for isopycnal slope in the x-direction
   integer :: id_slope_y = -1 !< Diagnostic id for isopycnal slope in the y-direction
   integer :: id_rv      = -1 !< Diagnostic id for surface relative vorticity
+
+  ! Isoneutral blocking parameters
+  integer :: niblock         !< The i block size used in calc_isoneutral_slopes [nondim].
+  integer :: njblock         !< The j block size used in calc_isoneutral_slopes [nondim].
+  integer :: nkblock         !< The k block size used in calc_isoneutral_slopes [nondim].
 
 end type MEKE_CS
 
@@ -1825,6 +1831,23 @@ subroutine ML_MEKE_init(diag, G, US, Time, param_file, dbcomms_CS, CS)
   CS%id_rv = register_diag_field('ocean_model', 'MEKE_RV', diag%axesT1, Time, &
      'Surface relative vorticity used in MEKE', 's-1', conversion=US%s_to_T)
 
+  ! Isoneutral blocking parameters
+  call get_param(param_file, mdl, "ISOPYCNAL_NIBLOCK", CS%niblock, &
+                 "The i-direction block size used to calculate isopycnal slopes. "//&
+                 "If 0, defaults to 64, except when "//&
+                 "running with OpenMP offload, in which case the full computational "//&
+                 "domain width is used.", default=64)
+  call get_param(param_file, mdl, "ISOPYCNAL_NJBLOCK", CS%njblock, &
+                 "The j-direction block size used in the continuity solver. "//&
+                 "If 0, defaults to 1, except when "//&
+                 "running with OpenMP offload, in which case the full computational "//&
+                 "domain height is used.", default=1)
+  call get_param(param_file, mdl, "ISOPYCNAL_NKBLOCK", CS%nkblock, &
+                 "The j-direction block size used in the continuity solver. "//&
+                 "If 0, defaults to 1 , except when "//&
+                 "running with OpenMP offload, in which case the full computational "//&
+                 "domain height is used.", default=1)
+
 end subroutine ML_MEKE_init
 
 !> Calculate the various features used for the machine learning prediction
@@ -1865,6 +1888,7 @@ subroutine ML_MEKE_calculate_features(G, GV, US, CS, Rd_dx_h, u, v, tv, h, dt, f
   real :: sum_area  ! A sum of adjacent cell areas [L2 ~> m2]
 
   integer :: i, j, k, is, ie, js, je, Isq, Ieq, Jsq, Jeq, nz
+  integer :: niblock, njblock, nkblock
 
   is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec ; nz = GV%ke
   Isq = G%IscB ; Ieq = G%IecB ; Jsq = G%JscB ; Jeq = G%JecB
@@ -1875,6 +1899,16 @@ subroutine ML_MEKE_calculate_features(G, GV, US, CS, Rd_dx_h, u, v, tv, h, dt, f
     h_u(I,j,k) = 0.5*(h(i,j,k)*G%mask2dT(i,j) + h(i+1,j,k)*G%mask2dT(i+1,j)) + GV%Angstrom_H
     h_v(i,J,k) = 0.5*(h(i,j,k)*G%mask2dT(i,j) + h(i,j+1,k)*G%mask2dT(i,j+1)) + GV%Angstrom_H
   enddo ; enddo ; enddo
+
+  niblock = CS%niblock
+  njblock = CS%njblock
+  nkblock = CS%nkblock
+  !$ if (omp_get_num_devices() > 0) then
+  !$   niblock = ie - is + 1
+  !$   njblock = je - js + 1
+  !$   nkblock = nz
+  !$ endif
+
   !$omp target update to(h)
   !$omp target enter data map(alloc: e)
   call find_eta(h, tv, G, GV, US, e, halo_size=2)
@@ -1883,7 +1917,8 @@ subroutine ML_MEKE_calculate_features(G, GV, US, CS, Rd_dx_h, u, v, tv, h, dt, f
   !$omp target enter data map(to: tv, tv%T, tv%S, slope_x, slope_y, e)
   !$omp target enter data map(to: tv%SpV_avg) if (allocated(tv%SpV_avg))
   !$omp target enter data map(to: tv%p_surf) if (associated(tv%p_surf))
-  call calc_isoneutral_slopes(G, GV, US, h, e, tv, dt*1.e-7*GV%m2_s_to_HZ_T, .false., slope_x, slope_y)
+  call calc_isoneutral_slopes(G, GV, US, h, e, tv, dt*1.e-7*GV%m2_s_to_HZ_T, .false., slope_x, slope_y, &
+                              niblock, njblock, nkblock )
   !$omp target exit data map(release: tv, tv%T, tv%S, e)
   !$omp target exit data map(release: tv%SpV_avg) if (allocated(tv%SpV_avg))
   !$omp target exit data map(release: tv%p_surf) if (associated(tv%p_surf))

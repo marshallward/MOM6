@@ -25,6 +25,8 @@ use MOM_open_boundary,     only : ocean_OBC_type, OBC_NONE
 use MOM_open_boundary,     only : OBC_DIRECTION_E, OBC_DIRECTION_W, OBC_DIRECTION_N, OBC_DIRECTION_S
 use MOM_MEKE_types,        only : MEKE_type
 
+!$ use omp_lib, only: omp_get_num_devices
+
 implicit none ; private
 
 #include <MOM_memory.h>
@@ -176,6 +178,11 @@ type, public :: VarMix_CS
   ! Leith parameters
   logical :: use_QG_Leith_GM      !< If true, uses the QG Leith viscosity as the GM coefficient
   logical :: use_beta_in_QG_Leith !< If true, includes the beta term in the QG Leith GM coefficient
+
+  ! Isoneutral blocking parameters
+  integer :: niblock         !< The i block size used in calc_isoneutral_slopes [nondim].
+  integer :: njblock         !< The j block size used in calc_isoneutral_slopes [nondim].
+  integer :: nkblock         !< The k block size used in calc_isoneutral_slopes [nondim].
 
   ! Diagnostics
   !>@{
@@ -653,6 +660,7 @@ subroutine calc_sqg_struct(h, tv, G, GV, US, CS, dt, MEKE, OBC)
   real :: dz_int        ! Average of thicknesses around an interface in height units [Z ~> m]
   integer, dimension(2) :: EOSdom ! The i-computational domain for the equation of state
   integer :: i, j, k, is, ie, js, je, nz
+  integer :: niblock, njblock, nkblock
 
   is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec ; nz = GV%ke
   f_subround = 1.0e-40 * US%s_to_T
@@ -686,13 +694,24 @@ subroutine calc_sqg_struct(h, tv, G, GV, US, CS, dt, MEKE, OBC)
       !$omp target update to(h)
       !$omp target enter data map(alloc: e)
       call find_eta(h, tv, G, GV, US, e, halo_size=2)  !### Could be halo_size=1?
+
+      niblock = CS%niblock
+      njblock = CS%njblock
+      nkblock = CS%nkblock
+      !$ if (omp_get_num_devices() > 0) then
+      !$   niblock = ie - is + 1
+      !$   njblock = je - js + 1
+      !$   nkblock = nz
+      !$ endif
+
       !$omp target enter data map(to: tv, tv%T, tv%S)
       !$omp target enter data map(to: tv%SpV_avg) if (allocated(tv%SpV_avg))
       !$omp target enter data map(to: tv%p_surf) if (associated(tv%p_surf))
       !$omp target enter data map(alloc: N2_u, N2_v, dzu, dzv, dzSxN, dzSyN)
       call calc_isoneutral_slopes(G, GV, US, h, e, tv, dt*CS%kappa_smooth, CS%use_stanley_iso, &
-                                  CS%slope_x, CS%slope_y, N2_u=N2_u, N2_v=N2_v, dzu=dzu, dzv=dzv, &
-                                  dzSxN=dzSxN, dzSyN=dzSyN, halo=1, OBC=OBC, OBC_N2=CS%OBC_friendly)
+                                  CS%slope_x, CS%slope_y, niblock, njblock, nkblock, N2_u=N2_u, &
+                                  N2_v=N2_v, dzu=dzu, dzv=dzv, dzSxN=dzSxN, dzSyN=dzSyN, halo=1, &
+                                  OBC=OBC, OBC_N2=CS%OBC_friendly)
       !$omp target exit data map(release: tv%T, tv%S, e)
       !$omp target exit data map(release: tv%SpV_avg) if (allocated(tv%SpV_avg))
       !$omp target exit data map(release: tv%p_surf) if (associated(tv%p_surf))
@@ -785,9 +804,19 @@ subroutine calc_slope_functions(h, tv, dt, G, GV, US, CS, OBC)
   real, dimension(SZI_(G),SZJB_(G),SZK_(GV)+1) :: dzv  ! Z-thickness at v-points [Z ~> m]
   real, dimension(SZIB_(G),SZJ_(G),SZK_(GV)+1) :: dzSxN ! |Sx| N times dz at u-points [Z T-1 ~> m s-1]
   real, dimension(SZI_(G),SZJB_(G),SZK_(GV)+1) :: dzSyN ! |Sy| N times dz at v-points [Z T-1 ~> m s-1]
+  integer :: niblock, njblock, nkblock
 
   if (.not. CS%initialized) call MOM_error(FATAL, "MOM_lateral_mixing_coeffs.F90, calc_slope_functions: "//&
          "Module must be initialized before it is used.")
+
+  niblock = CS%niblock
+  njblock = CS%njblock
+  nkblock = CS%nkblock
+  !$ if (omp_get_num_devices() > 0) then
+  !$   niblock = G%iec - G%isc + 1
+  !$   njblock = G%jec - G%jsc + 1
+  !$   nkblock = GV%ke
+  !$ endif
 
   if (CS%calculate_Eady_growth_rate) then
     !$omp target update to(h)
@@ -800,8 +829,9 @@ subroutine calc_slope_functions(h, tv, dt, G, GV, US, CS, OBC)
       !$omp target enter data map(to: tv%p_surf) if (associated(tv%p_surf))
       !$omp target enter data map(alloc: N2_u, N2_v, dzu, dzv, dzSxN, dzSyN)
       call calc_isoneutral_slopes(G, GV, US, h, e, tv, dt*CS%kappa_smooth, CS%use_stanley_iso, &
-                                  CS%slope_x, CS%slope_y, N2_u=N2_u, N2_v=N2_v, dzu=dzu, dzv=dzv, &
-                                  dzSxN=dzSxN, dzSyN=dzSyN, halo=1, OBC=OBC, OBC_N2=CS%OBC_friendly)
+                                  CS%slope_x, CS%slope_y, niblock, njblock, nkblock, N2_u=N2_u, &
+                                  N2_v=N2_v, dzu=dzu, dzv=dzv, dzSxN=dzSxN, dzSyN=dzSyN, halo=1, &
+                                  OBC=OBC, OBC_N2=CS%OBC_friendly)
       !$omp target exit data map(from: e, dzu, dzv, dzSxN, dzSyN)
       call calc_Eady_growth_rate_2D(CS, G, GV, US, h, e, dzu, dzv, dzSxN, dzSyN, CS%SN_u, CS%SN_v)
       !$omp target exit data map(release: tv%SpV_avg) if (allocated(tv%SpV_avg))
@@ -814,8 +844,8 @@ subroutine calc_slope_functions(h, tv, dt, G, GV, US, CS, OBC)
       !$omp target enter data map(to: tv%p_surf) if (associated(tv%p_surf))
       !$omp target enter data map(alloc: N2_u, N2_v)
       call calc_isoneutral_slopes(G, GV, US, h, e, tv, dt*CS%kappa_smooth, CS%use_stanley_iso, &
-                                  CS%slope_x, CS%slope_y, N2_u=N2_u, N2_v=N2_v, halo=1, OBC=OBC, &
-                                  OBC_N2=CS%OBC_friendly)
+                                  CS%slope_x, CS%slope_y, niblock, njblock, nkblock, N2_u=N2_u, &
+                                  N2_v=N2_v, halo=1, OBC=OBC, OBC_N2=CS%OBC_friendly)
       !$omp target exit data map(from: CS%slope_x, CS%slope_y, N2_u, N2_v)
       call calc_Visbeck_coeffs_old(h, CS%slope_x, CS%slope_y, N2_u, N2_v, G, GV, US, CS, OBC)
       !$omp target exit data map(release: tv, tv%T, tv%S, CS%slope_x, CS%slope_y)
@@ -1398,9 +1428,19 @@ subroutine calc_QG_slopes(h, tv, dt, G, GV, US, slope_x, slope_y, CS, OBC)
   type(ocean_OBC_type),                         pointer       :: OBC !< Open boundaries control structure
   ! Local variables
   real, dimension(SZI_(G),SZJ_(G),SZK_(GV)+1)  :: e    ! The interface heights relative to mean sea level [Z ~> m]
+  integer :: niblock, njblock, nkblock
 
   if (.not. CS%initialized) call MOM_error(FATAL, "MOM_lateral_mixing_coeffs.F90, calc_QG_slopes: "//&
          "Module must be initialized before it is used.")
+
+  niblock = CS%niblock
+  njblock = CS%njblock
+  nkblock = CS%nkblock
+  !$ if (omp_get_num_devices() > 0) then
+  !$   niblock = G%iec - G%isc + 1
+  !$   njblock = G%jec - G%jsc + 1
+  !$   nkblock = GV%ke
+  !$ endif
 
   !$omp target update to(h)
   !$omp target enter data map(alloc: e)
@@ -1409,7 +1449,8 @@ subroutine calc_QG_slopes(h, tv, dt, G, GV, US, slope_x, slope_y, CS, OBC)
   !$omp target enter data map(to: tv%SpV_avg) if (allocated(tv%SpV_avg))
   !$omp target enter data map(to: tv%p_surf) if (associated(tv%p_surf))
   call calc_isoneutral_slopes(G, GV, US, h, e, tv, dt*CS%kappa_smooth, CS%use_stanley_iso, &
-                              slope_x, slope_y, halo=2, OBC=OBC, OBC_N2=CS%OBC_friendly)
+                              slope_x, slope_y, niblock, njblock, nkblock, halo=2, OBC=OBC, &
+                              OBC_N2=CS%OBC_friendly)
   !$omp target exit data map(release: tv%T, tv%S, e)
   !$omp target exit data map(release: tv%SpV_avg) if (allocated(tv%SpV_avg))
   !$omp target exit data map(release: tv%p_surf) if (associated(tv%p_surf))
@@ -2126,6 +2167,23 @@ subroutine VarMix_init(Time, G, GV, US, param_file, diag, CS)
                          better_speed_est=better_speed_est, min_speed=wave_speed_min, &
                          om4_remap_via_sub_cells=om4_remap_via_sub_cells, wave_speed_tol=wave_speed_tol)
   endif
+
+  ! Isoneutral blocking parameters
+  call get_param(param_file, mdl, "ISOPYCNAL_NIBLOCK", CS%niblock, &
+                 "The i-direction block size used to calculate isopycnal slopes. "//&
+                 "If 0, defaults to 64, except when "//&
+                 "running with OpenMP offload, in which case the full computational "//&
+                 "domain width is used.", default=64)
+  call get_param(param_file, mdl, "ISOPYCNAL_NJBLOCK", CS%njblock, &
+                 "The j-direction block size used in the continuity solver. "//&
+                 "If 0, defaults to 1, except when "//&
+                 "running with OpenMP offload, in which case the full computational "//&
+                 "domain height is used.", default=1)
+  call get_param(param_file, mdl, "ISOPYCNAL_NKBLOCK", CS%nkblock, &
+                 "The j-direction block size used in the continuity solver. "//&
+                 "If 0, defaults to 1 , except when "//&
+                 "running with OpenMP offload, in which case the full computational "//&
+                 "domain height is used.", default=1)
 
   ! Leith parameters
   call get_param(param_file, mdl, "USE_QG_LEITH_GM", CS%use_QG_Leith_GM, &

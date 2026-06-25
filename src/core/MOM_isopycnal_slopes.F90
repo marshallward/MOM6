@@ -22,13 +22,6 @@ implicit none ; private
 
 public calc_isoneutral_slopes, vert_fill_TS
 
-! Default tile sizes for loop blocking. For CPU runs these small values improve cache reuse
-! by working over small sub-domains at a time. For GPU runs, calc_isoneutral_slopes overrides
-! these to cover the full computational domain in a single tile (see niblock/njblock below).
-integer, parameter :: default_niblock = 64 !< Default i-direction loop-tile size [nondim].
-integer, parameter :: default_njblock = 1  !< Default j-direction loop-tile size [nondim].
-integer, parameter :: default_nkblock = 1  !< Default k-direction loop-tile size [nondim].
-
 ! A note on unit descriptions in comments: MOM6 uses units that can be rescaled for dimensional
 ! consistency testing. These are noted in comments with units like Z, H, L, and T, along with
 ! their mks counterparts with notation like "a velocity [Z T-1 ~> m s-1]".  If the units
@@ -39,7 +32,11 @@ contains
 !> Calculate isopycnal slopes, and optionally return other stratification dependent functions such as N^2
 !! and dz*S^2*g-prime used, or calculable from factors used, during the calculation.
 subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stanley, slope_x, slope_y, &
-                                  N2_u, N2_v, dzu, dzv, dzSxN, dzSyN, halo, OBC, OBC_N2)
+                                  niblock, njblock, nkblock, N2_u, N2_v, dzu, dzv, dzSxN, dzSyN, halo, &
+                                  OBC, OBC_N2)
+  integer,                                     intent(in)    :: niblock !< Blocksize in i direction
+  integer,                                     intent(in)    :: njblock !< Blocksize in j direction
+  integer,                                     intent(in)    :: nkblock !< Blocksize in k direction
   type(ocean_grid_type),                       intent(in)    :: G    !< The ocean's grid structure
   type(verticalGrid_type),                     intent(in)    :: GV   !< The ocean's vertical grid structure
   type(unit_scale_type),                       intent(in)    :: US   !< A dimensional unit scaling type
@@ -88,7 +85,7 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
   ! the Stanley h-point fills (which need one extra column/row beyond the u/v tile extent)
   ! fit without a separate buffer. drho_dT and drho_dS only ever need niblock x njblock,
   ! but are dimensioned +1 for alignment with the rest.
-  real, dimension(default_niblock+1, default_njblock+1, default_nkblock) :: &
+  real, dimension(niblock+1, njblock+1, nkblock) :: &
     drho_dT, &      ! The derivative of density with temperature [R C-1 ~> kg m-3 degC-1].
     drho_dS, &      ! The derivative of density with salinity [R S-1 ~> kg m-3 ppt-1].
     drho_dT_dT_h, & ! The second derivative of density with temperature at h points [R C-2 ~> kg m-3 degC-2]
@@ -96,7 +93,7 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
     S_uvh, &        ! Salinity at the u, v or h-points for derivative calculations [S ~> ppt].
     GxSpV_uvh, &    ! g * specific volume at u/v-point interfaces [L2 Z-1 T-2 R-1 ~> m4 s-2 kg-1]
     pres_uvh        ! Pressure at the u, v or h-points [R L2 T-2 ~> Pa].
-  real, dimension(default_niblock+1) :: scrap ! Ignored output from calculate_density_second_derivs()
+  real, dimension(niblock+1) :: scrap ! Ignored output from calculate_density_second_derivs()
 
   real :: drdiA, drdiB  ! Along layer zonal potential density  gradients in the layers above (A)
                         ! and below (B) the interface times the grid spacing [R ~> kg m-3].
@@ -132,13 +129,10 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
   integer, dimension(2) :: EOSdom_tile_h1 !< 1-based EOS domain for h-point fills (one extra column) [nondim].
   integer :: is, ie, js, je, nz, IsdB
   integer :: i, j, k
-  integer :: niblock_loc  !< i-direction tile size for the current subroutine call [nondim].
-  integer :: njblock_loc  !< j-direction tile size for the current subroutine call [nondim].
-  integer :: nkblock_loc  !< k-direction tile size for the current subroutine call [nondim].
   integer :: istart, iend !< First and last global i (or I) indices of the current tile [nondim].
   integer :: jstart, jend !< First and last global j (or J) indices of the current tile [nondim].
   integer :: kstart, kend !< First and last global K (or K) indices of the current tile [nondim].
-  integer :: ii, jj,kk       !< Tile-local 1-based i, j, and k indices [nondim].
+  integer :: ii, jj, kk   !< Tile-local 1-based i, j, and k indices [nondim].
 
   ! Allocate locals on device
   !$omp target enter data map(alloc: T, S, pres, T_uvh, S_uvh, pres_uvh, GxSpV_uvh, &
@@ -151,22 +145,8 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
     is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec
     EOSdom_h1(:) = EOS_domain(G%HI, halo=1)
   endif
-  !! For zonal loop: u-points for i, tracer points for j
-  !EOSdom(1,1) = is-1 - (G%IsdB-1) ; EOSdom(1,2) = ie - (G%IsdB-1)
-  !EOSdom(2,1) = js - (G%Jsdb-1) ; EOSdom(2,2) = je - (G%Jsdb-1)
 
   nz = GV%ke ; IsdB = G%IsdB
-
-  ! Set tile sizes. On CPU, use the module defaults (small tiles for cache locality).
-  ! On GPU, override to the full computational domain so the entire domain is processed
-  ! in a single tile, maximising parallelism. The zonal pass uses I=is-1:ie (extent
-  ! ie-is+2) and the meridional pass uses J=js-1:je (extent je-js+2); using these as
-  ! niblock_loc/njblock_loc ensures a single tile covers each pass on the GPU.
-  niblock_loc = default_niblock ; njblock_loc = default_njblock ; nkblock_loc = default_nkblock
-  !$ if (omp_get_num_devices() > 0) then
-  !$   niblock_loc = ie - is + 2  ! = (ie) - (is-1) + 1: covers I=is-1:ie in one tile
-  !$   njblock_loc = je - js + 2  ! = (je) - (js-1) + 1: covers J=js-1:je in one tile
-  !$ endif
 
   h_neglect = GV%H_subroundoff ; h_neglect2 = h_neglect**2
   dz_neglect = GV%dZ_subroundoff
@@ -263,7 +243,7 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
   ! ============================================================
   ! Zonal tiling loop: compute zonal isopycnal slopes
   ! ============================================================
-  ! Outer loop tiles the (I=is-1:ie, j=js:je) domain into niblock_loc x njblock_loc patches.
+  ! Outer loop tiles the (I=is-1:ie, j=js:je) domain into niblock x njblock patches.
   ! Within each tile:
   !   1. Fill tile-sized T_uvh/S_uvh/pres_uvh at u-points on device (do concurrent).
   !   2. Transfer tile arrays to host (target update from) for CPU-only EOS calls.
@@ -273,10 +253,10 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
   !   6. If use_stanley: refill at h-points, call calculate_density_second_derivs.
   !   7. Transfer derivatives to device (target update to).
   !   8. Compute slopes in do concurrent using tile-local indices.
-  do jstart=js, je, njblock_loc ; do istart=is-1, ie, niblock_loc ; do kstart=2,nz, nkblock_loc
-    iend = min(istart + niblock_loc - 1, ie)
-    jend = min(jstart + njblock_loc - 1, je)
-    kend = min(kstart + nkblock_loc - 1, nz)
+  do jstart=js, je, njblock ; do istart=is-1, ie, niblock ; do kstart=2,nz, nkblock
+    iend = min(istart + niblock - 1, ie)
+    jend = min(jstart + njblock - 1, je)
+    kend = min(kstart + nkblock - 1, nz)
     EOSdom_tile(1) = 1 ; EOSdom_tile(2) = iend - istart + 1
 
     ! Initialise GxSpV tile to the Boussinesq default G/rho0; overwritten below if
@@ -474,10 +454,10 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
   ! Structure mirrors the zonal loop above, but tiling over (i=is:ie, J=js-1:je).
   ! The Stanley second-derivative fill extends to jend+1 in J because the slope
   ! compute accesses drho_dT_dT_h(ii,jj,K) and drho_dT_dT_h(ii,jj+1,K) simultaneously.
-  do jstart=js-1, je, njblock_loc ; do istart=is, ie, niblock_loc ; do kstart=2,nz, nkblock_loc
-    iend = min(istart + niblock_loc - 1, ie)
-    jend = min(jstart + njblock_loc - 1, je)
-    kend = min(kstart + nkblock_loc - 1, nz)
+  do jstart=js-1, je, njblock ; do istart=is, ie, niblock ; do kstart=2,nz, nkblock
+    iend = min(istart + niblock - 1, ie)
+    jend = min(jstart + njblock - 1, je)
+    kend = min(kstart + nkblock - 1, nz)
     EOSdom_tile(1) = 1 ; EOSdom_tile(2) = iend - istart + 1
 
     ! Re-initialise GxSpV tile: the zonal pass may have set entries here, so reset to
