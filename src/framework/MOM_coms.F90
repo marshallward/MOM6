@@ -27,27 +27,42 @@ public :: reproducing_sum, reproducing_sum_EFP, EFP_sum_across_PEs, EFP_list_sum
 public :: EFP_plus, EFP_minus, EFP_to_real, real_to_EFP, EFP_real_diff
 public :: operator(+), operator(-), assignment(=)
 public :: query_EFP_overflow_error, reset_EFP_overflow_error
-public :: max_count_prec
 
-! This module provides interfaces to the non-domain-oriented communication subroutines.
+integer, parameter :: accum_width = digits(0_int64)
+  !< Accumulator width; total available bits for summation (excluding sign bit)
+integer, parameter :: prec_width = 46
+  !< Precision width; total bits for computed results
+integer, parameter :: guard_width = accum_width - prec_width
+  !< Number of guard bits reserved for carry overflow
 
-integer(kind=int64), parameter :: prec = (2_int64)**46 !< The precision of each integer.
-real, parameter :: r_prec=2.0**46  !< A real version of prec [nondim].
-real, parameter :: I_prec=1.0/(2.0**46) !< The inverse of prec [nondim].
-integer, parameter :: max_count_prec=2**(63-46)-1
-                              !< The number of values that can be added together
-                              !! with the current value of prec before there will
-                              !! be roundoff problems.
+! A sum of N points does N - 1 additions, which at most adds N - 1 carry bits.
+! For G guard bits, the maximum value is 2**G - 1.  A summation of N values
+! therefore requires that N - 1 <= 2**G - 1, or simply N <= 2**G.
+
+integer(kind=int64), parameter :: max_summands = (2_int64)**guard_width
+  !< Maximum number of summable points that can guarantee no carry overflow.
+
+integer(kind=int64), parameter :: prec = (2_int64)**prec_width
+  !< EPF upper bound (exclusive).  For each EPF bin e(i), 0 <= e(i) < prec.
+
+real, parameter :: r_prec = 2.**prec_width
+  !< Real-value of prec [nondim]
+real, parameter :: I_prec = 2.**(-prec_width)
+  !< Inverse real-value of prec [nondim]
+
+integer, parameter :: max_count_prec = max_summands - 1
+  !< Legacy estimate of max_summands.  Should probably not be used.
 
 integer, parameter :: ni=6    !< The number of long integers to use to represent
                               !< a real number.
 real, parameter, dimension(ni) :: &
-  pr = (/ r_prec**2, r_prec, 1.0, 1.0/r_prec, 1.0/r_prec**2, 1.0/r_prec**3 /)
+  pr = [r_prec**2, r_prec, 1.0, 1.0/r_prec, 1.0/r_prec**2, 1.0/r_prec**3]
     !< An array of the real precision of each of the integers in arbitrary units [a]
 real, parameter, dimension(ni) :: &
-  I_pr = (/ 1.0/r_prec**2, 1.0/r_prec, 1.0, r_prec, r_prec**2, r_prec**3 /)
+  I_pr = [1.0/r_prec**2, 1.0/r_prec, 1.0, r_prec, r_prec**2, r_prec**3]
     !< An array of the inverse of the real precision of each of the integers in arbitrary units [a-1]
-real, parameter :: max_efp_float = pr(1) * (2.**63 - 1.)
+!real, parameter :: max_efp_float = pr(1) * (2.**63 - 1.)
+real, parameter :: max_efp_float = pr(1) * real(huge(1_int64))
                               !< The largest float with an EFP representation in arbitrary units [a].
                               !! NOTE: Only the first bin can exceed precision,
                               !! but is bounded by the largest signed integer.
@@ -57,6 +72,8 @@ logical :: NaN_error = .false.      !< This becomes true if a NaN is encountered
 logical :: debug = .false.          !< Making this true enables debugging output.
 
 !$omp declare target(pr, I_pr)
+
+! This module provides interfaces to the non-domain-oriented communication subroutines.
 
 !> Find an accurate and order-invariant sum of a distributed 2d or 3d field, in some cases after
 !! undoing the scaling of the input array and restoring that scaling in the returned value
@@ -140,7 +157,8 @@ function reproducing_EFP_sum_2d(array, isr, ier, jsr, jer, overflow_check, err, 
     "reproducing_sum: Too many processors are being used for the value of "//&
     "prec.  Reduce prec to (2^63-1)/num_PEs.")
 
-  prec_error = ((2_int64)**62 + ((2_int64)**62 - 1)) / num_PEs()
+  !prec_error = ((2_int64)**62 + ((2_int64)**62 - 1)) / num_PEs()
+  prec_error = huge(1_int64) / num_PEs()
 
   is = 1 ; ie = size(array,1) ; js = 1 ; je = size(array,2)
   if (present(isr)) then
@@ -168,22 +186,28 @@ function reproducing_EFP_sum_2d(array, isr, ier, jsr, jer, overflow_check, err, 
   overflow_error = .false. ; NaN_error = .false. ; max_mag_term = 0.0
   ints_sum(:) = 0
   if (over_check) then
-    if ((je+1-js)*(ie+1-is) < max_count_prec) then
-      ! Common case: window is small enough that all carrying happens at the tail.
-      call increment_ints_2d(array, is, ie, js, je, descale, ints_sum, max_mag_term)
-      call carry_overflow(ints_sum, prec_error)
-    elseif ((ie+1-is) < max_count_prec) then
-      do j=js,je
-        do i=is,ie
-          call increment_ints_faster(ints_sum, descale*array(i,j), max_mag_term)
-        enddo
-        call carry_overflow(ints_sum, prec_error)
-      enddo
-    else
-      do j=js,je ; do i=is,ie
-        call increment_ints(ints_sum, real_to_ints(descale*array(i,j), prec_error), prec_error)
-      enddo ; enddo
-    endif
+    !**!if ((je+1-js)*(ie+1-is) < max_count_prec) then
+    !**!  ! Common case: window is small enough that all carrying happens at the tail.
+    !**!  !call increment_ints_2d(array, is, ie, js, je, descale, ints_sum, max_mag_term)
+    !**!  call increment_block_ints(array, is, ie, js, je, descale, ints_sum, max_mag_term)
+    !**!  call carry_overflow(ints_sum, prec_error)
+    !**!elseif ((ie+1-is) < max_count_prec) then
+    !**!  do j=js,je
+    !**!    do i=is,ie
+    !**!      call increment_ints_faster(ints_sum, descale*array(i,j), max_mag_term)
+    !**!    enddo
+    !**!    call carry_overflow(ints_sum, prec_error)
+    !**!  enddo
+    !**!else
+    !**!  do j=js,je ; do i=is,ie
+    !**!    call increment_ints(ints_sum, real_to_ints(descale*array(i,j), prec_error), prec_error)
+    !**!  enddo ; enddo
+    !**!endif
+    call increment_block_ints(array, is, ie, js, je, descale, ints_sum, &
+        max_mag_term, prec_error)
+
+    ! Redistribute carry bits to normalize the final result
+    call carry_overflow(ints_sum, prec_error)
   else
     do j=js,je ; do i=is,ie
       sgn = 1 ; if (array(i,j)<0.0) sgn = -1
@@ -717,10 +741,141 @@ subroutine increment_ints_2d(array, is, ie, js, je, descale, ints_sum, max_mag_t
 end subroutine increment_ints_2d
 
 
-!> Decompose one real into its 6 signed EFP bin contributions.  The function is
-!! used for both CPU and GPU kernels.  NaNs and overflows are reported by
-!! flags, rather than the module-level error logicals, so that the routine is
-!! free of side effects.
+subroutine increment_block_ints(array, is, ie, js, je, descale, ints_sum, &
+    max_mag_term, prec_error)
+  real, intent(in) :: array(:,:)
+    !< The field being added, in arbitrary units [a]
+  integer, intent(in) :: is
+    !< Start i-index of the summed domain
+  integer, intent(in) :: ie
+    !< End i-index of the summed domain
+  integer, intent(in) :: js
+    !< Start j-index of the summed domain
+  integer, intent(in) :: je
+    !< End j-index of the summed domain
+  real, intent(in) :: descale
+    !< Factor to descale array to physical value [a A-1 ~> 1]
+  integer(kind=int64), intent(inout) :: ints_sum(ni)
+    !< The array of EFP integers being incremented
+  real, intent(inout) :: max_mag_term
+    !< A running maximum magnitude of the r's, in arbitrary units [a]
+  integer(kind=int64), intent(in) :: prec_error
+    !< The maximum resolvable value for a given number of PEs
+
+  integer :: i, j, b, jbs, jbe
+    ! Loop indices
+  integer :: isize, jsize, nsize, bsize
+    ! Array summation sizes in i, j, total, and max-block
+  integer :: nblocks
+    ! Number of blocks
+  integer(kind=int64) :: e(ni)
+    ! The EPF representation of each array element
+  integer(kind=int64) :: block_sum(ni), array_sum(ni)
+    ! The cumulant per-block and total array EFP sums
+  real :: r, rmag, mmag
+  integer :: inan, iovf, lnan, lovf
+  integer :: max_sum_count
+    ! The total number of local sum operations to ensure no carry overflow.
+    ! Currently only includes for single-block sums and the ints_sum cumulant,
+    ! but could be extended to account for block-to-array cumulants.
+
+  mmag = abs(max_mag_term)
+  inan = 0 ; iovf = 0
+
+  ! Reduce the maximum number of summations to include the ints_sum cumulant
+  max_sum_count = max_summands - 1
+
+  ! TODO: We could further reduce maxsum to account for the block-to-array
+  ! cumulant sum.  But for now we call carry_overflow() twice if there is more
+  ! than one block.
+
+  ! Get the compute domain size
+  isize = ie - is + 1
+  jsize = je - js + 1
+  nsize = isize * jsize
+
+  ! Block configuration
+
+  ! NOTE: We divide blocks along nj for simplicity, and to maintain ni
+  ! contiguity.  But this could be generalized to more Cartesian blocks.
+
+  ! Abort if a single i-row cannot fit inside of a block.
+  ! For default settings, this would be a row of over 130k points.
+  ! TODO: This can be resolved by blocking in i and j.
+  if (isize > max_sum_count) call MOM_error(FATAL, &
+    "reproducing_sum: i-row is too large to fit in a single block." &
+  )
+
+  ! Set block size as ⌊max_sum_count/isize⌋ to ensure it can hold carry bits.
+  bsize = (max_sum_count / isize) * isize
+
+  ! Pad block count as ⌈nsize/csize⌉ to include partial rows in final block.
+  nblocks = (nsize + bsize - 1) / bsize
+
+  ! Abort if the number of blocks also exceeds the carry-bit summation limit.
+  ! For default settings, this would use over 17 billion points per PE.
+  ! TODO: This can be resolved with recursive block trees.
+  if (nblocks > max_sum_count) call MOM_error(FATAL, &
+      "reproducing sum: Number of blocks exceeds carry value limit." &
+  )
+
+  array_sum(:) = 0
+  ! do concurrent (b=1:nblocks) reduce(+:array_sum)
+  do b=1,nblocks
+    ! TODO: This truncates the final block, but we could also redistribute to
+    !   ensure roughly equal block sizes.
+    jbs = js + (b - 1) * bsize
+    jbe = min(jbs + bsize - 1, je)
+
+    block_sum(:) = 0
+
+    ! Compute the sum each block
+    !do j=jcs,jce ; do i=is,ie
+    do concurrent (j=jbs:jbe, i=is:ie) &
+        DO_LOCALITY(local(r, e, rmag, lnan, lovf)) &
+        DO_LOCALITY(reduce(+: block_sum) reduce(max: mmag, inan, iovf))
+
+      ! Convert array(i,j) to EPF form
+      r = descale * array(i,j)
+      call efp_decompose(r, e, rmag, lnan, lovf)
+
+      ! Verify that the conversion was completed
+      inan = max(inan, lnan)
+      iovf = max(iovf, lovf)
+      if (rmag > mmag) mmag = rmag
+
+      ! Add the EPF result (including potential carry bits)
+      block_sum(:) = block_sum(:) + e(:)
+    enddo
+    !enddo ; enddo
+
+    ! Redistribute carry bits across bins
+    if (nblocks > 1) call carry_overflow(block_sum, prec_error)
+
+    ! NOTE: For one block, this step is redundant.
+    array_sum(:) = array_sum(:) + block_sum(:)
+  enddo
+
+  ! Formally nblocks could be as high as max_sum_count, so we should again
+  ! redistribute the result.  For one block, it is already normalized.
+  if (nblocks > 1) call carry_overflow(array_sum, prec_error)
+
+  ! Finally, apply the cumulant result
+  ints_sum(:) = ints_sum(:) + array_sum(:)
+
+  ! Redistribute carry bits to normalize the final result
+  call carry_overflow(ints_sum, prec_error)
+
+  ! Transfer error/warning signals to module flags
+  max_mag_term = mmag
+  if (inan /= 0) NaN_error = .true.
+  if (iovf /= 0) overflow_error = .true.
+end subroutine increment_block_ints
+
+
+!> Decompose one real into its 6 signed EFP bin contributions.  NaNs and
+!! overflows are reported by flags, rather than the module-level error
+!! logicals, so that the routine is free of side effects.
 pure subroutine efp_decompose(r, e, rmag, is_nan, is_ovf)
   !$omp declare target
   real, intent(in)  :: r
