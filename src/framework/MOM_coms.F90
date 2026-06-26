@@ -27,6 +27,8 @@ public :: reproducing_sum, reproducing_sum_EFP, EFP_sum_across_PEs, EFP_list_sum
 public :: EFP_plus, EFP_minus, EFP_to_real, real_to_EFP, EFP_real_diff
 public :: operator(+), operator(-), assignment(=)
 public :: query_EFP_overflow_error, reset_EFP_overflow_error
+! TODO: This is being made public to accommodate a unit test.  Bad sign!
+public :: max_count_prec
 
 integer, parameter :: accum_width = digits(0_int64)
   !< Accumulator width; total available bits for summation (excluding sign bit)
@@ -205,9 +207,6 @@ function reproducing_EFP_sum_2d(array, isr, ier, jsr, jer, overflow_check, err, 
     !**!endif
     call increment_block_ints(array, is, ie, js, je, descale, ints_sum, &
         max_mag_term, prec_error)
-
-    ! Redistribute carry bits to normalize the final result
-    call carry_overflow(ints_sum, prec_error)
   else
     do j=js,je ; do i=is,ie
       sgn = 1 ; if (array(i,j)<0.0) sgn = -1
@@ -766,20 +765,23 @@ subroutine increment_block_ints(array, is, ie, js, je, descale, ints_sum, &
     ! Loop indices
   integer :: isize, jsize, nsize, bsize
     ! Array summation sizes in i, j, total, and max-block
+  integer :: jb_rows
+    ! Number of j-rows per block
   integer :: nblocks
     ! Number of blocks
   integer(kind=int64) :: e(ni)
     ! The EPF representation of each array element
   integer(kind=int64) :: block_sum(ni), array_sum(ni)
     ! The cumulant per-block and total array EFP sums
-  real :: r, rmag, mmag
+  real :: r, rmag, max_pos, max_neg
   integer :: inan, iovf, lnan, lovf
   integer :: max_sum_count
     ! The total number of local sum operations to ensure no carry overflow.
     ! Currently only includes for single-block sums and the ints_sum cumulant,
     ! but could be extended to account for block-to-array cumulants.
 
-  mmag = abs(max_mag_term)
+  max_pos = max(0., max_mag_term)
+  max_neg = max(0., -max_mag_term)
   inan = 0 ; iovf = 0
 
   ! Reduce the maximum number of summations to include the ints_sum cumulant
@@ -807,7 +809,8 @@ subroutine increment_block_ints(array, is, ie, js, je, descale, ints_sum, &
   )
 
   ! Set block size as ⌊max_sum_count/isize⌋ to ensure it can hold carry bits.
-  bsize = (max_sum_count / isize) * isize
+  jb_rows = max_sum_count / isize
+  bsize = jb_rows * isize
 
   ! Pad block count as ⌈nsize/csize⌉ to include partial rows in final block.
   nblocks = (nsize + bsize - 1) / bsize
@@ -820,12 +823,11 @@ subroutine increment_block_ints(array, is, ie, js, je, descale, ints_sum, &
   )
 
   array_sum(:) = 0
-  ! do concurrent (b=1:nblocks) reduce(+:array_sum)
   do b=1,nblocks
     ! TODO: This truncates the final block, but we could also redistribute to
     !   ensure roughly equal block sizes.
-    jbs = js + (b - 1) * bsize
-    jbe = min(jbs + bsize - 1, je)
+    jbs = js + (b - 1) * jb_rows
+    jbe = min(jbs + jb_rows - 1, je)
 
     block_sum(:) = 0
 
@@ -833,7 +835,7 @@ subroutine increment_block_ints(array, is, ie, js, je, descale, ints_sum, &
     !do j=jcs,jce ; do i=is,ie
     do concurrent (j=jbs:jbe, i=is:ie) &
         DO_LOCALITY(local(r, e, rmag, lnan, lovf)) &
-        DO_LOCALITY(reduce(+: block_sum) reduce(max: mmag, inan, iovf))
+        DO_LOCALITY(reduce(+: block_sum) reduce(max: max_pos, max_neg, inan, iovf))
 
       ! Convert array(i,j) to EPF form
       r = descale * array(i,j)
@@ -842,7 +844,12 @@ subroutine increment_block_ints(array, is, ie, js, je, descale, ints_sum, &
       ! Verify that the conversion was completed
       inan = max(inan, lnan)
       iovf = max(iovf, lovf)
-      if (rmag > mmag) mmag = rmag
+
+      if (r >= 0.) then
+        if (rmag > max_pos) max_pos = rmag
+      else
+        if (rmag > max_neg) max_neg = rmag
+      endif
 
       ! Add the EPF result (including potential carry bits)
       block_sum(:) = block_sum(:) + e(:)
@@ -866,8 +873,14 @@ subroutine increment_block_ints(array, is, ie, js, je, descale, ints_sum, &
   ! Redistribute carry bits to normalize the final result
   call carry_overflow(ints_sum, prec_error)
 
+  ! Extract the maximum value while preserving sign (and ties to positive)
+  if (max_pos >= max_neg) then
+    max_mag_term = max_pos
+  else
+    max_mag_term = -max_neg
+  endif
+
   ! Transfer error/warning signals to module flags
-  max_mag_term = mmag
   if (inan /= 0) NaN_error = .true.
   if (iovf /= 0) overflow_error = .true.
 end subroutine increment_block_ints
