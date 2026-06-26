@@ -186,25 +186,9 @@ function reproducing_EFP_sum_2d(array, isr, ier, jsr, jer, overflow_check, err, 
   descale = 1.0 ; if (do_unscale) descale = unscale
 
   overflow_error = .false. ; NaN_error = .false. ; max_mag_term = 0.0
+
   ints_sum(:) = 0
   if (over_check) then
-    !**!if ((je+1-js)*(ie+1-is) < max_count_prec) then
-    !**!  ! Common case: window is small enough that all carrying happens at the tail.
-    !**!  !call increment_ints_2d(array, is, ie, js, je, descale, ints_sum, max_mag_term)
-    !**!  call increment_block_ints(array, is, ie, js, je, descale, ints_sum, max_mag_term)
-    !**!  call carry_overflow(ints_sum, prec_error)
-    !**!elseif ((ie+1-is) < max_count_prec) then
-    !**!  do j=js,je
-    !**!    do i=is,ie
-    !**!      call increment_ints_faster(ints_sum, descale*array(i,j), max_mag_term)
-    !**!    enddo
-    !**!    call carry_overflow(ints_sum, prec_error)
-    !**!  enddo
-    !**!else
-    !**!  do j=js,je ; do i=is,ie
-    !**!    call increment_ints(ints_sum, real_to_ints(descale*array(i,j), prec_error), prec_error)
-    !**!  enddo ; enddo
-    !**!endif
     call increment_block_ints(array, is, ie, js, je, descale, ints_sum, &
         max_mag_term, prec_error)
   else
@@ -443,26 +427,15 @@ function reproducing_sum_3d(array, isr, ier, jsr, jer, sums, EFP_sum, EFP_lay_su
     if (present(EFP_lay_sums)) then ; if (size(EFP_lay_sums) < ke) then
       call MOM_error(FATAL, "Sums is smaller than the vertical extent of array in reproducing_sum(_3d).")
     endif ; endif
-    ints_sums(:,:) = 0
+
     overflow_error = .false. ; NaN_error = .false. ; max_mag_term = 0.0
-    if (jsz*isz < max_count_prec) then
-      do k=1,ke
-        call increment_ints_2d(array(:,:,k), is, ie, js, je, descale, ints_sums(:,k), max_mag_term)
-        call carry_overflow(ints_sums(:,k), prec_error)
-      enddo
-    elseif (isz < max_count_prec) then
-      do k=1,ke ; do j=js,je
-        do i=is,ie
-          call increment_ints_faster(ints_sums(:,k), descale*array(i,j,k), max_mag_term)
-        enddo
-        call carry_overflow(ints_sums(:,k), prec_error)
-      enddo ; enddo
-    else
-      do k=1,ke ; do j=js,je ; do i=is,ie
-        call increment_ints(ints_sums(:,k), &
-                            real_to_ints(descale*array(i,j,k), prec_error), prec_error)
-      enddo ; enddo ; enddo
-    endif
+
+    ints_sums(:,:) = 0
+    do k=1,ke
+      call increment_block_ints(array(:,:,k), is, ie, js, je, descale, &
+          ints_sums(:,k), max_mag_term, prec_error)
+    enddo
+
     if (present(err)) then
       err = 0
       if (abs(max_mag_term) >= prec_error*pr(1)) err = err+1
@@ -503,26 +476,14 @@ function reproducing_sum_3d(array, isr, ier, jsr, jer, sums, EFP_sum, EFP_lay_su
       call MOM_mesg(mesg, 3)
     endif
   else
-    ints_sum(:) = 0
     overflow_error = .false. ; NaN_error = .false. ; max_mag_term = 0.0
-    if (jsz*isz < max_count_prec) then
-      do k=1,ke
-        call increment_ints_2d(array(:,:,k), is, ie, js, je, descale, ints_sum, max_mag_term)
-        call carry_overflow(ints_sum, prec_error)
-      enddo
-    elseif (isz < max_count_prec) then
-      do k=1,ke ; do j=js,je
-        do i=is,ie
-          call increment_ints_faster(ints_sum, descale*array(i,j,k), max_mag_term)
-        enddo
-        call carry_overflow(ints_sum, prec_error)
-      enddo ; enddo
-    else
-      do k=1,ke ; do j=js,je ; do i=is,ie
-        call increment_ints(ints_sum, real_to_ints(descale*array(i,j,k), prec_error), &
-                            prec_error)
-      enddo ; enddo ; enddo
-    endif
+
+    ints_sum(:) = 0
+    do k=1,ke
+      call increment_block_ints(array(:,:,k), is, ie, js, je, descale, &
+          ints_sum, max_mag_term, prec_error)
+    enddo
+
     if (present(err)) then
       err = 0
       if (abs(max_mag_term) >= prec_error*pr(1)) err = err+1
@@ -683,61 +644,61 @@ subroutine increment_ints_faster(int_sum, r, max_mag_term)
 end subroutine increment_ints_faster
 
 
-!> Increment an EFP number with a real number over a 2d array without doing any
-!! carrying of overflows and using only minimal error checking.
-!! modulo: max_mag_term is updated with the magnitude (>=0) rather than the
-!! signed last-winner. Only consumer of max_mag_term is abs() in the overflow
-!! guard, so values are unchanged; only the sign in one FATAL message can
-!! differ.
-subroutine increment_ints_2d(array, is, ie, js, je, descale, ints_sum, max_mag_term)
-  real, intent(in) :: array(:,:)
-    !< The field being added, in arbitrary units [a]
-  integer, intent(in) :: is
-    !< Start i-index of the summed domain
-  integer, intent(in) :: ie
-    !< End i-index of the summed domain
-  integer, intent(in) :: js
-    !< Start j-index of the summed domain
-  integer, intent(in) :: je
-    !< End j-index of the summed domain
-  real, intent(in) :: descale
-    !< unscale factor or 1.0 [a A-1 ~> 1]
-  integer(kind=int64), intent(inout) :: ints_sum(ni)
-    !< The array of EFP integers being incremented
-  real, intent(inout) :: max_mag_term
-    !< A running maximum magnitude of the r's, in arbitrary units [a]
-
-  integer :: i, j
-  integer(kind=int64) :: e(ni)
-  real :: r, rmag, mmag
-  integer :: inan, iovf, lnan, lovf
-
-  mmag = abs(max_mag_term)
-  inan = 0 ; iovf = 0
-
-  ! This subroutine increments a number with another, both using the integer
-  ! representation in real_to_ints, but without doing any carrying of overflow.
-  do concurrent (j=js:je, i=is:ie) &
-      DO_LOCALITY(local(r, e, rmag, lnan, lovf)) &
-      DO_LOCALITY(reduce(+: ints_sum) reduce(max: mmag, inan, iovf))
-
-    r = descale*array(i,j)
-
-    call efp_decompose(r, e, rmag, lnan, lovf)
-
-    inan = max(inan, lnan)
-    iovf = max(iovf, lovf)
-
-    if (rmag > mmag) mmag = rmag
-
-    ints_sum(:) = ints_sum(:) + e(:)
-  enddo
-
-  max_mag_term = mmag
-
-  if (inan /= 0) NaN_error = .true.
-  if (iovf /= 0) overflow_error = .true.
-end subroutine increment_ints_2d
+!**!!> Increment an EFP number with a real number over a 2d array without doing any
+!**!!! carrying of overflows and using only minimal error checking.
+!**!!! modulo: max_mag_term is updated with the magnitude (>=0) rather than the
+!**!!! signed last-winner. Only consumer of max_mag_term is abs() in the overflow
+!**!!! guard, so values are unchanged; only the sign in one FATAL message can
+!**!!! differ.
+!**!subroutine increment_ints_2d(array, is, ie, js, je, descale, ints_sum, max_mag_term)
+!**!  real, intent(in) :: array(:,:)
+!**!    !< The field being added, in arbitrary units [a]
+!**!  integer, intent(in) :: is
+!**!    !< Start i-index of the summed domain
+!**!  integer, intent(in) :: ie
+!**!    !< End i-index of the summed domain
+!**!  integer, intent(in) :: js
+!**!    !< Start j-index of the summed domain
+!**!  integer, intent(in) :: je
+!**!    !< End j-index of the summed domain
+!**!  real, intent(in) :: descale
+!**!    !< unscale factor or 1.0 [a A-1 ~> 1]
+!**!  integer(kind=int64), intent(inout) :: ints_sum(ni)
+!**!    !< The array of EFP integers being incremented
+!**!  real, intent(inout) :: max_mag_term
+!**!    !< A running maximum magnitude of the r's, in arbitrary units [a]
+!**!
+!**!  integer :: i, j
+!**!  integer(kind=int64) :: e(ni)
+!**!  real :: r, rmag, mmag
+!**!  integer :: inan, iovf, lnan, lovf
+!**!
+!**!  mmag = abs(max_mag_term)
+!**!  inan = 0 ; iovf = 0
+!**!
+!**!  ! This subroutine increments a number with another, both using the integer
+!**!  ! representation in real_to_ints, but without doing any carrying of overflow.
+!**!  do concurrent (j=js:je, i=is:ie) &
+!**!      DO_LOCALITY(local(r, e, rmag, lnan, lovf)) &
+!**!      DO_LOCALITY(reduce(+: ints_sum) reduce(max: mmag, inan, iovf))
+!**!
+!**!    r = descale*array(i,j)
+!**!
+!**!    call efp_decompose(r, e, rmag, lnan, lovf)
+!**!
+!**!    inan = max(inan, lnan)
+!**!    iovf = max(iovf, lovf)
+!**!
+!**!    if (rmag > mmag) mmag = rmag
+!**!
+!**!    ints_sum(:) = ints_sum(:) + e(:)
+!**!  enddo
+!**!
+!**!  max_mag_term = mmag
+!**!
+!**!  if (inan /= 0) NaN_error = .true.
+!**!  if (iovf /= 0) overflow_error = .true.
+!**!end subroutine increment_ints_2d
 
 
 subroutine increment_block_ints(array, is, ie, js, je, descale, ints_sum, &
