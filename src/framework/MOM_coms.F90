@@ -27,7 +27,6 @@ public :: reproducing_sum, reproducing_sum_EFP, EFP_sum_across_PEs, EFP_list_sum
 public :: EFP_plus, EFP_minus, EFP_to_real, real_to_EFP, EFP_real_diff
 public :: operator(+), operator(-), assignment(=)
 public :: query_EFP_overflow_error, reset_EFP_overflow_error
-! TODO: This is being made public to accommodate a unit test.  Bad sign!
 public :: max_count_prec
 
 integer, parameter :: accum_width = digits(0_int64)
@@ -63,7 +62,6 @@ real, parameter, dimension(ni) :: &
 real, parameter, dimension(ni) :: &
   I_pr = [1.0/r_prec**2, 1.0/r_prec, 1.0, r_prec, r_prec**2, r_prec**3]
     !< An array of the inverse of the real precision of each of the integers in arbitrary units [a-1]
-!real, parameter :: max_efp_float = pr(1) * (2.**63 - 1.)
 real, parameter :: max_efp_float = pr(1) * real(huge(1_int64))
                               !< The largest float with an EFP representation in arbitrary units [a].
                               !! NOTE: Only the first bin can exceed precision,
@@ -159,7 +157,6 @@ function reproducing_EFP_sum_2d(array, isr, ier, jsr, jer, overflow_check, err, 
     "reproducing_sum: Too many processors are being used for the value of "//&
     "prec.  Reduce prec to (2^63-1)/num_PEs.")
 
-  !prec_error = ((2_int64)**62 + ((2_int64)**62 - 1)) / num_PEs()
   prec_error = huge(1_int64) / num_PEs()
 
   is = 1 ; ie = size(array,1) ; js = 1 ; je = size(array,2)
@@ -644,63 +641,7 @@ subroutine increment_ints_faster(int_sum, r, max_mag_term)
 end subroutine increment_ints_faster
 
 
-!**!!> Increment an EFP number with a real number over a 2d array without doing any
-!**!!! carrying of overflows and using only minimal error checking.
-!**!!! modulo: max_mag_term is updated with the magnitude (>=0) rather than the
-!**!!! signed last-winner. Only consumer of max_mag_term is abs() in the overflow
-!**!!! guard, so values are unchanged; only the sign in one FATAL message can
-!**!!! differ.
-!**!subroutine increment_ints_2d(array, is, ie, js, je, descale, ints_sum, max_mag_term)
-!**!  real, intent(in) :: array(:,:)
-!**!    !< The field being added, in arbitrary units [a]
-!**!  integer, intent(in) :: is
-!**!    !< Start i-index of the summed domain
-!**!  integer, intent(in) :: ie
-!**!    !< End i-index of the summed domain
-!**!  integer, intent(in) :: js
-!**!    !< Start j-index of the summed domain
-!**!  integer, intent(in) :: je
-!**!    !< End j-index of the summed domain
-!**!  real, intent(in) :: descale
-!**!    !< unscale factor or 1.0 [a A-1 ~> 1]
-!**!  integer(kind=int64), intent(inout) :: ints_sum(ni)
-!**!    !< The array of EFP integers being incremented
-!**!  real, intent(inout) :: max_mag_term
-!**!    !< A running maximum magnitude of the r's, in arbitrary units [a]
-!**!
-!**!  integer :: i, j
-!**!  integer(kind=int64) :: e(ni)
-!**!  real :: r, rmag, mmag
-!**!  integer :: inan, iovf, lnan, lovf
-!**!
-!**!  mmag = abs(max_mag_term)
-!**!  inan = 0 ; iovf = 0
-!**!
-!**!  ! This subroutine increments a number with another, both using the integer
-!**!  ! representation in real_to_ints, but without doing any carrying of overflow.
-!**!  do concurrent (j=js:je, i=is:ie) &
-!**!      DO_LOCALITY(local(r, e, rmag, lnan, lovf)) &
-!**!      DO_LOCALITY(reduce(+: ints_sum) reduce(max: mmag, inan, iovf))
-!**!
-!**!    r = descale*array(i,j)
-!**!
-!**!    call efp_decompose(r, e, rmag, lnan, lovf)
-!**!
-!**!    inan = max(inan, lnan)
-!**!    iovf = max(iovf, lovf)
-!**!
-!**!    if (rmag > mmag) mmag = rmag
-!**!
-!**!    ints_sum(:) = ints_sum(:) + e(:)
-!**!  enddo
-!**!
-!**!  max_mag_term = mmag
-!**!
-!**!  if (inan /= 0) NaN_error = .true.
-!**!  if (iovf /= 0) overflow_error = .true.
-!**!end subroutine increment_ints_2d
-
-
+!> Increment an EFP array with a new EFP summation over an input array.
 subroutine increment_block_ints(array, is, ie, js, je, descale, ints_sum, &
     max_mag_term, prec_error)
   real, intent(in) :: array(:,:)
@@ -734,7 +675,7 @@ subroutine increment_block_ints(array, is, ie, js, je, descale, ints_sum, &
     ! The EPF representation of each array element
   integer(kind=int64) :: block_sum(ni), array_sum(ni)
     ! The cumulant per-block and total array EFP sums
-  real :: r, rmag, max_pos, max_neg
+  real :: r, rmag, max_pos, max_neg, block_max_pos, block_max_neg
   integer :: inan, iovf, lnan, lovf
   integer :: max_sum_count
     ! The total number of local sum operations to ensure no carry overflow.
@@ -791,12 +732,14 @@ subroutine increment_block_ints(array, is, ie, js, je, descale, ints_sum, &
     jbe = min(jbs + jb_rows - 1, je)
 
     block_sum(:) = 0
+    block_max_pos = 0.
+    block_max_neg = 0.
 
     ! Compute the sum each block
-    !do j=jcs,jce ; do i=is,ie
     do concurrent (j=jbs:jbe, i=is:ie) &
         DO_LOCALITY(local(r, e, rmag, lnan, lovf)) &
-        DO_LOCALITY(reduce(+: block_sum) reduce(max: max_pos, max_neg, inan, iovf))
+        DO_LOCALITY(reduce(+: block_sum)) &
+        DO_LOCALITY(reduce(max: block_max_pos, block_max_neg, inan, iovf))
 
       ! Convert array(i,j) to EPF form
       r = descale * array(i,j)
@@ -807,21 +750,24 @@ subroutine increment_block_ints(array, is, ie, js, je, descale, ints_sum, &
       iovf = max(iovf, lovf)
 
       if (r >= 0.) then
-        if (rmag > max_pos) max_pos = rmag
+        if (rmag > block_max_pos) block_max_pos = rmag
       else
-        if (rmag > max_neg) max_neg = rmag
+        if (rmag > block_max_neg) block_max_neg = rmag
       endif
 
       ! Add the EPF result (including potential carry bits)
       block_sum(:) = block_sum(:) + e(:)
     enddo
-    !enddo ; enddo
 
     ! Redistribute carry bits across bins
     if (nblocks > 1) call carry_overflow(block_sum, prec_error)
 
     ! NOTE: For one block, this step is redundant.
     array_sum(:) = array_sum(:) + block_sum(:)
+
+    ! Update maximum magnitude
+    max_pos = max(max_pos, block_max_pos)
+    max_neg = max(max_neg, block_max_neg)
   enddo
 
   ! Formally nblocks could be as high as max_sum_count, so we should again
