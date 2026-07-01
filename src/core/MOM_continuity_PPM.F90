@@ -640,6 +640,7 @@ subroutine zonal_mass_flux(u, h_in, h_W, h_E, uh, dt, G, GV, US, CS, OBC, por_fa
   real :: dx_E, dx_W ! Effective x-grid spacings to the east and west [L ~> m].
   type(cont_loop_bounds_type) :: LB
   integer :: i, j, k, ish, ieh, jsh, jeh, n, nz, II, jj
+  integer :: imax, jmax ! The i- and j-direction extents of the current block [nondim].
   integer :: l_seg ! The OBC segment number
   logical :: use_visc_rem, set_BT_cont
   logical :: local_specified_BC, local_Flather_OBC, local_open_BC, any_simple_OBC  ! OBC-related logicals
@@ -689,25 +690,27 @@ subroutine zonal_mass_flux(u, h_in, h_W, h_E, uh, dt, G, GV, US, CS, OBC, por_fa
   do j_start=jsh,jeh,njblock ; do I_start=ish-1,ieh,niblock
     I_end = min(I_start + niblock - 1, ieh)
     j_end = min(j_start + njblock - 1, jeh)
+    imax = I_end - I_start + 1
+    jmax = j_end - j_start + 1
 
-    do jj=1,j_end-j_start+1 ; do II=1,I_end-I_start+1
+    do jj=1,jmax ; do II=1,imax
       do_I(II,jj) = .true.
     enddo ; enddo
 
     ! Set uh and duhdu.
     do k=1,nz
       if (use_visc_rem) then
-        do j=j_start,j_end ; do I=I_start,I_end
-          II = I - I_start + 1
-          jj = j - j_start + 1
+        do jj=1,jmax ; do II=1,imax
+          I = I_start + II - 1
+          j = j_start + jj - 1
 
           visc_rem(II,jj,k) = visc_rem_u(I,j,k)
         enddo ; enddo
       endif
 
-      do j=j_start,j_end ; do I=I_start,I_end
-        II = I - I_start + 1
-        jj = j - j_start + 1
+      do jj=1,jmax ; do II=1,imax
+        I = I_start + II - 1
+        j = j_start + jj - 1
 
         call flux_elem(u(I,j,k), h_in(i,j,k), h_in(i+1,j,k), &
             h_W(i,j,k), h_W(i+1,j,k), h_E(i,j,k), h_E(i+1,j,k), &
@@ -723,33 +726,37 @@ subroutine zonal_mass_flux(u, h_in, h_W, h_E, uh, dt, G, GV, US, CS, OBC, por_fa
       enddo ; enddo
 
       if (local_specified_BC) then
-        do j=j_start,j_end ; do I=I_start,I_end ; if (OBC%segnum_u(I,j) /= 0) then
-          l_seg = abs(OBC%segnum_u(I,j))
-          if (OBC%segment(l_seg)%specified) &
-            uh_b(I-I_start+1,j-j_start+1,k) = OBC%segment(l_seg)%normal_trans(I,j,k)
-        endif ; enddo ; enddo
+        do jj=1,jmax ; do II=1,imax
+          I = I_start + II - 1
+          j = j_start + jj - 1
+          if (OBC%segnum_u(I,j) /= 0) then
+            l_seg = abs(OBC%segnum_u(I,j))
+            if (OBC%segment(l_seg)%specified) &
+              uh_b(II,jj,k) = OBC%segment(l_seg)%normal_trans(I,j,k)
+          endif
+        enddo ; enddo
       endif
     enddo
 
     if (present(uhbt) .or. set_BT_cont) then
       if (use_visc_rem .and. CS%use_visc_rem_max) then
-        do jj=1,j_end-j_start+1 ; do II=1,I_end-I_start+1
+        do jj=1,jmax ; do II=1,imax
           visc_rem_max(II,jj) = 0.0
         enddo ; enddo
 
-        do k=1,nz ; do jj=1,j_end-j_start+1 ; do II=1,I_end-I_start+1
+        do k=1,nz ; do jj=1,jmax ; do II=1,imax
           visc_rem_max(II,jj) = max(visc_rem_max(II,jj), visc_rem(II,jj,k))
         enddo ; enddo ; enddo
       else
-        do jj=1,j_end-j_start+1 ; do II=1,I_end-I_start+1
+        do jj=1,jmax ; do II=1,imax
           visc_rem_max(II,jj) = 1.0
         enddo ; enddo
       endif
       !   Set limits on du that will keep the CFL number between -1 and 1.
       ! This should be adequate to keep the root bracketed in all cases.
-      do j=j_start,j_end ; do I=I_start,I_end
-        II = I - I_start + 1
-        jj = j - j_start + 1
+      do jj=1,jmax ; do II=1,imax
+        I = I_start + II - 1
+        j = j_start + jj - 1
 
         I_vrm = 0.0
         if (visc_rem_max(II,jj) > 0.0) I_vrm = 1.0 / visc_rem_max(II,jj)
@@ -763,9 +770,9 @@ subroutine zonal_mass_flux(u, h_in, h_W, h_E, uh, dt, G, GV, US, CS, OBC, por_fa
       enddo ; enddo
 
       do k=1,nz
-        do j=j_start,j_end ; do I=I_start,I_end
-          II = I - I_start + 1
-          jj = j - j_start + 1
+        do jj=1,jmax ; do II=1,imax
+          I = I_start + II - 1
+          j = j_start + jj - 1
 
           duhdu_tot_0(II,jj) = duhdu_tot_0(II,jj) + duhdu(II,jj,k)
           uh_tot_0(II,jj) = uh_tot_0(II,jj) + uh_b(II,jj,k)
@@ -775,9 +782,9 @@ subroutine zonal_mass_flux(u, h_in, h_W, h_E, uh, dt, G, GV, US, CS, OBC, por_fa
       if (use_visc_rem) then
         if (CS%aggress_adjust) then
           do k=1,nz
-            do j=j_start,j_end ; do I=I_start,I_end
-              II = I - I_start + 1
-              jj = j - j_start + 1
+            do jj=1,jmax ; do II=1,imax
+              I = I_start + II - 1
+              j = j_start + jj - 1
 
               if (CS%vol_CFL) then
                 dx_W = ratio_max(G%areaT(i,j), G%dy_Cu(I,j), 1000.0*G%dxT(i,j))
@@ -795,9 +802,9 @@ subroutine zonal_mass_flux(u, h_in, h_W, h_E, uh, dt, G, GV, US, CS, OBC, por_fa
           enddo
         else
           do k=1,nz
-            do j=j_start,j_end ; do I=I_start,I_end
-              II = I - I_start + 1
-              jj = j - j_start + 1
+            do jj=1,jmax ; do II=1,imax
+              I = I_start + II - 1
+              j = j_start + jj - 1
 
               if (CS%vol_CFL) then
                 dx_W = ratio_max(G%areaT(i,j), G%dy_Cu(I,j), 1000.0*G%dxT(i,j))
@@ -814,9 +821,9 @@ subroutine zonal_mass_flux(u, h_in, h_W, h_E, uh, dt, G, GV, US, CS, OBC, por_fa
       else
         if (CS%aggress_adjust) then
           do k=1,nz
-            do j=j_start,j_end ; do I=I_start,I_end
-              II = I - I_start + 1
-              jj = j - j_start + 1
+            do jj=1,jmax ; do II=1,imax
+              I = I_start + II - 1
+              j = j_start + jj - 1
 
               if (CS%vol_CFL) then
                 dx_W = ratio_max(G%areaT(i,j), G%dy_Cu(I,j), 1000.0*G%dxT(i,j))
@@ -831,9 +838,9 @@ subroutine zonal_mass_flux(u, h_in, h_W, h_E, uh, dt, G, GV, US, CS, OBC, por_fa
           enddo
         else
           do k=1,nz
-            do j=j_start,j_end ; do I=I_start,I_end
-              II = I - I_start + 1
-              jj = j - j_start + 1
+            do jj=1,jmax ; do II=1,imax
+              I = I_start + II - 1
+              j = j_start + jj - 1
 
               if (CS%vol_CFL) then
                 dx_W = ratio_max(G%areaT(i,j), G%dy_Cu(I,j), 1000.0*G%dxT(i,j))
@@ -846,7 +853,7 @@ subroutine zonal_mass_flux(u, h_in, h_W, h_E, uh, dt, G, GV, US, CS, OBC, por_fa
           enddo
         endif
       endif
-      do jj=1,j_end-j_start+1 ; do II=1,I_end-I_start+1
+      do jj=1,jmax ; do II=1,imax
         du_max_CFL(II,jj) = max(du_max_CFL(II,jj),0.0)
         du_min_CFL(II,jj) = min(du_min_CFL(II,jj),0.0)
       enddo ; enddo
@@ -854,9 +861,9 @@ subroutine zonal_mass_flux(u, h_in, h_W, h_E, uh, dt, G, GV, US, CS, OBC, por_fa
       any_simple_OBC = .false.
       if (present(uhbt) .or. set_BT_cont) then
         if (local_specified_BC .or. local_Flather_OBC) then
-          do j=j_start,j_end ; do I=I_start,I_end
-            II = I - I_start + 1
-            jj = j - j_start + 1
+          do jj=1,jmax ; do II=1,imax
+            I = I_start + II - 1
+            j = j_start + jj - 1
 
             l_seg = abs(OBC%segnum_u(I,j))
 
@@ -867,15 +874,17 @@ subroutine zonal_mass_flux(u, h_in, h_W, h_E, uh, dt, G, GV, US, CS, OBC, por_fa
             any_simple_OBC = any_simple_OBC .or. simple_OBC_pt(II,jj)
           enddo ; enddo
         else
-          do jj=1,j_end-j_start+1 ; do II=1,I_end-I_start+1
+          do jj=1,jmax ; do II=1,imax
             do_I(II,jj) = .true.
           enddo ; enddo
         endif
       endif
 
       if (present(uhbt)) then
-        do j=j_start,j_end ; do I=I_start,I_end
-          uhbt_b(I-I_start+1,j-j_start+1) = uhbt(I,j)
+        do jj=1,jmax ; do II=1,imax
+          I = I_start + II - 1
+          j = j_start + jj - 1
+          uhbt_b(II,jj) = uhbt(I,j)
         enddo ; enddo
         ! Find du and uh.
         call zonal_flux_adjust(u, h_in, h_W, h_E, uhbt_b, uh_tot_0, duhdu_tot_0, du, &
@@ -884,17 +893,17 @@ subroutine zonal_mass_flux(u, h_in, h_W, h_E, uh, dt, G, GV, US, CS, OBC, por_fa
                               uh_b, OBC=OBC)
 
         if (present(u_cor)) then
-          do k=1,nz ; do j=j_start,j_end ; do I=I_start,I_end
-            II = I - I_start + 1
-            jj = j - j_start + 1
+          do k=1,nz ; do jj=1,jmax ; do II=1,imax
+            I = I_start + II - 1
+            j = j_start + jj - 1
 
             u_cor(I,j,k) = u(I,j,k) + du(II,jj) * visc_rem(II,jj,k)
           enddo ; enddo ; enddo
 
           if (any_simple_OBC) then
-            do k=1,nz ; do j=j_start,j_end ; do I=I_start,I_end
-              II = I - I_start + 1
-              jj = j - j_start + 1
+            do k=1,nz ; do jj=1,jmax ; do II=1,imax
+              I = I_start + II - 1
+              j = j_start + jj - 1
 
               if (simple_OBC_pt(II,jj)) &
                 u_cor(I,j,k) = OBC%segment(abs(OBC%segnum_u(I,j)))%normal_vel(I,j,k)
@@ -903,9 +912,9 @@ subroutine zonal_mass_flux(u, h_in, h_W, h_E, uh, dt, G, GV, US, CS, OBC, por_fa
         endif ! u-corrected
 
         if (present(du_cor)) then
-          do j=j_start,j_end ; do I=I_start,I_end
-            II = I - I_start + 1
-            jj = j - j_start + 1
+          do jj=1,jmax ; do II=1,imax
+            I = I_start + II - 1
+            j = j_start + jj - 1
 
             du_cor(I,j) = du(II,jj)
           enddo ; enddo
@@ -919,18 +928,18 @@ subroutine zonal_mass_flux(u, h_in, h_W, h_E, uh, dt, G, GV, US, CS, OBC, por_fa
                               visc_rem_max, I_start, I_end, j_start, j_end, do_I, &
                               por_face_areaU, niblock, njblock)
         if (any_simple_OBC) then
-          do j=j_start,j_end ; do I=I_start,I_end
-            II = I - I_start + 1
-            jj = j - j_start + 1
+          do jj=1,jmax ; do II=1,imax
+            I = I_start + II - 1
+            j = j_start + jj - 1
 
             if (simple_OBC_pt(II,jj)) FAuI(II,jj) = GV%H_subroundoff*G%dy_Cu(I,j)
           enddo ; enddo
 
           ! NOTE: simple_OBC_pt should prevent access to segment OBC_NONE
           do k=1,nz
-            do j=j_start,j_end ; do I=I_start,I_end
-              II = I - I_start + 1
-              jj = j - j_start + 1
+            do jj=1,jmax ; do II=1,imax
+              I = I_start + II - 1
+              j = j_start + jj - 1
 
               if (simple_OBC_pt(II,jj)) then
                 l_seg = abs(OBC%segnum_u(I,j))
@@ -942,9 +951,9 @@ subroutine zonal_mass_flux(u, h_in, h_W, h_E, uh, dt, G, GV, US, CS, OBC, por_fa
             enddo ; enddo
           enddo
 
-          do j=j_start,j_end ; do I=I_start,I_end
-            II = I - I_start + 1
-            jj = j - j_start + 1
+          do jj=1,jmax ; do II=1,imax
+            I = I_start + II - 1
+            j = j_start + jj - 1
 
             if (simple_OBC_pt(II,jj)) then
               BT_cont%FA_u_W0(I,j) = FAuI(II,jj) ; BT_cont%FA_u_E0(I,j) = FAuI(II,jj)
@@ -956,8 +965,10 @@ subroutine zonal_mass_flux(u, h_in, h_W, h_E, uh, dt, G, GV, US, CS, OBC, por_fa
       endif ! set_BT_cont
     endif ! present(uhbt) or set_BT_cont
 
-    do k=1,nz ; do j=j_start,j_end ; do I=I_start,I_end
-      uh(I,j,k) = uh_b(I-I_start+1,j-j_start+1,k)
+    do k=1,nz ; do jj=1,jmax ; do II=1,imax
+      I = I_start + II - 1
+      j = j_start + jj - 1
+      uh(I,j,k) = uh_b(II,jj,k)
     enddo ; enddo ; enddo
   enddo ; enddo ! ij block loop
 
@@ -1294,16 +1305,20 @@ subroutine zonal_flux_thickness(u, h, h_W, h_E, h_u, dt, G, GV, US, LB, vol_CFL,
  !    h_marg = (2.0 * h_W(i+1,j,k) * h_E(i,j,k)) / &
  !             (h_W(i+1,j,k) + h_E(i,j,k) + GV%H_subroundoff)
     endif
-
-    if (present(visc_rem_u)) then
-      ! Scale back the thickness to account for the effects of viscosity and the fractional open
-      ! thickness to give an appropriate non-normalized weight for each layer in determining the
-      ! barotropic acceleration.
-      h_u(I,j,k) = h_u(I,j,k) * (visc_rem_u(I,j,k) * por_face_areaU(I,j,k))
-    else
-      h_u(I,j,k) = h_u(I,j,k) * por_face_areaU(I,j,k)
-    endif
   enddo ; enddo ; enddo
+
+  ! Scale back the thickness to account for the effects of viscosity and the fractional open
+  ! thickness to give an appropriate non-normalized weight for each layer in determining the
+  ! barotropic acceleration.
+  if (present(visc_rem_u)) then
+    do k=1,nz ; do j=jsh,jeh ; do I=ish-1,ieh
+      h_u(I,j,k) = h_u(I,j,k) * (visc_rem_u(I,j,k) * por_face_areaU(I,j,k))
+    enddo ; enddo ; enddo
+  else
+    do k=1,nz ; do j=jsh,jeh ; do I=ish-1,ieh
+      h_u(I,j,k) = h_u(I,j,k) * por_face_areaU(I,j,k)
+    enddo ; enddo ; enddo
+  endif
 
   local_open_BC = .false.
   if (associated(OBC)) local_open_BC = OBC%open_u_BCs_exist_globally
@@ -1354,7 +1369,7 @@ subroutine zonal_flux_adjust(u, h_in, h_W, h_E, uhbt, uh_tot_0, duhdu_tot_0, &
                                                                    !! reconstruction [H ~> m or kg m-2].
   real, dimension(SZI_(G),SZJ_(G),SZK_(GV)), intent(in)    :: h_E  !< East edge thickness in the
                                                                    !! reconstruction [H ~> m or kg m-2].
-  real, dimension(niblock,njblock,SZK_(GV)),intent(in) :: visc_rem !< Both the fraction of the
+  real, dimension(niblock,njblock,SZK_(GV)), intent(in)    :: visc_rem !< Both the fraction of the
                        !! momentum originally in a layer that remains after a time-step of viscosity, and
                        !! the fraction of a time-step's worth of a barotropic acceleration that a layer
                        !! experiences after viscosity is applied [nondim].
@@ -1379,7 +1394,7 @@ subroutine zonal_flux_adjust(u, h_in, h_W, h_E, uhbt, uh_tot_0, duhdu_tot_0, &
   integer,                                   intent(in)    :: I_end   !< End of i index range [nondim].
   integer,                                   intent(in)    :: j_start !< Start of j index range [nondim].
   integer,                                   intent(in)    :: j_end   !< End of j index range [nondim].
-  logical, dimension(niblock,njblock),intent(in)    :: do_I_in     !<
+  logical, dimension(niblock,njblock), intent(in)    :: do_I_in     !<
                        !! A logical flag indicating which I values to work on.
   real, dimension(SZIB_(G), SZJ_(G), SZK_(G)), &
                                       intent(in) :: por_face_areaU !< fractional open area of U-faces [nondim]
@@ -1405,19 +1420,22 @@ subroutine zonal_flux_adjust(u, h_in, h_W, h_E, uhbt, uh_tot_0, duhdu_tot_0, &
   real :: tol_eta ! The tolerance for the current iteration [H ~> m or kg m-2].
   real :: tol_vel ! The tolerance for velocity in the current iteration [L T-1 ~> m s-1].
   integer :: i, j, k, nz, itt, II, jj
+  integer :: imax, jmax ! The i- and j-direction extents of the current block [nondim].
   logical :: domore, do_I(niblock,njblock)
   logical :: local_open_BC ! True if there are open OBC points on this PE [nondim].
   integer, parameter :: max_itts = 20
 
   nz = GV%ke
+  imax = I_end - I_start + 1
+  jmax = j_end - j_start + 1
   local_open_BC = .false.
   if (present(OBC)) then ; if (associated(OBC)) local_open_BC = OBC%open_u_BCs_exist_globally ; endif
 
   tol_vel = CS%tol_vel
 
-  do j=j_start,j_end ; do I=I_start,I_end
-    II = I - I_start + 1
-    jj = j - j_start + 1
+  do jj=1,jmax ; do II=1,imax
+    I = I_start + II - 1
+    j = j_start + jj - 1
 
     du(II,jj) = 0.0 ; do_I(II,jj) = do_I_in(II,jj)
     du_max(II,jj) = du_max_CFL(II,jj) ; du_min(II,jj) = du_min_CFL(II,jj)
@@ -1433,16 +1451,16 @@ subroutine zonal_flux_adjust(u, h_in, h_W, h_E, uhbt, uh_tot_0, duhdu_tot_0, &
       case default ; tol_eta = CS%tol_eta
     end select
 
-    do jj=1,j_end-j_start+1 ; do II=1,I_end-I_start+1
+    do jj=1,jmax ; do II=1,imax
       if (uh_err(II,jj) > 0.0) then ; du_max(II,jj) = du(II,jj)
       elseif (uh_err(II,jj) < 0.0) then ; du_min(II,jj) = du(II,jj)
       else ; do_I(II,jj) = .false. ; endif
     enddo ; enddo
 
     domore = .false.
-    do j=j_start,j_end ; do I=I_start,I_end
-      II = I - I_start + 1
-      jj = j - j_start + 1
+    do jj=1,jmax ; do II=1,imax
+      I = I_start + II - 1
+      j = j_start + jj - 1
 
       if (do_I(II,jj)) then
         if ((dt * min(G%IareaT(i,j),G%IareaT(i+1,j))*abs(uh_err(II,jj)) > tol_eta) .or. &
@@ -1475,17 +1493,17 @@ subroutine zonal_flux_adjust(u, h_in, h_W, h_E, uhbt, uh_tot_0, duhdu_tot_0, &
 
     if (.not.domore) exit
 
-    do j=j_start,j_end ; do I=I_start,I_end
-      II = I - I_start + 1
-      jj = j - j_start + 1
+    do jj=1,jmax ; do II=1,imax
+      I = I_start + II - 1
+      j = j_start + jj - 1
 
       uh_err(II,jj) = -uhbt(II,jj) ; duhdu_tot(II,jj) = 0.0
     enddo ; enddo
 
     do k=1,nz
-      do j=j_start,j_end ; do I=I_start,I_end
-        II = I - I_start + 1
-        jj = j - j_start + 1
+      do jj=1,jmax ; do II=1,imax
+        I = I_start + II - 1
+        j = j_start + jj - 1
 
         if (do_I(II,jj)) then
           u_new = u(I,j,k) + du(II,jj) * visc_rem(II,jj,k)
@@ -1509,9 +1527,9 @@ subroutine zonal_flux_adjust(u, h_in, h_W, h_E, uhbt, uh_tot_0, duhdu_tot_0, &
       enddo ; enddo
     enddo
 
-    do j=j_start,j_end ; do I=I_start,I_end
-      II = I - I_start + 1
-      jj = j - j_start + 1
+    do jj=1,jmax ; do II=1,imax
+      I = I_start + II - 1
+      j = j_start + jj - 1
 
       uh_err_best(II,jj) = min(uh_err_best(II,jj), abs(uh_err(II,jj)))
     enddo ; enddo
@@ -1553,7 +1571,7 @@ subroutine set_zonal_BT_cont(u, h_in, h_W, h_E, BT_cont, uh_tot_0, duhdu_tot_0, 
   real,                                      intent(in)    :: dt   !< Time increment [T ~> s].
   type(unit_scale_type),                     intent(in)    :: US   !< A dimensional unit scaling type
   type(continuity_PPM_CS),                   intent(in)    :: CS   !< This module's control structure.
-  real, dimension(niblock,njblock,SZK_(GV)),intent(in) :: visc_rem !< Both the fraction of the
+  real, dimension(niblock,njblock,SZK_(GV)), intent(in)    :: visc_rem !< Both the fraction of the
                        !! momentum originally in a layer that remains after a time-step of viscosity, and
                        !! the fraction of a time-step's worth of a barotropic acceleration that a layer
                        !! experiences after viscosity is applied [nondim].
@@ -1563,7 +1581,7 @@ subroutine set_zonal_BT_cont(u, h_in, h_W, h_E, BT_cont, uh_tot_0, duhdu_tot_0, 
   integer,                                   intent(in)    :: I_end   !< End of i index range [nondim].
   integer,                                   intent(in)    :: j_start !< Start of j index range [nondim].
   integer,                                   intent(in)    :: j_end   !< End of j index range [nondim].
-  logical, dimension(niblock,njblock),intent(in)    :: do_I     !< A logical flag indicating
+  logical, dimension(niblock,njblock), intent(in)    :: do_I     !< A logical flag indicating
                        !! which I values to work on.
   real, dimension(SZIB_(G), SZJ_(G), SZK_(G)), &
                                     intent(in) :: por_face_areaU !< fractional open area of U-faces [nondim]
@@ -1605,12 +1623,15 @@ subroutine set_zonal_BT_cont(u, h_in, h_W, h_E, BT_cont, uh_tot_0, duhdu_tot_0, 
                   ! flow is truly upwind [nondim]
   real :: Idt     ! The inverse of the time step [T-1 ~> s-1].
   integer :: i, j, k, nz, II, jj !< Tile loop indices [nondim].
+  integer :: imax, jmax ! The i- and j-direction extents of the current block [nondim].
 
   nz = GV%ke ; Idt = 1.0 / dt
+  imax = I_end - I_start + 1
+  jmax = j_end - j_start + 1
   min_visc_rem = 0.1 ; CFL_min = 1e-6
 
  ! Diagnose the zero-transport correction, du0.
-  do jj=1,j_end-j_start+1 ; do II=1,I_end-I_start+1
+  do jj=1,jmax ; do II=1,imax
     zeros(II,jj) = 0.0
   enddo ; enddo
   call zonal_flux_adjust(u, h_in, h_W, h_E, zeros, uh_tot_0, duhdu_tot_0, du0, &
@@ -1621,9 +1642,9 @@ subroutine set_zonal_BT_cont(u, h_in, h_W, h_E, BT_cont, uh_tot_0, duhdu_tot_0, 
   ! Determine the westerly- and easterly- fluxes.  Choose a sufficiently
   ! negative velocity correction for the easterly-flux, and a sufficiently
   ! positive correction for the westerly-flux.
-  do j=j_start,j_end ; do I=I_start,I_end
-    II = I - I_start + 1
-    jj = j - j_start + 1
+  do jj=1,jmax ; do II=1,imax
+    I = I_start + II - 1
+    j = j_start + jj - 1
 
     du_CFL(II,jj) = (CFL_min * Idt) * G%dxCu(I,j)
     duR(II,jj) = min(0.0,du0(II,jj) - du_CFL(II,jj))
@@ -1633,9 +1654,9 @@ subroutine set_zonal_BT_cont(u, h_in, h_W, h_E, BT_cont, uh_tot_0, duhdu_tot_0, 
   enddo ; enddo
 
   do k=1,nz
-    do j=j_start,j_end ; do I=I_start,I_end
-      II = I - I_start + 1
-      jj = j - j_start + 1
+    do jj=1,jmax ; do II=1,imax
+      I = I_start + II - 1
+      j = j_start + jj - 1
 
       if (do_I(II,jj)) then
         visc_rem_lim = max(visc_rem(II,jj,k), min_visc_rem*visc_rem_max(II,jj))
@@ -1650,9 +1671,9 @@ subroutine set_zonal_BT_cont(u, h_in, h_W, h_E, BT_cont, uh_tot_0, duhdu_tot_0, 
   enddo
 
   do k=1,nz
-    do j=j_start,j_end ; do I=I_start,I_end
-      II = I - I_start + 1
-      jj = j - j_start + 1
+    do jj=1,jmax ; do II=1,imax
+      I = I_start + II - 1
+      j = j_start + jj - 1
 
       if (do_I(II,jj)) then
         u_L = u(I,j,k) + duL(II,jj) * visc_rem(II,jj,k)
@@ -1689,9 +1710,9 @@ subroutine set_zonal_BT_cont(u, h_in, h_W, h_E, BT_cont, uh_tot_0, duhdu_tot_0, 
     enddo ; enddo
   enddo
 
-  do j=j_start,j_end ; do I=I_start,I_end
-    II = I - I_start + 1
-    jj = j - j_start + 1
+  do jj=1,jmax ; do II=1,imax
+    I = I_start + II - 1
+    j = j_start + jj - 1
 
     if (do_I(II,jj)) then
       FA_0 = FAmt_0(II,jj)
@@ -1830,6 +1851,7 @@ subroutine meridional_mass_flux(v, h_in, h_S, h_N, vh, dt, G, GV, US, CS, OBC, p
   logical :: simple_OBC_pt(niblock,njblock) ! Indicates points with specified transport OBCs
   type(OBC_segment_type), pointer :: segment => NULL()
   integer :: J_start, J_end, i_start, i_end, ii, JJ
+  integer :: imax, jmax ! The i- and j-direction extents of the current block [nondim].
   integer :: nteams
 
   call cpu_clock_begin(id_clock_correct)
@@ -1871,25 +1893,27 @@ subroutine meridional_mass_flux(v, h_in, h_S, h_N, vh, dt, G, GV, US, CS, OBC, p
   do J_start = jsh-1,jeh,njblock ; do i_start = ish,ieh,niblock
     J_end = min(J_start + njblock-1, jeh)
     i_end = min(i_start + niblock-1, ieh)
+    imax = i_end - i_start + 1
+    jmax = J_end - J_start + 1
 
-    do JJ=1,J_end-J_start+1 ; do ii=1,i_end-i_start+1
+    do JJ=1,jmax ; do ii=1,imax
       do_I(ii,JJ) = .true.
     enddo ; enddo
 
     ! This sets vh and dvhdv.
     do k=1,nz
       if (use_visc_rem) then
-        do J=J_start,J_end ; do i=i_start,i_end
-          ii = i - i_start + 1
-          JJ = J - J_start + 1
+        do JJ=1,jmax ; do ii=1,imax
+          i = i_start + ii - 1
+          J = J_start + JJ - 1
 
           visc_rem(ii,JJ,k) = visc_rem_v(i,J,k)
         enddo ; enddo
       endif
 
-      do J=J_start,J_end ; do i=i_start,i_end
-        ii = i - i_start + 1
-        JJ = J - J_start + 1
+      do JJ=1,jmax ; do ii=1,imax
+        i = i_start + ii - 1
+        J = J_start + JJ - 1
 
         call flux_elem(v(i,J,k), h_in(i,J,k), h_in(i,J+1,k), &
             h_S(i,J,k), h_S(i,J+1,k), h_N(i,J,k), h_N(i,J+1,k), &
@@ -1905,33 +1929,38 @@ subroutine meridional_mass_flux(v, h_in, h_S, h_N, vh, dt, G, GV, US, CS, OBC, p
       enddo ; enddo
 
       if (local_specified_BC) then
-        do J=J_start,J_end ; do i=i_start,i_end ; if (OBC%segnum_v(i,J) /= 0) then
-          l_seg = abs(OBC%segnum_v(i,J))
-          if (OBC%segment(l_seg)%specified) vh_b(i-i_start+1,J-J_start+1,k) = OBC%segment(l_seg)%normal_trans(i,J,k)
-        endif ; enddo ; enddo
+        do JJ=1,jmax ; do ii=1,imax
+          J = J_start + JJ - 1
+          i = i_start + ii - 1
+          if (OBC%segnum_v(i,J) /= 0) then
+            l_seg = abs(OBC%segnum_v(i,J))
+            if (OBC%segment(l_seg)%specified) &
+              vh_b(ii,JJ,k) = OBC%segment(l_seg)%normal_trans(i,J,k)
+          endif
+        enddo ; enddo
       endif
     enddo ! k-loop
 
     if (present(vhbt) .or. set_BT_cont) then
       if (use_visc_rem .and. CS%use_visc_rem_max) then
-        do JJ=1,J_end-J_start+1 ; do ii=1,i_end-i_start+1
+        do JJ=1,jmax ; do ii=1,imax
           visc_rem_max(ii,JJ) = 0.0
         enddo ; enddo
 
-        do k=1,nz ; do JJ=1,J_end-J_start+1 ; do ii=1,i_end-i_start+1
+        do k=1,nz ; do JJ=1,jmax ; do ii=1,imax
           visc_rem_max(ii,JJ) = max(visc_rem_max(ii,JJ), visc_rem(ii,JJ,k))
         enddo ; enddo ; enddo
       else
-        do JJ=1,J_end-J_start+1 ; do ii=1,i_end-i_start+1
+        do JJ=1,jmax ; do ii=1,imax
           visc_rem_max(ii,JJ) = 1.0
         enddo ; enddo
       endif
 
       !   Set limits on dv that will keep the CFL number between -1 and 1.
       ! This should be adequate to keep the root bracketed in all cases.
-      do J=J_start,J_end ; do i=i_start,i_end
-        ii = i - i_start + 1
-        JJ = J - J_start + 1
+      do JJ=1,jmax ; do ii=1,imax
+        i = i_start + ii - 1
+        J = J_start + JJ - 1
 
         I_vrm = 0.0
         if (visc_rem_max(ii,JJ) > 0.0) I_vrm = 1.0 / visc_rem_max(ii,JJ)
@@ -1945,9 +1974,9 @@ subroutine meridional_mass_flux(v, h_in, h_S, h_N, vh, dt, G, GV, US, CS, OBC, p
       enddo ; enddo
 
       do k=1,nz
-        do J=J_start,J_end ; do i=i_start,i_end
-          ii = i - i_start + 1
-          JJ = J - J_start + 1
+        do JJ=1,jmax ; do ii=1,imax
+          i = i_start + ii - 1
+          J = J_start + JJ - 1
 
           dvhdv_tot_0(ii,JJ) = dvhdv_tot_0(ii,JJ) + dvhdv(ii,JJ,k)
           vh_tot_0(ii,JJ) = vh_tot_0(ii,JJ) + vh_b(ii,JJ,k)
@@ -1957,9 +1986,9 @@ subroutine meridional_mass_flux(v, h_in, h_S, h_N, vh, dt, G, GV, US, CS, OBC, p
       if (use_visc_rem) then
         if (CS%aggress_adjust) then
           do k=1,nz
-            do J=J_start,J_end ; do i=i_start,i_end
-              ii = i - i_start + 1
-              JJ = J - J_start + 1
+            do JJ=1,jmax ; do ii=1,imax
+              i = i_start + ii - 1
+              J = J_start + JJ - 1
 
               if (CS%vol_CFL) then
                 dy_S = ratio_max(G%areaT(i,j), G%dx_Cv(i,J), 1000.0*G%dyT(i,j))
@@ -1976,9 +2005,9 @@ subroutine meridional_mass_flux(v, h_in, h_S, h_N, vh, dt, G, GV, US, CS, OBC, p
           enddo ; enddo
         else
           do k=1,nz
-            do J=J_start,J_end ; do i=i_start,i_end
-              ii = i - i_start + 1
-              JJ = J - J_start + 1
+            do JJ=1,jmax ; do ii=1,imax
+              i = i_start + ii - 1
+              J = J_start + JJ - 1
 
               if (CS%vol_CFL) then
                 dy_S = ratio_max(G%areaT(i,j), G%dx_Cv(i,J), 1000.0*G%dyT(i,j))
@@ -1996,9 +2025,9 @@ subroutine meridional_mass_flux(v, h_in, h_S, h_N, vh, dt, G, GV, US, CS, OBC, p
       else
         if (CS%aggress_adjust) then
           do k=1,nz
-            do J=J_start,J_end ; do i=i_start,i_end
-              ii = i - i_start + 1
-              JJ = J - J_start + 1
+            do JJ=1,jmax ; do ii=1,imax
+              i = i_start + ii - 1
+              J = J_start + JJ - 1
 
               if (CS%vol_CFL) then
                 dy_S = ratio_max(G%areaT(i,j), G%dx_Cv(i,J), 1000.0*G%dyT(i,j))
@@ -2012,9 +2041,9 @@ subroutine meridional_mass_flux(v, h_in, h_S, h_N, vh, dt, G, GV, US, CS, OBC, p
           enddo
         else
           do k=1,nz
-            do J=J_start,J_end ; do i=i_start,i_end
-              ii = i - i_start + 1
-              JJ = J - J_start + 1
+            do JJ=1,jmax ; do ii=1,imax
+              i = i_start + ii - 1
+              J = J_start + JJ - 1
 
               if (CS%vol_CFL) then
                 dy_S = ratio_max(G%areaT(i,j), G%dx_Cv(i,J), 1000.0*G%dyT(i,j))
@@ -2026,7 +2055,7 @@ subroutine meridional_mass_flux(v, h_in, h_S, h_N, vh, dt, G, GV, US, CS, OBC, p
           enddo
         endif
       endif
-      do JJ=1,J_end-J_start+1 ; do ii=1,i_end-i_start+1
+      do JJ=1,jmax ; do ii=1,imax
         dv_max_CFL(ii,JJ) = max(dv_max_CFL(ii,JJ),0.0)
         dv_min_CFL(ii,JJ) = min(dv_min_CFL(ii,JJ),0.0)
       enddo ; enddo
@@ -2034,9 +2063,9 @@ subroutine meridional_mass_flux(v, h_in, h_S, h_N, vh, dt, G, GV, US, CS, OBC, p
       any_simple_OBC = .false.
       if (present(vhbt) .or. set_BT_cont) then
         if (local_specified_BC .or. local_Flather_OBC) then
-          do J=J_start,J_end ; do i=i_start,i_end
-            ii = i - i_start + 1
-            JJ = J - J_start + 1
+          do JJ=1,jmax ; do ii=1,imax
+            i = i_start + ii - 1
+            J = J_start + JJ - 1
 
             l_seg = abs(OBC%segnum_v(i,J))
 
@@ -2047,16 +2076,16 @@ subroutine meridional_mass_flux(v, h_in, h_S, h_N, vh, dt, G, GV, US, CS, OBC, p
             any_simple_OBC = any_simple_OBC .or. simple_OBC_pt(ii,JJ)
           enddo ; enddo
         else
-          do JJ=1,J_end-J_start+1 ; do ii=1,i_end-i_start+1
+          do JJ=1,jmax ; do ii=1,imax
             do_I(ii,JJ) = .true.
           enddo ; enddo
         endif
       endif
 
       if (present(vhbt)) then
-        do J=J_start,J_end ; do i=i_start,i_end
-          ii = i - i_start + 1
-          JJ = J - J_start + 1
+        do JJ=1,jmax ; do ii=1,imax
+          i = i_start + ii - 1
+          J = J_start + JJ - 1
 
           vhbt_b(ii,JJ) = vhbt(i,J)
         enddo ; enddo
@@ -2067,9 +2096,9 @@ subroutine meridional_mass_flux(v, h_in, h_S, h_N, vh, dt, G, GV, US, CS, OBC, p
                                          niblock, njblock, vh_b, OBC)
 
         if (present(v_cor)) then
-          do k=1,nz ; do J=J_start,J_end ; do i=i_start,i_end
-            ii = i - i_start + 1
-            JJ = J - J_start + 1
+          do k=1,nz ; do JJ=1,jmax ; do ii=1,imax
+            i = i_start + ii - 1
+            J = J_start + JJ - 1
 
             v_cor(i,J,k) = v(i,J,k) + dv(ii,JJ) * visc_rem(ii,JJ,k)
             if (any_simple_OBC) then ; if (simple_OBC_pt(ii,JJ)) then
@@ -2079,9 +2108,9 @@ subroutine meridional_mass_flux(v, h_in, h_S, h_N, vh, dt, G, GV, US, CS, OBC, p
         endif ! v-corrected
 
         if (present(dv_cor)) then
-          do J=J_start,J_end ; do i=i_start,i_end
-            ii = i - i_start + 1
-            JJ = J - J_start + 1
+          do JJ=1,jmax ; do ii=1,imax
+            i = i_start + ii - 1
+            J = J_start + JJ - 1
 
             dv_cor(i,J) = dv(ii,JJ)
           enddo ; enddo
@@ -2094,18 +2123,18 @@ subroutine meridional_mass_flux(v, h_in, h_S, h_N, vh, dt, G, GV, US, CS, OBC, p
                                visc_rem_max, i_start, i_end, J_start, J_end, do_I, &
                                por_face_areaV, niblock, njblock)
         if (any_simple_OBC) then
-          do J=J_start,J_end ; do i=i_start,i_end
-            ii = i - i_start + 1
-            JJ = J - J_start + 1
+          do JJ=1,jmax ; do ii=1,imax
+            i = i_start + ii - 1
+            J = J_start + JJ - 1
 
             if (simple_OBC_pt(ii,JJ)) FAvi(ii,JJ) = GV%H_subroundoff*G%dx_Cv(i,J)
           enddo ; enddo
 
           ! NOTE: simple_OBC_pt should prevent access to segment OBC_NONE
           do k=1,nz
-            do J=J_start,J_end ; do i=i_start,i_end
-              ii = i - i_start + 1
-              JJ = J - J_start + 1
+            do JJ=1,jmax ; do ii=1,imax
+              i = i_start + ii - 1
+              J = J_start + JJ - 1
 
               if (simple_OBC_pt(ii,JJ)) then
                 l_seg = abs(OBC%segnum_v(i,J))
@@ -2117,9 +2146,9 @@ subroutine meridional_mass_flux(v, h_in, h_S, h_N, vh, dt, G, GV, US, CS, OBC, p
             enddo ; enddo
           enddo
 
-          do J=J_start,J_end ; do i=i_start,i_end
-            ii = i - i_start + 1
-            JJ = J - J_start + 1
+          do JJ=1,jmax ; do ii=1,imax
+            i = i_start + ii - 1
+            J = J_start + JJ - 1
 
             if (simple_OBC_pt(ii,JJ)) then
               BT_cont%FA_v_S0(i,J) = FAvi(ii,JJ) ; BT_cont%FA_v_N0(i,J) = FAvi(ii,JJ)
@@ -2132,8 +2161,8 @@ subroutine meridional_mass_flux(v, h_in, h_S, h_N, vh, dt, G, GV, US, CS, OBC, p
 
     endif ! present(vhbt) or set_BT_cont
 
-    do k=1,nz ; do J=J_start,J_end ; do i=i_start,i_end
-      JJ=J-J_start+1 ; ii=i-i_start+1
+    do k=1,nz ; do JJ=1,jmax ; do ii=1,imax
+      J=J_start+JJ-1 ; i=i_start+ii-1
       vh(i,J,k) = vh_b(ii,JJ,k)
     enddo ; enddo ; enddo
 
@@ -2332,16 +2361,20 @@ subroutine meridional_flux_thickness(v, h, h_S, h_N, h_v, dt, G, GV, US, LB, vol
  !    h_marg = (2.0 * h_S(i,j+1,k) * h_N(i,j,k)) / &
  !             (h_S(i,j+1,k) + h_N(i,j,k) + GV%H_subroundoff)
     endif
-
-    if (present(visc_rem_v)) then
-      ! Scale back the thickness to account for the effects of viscosity and the fractional open
-      ! thickness to give an appropriate non-normalized weight for each layer in determining the
-      ! barotropic acceleration.
-      h_v(i,J,k) = h_v(i,J,k) * (visc_rem_v(i,J,k) * por_face_areaV(i,J,k))
-    else
-      h_v(i,J,k) = h_v(i,J,k) * por_face_areaV(i,J,k)
-    endif
   enddo ; enddo ; enddo
+
+  ! Scale back the thickness to account for the effects of viscosity and the fractional open
+  ! thickness to give an appropriate non-normalized weight for each layer in determining the
+  ! barotropic acceleration.
+  if (present(visc_rem_v)) then
+    do k=1,nz ; do J=jsh-1,jeh ; do i=ish,ieh
+      h_v(i,J,k) = h_v(i,J,k) * (visc_rem_v(i,J,k) * por_face_areaV(i,J,k))
+    enddo ; enddo ; enddo
+  else
+    do k=1,nz ; do J=jsh-1,jeh ; do i=ish,ieh
+      h_v(i,J,k) = h_v(i,J,k) * por_face_areaV(i,J,k)
+    enddo ; enddo ; enddo
+  endif
 
   local_open_BC = .false.
   if (associated(OBC)) local_open_BC = OBC%open_v_BCs_exist_globally
@@ -2451,6 +2484,7 @@ subroutine meridional_flux_adjust(v, h_in, h_S, h_N, vhbt, vh_tot_0, dvhdv_tot_0
   real :: tol_eta ! The tolerance for the current iteration [H ~> m or kg m-2].
   real :: tol_vel ! The tolerance for velocity in the current iteration [L T-1 ~> m s-1].
   integer :: i, j, k, nz, itt, ii, JJ
+  integer :: imax, jmax ! The i- and j-direction extents of the current block [nondim].
   logical :: domore, do_I(niblock,njblock), local_open_BC
   integer, parameter :: max_itts = 20
 
@@ -2460,11 +2494,13 @@ subroutine meridional_flux_adjust(v, h_in, h_S, h_N, vhbt, vh_tot_0, dvhdv_tot_0
   endif ; endif
 
   nz = GV%ke
+  imax = i_end - i_start + 1
+  jmax = J_end - J_start + 1
   tol_vel = CS%tol_vel
 
-  do J=J_start,J_end ; do i=i_start,i_end
-    ii = i - i_start + 1
-    JJ = J - J_start + 1
+  do JJ=1,jmax ; do ii=1,imax
+    i = i_start + ii - 1
+    J = J_start + JJ - 1
 
     dv(ii,JJ) = 0.0 ; do_I(ii,JJ) = do_I_in(ii,JJ)
     dv_max(ii,JJ) = dv_max_CFL(ii,JJ) ; dv_min(ii,JJ) = dv_min_CFL(ii,JJ)
@@ -2480,15 +2516,15 @@ subroutine meridional_flux_adjust(v, h_in, h_S, h_N, vhbt, vh_tot_0, dvhdv_tot_0
       case default ; tol_eta = CS%tol_eta
     end select
 
-    do JJ=1,J_end-J_start+1 ; do ii=1,i_end-i_start+1
+    do JJ=1,jmax ; do ii=1,imax
       if (vh_err(ii,JJ) > 0.0) then ; dv_max(ii,JJ) = dv(ii,JJ)
       elseif (vh_err(ii,JJ) < 0.0) then ; dv_min(ii,JJ) = dv(ii,JJ)
       else ; do_I(ii,JJ) = .false. ; endif
     enddo ; enddo
 
     domore = .false.
-    do J=J_start,J_end ; do i=i_start,i_end
-      ii=i-i_start+1 ; JJ=J-J_start+1 ; if (do_I(ii,JJ)) then
+    do JJ=1,jmax ; do ii=1,imax
+      i=i_start+ii-1 ; J=J_start+JJ-1 ; if (do_I(ii,JJ)) then
       if ((dt * min(G%IareaT(i,j),G%IareaT(i,j+1))*abs(vh_err(ii,JJ)) > tol_eta) .or. &
           (CS%better_iter .and. ((abs(vh_err(ii,JJ)) > tol_vel * dvhdv_tot(ii,JJ)) .or. &
                                  (abs(vh_err(ii,JJ)) > vh_err_best(ii,JJ))) )) then
@@ -2518,16 +2554,16 @@ subroutine meridional_flux_adjust(v, h_in, h_S, h_N, vhbt, vh_tot_0, dvhdv_tot_0
 
     if (.not.domore) exit
 
-    do J=J_start,J_end ; do i=i_start,i_end
-      ii = i - i_start + 1
-      JJ = J - J_start + 1
+    do JJ=1,jmax ; do ii=1,imax
+      i = i_start + ii - 1
+      J = J_start + JJ - 1
 
       vh_err(ii,JJ) = -vhbt(ii,JJ) ; dvhdv_tot(ii,JJ) = 0.0
     enddo ; enddo
     do k=1,nz
-      do J=J_start,J_end ; do i=i_start,i_end
-        ii = i - i_start + 1
-        JJ = J - J_start + 1
+      do JJ=1,jmax ; do ii=1,imax
+        i = i_start + ii - 1
+        J = J_start + JJ - 1
 
         if (do_I(ii,JJ)) then
           v_new = v(i,J,k) + dv(ii,JJ) * visc_rem(ii,JJ,k)
@@ -2550,9 +2586,9 @@ subroutine meridional_flux_adjust(v, h_in, h_S, h_N, vhbt, vh_tot_0, dvhdv_tot_0
       enddo ; enddo
     enddo
 
-    do J=J_start,J_end ; do i=i_start,i_end
-      ii = i - i_start + 1
-      JJ = J - J_start + 1
+    do JJ=1,jmax ; do ii=1,imax
+      i = i_start + ii - 1
+      J = J_start + JJ - 1
 
       vh_err_best(ii,JJ) = min(vh_err_best(ii,JJ), abs(vh_err(ii,JJ)))
     enddo ; enddo
@@ -2648,12 +2684,15 @@ subroutine set_merid_BT_cont(v, h_in, h_S, h_N, BT_cont, vh_tot_0, dvhdv_tot_0, 
                   ! flow is truly upwind [nondim]
   real :: Idt     ! The inverse of the time step [T-1 ~> s-1].
   integer :: i, j, k, nz, ii, JJ
+  integer :: imax, jmax ! The i- and j-direction extents of the current block [nondim].
 
   nz = GV%ke ; Idt = 1.0 / dt
+  imax = i_end - i_start + 1
+  jmax = J_end - J_start + 1
   min_visc_rem = 0.1 ; CFL_min = 1e-6
 
  ! Diagnose the zero-transport correction, dv0.
-  do JJ=1,J_end-J_start+1 ; do ii=1,i_end-i_start+1
+  do JJ=1,jmax ; do ii=1,imax
     zeros(ii,JJ) = 0.0
   enddo ; enddo
 
@@ -2665,9 +2704,9 @@ subroutine set_merid_BT_cont(v, h_in, h_S, h_N, BT_cont, vh_tot_0, dvhdv_tot_0, 
   !   Determine the southerly- and northerly- fluxes.  Choose a sufficiently
   ! negative velocity correction for the northerly-flux, and a sufficiently
   ! positive correction for the southerly-flux.
-  do J=J_start,J_end ; do i=i_start,i_end
-    ii = i - i_start + 1
-    JJ = J - J_start + 1
+  do JJ=1,jmax ; do ii=1,imax
+    i = i_start + ii - 1
+    J = J_start + JJ - 1
 
     dv_CFL(ii,JJ) = (CFL_min * Idt) * G%dyCv(i,J)
     dvR(ii,JJ) = min(0.0,dv0(ii,JJ) - dv_CFL(ii,JJ))
@@ -2677,9 +2716,9 @@ subroutine set_merid_BT_cont(v, h_in, h_S, h_N, BT_cont, vh_tot_0, dvhdv_tot_0, 
   enddo ; enddo
 
   do k=1,nz
-    do J=J_start,J_end ; do i=i_start,i_end
-      ii = i - i_start + 1
-      JJ = J - J_start + 1
+    do JJ=1,jmax ; do ii=1,imax
+      i = i_start + ii - 1
+      J = J_start + JJ - 1
 
       if (do_I(ii,JJ)) then
         visc_rem_lim = max(visc_rem(ii,JJ,k), min_visc_rem*visc_rem_max(ii,JJ))
@@ -2694,9 +2733,9 @@ subroutine set_merid_BT_cont(v, h_in, h_S, h_N, BT_cont, vh_tot_0, dvhdv_tot_0, 
   enddo
 
   do k=1,nz
-    do J=J_start,J_end ; do i=i_start,i_end
-      ii = i - i_start + 1
-      JJ = J - J_start + 1
+    do JJ=1,jmax ; do ii=1,imax
+      i = i_start + ii - 1
+      J = J_start + JJ - 1
 
       if (do_I(ii,JJ)) then
         v_L = v(i,J,k) + dvL(ii,JJ) * visc_rem(ii,JJ,k)
@@ -2731,9 +2770,9 @@ subroutine set_merid_BT_cont(v, h_in, h_S, h_N, BT_cont, vh_tot_0, dvhdv_tot_0, 
     enddo ; enddo
   enddo
 
-  do J=J_start,J_end ; do i=i_start,i_end
-    ii = i - i_start + 1
-    JJ = J - J_start + 1
+  do JJ=1,jmax ; do ii=1,imax
+    i = i_start + ii - 1
+    J = J_start + JJ - 1
 
     if (do_I(ii,JJ)) then
       FA_0 = FAmt_0(ii,JJ)
