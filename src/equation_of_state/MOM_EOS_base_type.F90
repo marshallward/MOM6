@@ -46,6 +46,8 @@ contains
   procedure :: calculate_density_array => a_calculate_density_array
   !> Calculates the in-situ density or density anomaly for 2d array inputs [m3 kg-1]
   procedure :: calculate_density_array_2d => a_calculate_density_array_2d
+  !> Calculates the in-situ density or density anomaly for 3d array inputs [m3 kg-1]
+  procedure :: calculate_density_array_3d => a_calculate_density_array_3d
   !> Calculates the in-situ specific volume or specific volume anomaly for scalar inputs [m3 kg-1]
   procedure :: calculate_spec_vol_scalar => a_calculate_spec_vol_scalar
   !> Calculates the in-situ specific volume or specific volume anomaly for array inputs [m3 kg-1]
@@ -56,10 +58,14 @@ contains
   procedure :: calculate_density_derivs_array => a_calculate_density_derivs_array
   !> Calculates the derivatives of density for array inputs
   procedure :: calculate_density_derivs_2d => a_calculate_density_derivs_2d
+  !> Calculates the derivatives of density for 3d array inputs
+  procedure :: calculate_density_derivs_3d => a_calculate_density_derivs_3d
   !> Calculates the second derivatives of density for scalar inputs
   procedure :: calculate_density_second_derivs_scalar => a_calculate_density_second_derivs_scalar
   !> Calculates the second derivatives of density for array inputs
   procedure :: calculate_density_second_derivs_array => a_calculate_density_second_derivs_array
+  !> Calculates the second derivatives of density for 2d array inputs
+  procedure :: calculate_density_second_derivs_2d => a_calculate_density_second_derivs_2d
   !> Calculates the derivatives of specific volume for array inputs
   procedure :: calculate_specvol_derivs_array => a_calculate_specvol_derivs_array
   !> Calculates the compressibility for array inputs
@@ -288,6 +294,37 @@ contains
     endif
   end subroutine a_calculate_density_array_2d
 
+  !> Calculate the in-situ density for 3D array inputs and outputs.
+  subroutine a_calculate_density_array_3d(this, T, S, pressure, rho, dom, rho_ref)
+    class(EOS_base), intent(in) :: this     !< This EOS
+    real, intent(in) :: T(:,:,:)
+      !< Potential temperature relative to the surface [degC]
+    real, intent(in) :: S(:,:,:)
+      !< Salinity [PSU]
+    real, intent(in) :: pressure(:,:,:)
+      !< Pressure [Pa]
+    real, intent(out) :: rho(:,:,:)
+      !< In situ density [kg m-3]
+    integer, intent(in) :: dom(3,2)
+      !< Index bounds of domain.  First index is rank, second is bounds
+    real, optional, intent(in) :: rho_ref
+      !< A reference density [kg m-3]
+
+    integer :: is, ie, js, je, ks, ke
+
+    is = dom(1,1) ; ie = dom(1,2)
+    js = dom(2,1) ; je = dom(2,2)
+    ks = dom(3,1) ; ke = dom(3,2)
+
+    if (present(rho_ref)) then
+      rho(is:ie, js:je, ks:ke) = this%density_anomaly_elem(T(is:ie, js:je, ks:ke), &
+          S(is:ie, js:je, ks:ke), pressure(is:ie, js:je, ks:ke), rho_ref)
+    else
+      rho(is:ie, js:je, ks:ke) = this%density_elem(T(is:ie, js:je, ks:ke), &
+          S(is:ie, js:je, ks:ke), pressure(is:ie, js:je, ks:ke))
+    endif
+  end subroutine a_calculate_density_array_3d
+
   !> In situ specific volume [m3 kg-1]
   real function a_spec_vol_fn(this, T, S, pressure, spv_ref)
     class(EOS_base), intent(in) :: this     !< This EOS
@@ -414,6 +451,35 @@ contains
         pressure(is:ie, js:je), drho_dt(is:ie, js:je), drho_ds(is:ie, js:je))
   end subroutine a_calculate_density_derivs_2d
 
+  !> Calculate the derivatives of density with respect to temperature and salinity
+  !! for 3d array inputs
+  subroutine a_calculate_density_derivs_3d(this, T, S, pressure, drho_dT, drho_dS, dom)
+    class(EOS_base), intent(in) :: this
+      !< This EOS
+    real, intent(in) :: T(:,:,:)
+      !< Potential temperature relative to the surface [degC]
+    real, intent(in)  :: S(:,:,:)
+      !< Salinity [PSU]
+    real, intent(in)  :: pressure(:,:,:)
+      !< Pressure [Pa]
+    real, intent(out) :: drho_dT(:,:,:)
+      !< The partial derivative of density with potential temperature
+      !! [kg m-3 degC-1]
+    real, intent(out) :: drho_dS(:,:,:)
+      !< The partial derivative of density with salinity, in [kg m-3 PSU-1]
+    integer, intent(in) :: dom(3,2)
+      !< Index bounds of domain.  First index is rank, second is bounds
+
+    integer :: is, ie, js, je, ks, ke
+
+    is = dom(1,1) ; ie = dom(1,2)
+    js = dom(2,1) ; je = dom(2,2)
+    ks = dom(3,1) ; ke = dom(3,2)
+
+    call this%calculate_density_derivs_elem(T(is:ie, js:je, ks:ke), S(is:ie, js:je, ks:ke), &
+        pressure(is:ie, js:je, ks:ke), drho_dt(is:ie, js:je, ks:ke), drho_ds(is:ie, js:je, ks:ke))
+  end subroutine a_calculate_density_derivs_3d
+
   !> Calculate the second derivatives of density with respect to temperature, salinity and pressure
   !! for scalar inputs
   subroutine a_calculate_density_second_derivs_scalar(this, T, S, pressure, &
@@ -470,6 +536,32 @@ contains
                               drho_ds_dp(js:je), drho_dt_dp(js:je))
 
   end subroutine a_calculate_density_second_derivs_array
+
+  !> Default implementation: calculate second derivatives of density for 2d array inputs.
+  !! Delegates to the elemental calculate_density_second_derivs_elem via array sections.
+  subroutine a_calculate_density_second_derivs_2d(this, T, S, pressure, &
+                     drho_ds_ds, drho_ds_dt, drho_dt_dt, drho_ds_dp, drho_dt_dp, dom)
+    class(EOS_base), intent(in)    :: this       !< This EOS
+    real,            intent(in)    :: T(:,:)     !< Potential temperature [degC]
+    real,            intent(in)    :: S(:,:)     !< Salinity [PSU]
+    real,            intent(in)    :: pressure(:,:) !< Pressure [Pa]
+    real,            intent(inout) :: drho_ds_ds(:,:) !< Partial derivative of beta w.r.t. S [kg m-3 PSU-2]
+    real,            intent(inout) :: drho_ds_dt(:,:) !< Partial derivative of beta w.r.t. T [kg m-3 PSU-1 degC-1]
+    real,            intent(inout) :: drho_dt_dt(:,:) !< Partial derivative of alpha w.r.t. T [kg m-3 degC-2]
+    real,            intent(inout) :: drho_ds_dp(:,:) !< Partial derivative of beta w.r.t. p [kg m-3 PSU-1 Pa-1]
+    real,            intent(inout) :: drho_dt_dp(:,:) !< Partial derivative of alpha w.r.t. p [kg m-3 degC-1 Pa-1]
+    integer,         intent(in)    :: dom(2,2)   !< Index bounds; first index is rank, second is bounds
+
+    integer :: is, ie, js, je
+
+    is = dom(1,1) ; ie = dom(1,2)
+    js = dom(2,1) ; je = dom(2,2)
+
+    call this%calculate_density_second_derivs_elem( &
+        T(is:ie, js:je), S(is:ie, js:je), pressure(is:ie, js:je), &
+        drho_ds_ds(is:ie, js:je), drho_ds_dt(is:ie, js:je), drho_dt_dt(is:ie, js:je), &
+        drho_ds_dp(is:ie, js:je), drho_dt_dp(is:ie, js:je))
+  end subroutine a_calculate_density_second_derivs_2d
 
   !> Calculate the partial derivatives of specific volume with temperature and salinity
   !! for array inputs
