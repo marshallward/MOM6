@@ -236,6 +236,12 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
     enddo
   enddo
 
+  ! Initialise GxSpV tile to the Boussinesq default G/rho0; overwritten below if
+  ! non-Boussinesq SpV_avg is available.
+  do concurrent( kk=1:nkblock, jj=1:njblock+1, ii=1:niblock+1 )
+    GxSpV_uvh(ii,jj,kk) = G_Rho0
+  enddo
+
   ! ============================================================
   ! Zonal tiling loop: compute zonal isopycnal slopes
   ! ============================================================
@@ -243,10 +249,9 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
   ! Within each tile:
   !   1. Fill tile-sized T_uvh/S_uvh/pres_uvh at u-points on device (do concurrent).
   !   2. Apply OBC overrides (CPU, host-side OBC derived types).
-  !   3. Pre-fill GxSpV_uvh at u-points.
-  !   4. Call calculate_density_derivs over tile.
-  !   5. If use_stanley: refill at h-points, call calculate_density_second_derivs.
-  !   6. Compute slopes in do concurrent using tile-local indices.
+  !   3. Call calculate_density_derivs over tile.
+  !   4. If use_stanley: refill at h-points, call calculate_density_second_derivs.
+  !   5. Compute slopes in do concurrent using tile-local indices.
   do jstart=js, je, njblock ; do istart=is-1, ie, niblock ; do kstart=2,nz, nkblock
     iend = min(istart + niblock - 1, ie)
     jend = min(jstart + njblock - 1, je)
@@ -254,12 +259,6 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
     EOSdom_tile(1,1) = 1 ; EOSdom_tile(1,2) = iend - istart + 1
     EOSdom_tile(2,1) = 1 ; EOSdom_tile(2,2) = jend - jstart + 1
     EOSdom_tile(3,1) = 1 ; EOSdom_tile(3,2) = kend - kstart + 1
-
-    ! Initialise GxSpV tile to the Boussinesq default G/rho0; overwritten below if
-    ! non-Boussinesq SpV_avg is available.
-    do concurrent( jj=1:jend-jstart+1, kk=1:kend-kstart+1, ii=1:iend-istart+1 )
-      GxSpV_uvh(ii,jj,kk) = G_Rho0
-    enddo
 
     if (use_EOS) then
       ! Fill tile T_uvh/S_uvh/pres_uvh at u-points (u-face = average of i and i+1)
@@ -321,13 +320,14 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
       ! adjacent layers. Individual OBC faces may override this inside the slope loop.
       if (present_N2_u .or. present(dzSxN)) then
         if (allocated(tv%SpV_avg)) then
-          do jj=1, jend-jstart+1 ; do kk=1,kend-kstart+1 ; do ii=1, iend-istart+1
+          do concurrent( kk=1:kend-kstart+1, jj=1:jend-jstart+1, ii=1:iend-istart+1 ) &
+              DO_LOCALITY(local(i,j,k))
             i = istart + ii - 1
             j = jstart + jj - 1
             k = kstart + kk - 1
             GxSpV_uvh(ii,jj,kk) = GV%g_Earth * 0.25 * ((tv%SpV_avg(i,j,K) + tv%SpV_avg(i+1,j,K)) + &
                                                         (tv%SpV_avg(i,j,K-1) + tv%SpV_avg(i+1,j,K-1)))
-          enddo ; enddo ; enddo
+          enddo
         endif
       endif
 
@@ -463,12 +463,6 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
     EOSdom_tile(2,1) = 1 ; EOSdom_tile(2,2) = jend - jstart + 1
     EOSdom_tile(3,1) = 1 ; EOSdom_tile(3,2) = kend - kstart + 1
 
-    ! Re-initialise GxSpV tile: the zonal pass may have set entries here, so reset to
-    ! G_Rho0 before the meridional fills.
-    do concurrent( jj=1:jend-jstart+1, kk=1:kend-kstart+1, ii=1:iend-istart+1 )
-      GxSpV_uvh(ii,jj,kk) = G_Rho0
-    enddo
-
     if (use_EOS) then
       ! Fill tile T_uvh/S_uvh/pres_uvh at v-points (v-face = average of j and j+1)
       do concurrent(jj=1:jend-jstart+1, kk=1:kend-kstart+1, ii=1:iend-istart+1)
@@ -524,13 +518,14 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
       ! Pre-fill GxSpV at v-points.
       if (present_N2_v .or. present(dzSyN)) then
         if (allocated(tv%SpV_avg)) then
-          do jj=1, jend-jstart+1 ; do kk=1, kend-kstart+1 ; do ii=1, iend-istart+1
+          do concurrent( kk=1:kend-kstart+1, jj=1:jend-jstart+1, ii=1:iend-istart+1 ) &
+             DO_LOCALITY(local(i,j,k))
             i = istart + ii - 1
             j = jstart + jj - 1
             k = kstart + kk - 1
             GxSpV_uvh(ii,jj,kk) = GV%g_Earth * 0.25 * ((tv%SpV_avg(i,j,K) + tv%SpV_avg(i,j+1,K)) + &
                                                         (tv%SpV_avg(i,j,K-1) + tv%SpV_avg(i,j+1,K-1)))
-          enddo ; enddo ; enddo
+          enddo
         endif
       endif
 
