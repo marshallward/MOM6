@@ -123,7 +123,7 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
   logical :: local_open_u_BC, local_open_v_BC ! True if u- or v-face OBCs exist anywhere in the global domain.
   logical :: OBC_friendly  ! If true, open boundary conditions are in use and only interior data should
                         ! be used to calculate N2 at OBC faces.
-  integer, dimension(2,2) :: EOSdom_tile    !< 1-based EOS domain for the current tile [nondim].
+  integer, dimension(3,2) :: EOSdom_tile    !< 1-based EOS domain for the current tile [nondim].
   integer, dimension(2)   :: EOSdom_tile_h1 !< 1-based EOS domain for h-point fills (one extra column) [nondim].
   integer :: is, ie, js, je, nz, IsdB
   integer :: i, j, k
@@ -253,6 +253,7 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
     kend = min(kstart + nkblock - 1, nz)
     EOSdom_tile(1,1) = 1 ; EOSdom_tile(1,2) = iend - istart + 1
     EOSdom_tile(2,1) = 1 ; EOSdom_tile(2,2) = jend - jstart + 1
+    EOSdom_tile(3,1) = 1 ; EOSdom_tile(3,2) = kend - kstart + 1
 
     ! Initialise GxSpV tile to the Boussinesq default G/rho0; overwritten below if
     ! non-Boussinesq SpV_avg is available.
@@ -331,11 +332,9 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
       endif
 
       ! Density derivatives at u-points. EOSdom_tile is 1-based so no IsdB offset is needed.
-      do kk=1,kend-kstart+1
-        call calculate_density_derivs(T_uvh(:,:,kk), S_uvh(:,:,kk), pres_uvh(:,:,kk), &
-                                      drho_dT(:,:,kk), drho_dS(:,:,kk), &
-                                      tv%eqn_of_state, EOSdom_tile)
-      enddo
+      call calculate_density_derivs(T_uvh, S_uvh, pres_uvh, &
+                                    drho_dT, drho_dS, &
+                                    tv%eqn_of_state, EOSdom_tile)
 
       if (use_stanley) then
         ! Refill T_uvh/S_uvh/pres_uvh at h-points for the Stanley second-derivative calculation.
@@ -462,6 +461,7 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
     kend = min(kstart + nkblock - 1, nz)
     EOSdom_tile(1,1) = 1 ; EOSdom_tile(1,2) = iend - istart + 1
     EOSdom_tile(2,1) = 1 ; EOSdom_tile(2,2) = jend - jstart + 1
+    EOSdom_tile(3,1) = 1 ; EOSdom_tile(3,2) = kend - kstart + 1
 
     ! Re-initialise GxSpV tile: the zonal pass may have set entries here, so reset to
     ! G_Rho0 before the meridional fills.
@@ -535,11 +535,9 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
       endif
 
       ! Density derivatives at v-points.
-      do kk=1,kend-kstart+1
-        call calculate_density_derivs(T_uvh(:,:,kk), S_uvh(:,:,kk), pres_uvh(:,:,kk), &
-                                      drho_dT(:,:,kk), drho_dS(:,:,kk), &
-                                      tv%eqn_of_state, EOSdom_tile)
-      enddo
+      call calculate_density_derivs(T_uvh, S_uvh, pres_uvh, &
+                                    drho_dT, drho_dS, &
+                                    tv%eqn_of_state, EOSdom_tile)
 
       if (use_stanley) then
         ! Refill at h-points for Stanley second derivatives. Extend to jend+1 in J because
