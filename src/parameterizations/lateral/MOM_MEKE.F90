@@ -1767,15 +1767,15 @@ subroutine ML_MEKE_init(diag, G, US, Time, param_file, dbcomms_CS, CS)
   character(len=200)  :: inputdir, backend, model_filename
   integer :: db_return_code, batch_size
   character(len=40) :: mdl = "MOM_ML_MEKE"
-  #ifdef __NVCOMPILER_OPENMP_GPU
+#ifdef __NVCOMPILER_OPENMP_GPU
   integer, parameter :: default_niblock = 0
   integer, parameter :: default_njblock = 0
   integer, parameter :: default_nkblock = 0
-  #else
+#else
   integer, parameter :: default_niblock = 0
   integer, parameter :: default_njblock = 1
   integer, parameter :: default_nkblock = 1
-  #endif
+#endif
 
   ! Store pointers in control structure
   write(CS%key_suffix, '(A,I6.6)') '_', PE_here()

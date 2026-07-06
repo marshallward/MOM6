@@ -228,9 +228,9 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
     enddo
   endif
 
-  do concurrent( j=js-1:je+1 )
+  do concurrent (j=js-1:je+1)
     do k=1,nz
-      do concurrent( i=is-1:ie+1 )
+      do concurrent (i=is-1:ie+1)
         pres(i,j,K+1) = pres(i,j,K) + GV%g_Earth * GV%H_to_RZ * h(i,j,k)
       enddo
     enddo
@@ -278,35 +278,35 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
       if (OBC_friendly) then
         !$omp target update from(T_uvh, S_uvh, pres_uvh)
 
-        ! East-facing open boundaries: interior cell is at i (=istart+ii-1), use pres/T/S(i,j,K)
+        ! East-facing open boundaries: interior cell is at i (=istart+ii-1), use pres/T/S(i,j,k)
         if (OBC%u_E_OBCs_on_PE) then
-          do jj = max(jstart, OBC%js_u_E_obc), min(jend, OBC%je_u_E_obc)
-            j = j - jstart + 1
-            do kk = 1, kend-kstart+1
-              k = kstart + kk - 1
-              do ii = max(istart, OBC%Is_u_E_obc), min(iend, OBC%Ie_u_E_obc)
-                i = i - istart + 1
+          do k = kstart,kend
+              kk = k - kstart + 1
+            do j = max(jstart, OBC%js_u_E_obc), min(jend, OBC%je_u_E_obc)
+              jj = j - jstart + 1
+              do i = max(istart, OBC%Is_u_E_obc), min(iend, OBC%Ie_u_E_obc)
+                ii = i - istart + 1
                 if (OBC%segnum_u(i,j) > 0) then ! OBC_DIRECTION_E
-                  pres_uvh(ii,jj,kk) = pres(i,j,K)
-                  T_uvh(ii,jj,kk) = 0.5*(T(i,j,K) + T(i,j,K-1))
-                  S_uvh(ii,jj,kk) = 0.5*(S(i,j,K) + S(i,j,K-1))
+                  pres_uvh(ii,jj,kk) = pres(i,j,k)
+                  T_uvh(ii,jj,kk) = 0.5*(T(i,j,k) + T(i,j,k-1))
+                  S_uvh(ii,jj,kk) = 0.5*(S(i,j,k) + S(i,j,k-1))
                 endif
               enddo
             enddo
           enddo
         endif
-        ! West-facing open boundaries: interior cell is at i+1, use pres/T/S(i+1,j,K)
+        ! West-facing open boundaries: interior cell is at i+1, use pres/T/S(i+1,j,k)
         if (OBC%u_W_OBCs_on_PE) then
-          do jj = max(jstart, OBC%js_u_W_obc), min(jend, OBC%je_u_W_obc)
-            j = j - jstart + 1
-            do kk = 1, kend-kstart+1
-              k = kstart + kk - 1
-              do ii = max(istart, OBC%Is_u_W_obc), min(iend, OBC%Ie_u_W_obc)
-                i = i - istart + 1
+          do k = kstart, kend
+            kk = k - kstart + 1
+            do j = max(jstart, OBC%js_u_W_obc), min(jend, OBC%je_u_W_obc)
+              jj = j - jstart + 1
+              do i = max(istart, OBC%Is_u_W_obc), min(iend, OBC%Ie_u_W_obc)
+                ii = i - istart + 1
                 if (OBC%segnum_u(i,j) < 0) then ! OBC_DIRECTION_W
-                  pres_uvh(ii,jj,kk) = pres(i+1,j,K)
-                  T_uvh(ii,jj,kk) = 0.5*(T(i+1,j,K) + T(i+1,j,K-1))
-                  S_uvh(ii,jj,kk) = 0.5*(S(i+1,j,K) + S(i+1,j,K-1))
+                  pres_uvh(ii,jj,kk) = pres(i+1,j,k)
+                  T_uvh(ii,jj,kk) = 0.5*(T(i+1,j,k) + T(i+1,j,k-1))
+                  S_uvh(ii,jj,kk) = 0.5*(S(i+1,j,k) + S(i+1,j,k-1))
                 endif
               enddo
             enddo
@@ -480,12 +480,12 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
         !$omp target update from(T_uvh, S_uvh, pres_uvh)
 
         if (OBC%v_N_OBCs_on_PE) then
-          do jj = max(jstart, OBC%Js_v_N_obc), min(jend, OBC%Je_v_N_obc)
-            j = j - jstart + 1
-            do kk = 1, kend-kstart+1
-              k = kstart + kk - 1
-              do ii = max(istart, OBC%is_v_N_obc), min(iend, OBC%ie_v_N_obc)
-                i = i - istart + 1
+          do k = kstart, kend
+              kk = k - kstart + 1
+            do j = max(jstart, OBC%Js_v_N_obc), min(jend, OBC%Je_v_N_obc)
+              jj = j - jstart + 1
+              do i = max(istart, OBC%is_v_N_obc), min(iend, OBC%ie_v_N_obc)
+                ii = i - istart + 1
                 if (OBC%segnum_v(i,j) > 0) then ! OBC_DIRECTION_N
                   pres_uvh(ii,jj,kk) = pres(i,j,K)
                   T_uvh(ii,jj,kk) = 0.5*(T(i,j,K) + T(i,j,K-1))
@@ -496,12 +496,12 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
           enddo
         endif
         if (OBC%v_S_OBCs_on_PE) then
-          do jj = max(jstart, OBC%Js_v_S_obc), min(jend, OBC%Je_v_S_obc)
-            j = j - jstart + 1
-            do kk = 1, kend-kstart+1
-              k = kstart + kk - 1
-              do ii = max(istart, OBC%is_v_S_obc), min(iend, OBC%ie_v_S_obc)
-                i = i - istart + 1
+          do k = kstart, kend
+            kk = k - kstart + 1
+            do j = max(jstart, OBC%Js_v_S_obc), min(jend, OBC%Je_v_S_obc)
+              jj = j - jstart + 1
+              do i = max(istart, OBC%is_v_S_obc), min(iend, OBC%ie_v_S_obc)
+                ii = i - istart + 1
                 if (OBC%segnum_v(i,j) < 0) then ! OBC_DIRECTION_S
                   pres_uvh(ii,jj,kk) = pres(i,j+1,K)
                   T_uvh(ii,jj,kk) = 0.5*(T(i,j+1,K) + T(i,j+1,K-1))
