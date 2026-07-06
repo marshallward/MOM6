@@ -1767,15 +1767,15 @@ subroutine ML_MEKE_init(diag, G, US, Time, param_file, dbcomms_CS, CS)
   character(len=200)  :: inputdir, backend, model_filename
   integer :: db_return_code, batch_size
   character(len=40) :: mdl = "MOM_ML_MEKE"
-  #ifdef __NVCOMPILER_OPENMP_GPU
+#ifdef __NVCOMPILER_OPENMP_GPU
   integer, parameter :: default_niblock = 0
   integer, parameter :: default_njblock = 0
   integer, parameter :: default_nkblock = 0
-  #else
+#else
   integer, parameter :: default_niblock = 0
   integer, parameter :: default_njblock = 1
   integer, parameter :: default_nkblock = 1
-  #endif
+#endif
 
   ! Store pointers in control structure
   write(CS%key_suffix, '(A,I6.6)') '_', PE_here()
@@ -1843,17 +1843,17 @@ subroutine ML_MEKE_init(diag, G, US, Time, param_file, dbcomms_CS, CS)
                  "The i-direction block size used to calculate isopycnal slopes. "//&
                  "If 0, defaults to 64, except when "//&
                  "running with OpenMP offload, in which case the full computational "//&
-                 "domain width is used.", default=default_niblock)
+                 "domain width is used.", default=default_niblock, layoutParam=.true.)
   call get_param(param_file, mdl, "ISOPYCNAL_NJBLOCK", CS%njblock, &
                  "The j-direction block size used in the continuity solver. "//&
                  "If 0, defaults to 1, except when "//&
                  "running with OpenMP offload, in which case the full computational "//&
-                 "domain height is used.", default=default_njblock)
+                 "domain height is used.", default=default_njblock, layoutParam=.true.)
   call get_param(param_file, mdl, "ISOPYCNAL_NKBLOCK", CS%nkblock, &
                  "The j-direction block size used in the continuity solver. "//&
                  "If 0, defaults to 1 , except when "//&
                  "running with OpenMP offload, in which case the full computational "//&
-                 "domain height is used.", default=default_nkblock)
+                 "domain height is used.", default=default_nkblock, layoutParam=.true.)
 
 end subroutine ML_MEKE_init
 

@@ -1651,15 +1651,15 @@ subroutine VarMix_init(Time, G, GV, US, param_file, diag, CS)
   integer :: number_of_OBC_segments
   integer :: is, ie, js, je, Isq, Ieq, Jsq, Jeq, i, j
   integer :: isd, ied, jsd, jed, IsdB, IedB, JsdB, JedB
-  #ifdef __NVCOMPILER_OPENMP_GPU
+#ifdef __NVCOMPILER_OPENMP_GPU
   integer, parameter :: default_niblock = 0
   integer, parameter :: default_njblock = 0
   integer, parameter :: default_nkblock = 0
-  #else
+#else
   integer, parameter :: default_niblock = 0
   integer, parameter :: default_njblock = 1
   integer, parameter :: default_nkblock = 1
-  #endif
+#endif
 
   is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec
   Isq = G%IscB ; Ieq = G%IecB ; Jsq = G%JscB ; Jeq = G%JecB
@@ -2180,17 +2180,17 @@ subroutine VarMix_init(Time, G, GV, US, param_file, diag, CS)
                  "The i-direction block size used to calculate isopycnal slopes. "//&
                  "If 0, defaults to 64, except when "//&
                  "running with OpenMP offload, in which case the full computational "//&
-                 "domain width is used.", default=default_niblock)
+                 "domain width is used.", default=default_niblock, layoutParam=.true.)
   call get_param(param_file, mdl, "ISOPYCNAL_NJBLOCK", CS%njblock, &
                  "The j-direction block size used in the continuity solver. "//&
                  "If 0, defaults to 1, except when "//&
                  "running with OpenMP offload, in which case the full computational "//&
-                 "domain height is used.", default=default_njblock)
+                 "domain height is used.", default=default_njblock, layoutParam=.true.)
   call get_param(param_file, mdl, "ISOPYCNAL_NKBLOCK", CS%nkblock, &
                  "The j-direction block size used in the continuity solver. "//&
                  "If 0, defaults to 1 , except when "//&
                  "running with OpenMP offload, in which case the full computational "//&
-                 "domain height is used.", default=default_nkblock)
+                 "domain height is used.", default=default_nkblock, layoutParam=.true.)
 
   ! Leith parameters
   call get_param(param_file, mdl, "USE_QG_LEITH_GM", CS%use_QG_Leith_GM, &
