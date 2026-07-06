@@ -35,8 +35,6 @@ use MOM_variables,         only : vertvisc_type, thermo_var_ptrs
 use MOM_verticalGrid,      only : verticalGrid_type
 use MOM_MEKE_types,        only : MEKE_type
 
-!$ use omp_lib, only: omp_get_num_devices
-
 implicit none ; private
 
 #include <MOM_memory.h>
@@ -1769,6 +1767,15 @@ subroutine ML_MEKE_init(diag, G, US, Time, param_file, dbcomms_CS, CS)
   character(len=200)  :: inputdir, backend, model_filename
   integer :: db_return_code, batch_size
   character(len=40) :: mdl = "MOM_ML_MEKE"
+  #ifdef __NVCOMPILER_OPENMP_GPU
+  integer, parameter :: default_niblock = 0
+  integer, parameter :: default_njblock = 0
+  integer, parameter :: default_nkblock = 0
+  #else
+  integer, parameter :: default_niblock = 0
+  integer, parameter :: default_njblock = 1
+  integer, parameter :: default_nkblock = 1
+  #endif
 
   ! Store pointers in control structure
   write(CS%key_suffix, '(A,I6.6)') '_', PE_here()
@@ -1836,17 +1843,17 @@ subroutine ML_MEKE_init(diag, G, US, Time, param_file, dbcomms_CS, CS)
                  "The i-direction block size used to calculate isopycnal slopes. "//&
                  "If 0, defaults to 64, except when "//&
                  "running with OpenMP offload, in which case the full computational "//&
-                 "domain width is used.", default=64)
+                 "domain width is used.", default=default_niblock)
   call get_param(param_file, mdl, "ISOPYCNAL_NJBLOCK", CS%njblock, &
                  "The j-direction block size used in the continuity solver. "//&
                  "If 0, defaults to 1, except when "//&
                  "running with OpenMP offload, in which case the full computational "//&
-                 "domain height is used.", default=1)
+                 "domain height is used.", default=default_njblock)
   call get_param(param_file, mdl, "ISOPYCNAL_NKBLOCK", CS%nkblock, &
                  "The j-direction block size used in the continuity solver. "//&
                  "If 0, defaults to 1 , except when "//&
                  "running with OpenMP offload, in which case the full computational "//&
-                 "domain height is used.", default=1)
+                 "domain height is used.", default=default_nkblock)
 
 end subroutine ML_MEKE_init
 
@@ -1890,6 +1897,10 @@ subroutine ML_MEKE_calculate_features(G, GV, US, CS, Rd_dx_h, u, v, tv, h, dt, f
   integer :: i, j, k, is, ie, js, je, Isq, Ieq, Jsq, Jeq, nz
   integer :: niblock, njblock, nkblock
 
+  niblock = CS%niblock
+  njblock = CS%njblock
+  nkblock = CS%nkblock
+
   is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec ; nz = GV%ke
   Isq = G%IscB ; Ieq = G%IecB ; Jsq = G%JscB ; Jeq = G%JecB
 
@@ -1900,14 +1911,9 @@ subroutine ML_MEKE_calculate_features(G, GV, US, CS, Rd_dx_h, u, v, tv, h, dt, f
     h_v(i,J,k) = 0.5*(h(i,j,k)*G%mask2dT(i,j) + h(i,j+1,k)*G%mask2dT(i,j+1)) + GV%Angstrom_H
   enddo ; enddo ; enddo
 
-  niblock = CS%niblock
-  njblock = CS%njblock
-  nkblock = CS%nkblock
-  !$ if (omp_get_num_devices() > 0) then
-  !$   niblock = ie - is + 1
-  !$   njblock = je - js + 1
-  !$   nkblock = nz
-  !$ endif
+  if (niblock == 0) niblock = ie - is + 1
+  if (njblock == 0) njblock = je - js + 1
+  if (nkblock == 0) nkblock = nz
 
   !$omp target update to(h)
   !$omp target enter data map(alloc: e)

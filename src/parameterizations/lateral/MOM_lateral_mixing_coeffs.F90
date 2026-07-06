@@ -662,6 +662,10 @@ subroutine calc_sqg_struct(h, tv, G, GV, US, CS, dt, MEKE, OBC)
   integer :: i, j, k, is, ie, js, je, nz
   integer :: niblock, njblock, nkblock
 
+  niblock = CS%niblock
+  njblock = CS%njblock
+  nkblock = CS%nkblock
+
   is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec ; nz = GV%ke
   f_subround = 1.0e-40 * US%s_to_T
 
@@ -695,14 +699,9 @@ subroutine calc_sqg_struct(h, tv, G, GV, US, CS, dt, MEKE, OBC)
       !$omp target enter data map(alloc: e)
       call find_eta(h, tv, G, GV, US, e, halo_size=2)  !### Could be halo_size=1?
 
-      niblock = CS%niblock
-      njblock = CS%njblock
-      nkblock = CS%nkblock
-      !$ if (omp_get_num_devices() > 0) then
-      !$   niblock = ie - is + 1
-      !$   njblock = je - js + 1
-      !$   nkblock = nz
-      !$ endif
+      if (niblock == 0) niblock = ie - is + 1
+      if (njblock == 0) njblock = je - js + 1
+      if (nkblock == 0) nkblock = nz
 
       !$omp target enter data map(to: tv, tv%T, tv%S)
       !$omp target enter data map(to: tv%SpV_avg) if (allocated(tv%SpV_avg))
@@ -812,11 +811,10 @@ subroutine calc_slope_functions(h, tv, dt, G, GV, US, CS, OBC)
   niblock = CS%niblock
   njblock = CS%njblock
   nkblock = CS%nkblock
-  !$ if (omp_get_num_devices() > 0) then
-  !$   niblock = G%iec - G%isc + 1
-  !$   njblock = G%jec - G%jsc + 1
-  !$   nkblock = GV%ke
-  !$ endif
+
+  if (niblock == 0) niblock = G%iec - G%isc + 1
+  if (njblock == 0) njblock = G%jec - G%jsc + 1
+  if (nkblock == 0) nkblock = GV%ke
 
   if (CS%calculate_Eady_growth_rate) then
     !$omp target update to(h)
@@ -1436,11 +1434,10 @@ subroutine calc_QG_slopes(h, tv, dt, G, GV, US, slope_x, slope_y, CS, OBC)
   niblock = CS%niblock
   njblock = CS%njblock
   nkblock = CS%nkblock
-  !$ if (omp_get_num_devices() > 0) then
-  !$   niblock = G%iec - G%isc + 1
-  !$   njblock = G%jec - G%jsc + 1
-  !$   nkblock = GV%ke
-  !$ endif
+
+  if (niblock == 0) niblock = G%iec - G%isc + 1
+  if (njblock == 0) njblock = G%jec - G%jsc + 1
+  if (nkblock == 0) nkblock = GV%ke
 
   !$omp target update to(h)
   !$omp target enter data map(alloc: e)
@@ -1654,6 +1651,16 @@ subroutine VarMix_init(Time, G, GV, US, param_file, diag, CS)
   integer :: number_of_OBC_segments
   integer :: is, ie, js, je, Isq, Ieq, Jsq, Jeq, i, j
   integer :: isd, ied, jsd, jed, IsdB, IedB, JsdB, JedB
+  #ifdef __NVCOMPILER_OPENMP_GPU
+  integer, parameter :: default_niblock = 0
+  integer, parameter :: default_njblock = 0
+  integer, parameter :: default_nkblock = 0
+  #else
+  integer, parameter :: default_niblock = 0
+  integer, parameter :: default_njblock = 1
+  integer, parameter :: default_nkblock = 1
+  #endif
+
   is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec
   Isq = G%IscB ; Ieq = G%IecB ; Jsq = G%JscB ; Jeq = G%JecB
   isd = G%isd ; ied = G%ied ; jsd = G%jsd ; jed = G%jed
@@ -2173,17 +2180,17 @@ subroutine VarMix_init(Time, G, GV, US, param_file, diag, CS)
                  "The i-direction block size used to calculate isopycnal slopes. "//&
                  "If 0, defaults to 64, except when "//&
                  "running with OpenMP offload, in which case the full computational "//&
-                 "domain width is used.", default=64)
+                 "domain width is used.", default=default_niblock)
   call get_param(param_file, mdl, "ISOPYCNAL_NJBLOCK", CS%njblock, &
                  "The j-direction block size used in the continuity solver. "//&
                  "If 0, defaults to 1, except when "//&
                  "running with OpenMP offload, in which case the full computational "//&
-                 "domain height is used.", default=1)
+                 "domain height is used.", default=default_njblock)
   call get_param(param_file, mdl, "ISOPYCNAL_NKBLOCK", CS%nkblock, &
                  "The j-direction block size used in the continuity solver. "//&
                  "If 0, defaults to 1 , except when "//&
                  "running with OpenMP offload, in which case the full computational "//&
-                 "domain height is used.", default=1)
+                 "domain height is used.", default=default_nkblock)
 
   ! Leith parameters
   call get_param(param_file, mdl, "USE_QG_LEITH_GM", CS%use_QG_Leith_GM, &
