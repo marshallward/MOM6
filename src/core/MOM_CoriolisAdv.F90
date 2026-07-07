@@ -2119,11 +2119,11 @@ subroutine CoriolisAdv_init(Time, G, GV, US, param_file, diag, AD, CS)
 
   ! Read all relevant parameters and write them to the model log.
   call log_version(param_file, mdl, version, "")
-  call get_param(param_file, mdl, "CORAD_NKBLOCK", CS%nkblock, &
+  call get_param(param_file, mdl, "CORIOLIS_ADV_NKBLOCK", CS%nkblock, &
                  "The k-direction block size used in Coriolis and momentum advection "//&
                  "calculations. The default 0 setting dynamically uses the full vertical column.", &
                  default=default_nkblock, layoutParam=.true.)
-  if (CS%nkblock < 0) call MOM_error(FATAL, "CORAD_NKBLOCK must be >= 0.")
+  if (CS%nkblock < 0) call MOM_error(FATAL, "CORIOLIS_ADV_NKBLOCK must be >= 0.")
   call get_param(param_file, mdl, "NOSLIP", CS%no_slip, &
                  "If true, no slip boundary conditions are used; otherwise "//&
                  "free slip boundary conditions are assumed. The "//&
