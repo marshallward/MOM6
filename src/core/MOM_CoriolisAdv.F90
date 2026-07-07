@@ -730,51 +730,50 @@ subroutine CorAdCalc(u, v, h, uh, vh, CAu, CAv, OBC, AD, G, GV, US, CS, pbv, Wav
     !  c1 = 1.0-1.5*RANGE ; c2 = 1.0-RANGE ; c3 = 2.0 ; slope = 0.5
       c1 = 1.0-1.5*0.5 ; c2 = 1.0-0.5 ; c3 = 2.0 ; slope = 0.5
 
-      do k=k_start,k_end ! TODO: port
-        kk = k - k_start + 1
-        do concurrent (j=Jsq:Jeq+1, I=is-1:ie)
-          uhc = uh_center(I,j,kk)
-          uhm = uh(I,j,k)
-          ! This sometimes matters with some types of open boundary conditions.
-          if (G%dy_Cu(I,j) == 0.0) uhc = uhm
+      do concurrent (kk=1:kmax, j=Jsq:Jeq+1, I=is-1:ie) DO_LOCALITY(local(k, uhc, uhm))
+        k = k_start + kk - 1
+        uhc = uh_center(I,j,kk)
+        uhm = uh(I,j,k)
+        ! This sometimes matters with some types of open boundary conditions.
+        if (G%dy_Cu(I,j) == 0.0) uhc = uhm
 
-          if (abs(uhc) < 0.1*abs(uhm)) then
-            uhm = 10.0*uhc
-          elseif (abs(uhc) > c1*abs(uhm)) then
-            if (abs(uhc) < c2*abs(uhm)) then ; uhc = (3.0*uhc+(1.0-c2*3.0)*uhm)
-            elseif (abs(uhc) <= c3*abs(uhm)) then ; uhc = uhm
-            else ; uhc = slope*uhc+(1.0-c3*slope)*uhm
-            endif
+        if (abs(uhc) < 0.1*abs(uhm)) then
+          uhm = 10.0*uhc
+        elseif (abs(uhc) > c1*abs(uhm)) then
+          if (abs(uhc) < c2*abs(uhm)) then ; uhc = (3.0*uhc+(1.0-c2*3.0)*uhm)
+          elseif (abs(uhc) <= c3*abs(uhm)) then ; uhc = uhm
+          else ; uhc = slope*uhc+(1.0-c3*slope)*uhm
           endif
+        endif
 
-          if (uhc > uhm) then
-            uh_min(I,j,kk) = uhm ; uh_max(I,j,kk) = uhc
-          else
-            uh_max(I,j,kk) = uhm ; uh_min(I,j,kk) = uhc
+        if (uhc > uhm) then
+          uh_min(I,j,kk) = uhm ; uh_max(I,j,kk) = uhc
+        else
+          uh_max(I,j,kk) = uhm ; uh_min(I,j,kk) = uhc
+        endif
+      enddo
+
+      do concurrent (kk=1:kmax, J=js-1:je, i=Isq:Ieq+1) DO_LOCALITY(local(k, vhc, vhm))
+        k = k_start + kk - 1
+        vhc = vh_center(i,J,kk)
+        vhm = vh(i,J,k)
+        ! This sometimes matters with some types of open boundary conditions.
+        if (G%dx_Cv(i,J) == 0.0) vhc = vhm
+
+        if (abs(vhc) < 0.1*abs(vhm)) then
+          vhm = 10.0*vhc
+        elseif (abs(vhc) > c1*abs(vhm)) then
+          if (abs(vhc) < c2*abs(vhm)) then ; vhc = (3.0*vhc+(1.0-c2*3.0)*vhm)
+          elseif (abs(vhc) <= c3*abs(vhm)) then ; vhc = vhm
+          else ; vhc = slope*vhc+(1.0-c3*slope)*vhm
           endif
-        enddo
+        endif
 
-        do concurrent (J=js-1:je, i=Isq:Ieq+1)
-          vhc = vh_center(i,J,kk)
-          vhm = vh(i,J,k)
-          ! This sometimes matters with some types of open boundary conditions.
-          if (G%dx_Cv(i,J) == 0.0) vhc = vhm
-
-          if (abs(vhc) < 0.1*abs(vhm)) then
-            vhm = 10.0*vhc
-          elseif (abs(vhc) > c1*abs(vhm)) then
-            if (abs(vhc) < c2*abs(vhm)) then ; vhc = (3.0*vhc+(1.0-c2*3.0)*vhm)
-            elseif (abs(vhc) <= c3*abs(vhm)) then ; vhc = vhm
-            else ; vhc = slope*vhc+(1.0-c3*slope)*vhm
-            endif
-          endif
-
-          if (vhc > vhm) then
-            vh_min(i,J,kk) = vhm ; vh_max(i,J,kk) = vhc
-          else
-            vh_max(i,J,kk) = vhm ; vh_min(i,J,kk) = vhc
-          endif
-        enddo
+        if (vhc > vhm) then
+          vh_min(i,J,kk) = vhm ; vh_max(i,J,kk) = vhc
+        else
+          vh_max(i,J,kk) = vhm ; vh_min(i,J,kk) = vhc
+        endif
       enddo
     endif
 
