@@ -648,7 +648,6 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
   ! Delete all tile and field arrays from device
   !$omp target exit data map(delete: T, S, pres, T_uvh, S_uvh, pres_uvh, GxSpV_uvh, &
   !$omp   scrap, drho_dT, drho_dS, drho_dT_dT_h)
-
 end subroutine calc_isoneutral_slopes
 
 !> Returns tracer arrays (nominally T and S) with massless layers filled with
