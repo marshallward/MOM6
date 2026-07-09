@@ -625,7 +625,7 @@ subroutine zonal_mass_flux(u, h_in, h_W, h_E, uh, dt, G, GV, US, CS, OBC, por_fa
     duhdu_tot_0, & ! Summed partial derivative of uh with u [H L ~> m2 or kg m-1].
     uh_tot_0, &   ! Summed transport with no barotropic correction [H L2 T-1 ~> m3 s-1 or kg s-1].
     visc_rem_max  ! The column maximum of visc_rem [nondim].
-  logical, dimension(niblock,njblock) :: do_I
+  logical, dimension(niblock,njblock) :: do_ij
   real, dimension(niblock,njblock,SZK_(GV)) :: &
     uh_b          ! A block-sized copy of uh [H L2 T-1 ~> m3 s-1 or kg s-1].
   real, dimension(niblock,njblock) :: &
@@ -692,7 +692,7 @@ subroutine zonal_mass_flux(u, h_in, h_W, h_E, uh, dt, G, GV, US, CS, OBC, por_fa
     jje = jeb - jsb + 1
 
     do jj=1,jje ; do II=1,IIe
-      do_I(II,jj) = .true.
+      do_ij(II,jj) = .true.
     enddo ; enddo
 
     ! Set uh and duhdu.
@@ -867,12 +867,12 @@ subroutine zonal_mass_flux(u, h_in, h_W, h_E, uh, dt, G, GV, US, CS, OBC, por_fa
             ! Avoid reconciling barotropic/baroclinic transports if transport is specified
             simple_OBC_pt(II,jj) = .false.
             if (l_seg /= OBC_NONE) simple_OBC_pt(II,jj) = OBC%segment(l_seg)%specified
-            do_I(II,jj) = .not.simple_OBC_pt(II,jj)
+            do_ij(II,jj) = .not.simple_OBC_pt(II,jj)
             any_simple_OBC = any_simple_OBC .or. simple_OBC_pt(II,jj)
           enddo ; enddo
         else
           do jj=1,jje ; do II=1,IIe
-            do_I(II,jj) = .true.
+            do_ij(II,jj) = .true.
           enddo ; enddo
         endif
       endif
@@ -886,7 +886,7 @@ subroutine zonal_mass_flux(u, h_in, h_W, h_E, uh, dt, G, GV, US, CS, OBC, por_fa
         ! Find du and uh.
         call zonal_flux_adjust(u, h_in, h_W, h_E, uhbt_b, uh_tot_0, duhdu_tot_0, du, &
                               du_max_CFL, du_min_CFL, dt, G, GV, US, CS, visc_rem, &
-                              IsbB, IebB, jsb, jeb, do_I, por_face_areaU, niblock, njblock, &
+                              IsbB, IebB, jsb, jeb, do_ij, por_face_areaU, niblock, njblock, &
                               uh_b, OBC=OBC)
 
         if (present(u_cor)) then
@@ -922,7 +922,7 @@ subroutine zonal_mass_flux(u, h_in, h_W, h_E, uh, dt, G, GV, US, CS, OBC, por_fa
       if (set_BT_cont) then
         call set_zonal_BT_cont(u, h_in, h_W, h_E, BT_cont, uh_tot_0, duhdu_tot_0,&
                               du_max_CFL, du_min_CFL, dt, G, GV, US, CS, visc_rem, &
-                              visc_rem_max, IsbB, IebB, jsb, jeb, do_I, &
+                              visc_rem_max, IsbB, IebB, jsb, jeb, do_ij, &
                               por_face_areaU, niblock, njblock)
         if (any_simple_OBC) then
           do jj=1,jje ; do II=1,IIe
@@ -1349,7 +1349,7 @@ end subroutine zonal_flux_thickness
 !! desired barotropic (layer-summed) transport.
 subroutine zonal_flux_adjust(u, h_in, h_W, h_E, uhbt, uh_tot_0, duhdu_tot_0, &
                              du, du_max_CFL, du_min_CFL, dt, G, GV, US, CS, visc_rem, &
-                             IsbB, IebB, jsb, jeb, do_I_in, por_face_areaU, niblock, njblock, &
+                             IsbB, IebB, jsb, jeb, do_ij_in, por_face_areaU, niblock, njblock, &
                              uh_3d, OBC)
   integer,                                    intent(in) :: niblock !< i block size for array calculations.
   integer,                                    intent(in) :: njblock !< j block size for array calculations.
@@ -1387,8 +1387,8 @@ subroutine zonal_flux_adjust(u, h_in, h_W, h_E, uhbt, uh_tot_0, duhdu_tot_0, &
   integer,                                   intent(in)    :: IebB !< End of I index range.
   integer,                                   intent(in)    :: jsb  !< Start of j index range.
   integer,                                   intent(in)    :: jeb  !< End of j index range.
-  logical, dimension(niblock,njblock),intent(in)    :: do_I_in     !<
-                       !! A logical flag indicating which I values to work on.
+  logical, dimension(niblock,njblock), intent(in) :: do_ij_in
+    !< A logical flag indicating which block points to work on.
   real, dimension(SZIB_(G), SZJ_(G), SZK_(G)), &
                                       intent(in) :: por_face_areaU !< fractional open area of U-faces [nondim]
   real, dimension(niblock,njblock,SZK_(GV)), intent(inout), optional :: uh_3d !<
@@ -1413,7 +1413,7 @@ subroutine zonal_flux_adjust(u, h_in, h_W, h_E, uhbt, uh_tot_0, duhdu_tot_0, &
   real :: tol_eta ! The tolerance for the current iteration [H ~> m or kg m-2].
   real :: tol_vel ! The tolerance for velocity in the current iteration [L T-1 ~> m s-1].
   integer :: i, j, k, nz, itt, II, jj, IIe, jje
-  logical :: domore, do_I(niblock,njblock)
+  logical :: domore, do_ij(niblock,njblock)
   logical :: local_open_BC ! True if there are open OBC points on this PE [nondim].
   integer, parameter :: max_itts = 20
 
@@ -1429,7 +1429,7 @@ subroutine zonal_flux_adjust(u, h_in, h_W, h_E, uhbt, uh_tot_0, duhdu_tot_0, &
     I = IsbB + II - 1
     j = jsb + jj - 1
 
-    du(II,jj) = 0.0 ; do_I(II,jj) = do_I_in(II,jj)
+    du(II,jj) = 0.0 ; do_ij(II,jj) = do_ij_in(II,jj)
     du_max(II,jj) = du_max_CFL(II,jj) ; du_min(II,jj) = du_min_CFL(II,jj)
     uh_err(II,jj) = uh_tot_0(II,jj) - uhbt(II,jj) ; duhdu_tot(II,jj) = duhdu_tot_0(II,jj)
     uh_err_best(II,jj) = abs(uh_err(II,jj))
@@ -1446,7 +1446,7 @@ subroutine zonal_flux_adjust(u, h_in, h_W, h_E, uhbt, uh_tot_0, duhdu_tot_0, &
     do jj=1,jje ; do II=1,IIe
       if (uh_err(II,jj) > 0.0) then ; du_max(II,jj) = du(II,jj)
       elseif (uh_err(II,jj) < 0.0) then ; du_min(II,jj) = du(II,jj)
-      else ; do_I(II,jj) = .false. ; endif
+      else ; do_ij(II,jj) = .false. ; endif
     enddo ; enddo
 
     domore = .false.
@@ -1454,7 +1454,7 @@ subroutine zonal_flux_adjust(u, h_in, h_W, h_E, uhbt, uh_tot_0, duhdu_tot_0, &
       I = IsbB + II - 1
       j = jsb + jj - 1
 
-      if (do_I(II,jj)) then
+      if (do_ij(II,jj)) then
         if ((dt * min(G%IareaT(i,j),G%IareaT(i+1,j))*abs(uh_err(II,jj)) > tol_eta) .or. &
             (CS%better_iter .and. ((abs(uh_err(II,jj)) > tol_vel * duhdu_tot(II,jj)) .or. &
                                    (abs(uh_err(II,jj)) > uh_err_best(II,jj))) )) then
@@ -1464,21 +1464,21 @@ subroutine zonal_flux_adjust(u, h_in, h_W, h_E, uhbt, uh_tot_0, duhdu_tot_0, &
           du_prev = du(II,jj)
           du(II,jj) = du(II,jj) + ddu
           if (abs(ddu) < 1.0e-15*abs(du(II,jj))) then
-            do_I(II,jj) = .false. ! ddu is small enough to quit.
+            do_ij(II,jj) = .false. ! ddu is small enough to quit.
           elseif (ddu > 0.0) then
             if (du(II,jj) >= du_max(II,jj)) then
               du(II,jj) = 0.5*(du_prev + du_max(II,jj))
-              if (du_max(II,jj) - du_prev < 1.0e-15*abs(du(II,jj))) do_I(II,jj) = .false.
+              if (du_max(II,jj) - du_prev < 1.0e-15*abs(du(II,jj))) do_ij(II,jj) = .false.
             endif
           else ! ddu < 0.0
             if (du(II,jj) <= du_min(II,jj)) then
               du(II,jj) = 0.5*(du_prev + du_min(II,jj))
-              if (du_prev - du_min(II,jj) < 1.0e-15*abs(du(II,jj))) do_I(II,jj) = .false.
+              if (du_prev - du_min(II,jj) < 1.0e-15*abs(du(II,jj))) do_ij(II,jj) = .false.
             endif
           endif
-          if (do_I(II,jj)) domore = .true.
+          if (do_ij(II,jj)) domore = .true.
         else
-          do_I(II,jj) = .false.
+          do_ij(II,jj) = .false.
         endif
       endif
     enddo ; enddo
@@ -1497,7 +1497,7 @@ subroutine zonal_flux_adjust(u, h_in, h_W, h_E, uhbt, uh_tot_0, duhdu_tot_0, &
         I = IsbB + II - 1
         j = jsb + jj - 1
 
-        if (do_I(II,jj)) then
+        if (do_ij(II,jj)) then
           u_new = u(I,j,k) + du(II,jj) * visc_rem(II,jj,k)
 
           call flux_elem(u_new, h_in(i,j,k), h_in(i+1,j,k), &
@@ -1537,7 +1537,7 @@ end subroutine zonal_flux_adjust
 !! function of barotropic flow to agree closely with the sum of the layer's transports.
 subroutine set_zonal_BT_cont(u, h_in, h_W, h_E, BT_cont, uh_tot_0, duhdu_tot_0, &
                              du_max_CFL, du_min_CFL, dt, G, GV, US, CS, visc_rem, &
-                             visc_rem_max, IsbB, IebB, jsb, jeb, do_I, &
+                             visc_rem_max, IsbB, IebB, jsb, jeb, do_ij, &
                              por_face_areaU, niblock, njblock)
   integer,                                   intent(in)    :: niblock !< i block size for array calculations.
   integer,                                   intent(in)    :: njblock !< j block size for array calculations.
@@ -1573,8 +1573,8 @@ subroutine set_zonal_BT_cont(u, h_in, h_W, h_E, BT_cont, uh_tot_0, duhdu_tot_0, 
   integer,                                   intent(in)    :: IebB !< End of I index range.
   integer,                                   intent(in)    :: jsb  !< Start of j index range.
   integer,                                   intent(in)    :: jeb  !< End of j index range.
-  logical, dimension(niblock,njblock),intent(in)    :: do_I     !< A logical flag indicating
-                       !! which I values to work on.
+  logical, dimension(niblock,njblock), intent(in) :: do_ij
+    !< A logical flag indicating which block points to work on.
   real, dimension(SZIB_(G), SZJ_(G), SZK_(G)), &
                                     intent(in) :: por_face_areaU !< fractional open area of U-faces [nondim]
   ! Local variables
@@ -1626,7 +1626,7 @@ subroutine set_zonal_BT_cont(u, h_in, h_W, h_E, BT_cont, uh_tot_0, duhdu_tot_0, 
   enddo ; enddo
   call zonal_flux_adjust(u, h_in, h_W, h_E, zeros, uh_tot_0, duhdu_tot_0, du0, &
                          du_max_CFL, du_min_CFL, dt, G, GV, US, CS, visc_rem, &
-                         IsbB, IebB, jsb, jeb, do_I, por_face_areaU, &
+                         IsbB, IebB, jsb, jeb, do_ij, por_face_areaU, &
                          niblock, njblock)
 
   ! Determine the westerly- and easterly- fluxes.  Choose a sufficiently
@@ -1648,7 +1648,7 @@ subroutine set_zonal_BT_cont(u, h_in, h_W, h_E, BT_cont, uh_tot_0, duhdu_tot_0, 
       I = IsbB + II - 1
       j = jsb + jj - 1
 
-      if (do_I(II,jj)) then
+      if (do_ij(II,jj)) then
         visc_rem_lim = max(visc_rem(II,jj,k), min_visc_rem*visc_rem_max(II,jj))
         if (visc_rem_lim > 0.0) then ! This is almost always true for ocean points.
           if (u(I,j,k) + duR(II,jj)*visc_rem_lim > -du_CFL(II,jj)*visc_rem(II,jj,k)) &
@@ -1665,7 +1665,7 @@ subroutine set_zonal_BT_cont(u, h_in, h_W, h_E, BT_cont, uh_tot_0, duhdu_tot_0, 
       I = IsbB + II - 1
       j = jsb + jj - 1
 
-      if (do_I(II,jj)) then
+      if (do_ij(II,jj)) then
         u_L = u(I,j,k) + duL(II,jj) * visc_rem(II,jj,k)
         u_R = u(I,j,k) + duR(II,jj) * visc_rem(II,jj,k)
         u_0 = u(I,j,k) + du0(II,jj) * visc_rem(II,jj,k)
@@ -1704,7 +1704,7 @@ subroutine set_zonal_BT_cont(u, h_in, h_W, h_E, BT_cont, uh_tot_0, duhdu_tot_0, 
     I = IsbB + II - 1
     j = jsb + jj - 1
 
-    if (do_I(II,jj)) then
+    if (do_ij(II,jj)) then
       FA_0 = FAmt_0(II,jj)
       FA_avg = FAmt_0(II,jj)
 
@@ -1820,7 +1820,7 @@ subroutine meridional_mass_flux(v, h_in, h_S, h_N, vh, dt, G, GV, US, CS, OBC, p
     dvhdv_tot_0, & ! Summed partial derivative of vh with v [H L ~> m2 or kg m-1].
     vh_tot_0, &   ! Summed transport with no barotropic correction [H L2 T-1 ~> m3 s-1 or kg s-1].
     visc_rem_max  ! The column maximum of visc_rem [nondim]
-  logical, dimension(niblock,njblock) :: do_I
+  logical, dimension(niblock,njblock) :: do_ij
   real, dimension(niblock,njblock) :: FAvi  ! A list of sums of meridional face areas
                                                    ! [H L ~> m2 or kg m-1].
   real :: FA_v    ! A sum of meridional face areas [H L ~> m2 or kg m-1].
@@ -1886,7 +1886,7 @@ subroutine meridional_mass_flux(v, h_in, h_S, h_N, vh, dt, G, GV, US, CS, OBC, p
     iie = ieb - isb + 1
 
     do JJ=1,JJe ; do ii=1,iie
-      do_I(ii,JJ) = .true.
+      do_ij(ii,JJ) = .true.
     enddo ; enddo
 
     ! This sets vh and dvhdv.
@@ -2059,12 +2059,12 @@ subroutine meridional_mass_flux(v, h_in, h_S, h_N, vh, dt, G, GV, US, CS, OBC, p
             ! Avoid reconciling barotropic/baroclinic transports if transport is specified
             simple_OBC_pt(ii,JJ) = .false.
             if (l_seg /= 0) simple_OBC_pt(ii,JJ) = OBC%segment(l_seg)%specified
-            do_I(ii,JJ) = .not.simple_OBC_pt(ii,JJ)
+            do_ij(ii,JJ) = .not.simple_OBC_pt(ii,JJ)
             any_simple_OBC = any_simple_OBC .or. simple_OBC_pt(ii,JJ)
           enddo ; enddo
         else
           do JJ=1,JJe ; do ii=1,iie
-            do_I(ii,JJ) = .true.
+            do_ij(ii,JJ) = .true.
           enddo ; enddo
         endif
       endif
@@ -2079,7 +2079,7 @@ subroutine meridional_mass_flux(v, h_in, h_S, h_N, vh, dt, G, GV, US, CS, OBC, p
         ! Find dv and vh.
         call meridional_flux_adjust(v, h_in, h_S, h_N, vhbt_b, vh_tot_0, dvhdv_tot_0, dv, &
                                          dv_max_CFL, dv_min_CFL, dt, G, GV, US, CS, visc_rem, &
-                                          isb, ieb, JsbB, JebB, do_I, por_face_areaV, &
+                                          isb, ieb, JsbB, JebB, do_ij, por_face_areaV, &
                                          niblock, njblock, vh_b, OBC)
 
         if (present(v_cor)) then
@@ -2107,7 +2107,7 @@ subroutine meridional_mass_flux(v, h_in, h_S, h_N, vh, dt, G, GV, US, CS, OBC, p
       if (set_BT_cont) then
         call set_merid_BT_cont(v, h_in, h_S, h_N, BT_cont, vh_tot_0, dvhdv_tot_0, &
                                dv_max_CFL, dv_min_CFL, dt, G, GV, US, CS, visc_rem, &
-                                visc_rem_max, isb, ieb, JsbB, JebB, do_I, &
+                                visc_rem_max, isb, ieb, JsbB, JebB, do_ij, &
                                por_face_areaV, niblock, njblock)
         if (any_simple_OBC) then
           do JJ=1,JJe ; do ii=1,iie
@@ -2398,7 +2398,7 @@ end subroutine meridional_flux_thickness
 !> Returns the barotropic velocity adjustment that gives the desired barotropic (layer-summed) transport.
 subroutine meridional_flux_adjust(v, h_in, h_S, h_N, vhbt, vh_tot_0, dvhdv_tot_0, &
                              dv, dv_max_CFL, dv_min_CFL, dt, G, GV, US, CS, visc_rem, &
-                             isb, ieb, JsbB, JebB, do_I_in, por_face_areaV, &
+                             isb, ieb, JsbB, JebB, do_ij_in, por_face_areaV, &
                              niblock, njblock, vh_3d, OBC)
   integer,                 intent(in)    :: niblock !< i block size for array calculations.
   integer,                 intent(in)    :: njblock !< j block size for array calculations.
@@ -2440,8 +2440,8 @@ subroutine meridional_flux_adjust(v, h_in, h_S, h_N, vhbt, vh_tot_0, dvhdv_tot_0
   integer,                  intent(in)    :: JebB !< End of J index range.
   integer,                  intent(in)    :: isb  !< Start of i index range.
   integer,                  intent(in)    :: ieb  !< End of i index range.
-  logical, dimension(niblock,njblock), &
-                   intent(in) :: do_I_in  !< A flag indicating which I values to work on.
+  logical, dimension(niblock,njblock), intent(in) :: do_ij_in
+    !< A flag indicating which block points to work on.
   real, dimension(SZI_(G),SZJB_(G),SZK_(G)), &
                      intent(in) :: por_face_areaV !< fractional open area of V-faces [nondim]
   real, dimension(niblock,njblock,SZK_(GV)), &
@@ -2468,7 +2468,7 @@ subroutine meridional_flux_adjust(v, h_in, h_S, h_N, vhbt, vh_tot_0, dvhdv_tot_0
   real :: tol_eta ! The tolerance for the current iteration [H ~> m or kg m-2].
   real :: tol_vel ! The tolerance for velocity in the current iteration [L T-1 ~> m s-1].
   integer :: i, j, k, nz, itt, ii, JJ, iie, JJe
-  logical :: domore, do_I(niblock,njblock), local_open_BC
+  logical :: domore, do_ij(niblock,njblock), local_open_BC
   integer, parameter :: max_itts = 20
 
   local_open_BC = .false.
@@ -2485,7 +2485,7 @@ subroutine meridional_flux_adjust(v, h_in, h_S, h_N, vhbt, vh_tot_0, dvhdv_tot_0
     i = isb + ii - 1
     J = JsbB + JJ - 1
 
-    dv(ii,JJ) = 0.0 ; do_I(ii,JJ) = do_I_in(ii,JJ)
+    dv(ii,JJ) = 0.0 ; do_ij(ii,JJ) = do_ij_in(ii,JJ)
     dv_max(ii,JJ) = dv_max_CFL(ii,JJ) ; dv_min(ii,JJ) = dv_min_CFL(ii,JJ)
     vh_err(ii,JJ) = vh_tot_0(ii,JJ) - vhbt(ii,JJ) ; dvhdv_tot(ii,JJ) = dvhdv_tot_0(ii,JJ)
     vh_err_best(ii,JJ) = abs(vh_err(ii,JJ))
@@ -2502,12 +2502,12 @@ subroutine meridional_flux_adjust(v, h_in, h_S, h_N, vhbt, vh_tot_0, dvhdv_tot_0
     do JJ=1,JJe ; do ii=1,iie
       if (vh_err(ii,JJ) > 0.0) then ; dv_max(ii,JJ) = dv(ii,JJ)
       elseif (vh_err(ii,JJ) < 0.0) then ; dv_min(ii,JJ) = dv(ii,JJ)
-      else ; do_I(ii,JJ) = .false. ; endif
+      else ; do_ij(ii,JJ) = .false. ; endif
     enddo ; enddo
 
     domore = .false.
     do JJ=1,JJe ; do ii=1,iie
-      i = isb + ii - 1 ; J = JsbB + JJ - 1 ; if (do_I(ii,JJ)) then
+      i = isb + ii - 1 ; J = JsbB + JJ - 1 ; if (do_ij(ii,JJ)) then
       if ((dt * min(G%IareaT(i,j),G%IareaT(i,j+1))*abs(vh_err(ii,JJ)) > tol_eta) .or. &
           (CS%better_iter .and. ((abs(vh_err(ii,JJ)) > tol_vel * dvhdv_tot(ii,JJ)) .or. &
                                  (abs(vh_err(ii,JJ)) > vh_err_best(ii,JJ))) )) then
@@ -2517,21 +2517,21 @@ subroutine meridional_flux_adjust(v, h_in, h_S, h_N, vhbt, vh_tot_0, dvhdv_tot_0
         dv_prev = dv(ii,JJ)
         dv(ii,JJ) = dv(ii,JJ) + ddv
         if (abs(ddv) < 1.0e-15*abs(dv(ii,JJ))) then
-          do_I(ii,JJ) = .false. ! ddv is small enough to quit.
+          do_ij(ii,JJ) = .false. ! ddv is small enough to quit.
         elseif (ddv > 0.0) then
           if (dv(ii,JJ) >= dv_max(ii,JJ)) then
             dv(ii,JJ) = 0.5*(dv_prev + dv_max(ii,JJ))
-            if (dv_max(ii,JJ) - dv_prev < 1.0e-15*abs(dv(ii,JJ))) do_I(ii,JJ) = .false.
+            if (dv_max(ii,JJ) - dv_prev < 1.0e-15*abs(dv(ii,JJ))) do_ij(ii,JJ) = .false.
           endif
         else ! dvv(i,J) < 0.0
           if (dv(ii,JJ) <= dv_min(ii,JJ)) then
             dv(ii,JJ) = 0.5*(dv_prev + dv_min(ii,JJ))
-            if (dv_prev - dv_min(ii,JJ) < 1.0e-15*abs(dv(ii,JJ))) do_I(ii,JJ) = .false.
+            if (dv_prev - dv_min(ii,JJ) < 1.0e-15*abs(dv(ii,JJ))) do_ij(ii,JJ) = .false.
           endif
         endif
-        if (do_I(ii,JJ)) domore = .true.
+        if (do_ij(ii,JJ)) domore = .true.
       else
-        do_I(ii,JJ) = .false.
+        do_ij(ii,JJ) = .false.
       endif
     endif ; enddo ; enddo
 
@@ -2548,7 +2548,7 @@ subroutine meridional_flux_adjust(v, h_in, h_S, h_N, vhbt, vh_tot_0, dvhdv_tot_0
         i = isb + ii - 1
         J = JsbB + JJ - 1
 
-        if (do_I(ii,JJ)) then
+        if (do_ij(ii,JJ)) then
           v_new = v(i,J,k) + dv(ii,JJ) * visc_rem(ii,JJ,k)
           call flux_elem(v_new, h_in(i,J,k), h_in(i,J+1,k), &
               h_S(i,J,k), h_S(i,J+1,k), h_N(i,J,k), h_N(i,J+1,k), &
@@ -2587,7 +2587,7 @@ end subroutine meridional_flux_adjust
 !! function of barotropic flow to agree closely with the sum of the layer's transports.
 subroutine set_merid_BT_cont(v, h_in, h_S, h_N, BT_cont, vh_tot_0, dvhdv_tot_0, &
                              dv_max_CFL, dv_min_CFL, dt, G, GV, US, CS, visc_rem, &
-                             visc_rem_max, isb, ieb, JsbB, JebB, do_I, &
+                             visc_rem_max, isb, ieb, JsbB, JebB, do_ij, &
                              por_face_areaV, niblock, njblock)
   integer,                                   intent(in) :: niblock !< i block size for array calculations.
   integer,                                   intent(in) :: njblock !< j block size for array calculations.
@@ -2626,8 +2626,8 @@ subroutine set_merid_BT_cont(v, h_in, h_S, h_N, BT_cont, vh_tot_0, dvhdv_tot_0, 
   integer,                                   intent(in) :: JebB !< End of J index range.
   integer,                                   intent(in) :: isb  !< Start of i index range.
   integer,                                   intent(in) :: ieb  !< End of i index range.
-  logical, dimension(niblock,njblock), &
-                       intent(in) :: do_I !< A logical flag indicating which I values to work on.
+  logical, dimension(niblock,njblock), intent(in) :: do_ij
+    !< A logical flag indicating which block points to work on.
   real, dimension(SZI_(G),SZJB_(G),SZK_(G)), &
                           intent(in) :: por_face_areaV !< fractional open area of V-faces [nondim]
   ! Local variables
@@ -2679,7 +2679,7 @@ subroutine set_merid_BT_cont(v, h_in, h_S, h_N, BT_cont, vh_tot_0, dvhdv_tot_0, 
 
   call meridional_flux_adjust(v, h_in, h_S, h_N, zeros, vh_tot_0, dvhdv_tot_0, dv0, &
                               dv_max_CFL, dv_min_CFL, dt, G, GV, US, CS, visc_rem, &
-                              isb, ieb, JsbB, JebB, do_I, por_face_areaV, &
+                              isb, ieb, JsbB, JebB, do_ij, por_face_areaV, &
                               niblock, njblock)
 
   !   Determine the southerly- and northerly- fluxes.  Choose a sufficiently
@@ -2701,7 +2701,7 @@ subroutine set_merid_BT_cont(v, h_in, h_S, h_N, BT_cont, vh_tot_0, dvhdv_tot_0, 
       i = isb + ii - 1
       J = JsbB + JJ - 1
 
-      if (do_I(ii,JJ)) then
+      if (do_ij(ii,JJ)) then
         visc_rem_lim = max(visc_rem(ii,JJ,k), min_visc_rem*visc_rem_max(ii,JJ))
         if (visc_rem_lim > 0.0) then ! This is almost always true for ocean points.
           if (v(i,J,k) + dvR(ii,JJ)*visc_rem_lim > -dv_CFL(ii,JJ)*visc_rem(ii,JJ,k)) &
@@ -2718,7 +2718,7 @@ subroutine set_merid_BT_cont(v, h_in, h_S, h_N, BT_cont, vh_tot_0, dvhdv_tot_0, 
       i = isb + ii - 1
       J = JsbB + JJ - 1
 
-      if (do_I(ii,JJ)) then
+      if (do_ij(ii,JJ)) then
         v_L = v(i,J,k) + dvL(ii,JJ) * visc_rem(ii,JJ,k)
         v_R = v(i,J,k) + dvR(ii,JJ) * visc_rem(ii,JJ,k)
         v_0 = v(i,J,k) + dv0(ii,JJ) * visc_rem(ii,JJ,k)
@@ -2755,7 +2755,7 @@ subroutine set_merid_BT_cont(v, h_in, h_S, h_N, BT_cont, vh_tot_0, dvhdv_tot_0, 
     i = isb + ii - 1
     J = JsbB + JJ - 1
 
-    if (do_I(ii,JJ)) then
+    if (do_ij(ii,JJ)) then
       FA_0 = FAmt_0(ii,JJ)
       FA_avg = FAmt_0(ii,JJ)
 
