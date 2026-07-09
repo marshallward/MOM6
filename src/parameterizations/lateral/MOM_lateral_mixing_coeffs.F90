@@ -1657,7 +1657,7 @@ subroutine VarMix_init(Time, G, GV, US, param_file, diag, CS)
   integer, parameter :: default_nkblock = 0
 #else
   integer, parameter :: default_niblock = 0
-  integer, parameter :: default_njblock = 1
+  integer, parameter :: default_njblock = 2
   integer, parameter :: default_nkblock = 1
 #endif
 
@@ -1776,6 +1776,32 @@ subroutine VarMix_init(Time, G, GV, US, param_file, diag, CS)
 
   call get_param(param_file, mdl, "DEBUG", CS%debug, default=.false., do_not_log=.true.)
 
+  ! Isopycnal blocking parameters
+  call get_param(param_file, mdl, "ISOPYCNAL_NIBLOCK", CS%niblock, &
+                 "The i-direction block size used to calculate isopycnal slopes. "//&
+                 "If 0, defaults to 64, except when "//&
+                 "running with OpenMP offload, in which case the full computational "//&
+                 "domain width is used.", default=default_niblock, layoutParam=.true.)
+  call get_param(param_file, mdl, "ISOPYCNAL_NJBLOCK", CS%njblock, &
+                 "The j-direction block size used to calculate isopycnal slopes. "//&
+                 "If 0, defaults to 1, except when "//&
+                 "running with OpenMP offload, in which case the full computational "//&
+                 "domain height is used.", default=default_njblock, layoutParam=.true.)
+  call get_param(param_file, mdl, "ISOPYCNAL_NKBLOCK", CS%nkblock, &
+                 "The j-direction block size used to calculate isopycnal slopes. "//&
+                 "If 0, defaults to 1 , except when "//&
+                 "running with OpenMP offload, in which case the full computational "//&
+                 "domain height is used.", default=default_nkblock, layoutParam=.true.)
+  if (CS%niblock < 0) &
+    call MOM_error(FATAL, "ISOPYCNAL_NIBLOCK must be nonnegative; "//&
+                          "use 0 to select the default block size.")
+  if (CS%njblock < 0) &
+    call MOM_error(FATAL, "ISOPYCNAL_NJBLOCK must be nonnegative; "//&
+                          "use 0 to select the default block size.")
+  if (CS%nkblock < 0) &
+    call MOM_error(FATAL, "ISOPYCNAL_NKBLOCK must be nonnegative; "//&
+                          "use 0 to select the default block size.")
+
   call get_param(param_file, mdl, "USE_STANLEY_ISO", CS%use_stanley_iso, &
                  "If true, turn on Stanley SGS T variance parameterization "// &
                  "in isopycnal slope code.", default=.false.)
@@ -1785,6 +1811,16 @@ subroutine VarMix_init(Time, G, GV, US, param_file, diag, CS)
                  units="nondim", default=-1.0, do_not_log=.true.)
     if (Stanley_coeff < 0.0) call MOM_error(FATAL, &
                  "STANLEY_COEFF must be set >= 0 if USE_STANLEY_ISO is true.")
+    if (CS%njblock == 1) then
+      call MOM_error(WARNING, "ISOPYCNAL_NJBLOCK must be >= 2 or 0 if USE_STANLEY_ISO is true."//&
+                    " Changing block size from 1 to 2 for this run.")
+      CS%njblock = 2
+    endif
+    if (CS%niblock == 1) then
+      call MOM_error(WARNING, "ISOPYCNAL_NIBLOCK must be >= 2 or 0 if USE_STANLEY_ISO is true."//&
+                    " Changing block size from 1 to 2 for this run.")
+      CS%niblock = 2
+    endif
   endif
   call get_param(param_file, mdl, "OBC_NUMBER_OF_SEGMENTS", number_of_OBC_segments, &
                  default=0, do_not_log=.true.)
@@ -2174,23 +2210,6 @@ subroutine VarMix_init(Time, G, GV, US, param_file, diag, CS)
                          better_speed_est=better_speed_est, min_speed=wave_speed_min, &
                          om4_remap_via_sub_cells=om4_remap_via_sub_cells, wave_speed_tol=wave_speed_tol)
   endif
-
-  ! Isoneutral blocking parameters
-  call get_param(param_file, mdl, "ISOPYCNAL_NIBLOCK", CS%niblock, &
-                 "The i-direction block size used to calculate isopycnal slopes. "//&
-                 "If 0, defaults to 64, except when "//&
-                 "running with OpenMP offload, in which case the full computational "//&
-                 "domain width is used.", default=default_niblock, layoutParam=.true.)
-  call get_param(param_file, mdl, "ISOPYCNAL_NJBLOCK", CS%njblock, &
-                 "The j-direction block size used in the continuity solver. "//&
-                 "If 0, defaults to 1, except when "//&
-                 "running with OpenMP offload, in which case the full computational "//&
-                 "domain height is used.", default=default_njblock, layoutParam=.true.)
-  call get_param(param_file, mdl, "ISOPYCNAL_NKBLOCK", CS%nkblock, &
-                 "The j-direction block size used in the continuity solver. "//&
-                 "If 0, defaults to 1 , except when "//&
-                 "running with OpenMP offload, in which case the full computational "//&
-                 "domain height is used.", default=default_nkblock, layoutParam=.true.)
 
   ! Leith parameters
   call get_param(param_file, mdl, "USE_QG_LEITH_GM", CS%use_QG_Leith_GM, &

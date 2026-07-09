@@ -81,11 +81,8 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
   real, dimension(SZI_(G), SZJ_(G),SZK_(GV)+1) :: &
     pres          ! The pressure at an interface [R L2 T-2 ~> Pa].
 
-  ! Tiled work arrays. First and second dimensions use niblock+1 / njblock+1 so that
-  ! the Stanley h-point fills (which need one extra column/row beyond the u/v tile extent)
-  ! fit without a separate buffer. drho_dT and drho_dS only ever need niblock x njblock,
-  ! but are dimensioned +1 for alignment with the rest.
-  real, dimension(niblock+1, njblock+1, nkblock) :: &
+  ! Tiled work arrays.
+  real, dimension(niblock, njblock, nkblock) :: &
     drho_dT, &      ! The derivative of density with temperature [R C-1 ~> kg m-3 degC-1].
     drho_dS, &      ! The derivative of density with salinity [R S-1 ~> kg m-3 ppt-1].
     drho_dT_dT_h, & ! The second derivative of density with temperature at h points [R C-2 ~> kg m-3 degC-2]
@@ -93,7 +90,7 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
     S_uvh, &        ! Salinity at the u, v or h-points for derivative calculations [S ~> ppt].
     GxSpV_uvh, &    ! g * specific volume at u/v-point interfaces [L2 Z-1 T-2 R-1 ~> m4 s-2 kg-1]
     pres_uvh        ! Pressure at the u, v or h-points [R L2 T-2 ~> Pa].
-  real, dimension(niblock+1) :: scrap ! Ignored output from calculate_density_second_derivs()
+  real, dimension(niblock) :: scrap ! Ignored output from calculate_density_second_derivs()
 
   real :: drdiA, drdiB  ! Along layer zonal potential density  gradients in the layers above (A)
                         ! and below (B) the interface times the grid spacing [R ~> kg m-3].
@@ -131,6 +128,14 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
   integer :: jstart, jend !< First and last global j (or J) indices of the current tile [nondim].
   integer :: kstart, kend !< First and last global K (or K) indices of the current tile [nondim].
   integer :: ii, jj, kk   !< Tile-local 1-based i, j, and k indices [nondim].
+  integer :: delta_i, delta_j
+  integer :: ie_read, je_read        !< Read-only extent of the h-point tile used to supply the
+                                     !! ii+1 (or jj+1) access needed by the Stanley stencil; equal
+                                     !! to ie (or je) plus one column/row when use_stanley is true,
+                                     !! and otherwise equal to ie (or je).
+  integer :: iend_fill, jend_fill    !< Last i (or j) index filled into the Stanley h-point tile,
+                                     !! as opposed to iend/jend, which bound what is actually written
+                                     !! to the output arrays this tile.
 
   ! Allocate locals on device
   !$omp target enter data map(alloc: T, S, pres, T_uvh, S_uvh, pres_uvh, GxSpV_uvh, &
@@ -238,22 +243,25 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
 
   ! Initialise GxSpV tile to the Boussinesq default G/rho0; overwritten below if
   ! non-Boussinesq SpV_avg is available.
-  do concurrent(kk=1:nkblock, jj=1:njblock+1, ii=1:niblock+1)
+  do concurrent(kk=1:nkblock, jj=1:njblock, ii=1:niblock)
     GxSpV_uvh(ii,jj,kk) = G_Rho0
   enddo
 
-  ! ============================================================
-  ! Zonal tiling loop: compute zonal isopycnal slopes
-  ! ============================================================
-  ! Outer loop tiles the (I=is-1:ie, j=js:je) domain into niblock x njblock patches.
-  ! Within each tile:
-  !   1. Fill tile-sized T_uvh/S_uvh/pres_uvh at u-points on device (do concurrent).
-  !   2. Apply OBC overrides (CPU, host-side OBC derived types).
-  !   3. Call calculate_density_derivs over tile.
-  !   4. If use_stanley: refill at h-points, call calculate_density_second_derivs.
-  !   5. Compute slopes in do concurrent using tile-local indices.
-  do kstart=2,nz,nkblock ; do jstart=js,je,njblock ; do istart=is-1,ie,niblock
-    iend = min(istart + niblock - 1, ie)
+  ! Stanley param needs access to h-point element ii+1, so when using stanley param,
+  ! write chunks of size block - 1 instead of chunks of size block to prevent out of
+  ! range writes but read up to ie+1 to include all values needed for slope computation
+  if (use_stanley) then
+    delta_i = niblock - 1
+    ie_read = ie + 1
+  else
+    delta_i = niblock
+    ie_read = ie
+  endif
+
+  ! Tiled zonal loop
+  do kstart=2,nz,nkblock ; do jstart=js,je,njblock ; do istart=is-1,ie,delta_i
+    iend = min(istart + delta_i - 1, ie)
+    iend_fill = min(istart + niblock - 1, ie_read)
     jend = min(jstart + njblock - 1, je)
     kend = min(kstart + nkblock - 1, nz)
     EOSdom_tile(1,1) = 1 ; EOSdom_tile(1,2) = iend - istart + 1
@@ -261,9 +269,9 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
     EOSdom_tile(3,1) = 1 ; EOSdom_tile(3,2) = kend - kstart + 1
 
     if (use_EOS) then
-      ! Fill tile T_uvh/S_uvh/pres_uvh at u-points (u-face = average of i and i+1)
+      ! Fill tile T_uvh/S_uvh/pres_uvh at u-points
       do concurrent(kk=1:kend-kstart+1, jj=1:jend-jstart+1, II=1:iend-istart+1)
-        I = istart + II - 1  ! global I (u-face index)
+        I = istart + II - 1  ! global I
         j = jstart + jj - 1  ! global j
         k = kstart + kk - 1  ! global k
         pres_uvh(ii,jj,kk) = 0.5*(pres(i,j,K) + pres(i+1,j,K))
@@ -272,16 +280,12 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
       enddo
 
       ! UMW NOTE: Vibecoded and untested
-      ! Apply OBC overrides: at open boundary faces use only the interior cell's T/S/P
-      ! rather than the two-cell average computed above. Runs on CPU because it requires
-      ! access to OBC%segnum_u, a derived-type component not mapped to the device.
       if (OBC_friendly) then
         !$omp target update from(T_uvh, S_uvh, pres_uvh)
 
-        ! East-facing open boundaries: interior cell is at i (=istart+ii-1), use pres/T/S(i,j,k)
         if (OBC%u_E_OBCs_on_PE) then
           do k = kstart,kend
-              kk = k - kstart + 1
+            kk = k - kstart + 1
             do j = max(jstart, OBC%js_u_E_obc), min(jend, OBC%je_u_E_obc)
               jj = j - jstart + 1
               do i = max(istart, OBC%Is_u_E_obc), min(iend, OBC%Ie_u_E_obc)
@@ -295,7 +299,6 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
             enddo
           enddo
         endif
-        ! West-facing open boundaries: interior cell is at i+1, use pres/T/S(i+1,j,k)
         if (OBC%u_W_OBCs_on_PE) then
           do k = kstart, kend
             kk = k - kstart + 1
@@ -331,17 +334,16 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
         endif
       endif
 
-      ! Density derivatives at u-points. EOSdom_tile is 1-based so no IsdB offset is needed.
       call calculate_density_derivs(T_uvh, S_uvh, pres_uvh, &
                                     drho_dT, drho_dS, &
                                     tv%eqn_of_state, EOSdom_tile)
 
       if (use_stanley) then
         ! Refill T_uvh/S_uvh/pres_uvh at h-points for the Stanley second-derivative calculation.
-        ! The fill extends one extra column (ii up to iend-istart+2) because the slope compute
-        ! accesses drho_dT_dT_h(ii,jj,kk) and drho_dT_dT_h(ii+1,jj,kk) simultaneously.
-        EOSdom_tile_h1(1) = 1 ; EOSdom_tile_h1(2) = iend - istart + 2
-        do concurrent(kk=1:kend-kstart+1, jj=1:jend-jstart+1, ii=1:iend-istart+2)
+        ! This tile is filled one column beyond the write range (out to iend_fill = iend+1) to
+        ! supply the ii+1 access used by the compute loop below.
+        EOSdom_tile_h1(1) = 1 ; EOSdom_tile_h1(2) = iend_fill - istart + 1
+        do concurrent(kk=1:kend-kstart+1, jj=1:jend-jstart+1, ii=1:iend_fill-istart+1)
           i = istart + ii - 1
           j = jstart + jj - 1
           k = kstart + kk - 1
@@ -350,6 +352,7 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
           S_uvh(ii,jj,kk) = 0.5*(S(i,j,k) + S(i,j,k-1))
         enddo
 
+        ! UMW TODO: Make 3d version of this
         do kk=1,kend-kstart+1 ; do jj=1,jend-jstart+1
           call calculate_density_second_derivs(T_uvh(:,jj,kk), S_uvh(:,jj,kk), pres_uvh(:,jj,kk), &
                      scrap, scrap, drho_dT_dT_h(:,jj,kk), scrap, scrap, &
@@ -362,8 +365,8 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
     ! Zonal slope compute over the tile
     do concurrent(kk=1:kend-kstart+1, jj=1:jend-jstart+1, II=1:iend-istart+1) &
         DO_LOCALITY(local(drdkL, drdkR, drdiA, drdiB, I, j))
-      I = istart + II - 1  ! global I (u-face)
-      j = jstart + jj - 1  ! global j (h-point)
+      I = istart + II - 1  ! global I
+      j = jstart + jj - 1  ! global j
       k = kstart + kk - 1  ! global k
 
       if (use_EOS) then
@@ -449,25 +452,29 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
     enddo ! end zonal tile do concurrent
   enddo ; enddo ; enddo ! end zonal outer tile loops
 
-  ! ============================================================
-  ! Meridional tiling loop: compute meridional isopycnal slopes
-  ! ============================================================
-  ! Structure mirrors the zonal loop above, but tiling over (i=is:ie, J=js-1:je).
-  ! The Stanley second-derivative fill extends to jend+1 in J because the slope
-  ! compute accesses drho_dT_dT_h(ii,jj,kk) and drho_dT_dT_h(ii,jj+1,kk) simultaneously.
-  do kstart=2,nz, nkblock ; do jstart=js-1,je,njblock ; do istart=is,ie,niblock
+  if (use_stanley) then
+    delta_j = njblock - 1
+    je_read = je + 1
+  else
+    delta_j = njblock
+    je_read = je
+  endif
+
+  ! Tiled meridional loop
+  do kstart=2,nz, nkblock ; do jstart=js-1,je,delta_j ; do istart=is,ie,niblock
     iend = min(istart + niblock - 1, ie)
-    jend = min(jstart + njblock - 1, je)
+    jend = min(jstart + delta_j - 1, je)
+    jend_fill = min(jstart + njblock - 1, je_read)
     kend = min(kstart + nkblock - 1, nz)
     EOSdom_tile(1,1) = 1 ; EOSdom_tile(1,2) = iend - istart + 1
     EOSdom_tile(2,1) = 1 ; EOSdom_tile(2,2) = jend - jstart + 1
     EOSdom_tile(3,1) = 1 ; EOSdom_tile(3,2) = kend - kstart + 1
 
     if (use_EOS) then
-      ! Fill tile T_uvh/S_uvh/pres_uvh at v-points (v-face = average of j and j+1)
+      ! Fill tile T_uvh/S_uvh/pres_uvh at v-points
       do concurrent(kk=1:kend-kstart+1, jj=1:jend-jstart+1, ii=1:iend-istart+1)
-        i = istart + ii - 1  ! global i (h-point)
-        j = jstart + jj - 1  ! global J (v-face index)
+        i = istart + ii - 1  ! global i
+        j = jstart + jj - 1  ! global J
         k = kstart + kk - 1  ! global k
         pres_uvh(ii,jj,kk) = 0.5*(pres(i,j,K) + pres(i,j+1,K))
         T_uvh(ii,jj,kk) = 0.25*((T(i,j,K) + T(i,j+1,K)) + (T(i,j,K-1) + T(i,j+1,K-1)))
@@ -475,7 +482,6 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
       enddo
 
       ! UMW NOTE: Vibecoded and untested
-      ! Apply OBC overrides at v-points: north-facing uses interior (j), south-facing uses j+1.
       if (OBC_friendly) then
         !$omp target update from(T_uvh, S_uvh, pres_uvh)
 
@@ -515,7 +521,6 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
         !$omp target update to(T_uvh, S_uvh, pres_uvh)
       endif
 
-      ! Pre-fill GxSpV at v-points.
       if (present_N2_v .or. present(dzSyN)) then
         if (allocated(tv%SpV_avg)) then
           do concurrent(kk=1:kend-kstart+1, jj=1:jend-jstart+1, ii=1:iend-istart+1) &
@@ -529,16 +534,14 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
         endif
       endif
 
-      ! Density derivatives at v-points.
       call calculate_density_derivs(T_uvh, S_uvh, pres_uvh, &
                                     drho_dT, drho_dS, &
                                     tv%eqn_of_state, EOSdom_tile)
 
       if (use_stanley) then
-        ! Refill at h-points for Stanley second derivatives. Extend to jend+1 in J because
-        ! the slope compute reads drho_dT_dT_h(ii,jj+1,K) (the J+1 neighbour).
+        ! Refill at h-points for Stanley second derivatives.
         EOSdom_tile_h1(1) = 1 ; EOSdom_tile_h1(2) = iend - istart + 1
-        do concurrent(kk=1:kend-kstart+1, jj=1:jend-jstart+2, ii=1:iend-istart+1)
+        do concurrent(kk=1:kend-kstart+1, jj=1:jend_fill-jstart+1, ii=1:iend-istart+1)
           i = istart + ii - 1
           j = jstart + jj - 1
           k = kstart + kk - 1
@@ -547,7 +550,8 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
           S_uvh(ii,jj,kk) = 0.5*(S(i,j,K) + S(i,j,K-1))
         enddo
 
-        do kk=1,kend-kstart+1 ; do jj=1,jend-jstart+2
+        ! UMW TODO: Make 3d versions of this
+        do kk=1,kend-kstart+1 ; do jj=1,jend_fill-jstart+1
           call calculate_density_second_derivs(T_uvh(:,jj,kk), S_uvh(:,jj,kk), pres_uvh(:,jj,kk), &
                      scrap, scrap, drho_dT_dT_h(:,jj,kk), scrap, scrap, &
                      tv%eqn_of_state, dom=EOSdom_tile_h1)
