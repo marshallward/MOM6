@@ -4,6 +4,8 @@
 
 !> The subroutines here provide convenient wrappers to the FMS diag_manager
 !! interfaces with additional diagnostic capabilities.
+#include "do_concurrent_compat.h"
+
 module MOM_diag_mediator
 
 use MOM_checksums,        only : chksum0, zchksum, hchksum, uchksum, vchksum, Bchksum
@@ -828,10 +830,9 @@ subroutine set_masks_for_axes(G, diag_cs)
       allocate( axes%mask3d(G%IsdB:G%IedB,G%jsd:G%jed,nk), source=0. )
       mCuL => axes%mask3d
       !$omp target enter data map(alloc: mCuL)
-      !$omp target teams distribute parallel do collapse(3)
-      do k = 1, nk ; do j=G%jsc,G%jec ; do I=G%isc-1,G%iec
-        if (h_mask(i,j,k) + h_mask(i+1,j,k) > 0.) mCuL(I,j,k) = 1.
-      enddo ; enddo ; enddo
+      do concurrent(k=1:nk, j=G%jsc:G%jec, I=G%isc-1:G%iec, (h_mask(i,j,k) + h_mask(i+1,j,k) > 0.))
+        mCuL(I,j,k) = 1.
+      end do
 
       ! Level/layer v-points in diagnostic coordinate
       axes => diag_cs%remap_axesCvL(c)
@@ -840,10 +841,9 @@ subroutine set_masks_for_axes(G, diag_cs)
       allocate( axes%mask3d(G%isd:G%ied,G%JsdB:G%JedB,nk), source=0. )
       mCvL => axes%mask3d
       !$omp target enter data map(alloc: mCvL)
-      !$omp target teams distribute parallel do collapse(3)
-      do k = 1, nk ; do J=G%jsc-1,G%jec ; do i=G%isc,G%iec
-        if (h_mask(i,j,k) + h_mask(i,j+1,k) > 0.) mCvL(i,J,k) = 1.
-      enddo ; enddo ; enddo
+      do concurrent(k=1:nk, J=G%jsc-1:G%jec, i=G%isc:G%iec, (h_mask(i,j,k) + h_mask(i,j+1,k) > 0.))
+        mCvL(i,J,k) = 1.
+      end do
 
       ! Level/layer q-points in diagnostic coordinate
       axes => diag_cs%remap_axesBL(c)
@@ -852,11 +852,11 @@ subroutine set_masks_for_axes(G, diag_cs)
       allocate( axes%mask3d(G%IsdB:G%IedB,G%JsdB:G%JedB,nk), source=0. )
       mBL => axes%mask3d
       !$omp target enter data map(alloc: mBL)
-      !$omp target teams distribute parallel do collapse(3)
-      do k = 1, nk ; do J=G%jsc-1,G%jec ; do I=G%isc-1,G%iec
-        if (h_mask(i,j,k) + h_mask(i+1,j+1,k) + &
-            h_mask(i+1,j,k) + h_mask(i,j+1,k) > 0.) mBL(I,J,k) = 1.
-      enddo ; enddo ; enddo
+      do concurrent(k=1:nk, J=G%jsc-1:G%jec, I=G%isc-1:G%iec, &
+          (h_mask(i,j,k) + h_mask(i+1,j+1,k) + &
+           h_mask(i+1,j,k) + h_mask(i,j+1,k) > 0.))
+        mBL(I,J,k) = 1.
+      end do
 
       ! Interface h-points in diagnostic coordinate (w-point)
       axes => diag_cs%remap_axesTi(c)
@@ -865,14 +865,14 @@ subroutine set_masks_for_axes(G, diag_cs)
       allocate( axes%mask3d(G%isd:G%ied,G%jsd:G%jed,nk+1), source=0. )
       mTi => axes%mask3d
       !$omp target enter data map(alloc: mTi)
-      !$omp target teams distribute parallel do collapse(2) private(K)
-      do j=G%jsc-1,G%jec+1 ; do i=G%isc-1,G%iec+1
-        if (h_mask(i,j,1) > 0.) mTi(i,j,1) = 1.
-        do K = 2, nk
-          if (h_mask(i,j,k-1) + h_mask(i,j,k) > 0.) mTi(i,j,K) = 1.
-        enddo
-        if (h_mask(i,j,nk) > 0.) mTi(i,j,nk+1) = 1.
-      enddo ; enddo
+
+      do concurrent(j=G%jsc-1:G%jec+1, i=G%isc-1:G%iec+1)
+        if(h_mask(i,j,1) > 0.) mTi(i,j,1) = 1.
+        do k = 2, nk
+          if (h_mask(i,j,k-1) + h_mask(i,j,k) > 0.) mTi(i,j,k) = 1.
+        end do
+        if(h_mask(i,j,nk) > 0.) mTi(i,j,nk+1) = 1.
+      end do  
 
       h_axes => diag_cs%remap_axesTi(c) ! Use the w-point masks to generate the u-, v- and q- masks
       h_mask => h_axes%mask3d
@@ -884,10 +884,9 @@ subroutine set_masks_for_axes(G, diag_cs)
       allocate( axes%mask3d(G%IsdB:G%IedB,G%jsd:G%jed,nk+1), source=0. )
       mCui => axes%mask3d
       !$omp target enter data map(alloc: mCui)
-      !$omp target teams distribute parallel do collapse(3)
-      do k = 1, nk+1 ; do j=G%jsc,G%jec ; do I=G%isc-1,G%iec
-        if (h_mask(i,j,k) + h_mask(i+1,j,k) > 0.) mCui(I,j,k) = 1.
-      enddo ; enddo ; enddo
+      do concurrent(k=1:nk+1, j=G%jsc:G%jec, I=G%isc-1:G%iec, (h_mask(i,j,k) + h_mask(i+1,j,k) > 0.))
+        mCui(I,j,k) = 1.
+      end do
 
       ! Interface v-points in diagnostic coordinate
       axes => diag_cs%remap_axesCvi(c)
@@ -896,10 +895,9 @@ subroutine set_masks_for_axes(G, diag_cs)
       allocate( axes%mask3d(G%isd:G%ied,G%JsdB:G%JedB,nk+1), source=0. )
       mCvi => axes%mask3d
       !$omp target enter data map(alloc: mCvi)
-      !$omp target teams distribute parallel do collapse(3)
-      do k = 1, nk+1 ; do J=G%jsc-1,G%jec ; do i=G%isc,G%iec
-        if (h_mask(i,j,k) + h_mask(i,j+1,k) > 0.) mCvi(i,J,k) = 1.
-      enddo ; enddo ; enddo
+      do concurrent(k=1:nk+1, J=G%jsc-1:G%jec, i=G%isc:G%iec, (h_mask(i,j,k) + h_mask(i,j+1,k) > 0.))
+        mCvi(i,J,k) = 1.
+      end do
 
       ! Interface q-points in diagnostic coordinate
       axes => diag_cs%remap_axesBi(c)
@@ -908,11 +906,11 @@ subroutine set_masks_for_axes(G, diag_cs)
       allocate( axes%mask3d(G%IsdB:G%IedB,G%JsdB:G%JedB,nk+1), source=0. )
       mBi => axes%mask3d
       !$omp target enter data map(alloc: mBi)
-      !$omp target teams distribute parallel do collapse(3)
-      do k = 1, nk+1 ; do J=G%jsc-1,G%jec ; do I=G%isc-1,G%iec
-        if (h_mask(i,j,k) + h_mask(i+1,j+1,k) + &
-            h_mask(i+1,j,k) + h_mask(i,j+1,k) > 0.) mBi(I,J,k) = 1.
-      enddo ; enddo ; enddo
+      do concurrent(k=1:nk+1, J=G%jsc-1:G%jec, I=G%isc-1:G%iec, &
+          (h_mask(i,j,k) + h_mask(i+1,j+1,k) + &
+           h_mask(i+1,j,k) + h_mask(i,j+1,k) > 0.))
+        mBi(I,J,k) = 1.
+      end do
 
       ! Copy all 8 masks back to host for use by set_masks_for_axes_dsamp
       !$omp target exit data map(from: mTL, mCuL, mCvL, mBL, mTi, mCui, mCvi, mBi)
@@ -4611,9 +4609,7 @@ subroutine downsample_field_3d(field_in, field_out, dl, method, mask, diag_cs, d
   !### The averaging used here is not rotationally invariant.
   !  Also, it would be better to use a max with eps_vol instead of adding it in the denominator.
   if (method == MMM) then
-    !$omp target teams distribute parallel do collapse(3) &
-    !$omp   private(i0,j0,ave,total_weight,ii,jj,weight)
-    do k=ks,ke ; do j=jsv_d,jev_d ; do i=isv_d,iev_d
+    do concurrent(k=ks:ke, j=jsv_d:jev_d, i=isv_d:iev_d) DO_LOCALITY(local(i0,j0,ave,total_weight,ii,jj,weight))
       i0 = isv_o+dl*(i-isv_d)
       j0 = jsv_o+dl*(j-jsv_d)
       ave = 0.0
@@ -4624,11 +4620,9 @@ subroutine downsample_field_3d(field_in, field_out, dl, method, mask, diag_cs, d
         ave = ave+field_in(ii,jj,k) * weight
       enddo ; enddo
       field_out(i,j,k)  = ave / (total_weight + eps_vol)  ! Eps_vol avoids division by 0.
-    enddo ; enddo ; enddo
+    enddo
   elseif (method == SSS) then   ! e.g., volcello
-    !$omp target teams distribute parallel do collapse(3) &
-    !$omp   private(i0,j0,ave,ii,jj,weight)
-    do k=ks,ke ; do j=jsv_d,jev_d ; do i=isv_d,iev_d
+    do concurrent(k=ks:ke, j=jsv_d:jev_d, i=isv_d:iev_d) DO_LOCALITY(local(i0,j0,ave,ii,jj,weight))
       i0 = isv_o+dl*(i-isv_d)
       j0 = jsv_o+dl*(j-jsv_d)
       ave = 0.0
@@ -4637,11 +4631,9 @@ subroutine downsample_field_3d(field_in, field_out, dl, method, mask, diag_cs, d
         ave = ave+field_in(ii,jj,k)*weight
       enddo ; enddo
       field_out(i,j,k)  = ave ! This is a masked sum, and total_weight = 1.
-    enddo ; enddo ; enddo
+    enddo
   elseif (method == MMP .or. method == MMS) then   ! e.g., T_advection_xy
-    !$omp target teams distribute parallel do collapse(3) &
-    !$omp   private(i0,j0,ave,total_weight,ii,jj,weight)
-    do k=ks,ke ; do j=jsv_d,jev_d ; do i=isv_d,iev_d
+    do concurrent(k=ks:ke, j=jsv_d:jev_d, i=isv_d:iev_d) DO_LOCALITY(local(i0,j0,ave,total_weight,ii,jj,weight))
       i0 = isv_o+dl*(i-isv_d)
       j0 = jsv_o+dl*(j-jsv_d)
       ave = 0.0
@@ -4652,11 +4644,9 @@ subroutine downsample_field_3d(field_in, field_out, dl, method, mask, diag_cs, d
         ave = ave+field_in(ii,jj,k) * weight
       enddo ; enddo
       field_out(i,j,k)  = ave / (total_weight + eps_area)  ! Eps_area avoids division by 0.
-    enddo ; enddo ; enddo
+    enddo
   elseif (method == PMM) then
-    !$omp target teams distribute parallel do collapse(3) &
-    !$omp   private(i0,j0,ave,total_weight,ii,jj,weight)
-    do k=ks,ke ; do j=jsv_d,jev_d ; do i=isv_d,iev_d
+    do concurrent(k=ks:ke, j=jsv_d:jev_d, i=isv_d:iev_d) DO_LOCALITY(local(i0,j0,ave,total_weight,ii,jj,weight))
       i0 = isv_o+dl*(i-isv_d)
       j0 = jsv_o+dl*(j-jsv_d)
       ave = 0.0
@@ -4668,11 +4658,9 @@ subroutine downsample_field_3d(field_in, field_out, dl, method, mask, diag_cs, d
         ave = ave+field_in(ii,jj,k) * weight
       enddo
       field_out(i,j,k)  = ave / (total_weight + eps_face)  ! Eps_face avoids division by 0.
-    enddo ; enddo ; enddo
+    enddo
   elseif (method == PSS) then    ! e.g. umo
-    !$omp target teams distribute parallel do collapse(3) &
-    !$omp   private(i0,j0,ave,ii,jj,weight)
-    do k=ks,ke ; do j=jsv_d,jev_d ; do i=isv_d,iev_d
+    do concurrent(k=ks:ke, j=jsv_d:jev_d, i=isv_d:iev_d) DO_LOCALITY(local(i0,j0,ave,ii,jj,weight))
       i0 = isv_o+dl*(i-isv_d)
       j0 = jsv_o+dl*(j-jsv_d)
       ave = 0.0
@@ -4682,11 +4670,9 @@ subroutine downsample_field_3d(field_in, field_out, dl, method, mask, diag_cs, d
         ave = ave+field_in(ii,jj,k)*weight
       enddo
       field_out(i,j,k)  = ave   ! This is a masked sum, and total_weight = 1.
-    enddo ; enddo ; enddo
+    enddo
   elseif (method == SPS) then   ! e.g. vmo
-    !$omp target teams distribute parallel do collapse(3) &
-    !$omp   private(i0,j0,ave,ii,jj,weight)
-    do k=ks,ke ; do j=jsv_d,jev_d ; do i=isv_d,iev_d
+    do concurrent(k=ks:ke, j=jsv_d:jev_d, i=isv_d:iev_d) DO_LOCALITY(local(i0,j0,ave,ii,jj,weight))
       i0 = isv_o+dl*(i-isv_d)
       j0 = jsv_o+dl*(j-jsv_d)
       ave = 0.0
@@ -4696,11 +4682,9 @@ subroutine downsample_field_3d(field_in, field_out, dl, method, mask, diag_cs, d
         ave = ave+field_in(ii,jj,k)*weight
       enddo
       field_out(i,j,k)  = ave  ! This is a masked sum, and total_weight = 1.
-    enddo ; enddo ; enddo
+    enddo
   elseif (method == MPM) then
-    !$omp target teams distribute parallel do collapse(3) &
-    !$omp   private(i0,j0,ave,total_weight,ii,jj,weight)
-    do k=ks,ke ; do j=jsv_d,jev_d ; do i=isv_d,iev_d
+    do concurrent(k=ks:ke, j=jsv_d:jev_d, i=isv_d:iev_d) DO_LOCALITY(local(i0,j0,ave,total_weight,ii,jj,weight))
       i0 = isv_o+dl*(i-isv_d)
       j0 = jsv_o+dl*(j-jsv_d)
       ave = 0.0
@@ -4712,15 +4696,12 @@ subroutine downsample_field_3d(field_in, field_out, dl, method, mask, diag_cs, d
         ave = ave+field_in(ii,jj,k) * weight
       enddo
       field_out(i,j,k)  = ave / (total_weight + eps_face)  ! Eps_face avoids division by 0.
-    enddo ; enddo ; enddo
+    enddo
   elseif (method == MSK) then ! The input field is a mask, so subsample it instead of averaging.
-    !$omp target teams distribute parallel do collapse(3)
-    do k=ks,ke ; do j=jsv_d,jev_d ; do i=isv_d,iev_d
+    do concurrent(k=ks:ke, j=jsv_d:jev_d, i=isv_d:iev_d)
       field_out(i,j,k) = 0.0
-    enddo ; enddo ; enddo
-    !$omp target teams distribute parallel do collapse(3) &
-    !$omp   private(i0,j0,ave,ii,jj)
-    do k=ks,ke ; do j=jsv_d,jev_d ; do i=isv_d,iev_d
+    enddo
+    do concurrent(k=ks:ke, j=jsv_d:jev_d, i=isv_d:iev_d) DO_LOCALITY(local(i0,j0,ave,ii,jj,weight))
       i0 = isv_o+dl*(i-isv_d)
       j0 = jsv_o+dl*(j-jsv_d)
       ave = 0.0
@@ -4728,7 +4709,7 @@ subroutine downsample_field_3d(field_in, field_out, dl, method, mask, diag_cs, d
         ave = ave+field_in(ii,jj,k)
       enddo ; enddo
       if (ave > 0.0) field_out(i,j,k)=1.0
-    enddo ; enddo ; enddo
+    enddo
   else
     write (mesg,*) " unknown sampling method: ",method
     call MOM_error(FATAL, "downsample_field_3d: "//trim(mesg)//" "//trim(diag%debug_str))
@@ -4794,9 +4775,7 @@ subroutine downsample_field_2d(field_in, field_out, dl, method, mask, diag_cs, d
   !$omp target enter data map(alloc: field_out)
 
   if (method == MMP) then
-    !$omp target teams distribute parallel do collapse(2) &
-    !$omp   private(i0,j0,ave,total_weight,ii,jj,weight)
-    do j=jsv_d,jev_d ; do i=isv_d,iev_d
+    do concurrent(j=jsv_d:jev_d, i=isv_d:iev_d) DO_LOCALITY(local(i0,j0,ave,total_weight,ii,jj,weight))
       i0 = isv_o+dl*(i-isv_d)
       j0 = jsv_o+dl*(j-jsv_d)
       ave = 0.0
@@ -4807,11 +4786,9 @@ subroutine downsample_field_2d(field_in, field_out, dl, method, mask, diag_cs, d
         ave = ave+field_in(ii,jj) * weight
       enddo ; enddo
       field_out(i,j) = ave / (total_weight + eps_area)  ! Eps_area avoids division by 0.
-    enddo ; enddo
+    enddo
   elseif (method == SSP) then    ! e.g., T_dfxy_cont_tendency_2d
-    !$omp target teams distribute parallel do collapse(2) &
-    !$omp   private(i0,j0,ave,ii,jj)
-    do j=jsv_d,jev_d ; do i=isv_d,iev_d
+    do concurrent(j=jsv_d:jev_d, i=isv_d:iev_d) DO_LOCALITY(local(i0,j0,ave,ii,jj))
       i0 = isv_o+dl*(i-isv_d)
       j0 = jsv_o+dl*(j-jsv_d)
       ave = 0.0
@@ -4819,11 +4796,9 @@ subroutine downsample_field_2d(field_in, field_out, dl, method, mask, diag_cs, d
         ave = ave+field_in(ii,jj) * mask(ii,jj)
       enddo ; enddo
       field_out(i,j) = ave  ! This is a masked sum, and total_weight = 1.
-    enddo ; enddo
+    enddo
   elseif (method == PSP) then   ! e.g., umo_2d
-    !$omp target teams distribute parallel do collapse(2) &
-    !$omp   private(i0,j0,ave,ii,jj)
-    do j=jsv_d,jev_d ; do i=isv_d,iev_d
+    do concurrent(j=jsv_d:jev_d, i=isv_d:iev_d) DO_LOCALITY(local(i0,j0,ave,ii,jj))
       i0 = isv_o+dl*(i-isv_d)
       j0 = jsv_o+dl*(j-jsv_d)
       ave = 0.0
@@ -4832,11 +4807,9 @@ subroutine downsample_field_2d(field_in, field_out, dl, method, mask, diag_cs, d
         ave = ave+field_in(ii,jj) * mask(ii,jj)
       enddo
       field_out(i,j) = ave  ! This is a masked sum, and total_weight = 1.
-    enddo ; enddo
+    enddo
   elseif (method == SPP) then   ! e.g., vmo_2d
-    !$omp target teams distribute parallel do collapse(2) &
-    !$omp   private(i0,j0,ave,ii,jj)
-    do j=jsv_d,jev_d ; do i=isv_d,iev_d
+    do concurrent(j=jsv_d:jev_d, i=isv_d:iev_d) DO_LOCALITY(local(i0,j0,ave,ii,jj))
       i0 = isv_o+dl*(i-isv_d)
       j0 = jsv_o+dl*(j-jsv_d)
       ave = 0.0
@@ -4845,11 +4818,9 @@ subroutine downsample_field_2d(field_in, field_out, dl, method, mask, diag_cs, d
         ave = ave+field_in(ii,jj) * mask(ii,jj)
       enddo
       field_out(i,j) = ave  ! This is a masked sum, and total_weight = 1.
-    enddo ; enddo
+    enddo
   elseif (method == PMP) then
-    !$omp target teams distribute parallel do collapse(2) &
-    !$omp   private(i0,j0,ave,total_weight,ii,jj,weight)
-    do j=jsv_d,jev_d ; do i=isv_d,iev_d
+    do concurrent(j=jsv_d:jev_d, i=isv_d:iev_d) DO_LOCALITY(local(i0,j0,ave,total_weight,ii,jj,weight))
       i0 = isv_o+dl*(i-isv_d)
       j0 = jsv_o+dl*(j-jsv_d)
       ave = 0.0
@@ -4861,11 +4832,9 @@ subroutine downsample_field_2d(field_in, field_out, dl, method, mask, diag_cs, d
         ave = ave+field_in(ii,jj) * weight
       enddo
       field_out(i,j) = ave / (total_weight + eps_len)  ! Eps_len avoids division by 0.
-    enddo ; enddo
+    enddo
   elseif (method == MPP) then
-    !$omp target teams distribute parallel do collapse(2) &
-    !$omp   private(i0,j0,ave,total_weight,ii,jj,weight)
-    do j=jsv_d,jev_d ; do i=isv_d,iev_d
+    do concurrent(j=jsv_d:jev_d, i=isv_d:iev_d) DO_LOCALITY(local(i0,j0,ave,total_weight,ii,jj,weight))
       i0 = isv_o+dl*(i-isv_d)
       j0 = jsv_o+dl*(j-jsv_d)
       ave = 0.0
@@ -4877,15 +4846,12 @@ subroutine downsample_field_2d(field_in, field_out, dl, method, mask, diag_cs, d
         ave = ave+field_in(ii,jj)*weight
       enddo
       field_out(i,j) = ave / (total_weight + eps_len)  ! Eps_len avoids division by 0.
-    enddo ; enddo
+    enddo
   elseif (method == MSK) then ! The input field is a mask, so subsample it instead of averaging.
-    !$omp target teams distribute parallel do collapse(2)
-    do j=jsv_d,jev_d ; do i=isv_d,iev_d
+    do concurrent(j=jsv_d:jev_d, i=isv_d:iev_d)
       field_out(i,j) = 0.0
-    enddo ; enddo
-    !$omp target teams distribute parallel do collapse(2) &
-    !$omp   private(i0,j0,ave,ii,jj)
-    do j=jsv_d,jev_d ; do i=isv_d,iev_d
+    enddo
+    do concurrent(j=jsv_d:jev_d, i=isv_d:iev_d) DO_LOCALITY(local(i0,j0,ave,ii,jj))
       i0 = isv_o+dl*(i-isv_d)
       j0 = jsv_o+dl*(j-jsv_d)
       ave = 0.0
@@ -4893,7 +4859,7 @@ subroutine downsample_field_2d(field_in, field_out, dl, method, mask, diag_cs, d
         ave = ave+field_in(ii,jj)
       enddo ; enddo
       if (ave > 0.0) field_out(i,j)=1.0
-    enddo ; enddo
+    enddo
   else
     write (mesg,*) " unknown sampling method: ",method
     call MOM_error(FATAL, "downsample_field_2d: "//trim(mesg)//" "//trim(diag%debug_str))
@@ -4931,14 +4897,11 @@ subroutine downsample_mask_2d(field_in, field_out, dl, isc_o, jsc_o, isd_o, jsd_
   ! field_in should already be on the device
   allocate(field_out(isd_d:ied_d,jsd_d:jed_d))
   !$omp target enter data map(alloc: field_out)
-
-  !$omp target teams distribute parallel do collapse(2)
-  do j = jsd_d,jed_d ; do i = isd_d,ied_d
+  do concurrent(j=jsd_d:jed_d, i=isd_d:ied_d)
     field_out(i,j) = 0.0
-  enddo ; enddo
+  enddo
 
-  !$omp target teams distribute parallel do collapse(2) private(i0,j0,tot_non_zero,ii,jj)
-  do j=jsc_d,jec_d ; do i=isc_d,iec_d
+  do concurrent(j=jsd_d:jed_d, i=isd_d:ied_d) DO_LOCALITY(local(i0,j0,tot_non_zero,ii,jj))
     i0 = isc_o+dl*(i-isc_d)
     j0 = jsc_o+dl*(j-jsc_d)
     tot_non_zero = 0.0
@@ -4946,7 +4909,7 @@ subroutine downsample_mask_2d(field_in, field_out, dl, isc_o, jsc_o, isd_o, jsd_
       tot_non_zero = tot_non_zero + field_in(ii,jj)
     enddo ; enddo
     if (tot_non_zero > 0.0) field_out(i,j)=1.0
-  enddo ; enddo
+  enddo
 
 end subroutine downsample_mask_2d
 
@@ -4984,13 +4947,11 @@ subroutine downsample_mask_3d(field_in, field_out, dl, isc_o, jsc_o, isd_o, jsd_
 
   !$omp target enter data map(alloc: field_out)
 
-  !$omp target teams distribute parallel do collapse(3)
-  do k=ks,ke ; do j = jsd_d,jed_d ; do i = isd_d,ied_d
+  do concurrent(k=ks:ke, j=jsd_d:jed_d, i=isd_d:ied_d)
     field_out(i,j,k) = 0.0
-  enddo ; enddo ; enddo
+  enddo
 
-  !$omp target teams distribute parallel do collapse(3) private(i0,j0,tot_non_zero,ii,jj)
-  do k=ks,ke ; do j=jsc_d,jec_d ; do i=isc_d,iec_d
+  do concurrent(k=ks:ke, j=jsc_d:jec_d, i=isc_d:iec_d) DO_LOCALITY(local(i0,j0,tot_non_zero,ii,jj))
     i0 = isc_o+dl*(i-isc_d)
     j0 = jsc_o+dl*(j-jsc_d)
     tot_non_zero = 0.0
@@ -4998,7 +4959,7 @@ subroutine downsample_mask_3d(field_in, field_out, dl, isc_o, jsc_o, isd_o, jsd_
       tot_non_zero = tot_non_zero + field_in(ii,jj,k)
     enddo ; enddo
     if (tot_non_zero > 0.0) field_out(i,j,k)=1.0
-  enddo ; enddo ; enddo
+  enddo
 
   !$omp target exit data map(delete: field_out)
 
@@ -5031,14 +4992,14 @@ subroutine copy_2d_into_3d(field_2d, field_3d)
   real, intent(in)    :: field_2d(:,:)
   real, intent(inout) :: field_3d(:,:,:)
   integer :: i, j, k
-  !$omp target teams distribute parallel do collapse(3)
-  do k = 1, size(field_3d, 3)
-    do j = 1, size(field_3d, 2)
-      do i = 1, size(field_3d, 1)
-        field_3d(i,j,k) = field_2d(i,j)
-      enddo
-    enddo
-  enddo
+  integer :: nk, nj, ni
+  nk = size(field_3d, 3)
+  nj = size(field_3d, 2)
+  ni = size(field_3d, 1)
+
+  do concurrent(k=1:nk, j=1:nj, i=1:ni)
+    field_3d(i,j,k) = field_2d(i,j)
+  end do
 end subroutine copy_2d_into_3d
 
 end module MOM_diag_mediator
