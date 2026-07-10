@@ -253,6 +253,8 @@ type, public :: hor_visc_CS ; private
 
 end type hor_visc_CS
 
+  integer, parameter :: nkblock = 1
+
 contains
 
 !> Calculates the acceleration due to the horizontal viscosity.
@@ -306,7 +308,7 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
   type(stochastic_CS), intent(inout), optional :: STOCH !< Stochastic control structure
 
   ! Local variables
-  real, dimension(SZIB_(G),SZJ_(G)) :: &
+  real, dimension(SZIB_(G),SZJ_(G),nkblock) :: &
     Del2u, &      ! The u-component of the Laplacian of velocity [L-1 T-1 ~> m-1 s-1]
     h_u, &        ! Thickness interpolated to u points [H ~> m or kg m-2].
     vort_xy_dy, & ! y-derivative of vertical vorticity (d/dy(dv/dx - du/dy)) [L-1 T-1 ~> m-1 s-1]
@@ -447,7 +449,6 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
 
   logical :: rescale_Kh
   logical :: find_FrictWork
-  logical :: find_FrictWork_bh
   logical :: apply_OBC = .false.
   logical :: apply_OBC_strain
   logical :: use_MEKE_Ku
@@ -477,15 +478,6 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
     vert_vort_mag_smooth, &  ! magnitude of gradient of smoothed vertical vorticity (h or q) [L-1 T-1 ~> m-1 s-1]
     hrat_min, &     ! h_min divided by the thickness at the stress point (h or q) [nondim]
     visc_bound_rem  ! fraction of overall viscous bounds that remain to be applied (h or q) [nondim]
-
-  ! New variables: move these up once ready
-  logical :: use_Leith    ! True if any Leith parameterizations are enabled
-  logical :: use_vort_xy  ! True if vort_xy must be computed
-  logical :: use_Smag     ! True if a Smagorinsky viscosity is enabled
-
-  use_Leith = CS%Leith_Kh .or. CS%Leith_Ah .or. CS%use_Leithy
-  use_vort_xy = use_Leith .or. CS%id_vort_xy_q > 0 .or. CS%use_ZB2020
-  use_Smag = CS%Smagorinsky_Kh .or. CS%Smagorinsky_Ah
 
   is  = G%isc  ; ie  = G%iec  ; js  = G%jsc  ; je  = G%jec ; nz = GV%ke
   Isq = G%IscB ; Ieq = G%IecB ; Jsq = G%JscB ; Jeq = G%JecB
@@ -527,11 +519,10 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
 
   if (.not.(CS%Laplacian .or. CS%biharmonic)) return
 
-  find_FrictWork = CS%id_FrictWork > 0 .or. CS%id_FrictWorkIntz > 0 &
-      .or. allocated(MEKE%mom_src)
-  find_FrictWork_bh = CS%id_FrictWork_bh > 0 .or. CS%id_FrictWorkIntz_bh > 0 &
-      .or. allocated(MEKE%mom_src_bh)
+  find_FrictWork = (CS%id_FrictWork > 0)
+  if (CS%id_FrictWorkIntz > 0) find_FrictWork = .true.
 
+  if (allocated(MEKE%mom_src)) find_FrictWork = .true.
   use_kh_struct = allocated(VarMix%BS_struct)
   backscat_subround = 0.0
   if (find_FrictWork .and. allocated(MEKE%mom_src) .and. (MEKE%backscatter_Ro_c > 0.0) .and. &
@@ -584,15 +575,15 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
     str_xy_GME(:,:) = 0.0
 
     ! Get barotropic velocities and their gradients
-    call barotropic_get_tav(BT, ubtav, vbtav, G, US)
+    call barotropic_get_tav(BT, ubtav(:,:,1), vbtav, G, US)
 
-    call pass_vector(ubtav, vbtav, G%Domain)
+    call pass_vector(ubtav(:,:,1), vbtav, G%Domain)
     call pass_var(h, G%domain, halo=2)
 
     ! Calculate the barotropic horizontal tension
     do j=js-2,je+2 ; do i=is-2,ie+2
-      dudx_bt(i,j) = CS%DY_dxT(i,j)*((G%IdyCu(I,j) * ubtav(I,j)) - &
-                                     (G%IdyCu(I-1,j) * ubtav(I-1,j)))
+      dudx_bt(i,j) = CS%DY_dxT(i,j)*((G%IdyCu(I,j) * ubtav(I,j,1)) - &
+                                     (G%IdyCu(I-1,j) * ubtav(I-1,j,1)))
       dvdy_bt(i,j) = CS%DX_dyT(i,j)*((G%IdxCv(i,J) * vbtav(i,J)) - &
                                      (G%IdxCv(i,J-1) * vbtav(i,J-1)))
     enddo ; enddo
@@ -604,8 +595,8 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
     do J=Jsq-2,Jeq+2 ; do I=Isq-2,Ieq+2
       dvdx_bt(I,J) = CS%DY_dxBu(I,J)*((vbtav(i+1,J)*G%IdyCv(i+1,J)) &
                                     - (vbtav(i,J)*G%IdyCv(i,J)))
-      dudy_bt(I,J) = CS%DX_dyBu(I,J)*((ubtav(I,j+1)*G%IdxCu(I,j+1)) &
-                                    - (ubtav(I,j)*G%IdxCu(I,j)))
+      dudy_bt(I,J) = CS%DX_dyBu(I,J)*((ubtav(I,j+1,1)*G%IdxCu(I,j+1)) &
+                                    - (ubtav(I,j,1)*G%IdxCu(I,j)))
     enddo ; enddo
 
     if (CS%no_slip) then
@@ -685,50 +676,70 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
     ! call pass_vector(slope_x, slope_y, G%Domain, halo=2)
   endif
 
-  !$omp target enter data map(alloc: dudx, dudy, dvdx, dvdy, sh_xx, sh_xy)
-  !$omp target enter data map(alloc: h_u, h_v, hq)
-  !$omp target enter data map(alloc: str_xx, str_xy)
-  !$omp target enter data map(alloc: Del2u, Del2v) if (CS%biharmonic)
-  !$omp target enter data map(alloc: dDel2vdx, dDel2udy) if (CS%biharmonic)
-  !$omp target enter data map(alloc: Shear_mag) if (use_Smag)
-  !$omp target enter data map(alloc: Kh) if (CS%Laplacian)
-  !$omp target enter data map(alloc: Ah) if (CS%biharmonic)
-  ! TODO: Only needed if FrictWork_bh is true, and currently only used on CPU,
-  !   but I do not yet see any benefit to breaking up the calculation.
-  !$omp target enter data map(alloc: bhstr_xx, bhstr_xy) if (CS%biharmonic)
-
-  !$omp target enter data map(alloc: hrat_min) &
-  !$omp   if (CS%bound_Kh .or. CS%bound_Ah)
-  !$omp target enter data map(alloc: visc_bound_rem) &
-  !$omp   if (CS%bound_Kh .or. CS%bound_Ah)
-  !$omp target enter data map(alloc: sh_xy_q) &
-  !$omp   if (CS%id_sh_xy_q > 0)
-
+  !$OMP parallel do default(none) if (.not. CS%smooth_AH) &
+  !$OMP shared( &
+  !$OMP   CS, G, GV, US, OBC, VarMix, MEKE, u, v, h, uh, vh, &
+  !$OMP   is, ie, js, je, Isq, Ieq, Jsq, Jeq, nz, &
+  !$OMP   is_vort, ie_vort, js_vort, je_vort, &
+  !$OMP   is_Kh, ie_Kh, js_Kh, je_Kh, &
+  !$OMP   apply_OBC, apply_OBC_strain, rescale_Kh, find_FrictWork, use_kh_struct, skeb_use_frict, &
+  !$OMP   use_MEKE_Ku, use_MEKE_Au, u_smooth, v_smooth, use_cont_huv, slope_x, slope_y, dz, &
+  !$OMP   backscat_subround, GME_effic_h, GME_effic_q, &
+  !$OMP   h_neglect, h_neglect3, inv_PI3, inv_PI6, &
+  !$OMP   diffu, diffv, Kh_h, Kh_q, Ah_h, Ah_q, FrictWork, FrictWork_bh, FrictWork_GME, &
+  !$OMP   div_xx_h, sh_xx_h, vort_xy_q, sh_xy_q, GME_coeff_h, GME_coeff_q, &
+  !$OMP   KH_u_GME, KH_v_GME, grid_Re_Kh, grid_Re_Ah, NoSt, ShSt, hu_cont, hv_cont, STOCH &
+  !$OMP ) &
+  !$OMP private( &
+  !$OMP   i, j, k, n, tmp, &
+  !$OMP   dudx, dudy, dvdx, dvdy, sh_xx, sh_xy, h_u, h_v, &
+  !$OMP   Del2u, Del2v, DY_dxBu, DX_dyBu, sh_xx_bt, sh_xy_bt, &
+  !$OMP   str_xx, str_xy, bhstr_xx, bhstr_xy, str_xx_GME, str_xy_GME, &
+  !$OMP   vort_xy, vort_xy_dx, vort_xy_dy, div_xx, div_xx_dx, div_xx_dy, &
+  !$OMP   grad_div_mag_h, grad_div_mag_q, grad_vort_mag_h, grad_vort_mag_q, &
+  !$OMP   grad_vort, grad_vort_qg, grad_vort_mag_h_2d, grad_vort_mag_q_2d, &
+  !$OMP   sh_xx_sq, sh_xy_sq, meke_res_fn, Shear_mag, Shear_mag_bc, vert_vort_mag, &
+  !$OMP   h_min, hrat_min, visc_bound_rem, Kh_max_here, &
+  !$OMP   grid_Ah, grid_Kh, d_Del2u, d_Del2v, d_str, &
+  !$OMP   Kh, Ah, AhSm, AhLth, local_strain, Sh_F_pow, &
+  !$OMP   dDel2vdx, dDel2udy, Del2vort_q, Del2vort_h, KE, &
+  !$OMP   h2uq, h2vq, hu, hv, hq, FatH, RoScl, GME_coeff, &
+  !$OMP   dudx_smooth, dudy_smooth, dvdx_smooth, dvdy_smooth, &
+  !$OMP   vort_xy_smooth, vort_xy_dx_smooth, vort_xy_dy_smooth, &
+  !$OMP   sh_xx_smooth, sh_xy_smooth, &
+  !$OMP   vert_vort_mag_smooth, m_leithy, Ah_sq, AhLthy, &
+  !$OMP   Kh_BS, str_xx_bs, str_xy_bs, bs_coeff_h, bs_coeff_q &
+  !$OMP ) &
+  !$OMP firstprivate( &
+  !$OMP   visc_limit_h, visc_limit_h_frac, visc_limit_h_flag, &
+  !$OMP   visc_limit_q, visc_limit_q_frac, visc_limit_q_flag &
+  !$OMP )
   do k=1,nz
+
     ! The following are the forms of the horizontal tension and horizontal
     ! shearing strain advocated by Smagorinsky (1993) and discussed in
     ! Griffies and Hallberg (2000).
 
+    ! NOTE: There is a ~1% speedup when the tension and shearing loops below
+    !   are fused (presumably due to shared access of Id[xy]C[uv]).  However,
+    !   this breaks the center/vertex index case convention, and also evaluates
+    !   the dudx and dvdy terms beyond their valid bounds.
+    ! TODO: Explore methods for retaining both the syntax and speedup.
+
     ! Calculate horizontal tension
-    do concurrent (j=Jsq-1:Jeq+2, i=Isq-1:Ieq+2)
+    do j=Jsq-1,Jeq+2 ; do i=Isq-1,Ieq+2
       dudx(i,j) = CS%DY_dxT(i,j)*((G%IdyCu(I,j) * u(I,j,k)) - &
                                   (G%IdyCu(I-1,j) * u(I-1,j,k)))
-    enddo
-
-    do concurrent (j=Jsq-1:Jeq+2, i=Isq-1:Ieq+2)
       dvdy(i,j) = CS%DX_dyT(i,j)*((G%IdxCv(i,J) * v(i,J,k)) - &
                                   (G%IdxCv(i,J-1) * v(i,J-1,k)))
-    enddo
-
-    do concurrent (j=Jsq-1:Jeq+2, i=Isq-1:Ieq+2)
       sh_xx(i,j) = dudx(i,j) - dvdy(i,j)
-    enddo
+    enddo ; enddo
 
     ! Components for the shearing strain
-    do concurrent (J=js_vort:je_vort, I=is_vort:ie_vort)
+    do J=js_vort,je_vort ; do I=is_vort,ie_vort
       dvdx(I,J) = CS%DY_dxBu(I,J)*((v(i+1,J,k)*G%IdyCv(i+1,J)) - (v(i,J,k)*G%IdyCv(i,J)))
       dudy(I,J) = CS%DX_dyBu(I,J)*((u(I,j+1,k)*G%IdxCu(I,j+1)) - (u(I,j,k)*G%IdxCu(I,j)))
-    enddo
+    enddo ; enddo
 
     if (CS%use_Leithy) then
       ! Calculate horizontal tension from smoothed velocity
@@ -750,7 +761,6 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
     endif ! use Leith+E
 
     if (CS%id_normstress > 0) then
-      !$omp target update from(sh_xx)
       do j=js,je ; do i=is,ie
         NoSt(i,j,k) = sh_xx(i,j)
       enddo ; enddo
@@ -762,35 +772,31 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
     ! even with OBCs if the accelerations are zeroed at OBC points, in which
     ! case the j-loop for h_u could collapse to j=js=1,je+1. -RWH
     if (use_cont_huv) then
-      do concurrent (j=js-2:je+2, I=Isq-1:Ieq+1)
-        h_u(I,j) = hu_cont(I,j,k)
-      enddo
-      do concurrent (J=Jsq-1:Jeq+1, i=is-2:ie+2)
+      do j=js-2,je+2 ; do I=Isq-1,Ieq+1
+        h_u(I,j,1) = hu_cont(I,j,k)
+      enddo ; enddo
+      do J=Jsq-1,Jeq+1 ; do i=is-2,ie+2
         h_v(i,J) = hv_cont(i,J,k)
-      enddo
+      enddo ; enddo
     elseif (CS%use_land_mask) then
-      do concurrent (j=js-2:je+2, I=is-2:Ieq+1)
-        h_u(I,j) = 0.5 * (G%mask2dT(i,j)*h(i,j,k) + G%mask2dT(i+1,j)*h(i+1,j,k))
-      enddo
-      do concurrent (J=js-2:Jeq+1, i=is-2:ie+2)
+      do j=js-2,je+2 ; do I=is-2,Ieq+1
+        h_u(I,j,1) = 0.5 * (G%mask2dT(i,j)*h(i,j,k) + G%mask2dT(i+1,j)*h(i+1,j,k))
+      enddo ; enddo
+      do J=js-2,Jeq+1 ; do i=is-2,ie+2
         h_v(i,J) = 0.5 * (G%mask2dT(i,j)*h(i,j,k) + G%mask2dT(i,j+1)*h(i,j+1,k))
-      enddo
+      enddo ; enddo
     else
-      do concurrent (j=js-2:je+2, I=is-2:Ieq+1)
-        h_u(I,j) = 0.5 * (h(i,j,k) + h(i+1,j,k))
-      enddo
-      do concurrent (J=js-2:Jeq+1, i=is-2:ie+2)
+      do j=js-2,je+2 ; do I=is-2,Ieq+1
+        h_u(I,j,1) = 0.5 * (h(i,j,k) + h(i+1,j,k))
+      enddo ; enddo
+      do J=js-2,Jeq+1 ; do i=is-2,ie+2
         h_v(i,J) = 0.5 * (h(i,j,k) + h(i,j+1,k))
-      enddo
+      enddo ; enddo
     endif
 
     ! Adjust contributions to shearing strain and interpolated values of
     ! thicknesses on open boundaries.
-    if (apply_OBC) then
-      !$omp target update from(dvdx, dudy, h_u, h_v)
-      ! TODO: Reindent this later
-      do n=1,OBC%number_of_segments
-
+    if (apply_OBC) then ; do n=1,OBC%number_of_segments
       J = OBC%segment(n)%HI%JsdB ; I = OBC%segment(n)%HI%IsdB
       if (apply_OBC_strain) then
         if (OBC%segment(n)%is_N_or_S .and. (J >= Js_vort) .and. (J <= Je_vort)) then
@@ -869,13 +875,13 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
       elseif (OBC%segment(n)%direction == OBC_DIRECTION_E) then
         if ((I >= is-2) .and. (I <= Ieq+1)) then
           do j = max(js-2,OBC%segment(n)%HI%jsd), min(je+2,OBC%segment(n)%HI%jed)
-            h_u(I,j) = h(i,j,k)
+            h_u(I,j,1) = h(i,j,k)
           enddo
         endif
       elseif (OBC%segment(n)%direction == OBC_DIRECTION_W) then
         if ((I >= is-2) .and. (I <= Ieq+1)) then
           do j = max(js-2,OBC%segment(n)%HI%jsd), min(je+2,OBC%segment(n)%HI%jed)
-            h_u(I,j) = h(i+1,j,k)
+            h_u(I,j,1) = h(i+1,j,k)
           enddo
         endif
       endif
@@ -886,13 +892,13 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
       if (OBC%segment(n)%direction == OBC_DIRECTION_N) then
         if ((J >= js-2) .and. (J <= je)) then
           do I = max(is-2,OBC%segment(n)%HI%IsdB), min(Ieq+1,OBC%segment(n)%HI%IedB)
-            h_u(I,j+1) = h_u(I,j)
+            h_u(I,j+1,1) = h_u(I,j,1)
           enddo
         endif
       elseif (OBC%segment(n)%direction == OBC_DIRECTION_S) then
         if ((J >= js-1) .and. (J <= je+1)) then
           do I = max(is-2,OBC%segment(n)%HI%isd), min(Ieq+1,OBC%segment(n)%HI%ied)
-            h_u(I,j) = h_u(I,j+1)
+            h_u(I,j,1) = h_u(I,j+1,1)
           enddo
         endif
       elseif (OBC%segment(n)%direction == OBC_DIRECTION_E) then
@@ -908,27 +914,20 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
           enddo
         endif
       endif
-    enddo
-    ! TODO: Fix indentation
-    !$omp target update to(dvdx, dudy, h_u, h_v)
-    endif
+    enddo ; endif
 
     ! Shearing strain (including no-slip boundary conditions at the 2-D land-sea mask).
     ! dudy and dvdx include modifications at OBCs from above.
     if (CS%no_slip) then
-      do concurrent (J=js-2:Jeq+1, I=is-2:Ieq+1)
+      do J=js-2,Jeq+1 ; do I=is-2,Ieq+1
         sh_xy(I,J) = (2.0-G%mask2dBu(I,J)) * ( dvdx(I,J) + dudy(I,J) )
-      enddo
+        if (CS%id_shearstress > 0) ShSt(I,J,k) = sh_xy(I,J)
+      enddo ; enddo
     else
-      do concurrent (J=js-2:Jeq+1, I=is-2:Ieq+1)
+      do J=js-2,Jeq+1 ; do I=is-2,Ieq+1
         sh_xy(I,J) = G%mask2dBu(I,J) * ( dvdx(I,J) + dudy(I,J) )
-      enddo
-    endif
-
-    if (CS%id_shearstress > 0) then
-      do concurrent (J=js-2:Jeq+1, I=is-2:Ieq+1)
-        ShSt(I,J,k) = sh_xy(I,J)
-      enddo
+        if (CS%id_shearstress > 0) ShSt(I,J,k) = sh_xy(I,J)
+      enddo ; enddo
     endif
 
     if (CS%use_Leithy) then
@@ -947,18 +946,15 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
 
     !  Evaluate Del2u = x.Div(Grad u) and Del2v = y.Div( Grad u)
     if (CS%biharmonic) then
-      do concurrent (j=js-1:Jeq+1, I=Isq-1:Ieq+1)
-        Del2u(I,j) = CS%Idx2dyCu(I,j) * ((CS%dx2q(I,J)*sh_xy(I,J)) - (CS%dx2q(I,J-1)*sh_xy(I,J-1))) + &
+      do j=js-1,Jeq+1 ; do I=Isq-1,Ieq+1
+        Del2u(I,j,1) = CS%Idx2dyCu(I,j) * ((CS%dx2q(I,J)*sh_xy(I,J)) - (CS%dx2q(I,J-1)*sh_xy(I,J-1))) + &
                      CS%Idxdy2u(I,j) * ((CS%dy2h(i+1,j)*sh_xx(i+1,j)) - (CS%dy2h(i,j)*sh_xx(i,j)))
-      enddo
-
-      do concurrent (J=Jsq-1:Jeq+1, i=is-1:Ieq+1)
+      enddo ; enddo
+      do J=Jsq-1,Jeq+1 ; do i=is-1,Ieq+1
         Del2v(i,J) = CS%Idxdy2v(i,J) * ((CS%dy2q(I,J)*sh_xy(I,J)) - (CS%dy2q(I-1,J)*sh_xy(I-1,J))) - &
                      CS%Idx2dyCv(i,J) * ((CS%dx2h(i,j+1)*sh_xx(i,j+1)) - (CS%dx2h(i,j)*sh_xx(i,j)))
-      enddo
-
+      enddo ; enddo
       if (apply_OBC) then ; if (OBC%zero_biharmonic) then
-        !$omp target update from(Del2u, Del2v)
         do n=1,OBC%number_of_segments
           I = OBC%segment(n)%HI%IsdB ; J = OBC%segment(n)%HI%JsdB
           if (OBC%segment(n)%is_N_or_S .and. (J >= Jsq-1) .and. (J <= Jeq+1)) then
@@ -967,21 +963,15 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
             enddo
           elseif (OBC%segment(n)%is_E_or_W .and. (I >= Isq-1) .and. (I <= Ieq+1)) then
             do j=OBC%segment(n)%HI%jsd,OBC%segment(n)%HI%jed
-              Del2u(I,j) = 0.
+              Del2u(I,j,1) = 0.
             enddo
           endif
         enddo
-        !$omp target update to(Del2u, Del2v)
       endif ; endif
     endif
 
     ! Vorticity
-
-    ! NOTE: Keep Leith code on CPU for now, but moving it should be
-    ! straightforward.
-
-    if (use_vort_xy) then
-      !$omp target update from(dvdx, dudy)
+    if ((CS%Leith_Kh) .or. (CS%Leith_Ah) .or. (CS%use_Leithy) .or. (CS%id_vort_xy_q>0) .or. CS%use_ZB2020) then
       if (CS%no_slip) then
         do J=js_vort,je_vort ; do I=is_vort,ie_vort
           vort_xy(I,J) = (2.0-G%mask2dBu(I,J)) * ( dvdx(I,J) - dudy(I,J) )
@@ -1014,7 +1004,8 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
       endif
     endif
 
-    if (use_Leith) then
+
+    if ((CS%Leith_Kh) .or. (CS%Leith_Ah) .or. (CS%use_Leithy)) then
 
       ! Vorticity gradient
       do J=js-2,je_Kh ; do i=is_Kh-1,ie_Kh+1
@@ -1024,7 +1015,7 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
 
       do j=js_Kh-1,je_Kh+1 ; do I=is-2,ie_Kh
         DX_dyBu = G%dxBu(I,J) * G%IdyBu(I,J)
-        vort_xy_dy(I,j) = DX_dyBu * ((vort_xy(I,J) * G%IdxCv(i,J)) - (vort_xy(I,J-1) * G%IdxCv(i,J-1)))
+        vort_xy_dy(I,j,1) = DX_dyBu * ((vort_xy(I,J) * G%IdxCv(i,J)) - (vort_xy(I,J-1) * G%IdxCv(i,J-1)))
       enddo ; enddo
 
       if (CS%use_Leithy) then
@@ -1037,7 +1028,7 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
 
         do j=js_Kh,je_Kh ; do I=is_Kh-1,ie_Kh
           DX_dyBu = G%dxBu(I,J) * G%IdyBu(I,J)
-          vort_xy_dy_smooth(I,j) = DX_dyBu * &
+          vort_xy_dy_smooth(I,j,1) = DX_dyBu * &
                       ((vort_xy_smooth(I,J) * G%IdxCv(i,J)) - (vort_xy_smooth(I,J-1) * G%IdxCv(i,J-1)))
         enddo ; enddo
       endif ! If Leithy
@@ -1049,12 +1040,11 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
         DX_dyBu = G%dxBu(I,J) * G%IdyBu(I,J)
 
         Del2vort_q(I,J) = DY_dxBu * ((vort_xy_dx(i+1,J) * G%IdyCv(i+1,J)) - (vort_xy_dx(i,J) * G%IdyCv(i,J))) + &
-                          DX_dyBu * ((vort_xy_dy(I,j+1) * G%IdyCu(I,j+1)) - (vort_xy_dy(I,j) * G%IdyCu(I,j)))
+                          DX_dyBu * ((vort_xy_dy(I,j+1,1) * G%IdyCu(I,j+1)) - (vort_xy_dy(I,j,1) * G%IdyCu(I,j)))
       enddo ; enddo
       ! endif
 
       if (CS%modified_Leith) then
-        !$omp target update from(dudx, dvdy)
 
         ! Divergence
         do j=js_Kh-1,je_Kh+1 ; do i=is_Kh-1,ie_Kh+1
@@ -1063,7 +1053,7 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
 
         ! Divergence gradient
         do j=js-1,je+1 ; do I=is_Kh-1,ie_Kh
-          div_xx_dx(I,j) = G%IdxCu(I,j)*(div_xx(i+1,j) - div_xx(i,j))
+          div_xx_dx(I,j,1) = G%IdxCu(I,j)*(div_xx(i+1,j) - div_xx(i,j))
         enddo ; enddo
         do J=js_Kh-1,je_Kh ; do i=is-1,ie+1
           div_xx_dy(i,J) = G%IdyCv(i,J)*(div_xx(i,j+1) - div_xx(i,j))
@@ -1071,18 +1061,18 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
 
         ! Magnitude of divergence gradient
         do j=js_Kh,je_Kh ; do i=is_Kh,ie_Kh
-          grad_div_mag_h(i,j) = sqrt(((0.5*(div_xx_dx(I,j) + div_xx_dx(I-1,j)))**2) + &
+          grad_div_mag_h(i,j) = sqrt(((0.5*(div_xx_dx(I,j,1) + div_xx_dx(I-1,j,1)))**2) + &
                                      ((0.5*(div_xx_dy(i,J) + div_xx_dy(i,J-1)))**2))
         enddo ; enddo
         do J=js-1,Jeq ; do I=is-1,Ieq
-          grad_div_mag_q(I,J) = sqrt(((0.5*(div_xx_dx(I,j) + div_xx_dx(I,j+1)))**2) + &
+          grad_div_mag_q(I,J) = sqrt(((0.5*(div_xx_dx(I,j,1) + div_xx_dx(I,j+1,1)))**2) + &
                                      ((0.5*(div_xx_dy(i,J) + div_xx_dy(i+1,J)))**2))
         enddo ; enddo
 
       else
 
         do j=js-1,je+1 ; do I=is_Kh-1,ie_Kh
-          div_xx_dx(I,j) = 0.0
+          div_xx_dx(I,j,1) = 0.0
         enddo ; enddo
         do J=js_Kh-1,je_Kh ; do i=is-1,ie+1
           div_xx_dy(i,J) = 0.0
@@ -1097,14 +1087,12 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
       endif ! CS%modified_Leith
 
       ! Add in beta for the Leith viscosity
-      ! TODO: Move G%dF_dx, G%dF_dy to GPU
-
       if (CS%use_beta_in_Leith) then
         do J=js-2,Jeq+1 ; do i=is-1,ie+1
           vort_xy_dx(i,J) = vort_xy_dx(i,J) + 0.5 * ( G%dF_dx(i,j) + G%dF_dx(i,j+1))
         enddo ; enddo
         do j=js-1,je+1 ; do I=is-2,Ieq+1
-          vort_xy_dy(I,j) = vort_xy_dy(I,j) + 0.5 * ( G%dF_dy(i,j) + G%dF_dy(i+1,j))
+          vort_xy_dy(I,j,1) = vort_xy_dy(I,j,1) + 0.5 * ( G%dF_dy(i,j) + G%dF_dy(i+1,j))
         enddo ; enddo
       endif ! CS%use_beta_in_Leith
 
@@ -1112,53 +1100,53 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
 
         do j=js_Kh,je_Kh ; do i=is_Kh,ie_Kh
           grad_vort_mag_h_2d(i,j) = SQRT(((0.5*(vort_xy_dx(i,J) + vort_xy_dx(i,J-1)))**2) + &
-                                         ((0.5*(vort_xy_dy(I,j) + vort_xy_dy(I-1,j)))**2) )
+                                         ((0.5*(vort_xy_dy(I,j,1) + vort_xy_dy(I-1,j,1)))**2) )
         enddo ; enddo
         do J=js-1,Jeq ; do I=is-1,Ieq
           grad_vort_mag_q_2d(I,J) = SQRT(((0.5*(vort_xy_dx(i,J) + vort_xy_dx(i+1,J)))**2) + &
-                                         ((0.5*(vort_xy_dy(I,j) + vort_xy_dy(I,j+1)))**2) )
+                                         ((0.5*(vort_xy_dy(I,j,1) + vort_xy_dy(I,j+1,1)))**2) )
         enddo ; enddo
 
         ! This accumulates terms, some of which are in VarMix.
-        call calc_QG_Leith_viscosity(VarMix, G, GV, US, h, dz, k, div_xx_dx, div_xx_dy, &
-                                     slope_x, slope_y, vort_xy_dx, vort_xy_dy)
+        call calc_QG_Leith_viscosity(VarMix, G, GV, US, h, dz, k, div_xx_dx(:,:,1), div_xx_dy, &
+                                     slope_x, slope_y, vort_xy_dx, vort_xy_dy(:,:,1))
 
       endif
 
       do j=js_Kh,je_Kh ; do i=is_Kh,ie_Kh
         grad_vort_mag_h(i,j) = SQRT(((0.5*(vort_xy_dx(i,J) + vort_xy_dx(i,J-1)))**2) + &
-                                    ((0.5*(vort_xy_dy(I,j) + vort_xy_dy(I-1,j)))**2) )
+                                    ((0.5*(vort_xy_dy(I,j,1) + vort_xy_dy(I-1,j,1)))**2) )
       enddo ; enddo
       do J=js-1,Jeq ; do I=is-1,Ieq
         grad_vort_mag_q(I,J) = SQRT(((0.5*(vort_xy_dx(i,J) + vort_xy_dx(i+1,J)))**2) + &
-                                    ((0.5*(vort_xy_dy(I,j) + vort_xy_dy(I,j+1)))**2) )
+                                    ((0.5*(vort_xy_dy(I,j,1) + vort_xy_dy(I,j+1,1)))**2) )
       enddo ; enddo
 
       if (CS%use_Leithy) then
         do j=js_Kh,je_Kh ; do i=is_Kh,ie_Kh
           vert_vort_mag_smooth(i,j) = SQRT(((0.5*(vort_xy_dx_smooth(i,J) + &
                                                   vort_xy_dx_smooth(i,J-1)))**2) + &
-                                           ((0.5*(vort_xy_dy_smooth(I,j) + &
-                                                  vort_xy_dy_smooth(I-1,j)))**2) )
+                                           ((0.5*(vort_xy_dy_smooth(I,j,1) + &
+                                                  vort_xy_dy_smooth(I-1,j,1)))**2) )
         enddo ; enddo
       endif ! Leithy
 
     endif ! CS%Leith_Kh
 
     if ((CS%Smagorinsky_Kh) .or. (CS%Smagorinsky_Ah)) then
-      do concurrent (j=js_Kh:je_Kh, i=is_Kh:ie_Kh)
+      do j=js_Kh,je_Kh ; do i=is_Kh,ie_Kh
         sh_xx_sq = sh_xx(i,j)**2
         sh_xy_sq = 0.25 * ( ((sh_xy(I-1,J-1)**2) + (sh_xy(I,J)**2)) &
                           + ((sh_xy(I-1,J)**2) + (sh_xy(I,J-1)**2)) )
         Shear_mag(i,j) = sqrt(sh_xx_sq + sh_xy_sq)
-      enddo
+      enddo ; enddo
     endif
 
     if (CS%bound_Ah .or. CS%bound_Kh) then
-      do concurrent (j=js_Kh:je_Kh, i=is_Kh:ie_Kh)
-        h_min = min(h_u(I,j), h_u(I-1,j), h_v(i,J), h_v(i,J-1))
+      do j=js_Kh,je_Kh ; do i=is_Kh,ie_Kh
+        h_min = min(h_u(I,j,1), h_u(I-1,j,1), h_v(i,J), h_v(i,J-1))
         hrat_min(i,j) = min(1.0, h_min / (h(i,j,k) + h_neglect))
-      enddo
+      enddo ; enddo
     endif
 
     if (CS%Laplacian) then
@@ -1181,55 +1169,40 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
       endif
 
       ! Static (pre-computed) background viscosity
-      do concurrent (j=js_Kh:je_Kh, i=is_Kh:ie_Kh)
+      do j=js_Kh,je_Kh ; do i=is_Kh,ie_Kh
         Kh(i,j) = CS%Kh_bg_xx(i,j)
-      enddo
+      enddo ; enddo
 
-      if (CS%add_LES_viscosity) then
-        if (CS%Smagorinsky_Kh) then
-          do concurrent (j=js_Kh:je_Kh, i=is_Kh:ie_Kh)
+      ! NOTE: The following do-block can be decomposed and vectorized after the
+      !   stack size has been reduced.
+      do j=js_Kh,je_Kh ; do i=is_Kh,ie_Kh
+        if (CS%add_LES_viscosity) then
+          if (CS%Smagorinsky_Kh) &
             Kh(i,j) = Kh(i,j) + CS%Laplac2_const_xx(i,j) * Shear_mag(i,j)
-          enddo
-        endif
-
-        if (CS%Leith_Kh) then
-          do concurrent (j=js_Kh:je_Kh, i=is_Kh:ie_Kh)
-            Kh(i,j) = Kh(i,j) &
-                + CS%Laplac3_const_xx(i,j) * vert_vort_mag(i,j) * inv_PI3
-          enddo
-        endif
-      else
-        if (CS%Smagorinsky_Kh) then
-          do concurrent (j=js_Kh:je_Kh, i=is_Kh:ie_Kh)
+          if (CS%Leith_Kh) &
+            Kh(i,j) = Kh(i,j) + CS%Laplac3_const_xx(i,j) * vert_vort_mag(i,j) * inv_PI3
+        else
+          if (CS%Smagorinsky_Kh) &
             Kh(i,j) = max(Kh(i,j), CS%Laplac2_const_xx(i,j) * Shear_mag(i,j))
-          enddo
+          if (CS%Leith_Kh) &
+            Kh(i,j) = max(Kh(i,j), CS%Laplac3_const_xx(i,j) * vert_vort_mag(i,j) * inv_PI3)
         endif
-
-        if (CS%Leith_Kh) then
-          do concurrent (j=js_Kh:je_Kh, i=is_Kh:ie_Kh)
-            Kh(i,j) = max(Kh(i,j), &
-                CS%Laplac3_const_xx(i,j) * vert_vort_mag(i,j) * inv_PI3)
-          enddo
-        endif
-      endif
+      enddo ; enddo
 
       ! All viscosity contributions above are subject to resolution scaling
 
       if (rescale_Kh) then
-        !$omp target update from(Kh)
         do j=js_Kh,je_Kh ; do i=is_Kh,ie_Kh
           Kh(i,j) = VarMix%Res_fn_h(i,j) * Kh(i,j)
         enddo ; enddo
-        !$omp target update to(Kh)
       endif
 
       ! Place a floor on the viscosity, if desired.
-      do concurrent (j=js_Kh:je_Kh, i=is_Kh:ie_Kh)
+      do j=js_Kh,je_Kh ; do i=is_Kh,ie_Kh
         Kh(i,j) = max(Kh(i,j), CS%Kh_bg_min)
-      enddo
+      enddo ; enddo
 
       if (use_MEKE_Ku .and. .not. CS%EY24_EBT_BS) then
-        !$omp target update from(Kh)
         ! *Add* the MEKE contribution (which might be negative)
         if (use_kh_struct) then
           if (CS%res_scale_MEKE) then
@@ -1252,24 +1225,18 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
             enddo ; enddo
           endif
         endif
-        !$omp target update to(Kh)
       endif
 
       if (CS%anisotropic) then
-        !$omp target update from(Kh)
         do j=js_Kh,je_Kh ; do i=is_Kh,ie_Kh
           ! *Add* the tension component of anisotropic viscosity
           Kh(i,j) = Kh(i,j) + CS%Kh_aniso * (1. - CS%n1n2_h(i,j)**2)
         enddo ; enddo
-        !$omp target update to(Kh)
       endif
-
-      !$omp target update to(Kh) &
-      !$omp   if ((use_MEKE_Ku .and. .not. CS%EY24_EBT_BS) .or. CS%anisotropic)
 
       ! Newer method of bounding for stability
       if ((CS%bound_Kh) .and. (CS%bound_Ah)) then
-        do concurrent (j=js_Kh:je_Kh, i=is_Kh:ie_Kh)
+        do j=js_Kh,je_Kh ; do i=is_Kh,ie_Kh
           visc_bound_rem(i,j) = 1.0
           Kh_max_here = hrat_min(i,j) * CS%Kh_Max_xx(i,j)
           if (Kh(i,j) >= Kh_max_here) then
@@ -1278,32 +1245,28 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
           elseif ((Kh(i,j) > 0.0) .or. (CS%backscatter_underbound .and. (Kh_max_here > 0.0))) then
             visc_bound_rem(i,j) = 1.0 - Kh(i,j) / Kh_max_here
           endif
-        enddo
+        enddo ; enddo
       elseif (CS%bound_Kh) then
-        do concurrent (j=js_Kh:je_Kh, i=is_Kh:ie_Kh)
+        do j=js_Kh,je_Kh ; do i=is_Kh,ie_Kh
           Kh(i,j) = min(Kh(i,j), hrat_min(i,j) * CS%Kh_Max_xx(i,j))
-        enddo
+        enddo ; enddo
       endif
 
       ! In Leith+E parameterization Kh is computed after Ah in the biharmonic loop.
       ! The harmonic component of str_xx is added in the biharmonic loop.
       if (CS%use_Leithy) then
-        !$omp target update from(Kh)
         do j=js_Kh,je_Kh ; do i=is_Kh,ie_Kh
           Kh(i,j) = 0.
         enddo ; enddo
-        !$omp target update to(Kh)
       endif
 
       if (CS%id_Kh_h>0 .or. CS%debug) then
-        !$omp target update from(Kh)
         do j=js_Kh,je_Kh ; do i=is_Kh,ie_Kh
           Kh_h(i,j,k) = Kh(i,j)
         enddo ; enddo
       endif
 
       if (CS%id_grid_Re_Kh>0) then
-        !$omp target update from(Kh)
         do j=js,je ; do i=is,ie
           KE = 0.125*(((u(I,j,k)+u(I-1,j,k))**2) + ((v(i,J,k)+v(i,J-1,k))**2))
           grid_Kh = max(Kh(i,j), CS%min_grid_Kh)
@@ -1312,77 +1275,69 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
       endif
 
       if (CS%id_div_xx_h>0) then
-        !$omp target update from(dudx, dvdy)
         do j=js,je ; do i=is,ie
           div_xx_h(i,j,k) = dudx(i,j) + dvdy(i,j)
         enddo ; enddo
       endif
 
       if (CS%id_sh_xx_h>0) then
-        !$omp target update from(sh_xx)
         do j=js,je ; do i=is,ie
           sh_xx_h(i,j,k) = sh_xx(i,j)
         enddo ; enddo
       endif
 
-      do concurrent (j=Jsq:Jeq+1, i=Isq:Ieq+1)
+      do j=Jsq,Jeq+1 ; do i=Isq,Ieq+1
         str_xx(i,j) = -Kh(i,j) * sh_xx(i,j)
-      enddo
+      enddo ; enddo
     else
-      do concurrent (j=Jsq:Jeq+1, i=Isq:Ieq+1)
+      do j=Jsq,Jeq+1 ; do i=Isq,Ieq+1
         str_xx(i,j) = 0.0
-      enddo
+      enddo ; enddo
     endif ! Get Kh at h points and get Laplacian component of str_xx
 
     if (CS%anisotropic) then
-      !$omp target update from(str_xx, sh_xy)
       do j=Jsq,Jeq+1 ; do i=Isq,Ieq+1
         ! Shearing-strain averaged to h-points
         local_strain = 0.25 * ( (sh_xy(I,J) + sh_xy(I-1,J-1)) + (sh_xy(I-1,J) + sh_xy(I,J-1)) )
         ! *Add* the shear-strain contribution to the xx-component of stress
         str_xx(i,j) = str_xx(i,j) - CS%Kh_aniso * CS%n1n2_h(i,j) * CS%n1n1_m_n2n2_h(i,j) * local_strain
       enddo ; enddo
-      !$omp target update to(str_xx)
     endif
 
     if (CS%biharmonic) then
       ! Determine the biharmonic viscosity at h points, using the
       ! largest value from several parameterizations. Also get the
       ! biharmonic component of str_xx.
-      do concurrent (j=js_Kh:je_Kh, i=is_Kh:ie_Kh)
+      do j=js_Kh,je_Kh ; do i=is_Kh,ie_Kh
         Ah(i,j) = CS%Ah_bg_xx(i,j)
-      enddo
+      enddo ; enddo
 
       if ((CS%Smagorinsky_Ah) .or. (CS%Leith_Ah) .or. (CS%use_Leithy)) then
         if (CS%Smagorinsky_Ah) then
           if (CS%bound_Coriolis) then
-            do concurrent (j=js_Kh:je_Kh, i=is_Kh:ie_Kh)
+            do j=js_Kh,je_Kh ; do i=is_Kh,ie_Kh
               AhSm = Shear_mag(i,j) * (CS%Biharm_const_xx(i,j) &
                   + CS%Biharm_const2_xx(i,j) * Shear_mag(i,j))
               Ah(i,j) = max(Ah(i,j), AhSm)
-            enddo
+            enddo ; enddo
           else
-            do concurrent (j=js_Kh:je_Kh, i=is_Kh:ie_Kh)
+            do j=js_Kh,je_Kh ; do i=is_Kh,ie_Kh
               AhSm = CS%Biharm_const_xx(i,j) * Shear_mag(i,j)
               Ah(i,j) = max(Ah(i,j), AhSm)
-            enddo
+            enddo ; enddo
           endif
         endif
 
         if (CS%Leith_Ah) then
-          !$omp target update from(Ah)
           do j=js_Kh,je_Kh ; do i=is_Kh,ie_Kh
             Del2vort_h = 0.25 * ((Del2vort_q(I,J) + Del2vort_q(I-1,J-1)) + &
                                  (Del2vort_q(I-1,J) + Del2vort_q(I,J-1)))
             AhLth = CS%Biharm6_const_xx(i,j) * abs(Del2vort_h) * inv_PI6
             Ah(i,j) = max(Ah(i,j), AhLth)
           enddo ; enddo
-          !$omp target update to(Ah)
         endif
 
         if (CS%use_Leithy) then
-          ! TODO: !$omp target update from(...?)
-
           ! Get m_leithy
           if (CS%smooth_Ah) m_leithy(:,:) = 0.0 ! This is here to initialize domain edge halo values.
           do j=js_Kh,je_Kh ; do i=is_Kh,ie_Kh
@@ -1435,52 +1390,47 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
             enddo ; enddo
           endif
         endif
+
       endif ! Smagorinsky_Ah or Leith_Ah or Leith+E
 
       if (use_MEKE_Au) then
         ! *Add* the MEKE contribution
-        !$omp target update from(Ah)
         do j=js_Kh,je_Kh ; do i=is_Kh,ie_Kh
           Ah(i,j) = Ah(i,j) + MEKE%Au(i,j)
         enddo ; enddo
-        !$omp target update to(Ah)
       endif
 
       if (CS%Re_Ah > 0.0) then
-        !$omp target update from(Ah)
         do j=js_Kh,je_Kh ; do i=is_Kh,ie_Kh
           KE = 0.125*(((u(I,j,k)+u(I-1,j,k))**2) + ((v(i,J,k)+v(i,J-1,k))**2))
           Ah(i,j) = sqrt(KE) * CS%Re_Ah_const_xx(i,j)
         enddo ; enddo
-        !$omp target update to(Ah)
       endif
 
       if (CS%bound_Ah) then
         if (CS%bound_Kh) then
-          do concurrent (j=js_Kh:je_Kh, i=is_Kh:ie_Kh)
+          do j=js_Kh,je_Kh ; do i=is_Kh,ie_Kh
             Ah(i,j) = min(Ah(i,j), visc_bound_rem(i,j) * hrat_min(i,j) * CS%Ah_Max_xx(i,j))
-          enddo
+          enddo ; enddo
         else
-          do concurrent (j=js_Kh:je_Kh, i=is_Kh:ie_Kh)
+          do j=js_Kh,je_Kh ; do i=is_Kh,ie_Kh
             Ah(i,j) = min(Ah(i,j), hrat_min(i,j) * CS%Ah_Max_xx(i,j))
-          enddo
+          enddo ; enddo
         endif
       endif
 
       if (CS%EY24_EBT_BS) then
-        !$omp target update from(Ah)
-        do j=js_Kh,je_Kh ; do i=is_Kh,ie_Kh
-          tmp = CS%KS_coef * hrat_min(i,j) * CS%Ah_Max_xx_KS(i,j)
-          visc_limit_h(i,j,k) = tmp
-          visc_limit_h_frac(i,j,k) = Ah(i,j) / (CS%KS_coef * hrat_min(i,j) * CS%Ah_Max_xx_KS(i,j))
-          if (Ah(i,j) >= tmp) then
-            visc_limit_h_flag(i,j,k) = 1.
-          endif
-        enddo ; enddo
+          do j=js_Kh,je_Kh ; do i=is_Kh,ie_Kh
+            tmp = CS%KS_coef * hrat_min(i,j) * CS%Ah_Max_xx_KS(i,j)
+            visc_limit_h(i,j,k) = tmp
+            visc_limit_h_frac(i,j,k) = Ah(i,j) / (CS%KS_coef * hrat_min(i,j) * CS%Ah_Max_xx_KS(i,j))
+            if (Ah(i,j) >= tmp) then
+              visc_limit_h_flag(i,j,k) = 1.
+            endif
+          enddo ; enddo
       endif
 
       if ((CS%id_Ah_h>0) .or. CS%debug .or. CS%use_Leithy) then
-        !$omp target update from(Ah)
         do j=js_Kh,je_Kh ; do i=is_Kh,ie_Kh
           Ah_h(i,j,k) = Ah(i,j)
         enddo ; enddo
@@ -1489,16 +1439,13 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
       if (CS%use_Leithy) then
         ! Compute Leith+E Kh after bounds have been applied to Ah
         ! and after it has been smoothed. Kh = -m_leithy * Ah
-        !$omp target update from(Ah, Kh)
         do j=js_Kh,je_Kh ; do i=is_Kh,ie_Kh
           Kh(i,j) = -m_leithy(i,j) * Ah(i,j)
           Kh_h(i,j,k) = Kh(i,j)
         enddo ; enddo
-        !$omp target update to(Kh)
       endif
 
       if (CS%id_grid_Re_Ah > 0) then
-        !$omp target update from(Ah)
         do j=js,je ; do i=is,ie
           KE = 0.125 * (((u(I,j,k) + u(I-1,j,k))**2) + ((v(i,J,k) + v(i,J-1,k))**2))
           grid_Ah = max(Ah(i,j), CS%min_grid_Ah)
@@ -1506,30 +1453,22 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
         enddo ; enddo
       endif
 
-      do concurrent (j=Jsq:Jeq+1, i=Isq:Ieq+1)
-        d_del2u = (G%IdyCu(I,j) * Del2u(I,j)) - (G%IdyCu(I-1,j) * Del2u(I-1,j))
+      do j=Jsq,Jeq+1 ; do i=Isq,Ieq+1
+        d_del2u = (G%IdyCu(I,j) * Del2u(I,j,1)) - (G%IdyCu(I-1,j) * Del2u(I-1,j,1))
         d_del2v = (G%IdxCv(i,J) * Del2v(i,J)) - (G%IdxCv(i,J-1) * Del2v(i,J-1))
         d_str = Ah(i,j) * ((CS%DY_dxT(i,j) * d_del2u) - (CS%DX_dyT(i,j) * d_del2v))
 
         str_xx(i,j) = str_xx(i,j) + d_str
 
-        ! Keep a copy of the biharmonic contribution for backscatter parameterization
-        ! XXX: Need to get out of the loop somehow
-        if (find_FrictWork_bh) &
-          bhstr_xx(i,j) = d_str * (h(i,j,k) * CS%reduction_xx(i,j))
-      enddo
+        if (CS%use_Leithy) str_xx(i,j) = str_xx(i,j) - Kh(i,j) * sh_xx_smooth(i,j)
 
-      if (CS%use_Leithy) then
-        !$omp target update from(Kh)
-        do j=Jsq,Jeq+1 ; do i=Isq,Ieq+1
-          str_xx(i,j) = str_xx(i,j) - Kh(i,j) * sh_xx_smooth(i,j)
-        enddo ; enddo
-      endif
+        ! Keep a copy of the biharmonic contribution for backscatter parameterization
+        bhstr_xx(i,j) = d_str * (h(i,j,k) * CS%reduction_xx(i,j))
+      enddo ; enddo
     endif ! Get biharmonic coefficient at h points and biharmonic part of str_xx
 
     ! Backscatter using MEKE
     if (CS%EY24_EBT_BS) then
-      !$omp target update from(sh_xx)
       do j=Jsq,Jeq+1 ; do i=Isq,Ieq+1
         if (visc_limit_h_flag(i,j,k) > 0) then
           Kh_BS(i,j) = 0.
@@ -1555,20 +1494,17 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
       do j=Jsq,Jeq+1 ; do i=Isq,Ieq+1
         str_xx(i,j) = str_xx(i,j) + str_xx_BS(i,j)
       enddo ; enddo
-      !$omp target update to(str_xx)
     endif ! Backscatter
 
     if (CS%biharmonic) then
       ! Gradient of Laplacian, for use in bi-harmonic term
-      do concurrent (J=js-1:Jeq, I=is-1:Ieq)
+      do J=js-1,Jeq ; do I=is-1,Ieq
         dDel2vdx(I,J) = CS%DY_dxBu(I,J)*((Del2v(i+1,J)*G%IdyCv(i+1,J)) - (Del2v(i,J)*G%IdyCv(i,J)))
-        dDel2udy(I,J) = CS%DX_dyBu(I,J)*((Del2u(I,j+1)*G%IdxCu(I,j+1)) - (Del2u(I,j)*G%IdxCu(I,j)))
-      enddo
-
+        dDel2udy(I,J) = CS%DX_dyBu(I,J)*((Del2u(I,j+1,1)*G%IdxCu(I,j+1)) - (Del2u(I,j,1)*G%IdxCu(I,j)))
+      enddo ; enddo
       ! Adjust contributions to shearing strain on open boundaries.
       if (apply_OBC) then ; if ((OBC%strain_config == OBC_STRAIN_ZERO) .or. &
                                 (OBC%strain_config == OBC_STRAIN_FREESLIP)) then
-        !$omp target update from(dDel2vdx, dDel2udy)
         do n=1,OBC%number_of_segments
           J = OBC%segment(n)%HI%JsdB ; I = OBC%segment(n)%HI%IsdB
           if (OBC%segment(n)%is_N_or_S .and. (J >= js-1) .and. (J <= Jeq)) then
@@ -1589,34 +1525,33 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
             enddo
           endif
         enddo
-        !$omp target update to(dDel2vdx, dDel2udy)
       endif ; endif
     endif
 
     if ((CS%Smagorinsky_Kh) .or. (CS%Smagorinsky_Ah)) then
-      do concurrent (J=js-1:Jeq, I=is-1:Ieq)
+      do J=js-1,Jeq ; do I=is-1,Ieq
         sh_xy_sq = sh_xy(I,J)**2
         sh_xx_sq = 0.25 * ( ((sh_xx(i,j)**2) + (sh_xx(i+1,j+1)**2)) &
                           + ((sh_xx(i,j+1)**2) + (sh_xx(i+1,j)**2)) )
         Shear_mag(I,J) = sqrt(sh_xy_sq + sh_xx_sq)
-      enddo
+      enddo ; enddo
     endif
 
-    do concurrent (J=js-1:Jeq, I=is-1:Ieq)
-      h2uq = 4.0 * (h_u(I,j) * h_u(I,j+1))
+    do J=js-1,Jeq ; do I=is-1,Ieq
+      h2uq = 4.0 * (h_u(I,j,1) * h_u(I,j+1,1))
       h2vq = 4.0 * (h_v(i,J) * h_v(i+1,J))
       hq(I,J) = (2.0 * (h2uq * h2vq)) &
-          / (h_neglect3 + (h2uq + h2vq) * ((h_u(I,j) + h_u(I,j+1)) + (h_v(i,J) + h_v(i+1,J))))
-    enddo
+          / (h_neglect3 + (h2uq + h2vq) * ((h_u(I,j,1) + h_u(I,j+1,1)) + (h_v(i,J) + h_v(i+1,J))))
+    enddo ; enddo
 
     if (CS%bound_Ah .or. CS%bound_Kh) then
-      do concurrent (J=js-1:Jeq, I=is-1:Ieq)
-        h_min = min(h_u(I,j), h_u(I,j+1), h_v(i,J), h_v(i+1,J))
+      do J=js-1,Jeq ; do I=is-1,Ieq
+        h_min = min(h_u(I,j,1), h_u(I,j+1,1), h_v(i,J), h_v(i+1,J))
         hrat_min(I,J) = min(1.0, h_min / (hq(I,J) + h_neglect))
-      enddo
+      enddo ; enddo
+
     endif
 
-    ! TODO: GPU??  Are h_[uv] on CPU?  update to hrat_min?
     if (CS%no_slip) then
       do J=js-1,Jeq ; do I=is-1,Ieq
         if (CS%no_slip .and. (G%mask2dBu(I,J) < 0.5)) then
@@ -1624,7 +1559,7 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
               (G%mask2dCv(i,J) + G%mask2dCv(i+1,J)) > 0.0) then
             ! This is a coastal vorticity point, so modify hq and hrat_min.
 
-            hu = G%mask2dCu(I,j) * h_u(I,j) + G%mask2dCu(I,j+1) * h_u(I,j+1)
+            hu = G%mask2dCu(I,j) * h_u(I,j,1) + G%mask2dCu(I,j+1) * h_u(I,j+1,1)
             hv = G%mask2dCv(i,J) * h_v(i,J) + G%mask2dCv(i+1,J) * h_v(i+1,J)
             if ((G%mask2dCu(I,j) + G%mask2dCu(I,j+1)) * &
                 (G%mask2dCv(i,J) + G%mask2dCv(i+1,J)) == 0.0) then
@@ -1643,19 +1578,8 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
 
     ! Pass the velocity gradients and thickness to ZB2020
     if (CS%use_ZB2020) then
-      !$omp target update to(sh_xx, sh_xy, vort_xy, hq)
-      call ZB2020_copy_gradient_and_thickness( &
-           sh_xx, sh_xy, vort_xy,              &
-           hq,                                 &
-           G, GV, CS%ZB2020, k)
+      call ZB2020_copy_gradient_and_thickness(sh_xx, sh_xy, vort_xy, hq, G, GV, CS%ZB2020, k)
     endif
-
-    !!$omp target update from(sh_xx, sh_xy)
-    !!$omp target update from(h_u, h_v, hq)
-    !!$omp target update from(str_xx)
-    !!$omp target update from(Shear_mag) if (use_Smag)
-    !!$omp target update from(Del2u, Del2v) if (CS%biharmonic)
-    !!$omp target update from(dDel2vdx, dDel2udy) if (CS%biharmonic)
 
     if (CS%Laplacian) then
       ! Determine the Laplacian viscosity at q points, using the
@@ -1677,24 +1601,23 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
       endif
 
       ! Static (pre-computed) background viscosity
-      do concurrent (J=js-1:Jeq, I=is-1:Ieq)
+      do J=js-1,Jeq ; do I=is-1,Ieq
         Kh(I,J) = CS%Kh_bg_xy(I,J)
-      enddo
+      enddo ; enddo
 
       if (CS%Smagorinsky_Kh) then
         if (CS%add_LES_viscosity) then
-          do concurrent (J=js-1:Jeq, I=is-1:Ieq)
+          do J=js-1,Jeq ; do I=is-1,Ieq
             Kh(I,J) = Kh(I,J) + CS%Laplac2_const_xy(I,J) * Shear_mag(I,J)
-          enddo
+          enddo ; enddo
         else
-          do concurrent (J=js-1:Jeq, I=is-1:Ieq)
+          do J=js-1,Jeq ; do I=is-1,Ieq
             Kh(I,J) = max(Kh(I,J), CS%Laplac2_const_xy(I,J) * Shear_mag(I,J) )
-          enddo
+          enddo ; enddo
         endif
       endif
 
       if (CS%Leith_Kh) then
-        !$omp target update from(Kh)
         if (CS%add_LES_viscosity) then
           do J=js-1,Jeq ; do I=is-1,Ieq
             Kh(I,J) = Kh(I,J) + CS%Laplac3_const_xy(I,J) * vert_vort_mag(I,J) * inv_PI3 ! Is this right? -AJA
@@ -1704,25 +1627,21 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
             Kh(I,J) = max(Kh(I,J), CS%Laplac3_const_xy(I,J) * vert_vort_mag(I,J) * inv_PI3)
           enddo ; enddo
         endif
-        !$omp target update to(Kh)
       endif
 
       ! All viscosity contributions above are subject to resolution scaling
 
       if (rescale_Kh) then
-        !$omp target update from(Kh)
         do J=js-1,Jeq ; do I=is-1,Ieq
           Kh(I,J) = VarMix%Res_fn_q(I,J) * Kh(I,J)
         enddo ; enddo
-        !$omp target update to(Kh)
       endif
 
-      do concurrent (J=js-1:Jeq, I=is-1:Ieq)
+      do J=js-1,Jeq ; do I=is-1,Ieq
         Kh(I,J) = max(Kh(I,J), CS%Kh_bg_min) ! Place a floor on the viscosity, if desired.
-      enddo
+      enddo ; enddo
 
       if (use_MEKE_Ku .and. .not. CS%EY24_EBT_BS) then
-        !$omp target update from(Kh)
         if (use_kh_struct) then
           do J=js-1,Jeq ; do I=is-1,Ieq
             meke_res_fn = 1.
@@ -1744,21 +1663,18 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
                                         MEKE%Ku(i,j+1)) ) * meke_res_fn
           enddo ; enddo
         endif
-        !$omp target update to(Kh)
       endif
 
       if (CS%anisotropic) then
-        !$omp target update from(Kh)
         ! *Add* the shear component of anisotropic viscosity
         do J=js-1,Jeq ; do I=is-1,Ieq
             Kh(I,J) = Kh(I,J) + CS%Kh_aniso * CS%n1n2_q(I,J)**2
         enddo ; enddo
-        !$omp target update to(Kh)
       endif
 
-      if ((CS%bound_Kh) .and. (CS%bound_Ah)) then
+      do J=js-1,Jeq ; do I=is-1,Ieq
         ! Newer method of bounding for stability
-        do concurrent (J=js-1:Jeq, I=is-1:Ieq)
+        if ((CS%bound_Kh) .and. (CS%bound_Ah)) then
           visc_bound_rem(I,J) = 1.0
           Kh_max_here = hrat_min(I,J) * CS%Kh_Max_xy(I,J)
           if (Kh(I,J) >= Kh_max_here) then
@@ -1767,24 +1683,20 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
           elseif ((Kh(I,J) > 0.0) .or. (CS%backscatter_underbound .and. (Kh_max_here > 0.0))) then
             visc_bound_rem(I,J) = 1.0 - Kh(I,J) / Kh_max_here
           endif
-        enddo
-      elseif (CS%bound_Kh) then
-        do concurrent (J=js-1:Jeq, I=is-1:Ieq)
+        elseif (CS%bound_Kh) then
           Kh(I,J) = min(Kh(I,J), hrat_min(I,J) * CS%Kh_Max_xy(I,J))
-        enddo
-      endif
+        endif
+      enddo ; enddo
 
       if (CS%use_Leithy) then
         ! Leith+E doesn't recompute Kh at q points, it just interpolates it from h to q points
         do J=js-1,Jeq ; do I=is-1,Ieq
           Kh(I,J) = 0.25 * ((Kh_h(i,j,k) + Kh_h(i+1,j+1,k)) + (Kh_h(i,j+1,k) + Kh_h(i+1,j,k)))
         enddo ; enddo
-        !$omp target update to(Kh)
       endif
 
       if (CS%id_Kh_q > 0 .or. CS%debug) then
-        !$omp target update from (Kh)
-        do J=js-1,Jeq; do I=is-1,Ieq
+        do J=js-1,Jeq ; do I=is-1,Ieq
           Kh_q(I,J,k) = Kh(I,J)
         enddo ; enddo
       endif
@@ -1796,107 +1708,95 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
       endif
 
       if (CS%id_sh_xy_q > 0) then
-        do concurrent (J=js-1:Jeq, I=is-1:Ieq)
+        do J=js-1,Jeq ; do I=is-1,Ieq
           sh_xy_q(I,J,k) = sh_xy(I,J)
-        enddo
+        enddo ; enddo
       endif
 
       if (.not. CS%use_Leithy) then
-        do concurrent (J=js-1:Jeq, I=is-1:Ieq)
+        do J=js-1,Jeq ; do I=is-1,Ieq
           str_xy(I,J) = -Kh(I,J) * sh_xy(I,J)
-        enddo
+        enddo ; enddo
       else
-        !$omp target update from(Kh)
         do J=js-1,Jeq ; do I=is-1,Ieq
           str_xy(I,J) = -Kh(I,J) * sh_xy_smooth(I,J)
         enddo ; enddo
-        !$omp target update to(str_xy)
       endif
     else
-      do concurrent (J=js-1:Jeq, I=is-1:Ieq)
+      do J=js-1,Jeq ; do I=is-1,Ieq
         str_xy(I,J) = 0.
-      enddo
+      enddo ; enddo
     endif ! get harmonic coefficient Kh at q points and harmonic part of str_xy
 
     if (CS%anisotropic) then
-      !$omp target update from(sh_xx, str_xy)
       do J=js-1,Jeq ; do I=is-1,Ieq
         ! Horizontal-tension averaged to q-points
         local_strain = 0.25 * ( (sh_xx(i,j) + sh_xx(i+1,j+1)) + (sh_xx(i+1,j) + sh_xx(i,j+1)) )
         ! *Add* the tension contribution to the xy-component of stress
         str_xy(I,J) = str_xy(I,J) - CS%Kh_aniso * CS%n1n2_q(I,J) * CS%n1n1_m_n2n2_q(I,J) * local_strain
       enddo ; enddo
-      !$omp target update to(str_xy)
     endif
 
     if (CS%biharmonic) then
       ! Determine the biharmonic viscosity at q points, using the
       ! largest value from several parameterizations. Also get the
       ! biharmonic component of str_xy.
-      do concurrent (J=js-1:Jeq, I=is-1:Ieq)
+      do J=js-1,Jeq ; do I=is-1,Ieq
         Ah(I,J) = CS%Ah_bg_xy(I,J)
-      enddo
+      enddo ; enddo
 
       if (CS%Smagorinsky_Ah .or. CS%Leith_Ah) then
         if (CS%Smagorinsky_Ah) then
           if (CS%bound_Coriolis) then
-            do concurrent (J=js-1:Jeq, I=is-1:Ieq)
+            do J=js-1,Jeq ; do I=is-1,Ieq
               AhSm = Shear_mag(I,J) * (CS%Biharm_const_xy(I,J) &
                   + CS%Biharm_const2_xy(I,J) * Shear_mag(I,J))
               Ah(I,J) = max(Ah(I,J), AhSm)
-            enddo
+            enddo ; enddo
           else
-            do concurrent (J=js-1:Jeq, I=is-1:Ieq)
+            do J=js-1,Jeq ; do I=is-1,Ieq
               AhSm = CS%Biharm_const_xy(I,J) * Shear_mag(I,J)
               Ah(I,J) = max(Ah(I,J), AhSm)
-            enddo
+            enddo ; enddo
           endif
         endif
 
         if (CS%Leith_Ah) then
-          !$omp target update from(Ah)
           do J=js-1,Jeq ; do I=is-1,Ieq
             AhLth = CS%Biharm6_const_xy(I,J) * abs(Del2vort_q(I,J)) * inv_PI6
             Ah(I,J) = max(Ah(I,J), AhLth)
           enddo ; enddo
-          !$omp target update to(Ah)
         endif
       endif ! Smagorinsky_Ah or Leith_Ah
 
       if (use_MEKE_Au) then
-        !$omp target update from(Ah)
         ! *Add* the MEKE contribution
         do J=js-1,Jeq ; do I=is-1,Ieq
           Ah(I,J) = Ah(I,J) + 0.25 * ( &
               (MEKE%Au(i,j) + MEKE%Au(i+1,j+1)) + (MEKE%Au(i+1,j) + MEKE%Au(i,j+1)) )
         enddo ; enddo
-        !$omp target update to(Ah)
       endif
 
-      ! XXX: It is just overwrites the values!
       if (CS%Re_Ah > 0.0) then
         do J=js-1,Jeq ; do I=is-1,Ieq
           KE = 0.125 * (((u(I,j,k) + u(I,j+1,k))**2) + ((v(i,J,k) + v(i+1,J,k))**2))
           Ah(I,J) = sqrt(KE) * CS%Re_Ah_const_xy(I,J)
         enddo ; enddo
-        !$omp target update to(Ah)
       endif
 
       if (CS%bound_Ah) then
         if (CS%bound_Kh) then
-          do concurrent (J=js-1:Jeq, I=is-1:Ieq)
+          do J=js-1,Jeq ; do I=is-1,Ieq
             Ah(I,J) = min(Ah(I,J), visc_bound_rem(I,J) * hrat_min(I,J) * CS%Ah_Max_xy(I,J))
-          enddo
+          enddo ; enddo
         else
-          do concurrent (J=js-1:Jeq, I=is-1:Ieq)
+          do J=js-1,Jeq ; do I=is-1,Ieq
             Ah(I,J) = min(Ah(I,J), hrat_min(I,J) * CS%Ah_Max_xy(I,J))
-          enddo
+          enddo ; enddo
         endif
       endif
 
       if (CS%EY24_EBT_BS) then
-        ! TODO: Fix indent!
-        !$omp target update from(Ah, hrat_min)
           do J=js-1,Jeq ; do I=is-1,Ieq
             tmp = CS%KS_coef *hrat_min(I,J) * CS%Ah_Max_xy_KS(I,J)
             visc_limit_q(I,J,k) = tmp
@@ -1912,31 +1812,27 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
         do J=js-1,Jeq ; do I=is-1,Ieq
           Ah(I,J) = 0.25 * ((Ah_h(i,j,k) + Ah_h(i+1,j+1,k)) + (Ah_h(i,j+1,k) + Ah_h(i+1,j,k)))
         enddo ; enddo
-        !$omp target update to(Ah)
       endif
 
       if (CS%id_Ah_q>0 .or. CS%debug) then
-        !$omp target update from(Ah)
         do J=js-1,Jeq ; do I=is-1,Ieq
           Ah_q(I,J,k) = Ah(I,J)
         enddo ; enddo
       endif
 
       ! Again, need to initialize str_xy as if its biharmonic
-      do concurrent (J=js-1:Jeq, I=is-1:Ieq)
+      do J=js-1,Jeq ; do I=is-1,Ieq
         d_str = Ah(I,J) * (dDel2vdx(I,J) + dDel2udy(I,J))
 
         str_xy(I,J) = str_xy(I,J) + d_str
 
         ! Keep a copy of the biharmonic contribution for backscatter parameterization
-        ! NOTE: computing this ought to be conditional!  But it uses d_str...
         bhstr_xy(I,J) = d_str * (hq(I,J) * G%mask2dBu(I,J) * CS%reduction_xy(I,J))
-      enddo
+      enddo ; enddo
     endif ! Get Ah at q points and biharmonic part of str_xy
 
     ! Backscatter using MEKE
     if (CS%EY24_EBT_BS) then
-      !$omp target update from(sh_xy, str_xy)
       do J=js-1,Jeq ; do I=is-1,Ieq
         if (visc_limit_q_flag(I,J,k) > 0) then
           Kh_BS(I,J) = 0.
@@ -1966,13 +1862,9 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
       do J=js-1,Jeq ; do I=is-1,Ieq
         str_xy(I,J) = str_xy(I,J) + str_xy_BS(I,J)
       enddo ; enddo
-      !$omp target update to(str_xy)
     endif ! Backscatter
 
     if (CS%use_GME) then
-      !$omp target update from(str_xx, str_xy)
-      !$omp target update from(hq) if (CS%no_slip)
-
       ! The wider halo here is to permit one pass of smoothing without a halo update.
       do j=Jsq-1,Jeq+2 ; do i=Isq-1,Ieq+2
         GME_coeff = GME_effic_h(i,j) * 0.25 * &
@@ -2012,34 +1904,33 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
           str_xy(I,J) = (str_xy(I,J) + str_xy_GME(I,J)) * (hq(I,J) * G%mask2dBu(I,J) * CS%reduction_xy(I,J))
         enddo ; enddo
       endif
-      !$omp target update to(str_xx, str_xy)
+
     else ! .not. use_GME
       ! This changes the units of str_xx from [L2 T-2 ~> m2 s-2] to [H L2 T-2 ~> m3 s-2 or kg s-2].
-      do concurrent (j=Jsq:Jeq+1, i=Isq:Ieq+1)
+      do j=Jsq,Jeq+1 ; do i=Isq,Ieq+1
         str_xx(i,j) = str_xx(i,j) * (h(i,j,k) * CS%reduction_xx(i,j))
-      enddo
+      enddo ; enddo
 
       ! This changes the units of str_xy from [L2 T-2 ~> m2 s-2] to [H L2 T-2 ~> m3 s-2 or kg s-2].
       if (CS%no_slip) then
-        do concurrent (J=js-1:Jeq, I=is-1:Ieq)
+        do J=js-1,Jeq ; do I=is-1,Ieq
           str_xy(I,J) = str_xy(I,J) * (hq(I,J) * CS%reduction_xy(I,J))
-        enddo
+        enddo ; enddo
       else
-        do concurrent (J=js-1:Jeq, I=is-1:Ieq)
+        do J=js-1,Jeq ; do I=is-1,Ieq
           str_xy(I,J) = str_xy(I,J) * (hq(I,J) * G%mask2dBu(I,J) * CS%reduction_xy(I,J))
-        enddo
+        enddo ; enddo
       endif
     endif ! use_GME
 
     ! Evaluate 1/h x.Div(h Grad u) or the biharmonic equivalent.
-    do concurrent (j=js:je, I=Isq:Ieq)
+    do j=js,je ; do I=Isq,Ieq
       diffu(I,j,k) = ((G%IdxCu(I,j)*((CS%dx2q(I,J-1)*str_xy(I,J-1)) - (CS%dx2q(I,J)*str_xy(I,J))) + &
                        G%IdyCu(I,j)*((CS%dy2h(i,j)*str_xx(i,j)) - (CS%dy2h(i+1,j)*str_xx(i+1,j)))) * &
-                     G%IareaCu(I,j)) / (h_u(I,j) + h_neglect)
-    enddo
+                     G%IareaCu(I,j)) / (h_u(I,j,1) + h_neglect)
+    enddo ; enddo
 
     if (apply_OBC) then
-      !$omp target update from(diffu)
       ! This is not the right boundary condition. If all the masking of tendencies are done
       ! correctly later then eliminating this block should not change answers.
       do n=1,OBC%number_of_segments
@@ -2050,18 +1941,16 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
           enddo
         endif
       enddo
-      !$omp target update to(diffu)
     endif
 
     ! Evaluate 1/h y.Div(h Grad u) or the biharmonic equivalent.
-    do concurrent (J=Jsq:Jeq, i=is:ie)
+    do J=Jsq,Jeq ; do i=is,ie
       diffv(i,J,k) = ((G%IdyCv(i,J)*((CS%dy2q(I-1,J)*str_xy(I-1,J)) - (CS%dy2q(I,J)*str_xy(I,J))) - &
                        G%IdxCv(i,J)*((CS%dx2h(i,j)*str_xx(i,j)) - (CS%dx2h(i,j+1)*str_xx(i,j+1)))) * &
                      G%IareaCv(i,J)) / (h_v(i,J) + h_neglect)
-    enddo
+    enddo ; enddo
 
     if (apply_OBC) then
-      !$omp target update from(diffv)
       ! This is not the right boundary condition. If all the masking of tendencies are done
       ! correctly later then eliminating this block should not change answers.
       do n=1,OBC%number_of_segments
@@ -2072,15 +1961,9 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
           enddo
         endif
       enddo
-      !$omp target update to(diffv)
     endif
 
-    !$omp target update from(h_u, h_v) &
-    !$omp   if ((find_Frictwork .or. find_FrictWork_bh) .and. .not. CS%FrictWork_bug)
-
     if (find_FrictWork) then
-      !$omp target update from(str_xx, str_xy)
-
       if (CS%FrictWork_bug) then
         ! Diagnose   str_xx*d_x u - str_yy*d_y v + str_xy*(d_y u + d_x v)
         ! This is the old formulation that includes energy diffusion
@@ -2105,29 +1988,29 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
         do j=js,je ; do i=is,ie
           FrictWork(i,j,k) = GV%H_to_RZ * G%IareaT(i,j) * ( &
             ((str_xx(i,j)*CS%dy2h(i,j) * ( &
-                  (uh(I,j,k)*G%dxCu(I,j)*G%IdyCu(I,j)*G%IareaCu(I,j)/(h_u(I,j)+h_neglect)) &
-                - (uh(I-1,j,k)*G%dxCu(I-1,j)*G%IdyCu(I-1,j)*G%IareaCu(I-1,j)/(h_u(I-1,j)+h_neglect)) ) ) &
+                  (uh(I,j,k)*G%dxCu(I,j)*G%IdyCu(I,j)*G%IareaCu(I,j)/(h_u(I,j,1)+h_neglect)) &
+                - (uh(I-1,j,k)*G%dxCu(I-1,j)*G%IdyCu(I-1,j)*G%IareaCu(I-1,j)/(h_u(I-1,j,1)+h_neglect)) ) ) &
            - (str_xx(i,j)*CS%dx2h(i,j) * ( &
                   (vh(i,J,k)*G%dyCv(i,J)*G%IdxCv(i,J)*G%IareaCv(i,J)/(h_v(i,J)+h_neglect)) &
                 - (vh(i,J-1,k)*G%dyCv(i,J-1)*G%IdxCv(i,J-1)*G%IareaCv(i,J-1)/(h_v(i,J-1)+h_neglect)) ) )) &
           + (0.25*(((str_xy(I,J)*(                                     &
-                     (CS%dx2q(I,J)*((uh(I,j+1,k)*G%IareaCu(I,j+1)/(h_u(I,j+1)+h_neglect)) &
-                                  - (uh(I,j,k)*G%IareaCu(I,j)/(h_u(I,j)+h_neglect))))            &
+                     (CS%dx2q(I,J)*((uh(I,j+1,k)*G%IareaCu(I,j+1)/(h_u(I,j+1,1)+h_neglect)) &
+                                  - (uh(I,j,k)*G%IareaCu(I,j)/(h_u(I,j,1)+h_neglect))))            &
                    + (CS%dy2q(I,J)*((vh(i+1,J,k)*G%IareaCv(i+1,J)/(h_v(i+1,J)+h_neglect)) &
                                   - (vh(i,J,k)*G%IareaCv(i,J)/(h_v(i,J)+h_neglect)))) ))          &
                 +(str_xy(I-1,J-1)*(                                 &
-                     (CS%dx2q(I-1,J-1)*((uh(I-1,j,k)*G%IareaCu(I-1,j)/(h_u(I-1,j)+h_neglect)) &
-                                      - (uh(I-1,j-1,k)*G%IareaCu(I-1,j-1)/(h_u(I-1,j-1)+h_neglect))))    &
+                     (CS%dx2q(I-1,J-1)*((uh(I-1,j,k)*G%IareaCu(I-1,j)/(h_u(I-1,j,1)+h_neglect)) &
+                                      - (uh(I-1,j-1,k)*G%IareaCu(I-1,j-1)/(h_u(I-1,j-1,1)+h_neglect))))    &
                    + (CS%dy2q(I-1,J-1)*((vh(i,J-1,k)*G%IareaCv(i,J-1)/(h_v(i,J-1)+h_neglect)) &
                                       - (vh(i-1,J-1,k)*G%IareaCv(i-1,J-1)/(h_v(i-1,J-1)+h_neglect)))) )) ) &
                +((str_xy(I-1,J)*(                                   &
-                     (CS%dx2q(I-1,J)*((uh(I-1,j+1,k)*G%IareaCu(I-1,j+1)/(h_u(I-1,j+1)+h_neglect)) &
-                                    - (uh(I-1,j,k)*G%IareaCu(I-1,j)/(h_u(I-1,j)+h_neglect))))      &
+                     (CS%dx2q(I-1,J)*((uh(I-1,j+1,k)*G%IareaCu(I-1,j+1)/(h_u(I-1,j+1,1)+h_neglect)) &
+                                    - (uh(I-1,j,k)*G%IareaCu(I-1,j)/(h_u(I-1,j,1)+h_neglect))))      &
                    + (CS%dy2q(I-1,J)*((vh(i,J,k)*G%IareaCv(i,J)/(h_v(i,J)+h_neglect)) &
                                     - (vh(i-1,J,k)*G%IareaCv(i-1,J)/(h_v(i-1,J)+h_neglect)))) ))        &
                 +(str_xy(I,J-1)*(                                   &
-                     (CS%dx2q(I,J-1)*((uh(I,j,k)*G%IareaCu(I,j)/(h_u(I,j)+h_neglect)) &
-                                    - (uh(I,j-1,k)*G%IareaCu(I,j-1)/(h_u(I,j-1)+h_neglect))))          &
+                     (CS%dx2q(I,J-1)*((uh(I,j,k)*G%IareaCu(I,j)/(h_u(I,j,1)+h_neglect)) &
+                                    - (uh(I,j-1,k)*G%IareaCu(I,j-1)/(h_u(I,j-1,1)+h_neglect))))          &
                    + (CS%dy2q(I,J-1)*((vh(i+1,J-1,k)*G%IareaCv(i+1,J-1)/(h_v(i+1,J-1)+h_neglect)) &
                                     - (vh(i,J-1,k)*G%IareaCv(i,J-1)/(h_v(i,J-1)+h_neglect)))) )) ) )) )
 
@@ -2141,8 +2024,7 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
       endif
     endif
 
-    if (find_FrictWork_bh) then
-      !$omp target update from(bhstr_xx, bhstr_xy)
+    if (CS%id_FrictWork_bh>0 .or. CS%id_FrictWorkIntz_bh > 0 .or. allocated(MEKE%mom_src_bh)) then
       if (CS%FrictWork_bug) then
         ! Diagnose   bhstr_xx*d_x u - bhstr_yy*d_y v + bhstr_xy*(d_y u + d_x v)
         ! This is the old formulation that includes energy diffusion !cyc
@@ -2168,29 +2050,29 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
           ! Diagnose   bhstr_xx*d_x u - bhstr_yy*d_y v + bhstr_xy*(d_y u + d_x v)
           FrictWork_bh(i,j,k) = GV%H_to_RZ * G%IareaT(i,j) * ( &
             ((bhstr_xx(i,j)*CS%dy2h(i,j) * ( &
-                  (uh(I,j,k)*G%dxCu(I,j)*G%IdyCu(I,j)*G%IareaCu(I,j)/(h_u(I,j)+h_neglect)) &
-                - (uh(I-1,j,k)*G%dxCu(I-1,j)*G%IdyCu(I-1,j)*G%IareaCu(I-1,j)/(h_u(I-1,j)+h_neglect)) ) ) &
+                  (uh(I,j,k)*G%dxCu(I,j)*G%IdyCu(I,j)*G%IareaCu(I,j)/(h_u(I,j,1)+h_neglect)) &
+                - (uh(I-1,j,k)*G%dxCu(I-1,j)*G%IdyCu(I-1,j)*G%IareaCu(I-1,j)/(h_u(I-1,j,1)+h_neglect)) ) ) &
            - (bhstr_xx(i,j)*CS%dx2h(i,j) * ( &
                   (vh(i,J,k)*G%dyCv(i,J)*G%IdxCv(i,J)*G%IareaCv(i,J)/(h_v(i,J)+h_neglect)) &
                 - (vh(i,J-1,k)*G%dyCv(i,J-1)*G%IdxCv(i,J-1)*G%IareaCv(i,J-1)/(h_v(i,J-1)+h_neglect)) ) )) &
           + (0.25*(((bhstr_xy(I,J)*(                                     &
-                     (CS%dx2q(I,J)*((uh(I,j+1,k)*G%IareaCu(I,j+1)/(h_u(I,j+1)+h_neglect)) &
-                                  - (uh(I,j,k)*G%IareaCu(I,j)/(h_u(I,j)+h_neglect))))            &
+                     (CS%dx2q(I,J)*((uh(I,j+1,k)*G%IareaCu(I,j+1)/(h_u(I,j+1,1)+h_neglect)) &
+                                  - (uh(I,j,k)*G%IareaCu(I,j)/(h_u(I,j,1)+h_neglect))))            &
                    + (CS%dy2q(I,J)*((vh(i+1,J,k)*G%IareaCv(i+1,J)/(h_v(i+1,J)+h_neglect)) &
                                   - (vh(i,J,k)*G%IareaCv(i,J)/(h_v(i,J)+h_neglect)))) ))          &
                 +(bhstr_xy(I-1,J-1)*(                                 &
-                     (CS%dx2q(I-1,J-1)*((uh(I-1,j,k)*G%IareaCu(I-1,j)/(h_u(I-1,j)+h_neglect)) &
-                                      - (uh(I-1,j-1,k)*G%IareaCu(I-1,j-1)/(h_u(I-1,j-1)+h_neglect))))    &
+                     (CS%dx2q(I-1,J-1)*((uh(I-1,j,k)*G%IareaCu(I-1,j)/(h_u(I-1,j,1)+h_neglect)) &
+                                      - (uh(I-1,j-1,k)*G%IareaCu(I-1,j-1)/(h_u(I-1,j-1,1)+h_neglect))))    &
                    + (CS%dy2q(I-1,J-1)*((vh(i,J-1,k)*G%IareaCv(i,J-1)/(h_v(i,J-1)+h_neglect)) &
                                       - (vh(i-1,J-1,k)*G%IareaCv(i-1,J-1)/(h_v(i-1,J-1)+h_neglect)))) )) ) &
                +((bhstr_xy(I-1,J)*(                                   &
-                     (CS%dx2q(I-1,J)*((uh(I-1,j+1,k)*G%IareaCu(I-1,j+1)/(h_u(I-1,j+1)+h_neglect)) &
-                                    - (uh(I-1,j,k)*G%IareaCu(I-1,j)/(h_u(I-1,j)+h_neglect))))      &
+                     (CS%dx2q(I-1,J)*((uh(I-1,j+1,k)*G%IareaCu(I-1,j+1)/(h_u(I-1,j+1,1)+h_neglect)) &
+                                    - (uh(I-1,j,k)*G%IareaCu(I-1,j)/(h_u(I-1,j,1)+h_neglect))))      &
                    + (CS%dy2q(I-1,J)*((vh(i,J,k)*G%IareaCv(i,J)/(h_v(i,J)+h_neglect)) &
                                     - (vh(i-1,J,k)*G%IareaCv(i-1,J)/(h_v(i-1,J)+h_neglect)))) ))        &
                 +(bhstr_xy(I,J-1)*(                                   &
-                     (CS%dx2q(I,J-1)*((uh(I,j,k)*G%IareaCu(I,j)/(h_u(I,j)+h_neglect)) &
-                                    - (uh(I,j-1,k)*G%IareaCu(I,j-1)/(h_u(I,j-1)+h_neglect))))          &
+                     (CS%dx2q(I,J-1)*((uh(I,j,k)*G%IareaCu(I,j)/(h_u(I,j,1)+h_neglect)) &
+                                    - (uh(I,j-1,k)*G%IareaCu(I,j-1)/(h_u(I,j-1,1)+h_neglect))))          &
                    + (CS%dy2q(I,J-1)*((vh(i+1,J-1,k)*G%IareaCv(i+1,J-1)/(h_v(i+1,J-1)+h_neglect)) &
                                     - (vh(i,J-1,k)*G%IareaCv(i,J-1)/(h_v(i,J-1)+h_neglect)))) )) ) )) )
         enddo ; enddo
@@ -2226,29 +2108,29 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
       else ; do j=js,je ; do i=is,ie
         FrictWork_GME(i,j,k) = GV%H_to_RZ * G%IareaT(i,j) * ( &
             ((str_xx_GME(i,j)*CS%dy2h(i,j) * ( &
-                  (uh(I,j,k)*G%dxCu(I,j)*G%IdyCu(I,j)*G%IareaCu(I,j)/(h_u(I,j)+h_neglect)) &
-                - (uh(I-1,j,k)*G%dxCu(I-1,j)*G%IdyCu(I-1,j)*G%IareaCu(I-1,j)/(h_u(I-1,j)+h_neglect)) ) ) &
+                  (uh(I,j,k)*G%dxCu(I,j)*G%IdyCu(I,j)*G%IareaCu(I,j)/(h_u(I,j,1)+h_neglect)) &
+                - (uh(I-1,j,k)*G%dxCu(I-1,j)*G%IdyCu(I-1,j)*G%IareaCu(I-1,j)/(h_u(I-1,j,1)+h_neglect)) ) ) &
            - (str_xx_GME(i,j)*CS%dx2h(i,j) * ( &
                   (vh(i,J,k)*G%dyCv(i,J)*G%IdxCv(i,J)*G%IareaCv(i,J)/(h_v(i,J)+h_neglect)) &
                 - (vh(i,J-1,k)*G%dyCv(i,J-1)*G%IdxCv(i,J-1)*G%IareaCv(i,J-1)/(h_v(i,J-1)+h_neglect)) ) )) &
        + (0.25*(((str_xy_GME(I,J)*(                                     &
-                     (CS%dx2q(I,J)*((uh(I,j+1,k)*G%IareaCu(I,j+1)/(h_u(I,j+1)+h_neglect)) &
-                                  - (uh(I,j,k)*G%IareaCu(I,j)/(h_u(I,j)+h_neglect))))            &
+                     (CS%dx2q(I,J)*((uh(I,j+1,k)*G%IareaCu(I,j+1)/(h_u(I,j+1,1)+h_neglect)) &
+                                  - (uh(I,j,k)*G%IareaCu(I,j)/(h_u(I,j,1)+h_neglect))))            &
                    + (CS%dy2q(I,J)*((vh(i+1,J,k)*G%IareaCv(i+1,J)/(h_v(i+1,J)+h_neglect)) &
                                   - (vh(i,J,k)*G%IareaCv(i,J)/(h_v(i,J)+h_neglect)))) ))          &
                 +(str_xy_GME(I-1,J-1)*(                                 &
-                     (CS%dx2q(I-1,J-1)*((uh(I-1,j,k)*G%IareaCu(I-1,j)/(h_u(I-1,j)+h_neglect)) &
-                                      - (uh(I-1,j-1,k)*G%IareaCu(I-1,j-1)/(h_u(I-1,j-1)+h_neglect))))    &
+                     (CS%dx2q(I-1,J-1)*((uh(I-1,j,k)*G%IareaCu(I-1,j)/(h_u(I-1,j,1)+h_neglect)) &
+                                      - (uh(I-1,j-1,k)*G%IareaCu(I-1,j-1)/(h_u(I-1,j-1,1)+h_neglect))))    &
                    + (CS%dy2q(I-1,J-1)*((vh(i,J-1,k)*G%IareaCv(i,J-1)/(h_v(i,J-1)+h_neglect)) &
                                       - (vh(i-1,J-1,k)*G%IareaCv(i-1,J-1)/(h_v(i-1,J-1)+h_neglect)))) )) ) &
                +((str_xy_GME(I-1,J)*(                                   &
-                     (CS%dx2q(I-1,J)*((uh(I-1,j+1,k)*G%IareaCu(I-1,j+1)/(h_u(I-1,j+1)+h_neglect)) &
-                                    - (uh(I-1,j,k)*G%IareaCu(I-1,j)/(h_u(I-1,j)+h_neglect))))      &
+                     (CS%dx2q(I-1,J)*((uh(I-1,j+1,k)*G%IareaCu(I-1,j+1)/(h_u(I-1,j+1,1)+h_neglect)) &
+                                    - (uh(I-1,j,k)*G%IareaCu(I-1,j)/(h_u(I-1,j,1)+h_neglect))))      &
                    + (CS%dy2q(I-1,J)*((vh(i,J,k)*G%IareaCv(i,J)/(h_v(i,J)+h_neglect)) &
                                     - (vh(i-1,J,k)*G%IareaCv(i-1,J)/(h_v(i-1,J)+h_neglect)))) ))        &
                 +(str_xy_GME(I,J-1)*(                                   &
-                     (CS%dx2q(I,J-1)*((uh(I,j,k)*G%IareaCu(I,j)/(h_u(I,j)+h_neglect)) &
-                                    - (uh(I,j-1,k)*G%IareaCu(I,j-1)/(h_u(I,j-1)+h_neglect))))          &
+                     (CS%dx2q(I,J-1)*((uh(I,j,k)*G%IareaCu(I,j)/(h_u(I,j,1)+h_neglect)) &
+                                    - (uh(I,j-1,k)*G%IareaCu(I,j-1)/(h_u(I,j-1,1)+h_neglect))))          &
                    + (CS%dy2q(I,J-1)*((vh(i+1,J-1,k)*G%IareaCv(i+1,J-1)/(h_v(i+1,J-1)+h_neglect)) &
                                     - (vh(i,J-1,k)*G%IareaCv(i,J-1)/(h_v(i,J-1)+h_neglect)))) )) ) )) )
       enddo ; enddo ; endif
@@ -2282,7 +2164,6 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
         endif
       endif
       if (MEKE%backscatter_Ro_c /= 0.) then
-        !$omp target update from(sh_xx, sh_xy)
         do j=js,je ; do i=is,ie
           FatH = 0.25*( (abs(G%CoriolisBu(I-1,J-1)) + abs(G%CoriolisBu(I,J))) + &
                         (abs(G%CoriolisBu(I-1,J)) + abs(G%CoriolisBu(I,J-1))) )
@@ -2333,21 +2214,6 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
     endif ! find_FrictWork and associated(mom_src)
   enddo ! end of k loop
 
-  !$omp target exit data map(delete: dudx, dudy, dvdx, dvdy, sh_xx, sh_xy)
-  !$omp target exit data map(delete: h_u, h_v, hq)
-  !$omp target exit data map(delete: str_xx, str_xy)
-  !$omp target exit data map(delete: Del2u, Del2v) if (CS%biharmonic)
-  !$omp target exit data map(delete: dDel2vdx, dDel2udy) if (CS%biharmonic)
-  !$omp target exit data map(delete: Shear_mag) if (use_Smag)
-  !$omp target exit data map(delete: Kh) if (CS%Laplacian)
-  !$omp target exit data map(delete: Ah) if (CS%biharmonic)
-  !$omp target exit data map(delete: bhstr_xx, bhstr_xy) if (CS%biharmonic)
-
-  !$omp target exit data map(delete: hrat_min) &
-  !$omp   if (CS%bound_Kh .or. CS%bound_Ah)
-  !$omp target exit data map(delete: visc_bound_rem) &
-  !$omp   if (CS%bound_Kh .or. CS%bound_Ah)
-
   ! Offer fields for diagnostic averaging.
   if (CS%id_normstress > 0) call post_data(CS%id_normstress, NoSt, CS%diag)
   if (CS%id_shearstress > 0) call post_data(CS%id_shearstress, ShSt, CS%diag)
@@ -2395,9 +2261,6 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
       call Bchksum(Ah_q, "Ah_q", G%HI, haloshift=0, symmetric=.true., unscale=US%L_to_m**4*US%s_to_T)
     endif
   endif
-
-  !$omp target exit data map(delete: sh_xy_q) &
-  !$omp   if (CS%id_sh_xy_q > 0)
 
   if (CS%id_FrictWorkIntz > 0) then
     do j=js,je
@@ -2860,9 +2723,6 @@ subroutine hor_visc_init(Time, G, GV, US, param_file, diag, CS, ADp)
       "LAPLACIAN or BIHARMONIC viscosity.")
     return ! We are not using either Laplacian or Bi-harmonic lateral viscosity
   endif
-
-  !$omp target update to(CS)
-
   deg2rad = atan(1.0) / 45.
   ALLOC_(CS%dx2h(isd:ied,jsd:jed))        ; CS%dx2h(:,:)    = 0.0
   ALLOC_(CS%dy2h(isd:ied,jsd:jed))        ; CS%dy2h(:,:)    = 0.0
@@ -2872,9 +2732,6 @@ subroutine hor_visc_init(Time, G, GV, US, param_file, diag, CS, ADp)
   ALLOC_(CS%dy_dxT(isd:ied,jsd:jed))      ; CS%dy_dxT(:,:)  = 0.0
   ALLOC_(CS%dx_dyBu(IsdB:IedB,JsdB:JedB)) ; CS%dx_dyBu(:,:) = 0.0
   ALLOC_(CS%dy_dxBu(IsdB:IedB,JsdB:JedB)) ; CS%dy_dxBu(:,:) = 0.0
-  !$omp target enter data map(alloc: CS%dx2h, CS%dy2h, CS%dx2q, CS%dy2q)
-  !$omp target enter data map(alloc: CS%dx_dyT, CS%dy_dxT, CS%dx_dyBu, CS%dy_dxBu)
-
   if (CS%Laplacian) then
     ALLOC_(CS%grid_sp_h2(isd:ied,jsd:jed))   ; CS%grid_sp_h2(:,:) = 0.0
     ALLOC_(CS%Kh_bg_xx(isd:ied,jsd:jed))     ; CS%Kh_bg_xx(:,:) = 0.0
@@ -2966,37 +2823,31 @@ subroutine hor_visc_init(Time, G, GV, US, param_file, diag, CS, ADp)
       allocate(CS%Re_Ah_const_xy(IsdB:IedB,JsdB:JedB), source=0.0)
     endif
   endif
-
-  do concurrent (J=js-2:Jeq+1, I=is-2:Ieq+1)
+  do J=js-2,Jeq+1 ; do I=is-2,Ieq+1
     CS%dx2q(I,J) = G%dxBu(I,J)*G%dxBu(I,J) ; CS%dy2q(I,J) = G%dyBu(I,J)*G%dyBu(I,J)
-  enddo
+  enddo ; enddo
 
   if (((CS%Leith_Kh) .or. (CS%Leith_Ah) .or. (CS%use_Leithy)) .and. &
       ((G%isc-G%isd < 3) .or. (G%isc-G%isd < 3))) call MOM_error(FATAL, &
           "The minimum halo size is 3 when a Leith viscosity is being used.")
   if (CS%use_Leithy) then
-    do concurrent (J=js-3:Jeq+2, I=is-3:Ieq+2)
+    do J=js-3,Jeq+2 ; do I=is-3,Ieq+2
       CS%DX_dyBu(I,J) = G%dxBu(I,J)*G%IdyBu(I,J) ; CS%DY_dxBu(I,J) = G%dyBu(I,J)*G%IdxBu(I,J)
-    enddo
+    enddo ; enddo
   elseif ((CS%Leith_Kh) .or. (CS%Leith_Ah)) then
-    do concurrent (J=Jsq-2:Jeq+2, I=Isq-2:Ieq+2)
+    do J=Jsq-2,Jeq+2 ; do I=Isq-2,Ieq+2
       CS%DX_dyBu(I,J) = G%dxBu(I,J)*G%IdyBu(I,J) ; CS%DY_dxBu(I,J) = G%dyBu(I,J)*G%IdxBu(I,J)
-    enddo
+    enddo ; enddo
   else
-    do concurrent (J=js-2:Jeq+1, I=is-2:Ieq+1)
+    do J=js-2,Jeq+1 ; do I=is-2,Ieq+1
       CS%DX_dyBu(I,J) = G%dxBu(I,J)*G%IdyBu(I,J) ; CS%DY_dxBu(I,J) = G%dyBu(I,J)*G%IdxBu(I,J)
-    enddo
+    enddo ; enddo
   endif
 
-  do concurrent (j=js-2:Jeq+2, i=is-2:Ieq+2)
+  do j=js-2,Jeq+2 ; do i=is-2,Ieq+2
     CS%dx2h(i,j) = G%dxT(i,j)*G%dxT(i,j) ; CS%dy2h(i,j) = G%dyT(i,j)*G%dyT(i,j)
     CS%DX_dyT(i,j) = G%dxT(i,j)*G%IdyT(i,j) ; CS%DY_dxT(i,j) = G%dyT(i,j)*G%IdxT(i,j)
-  enddo
-
-  ! TODO: Remove this after every instance has been moved to GPU
-  !$omp target update from(CS%dx2q, CS%dy2q, CS%dx_dyBu, CS%dy_dxBu)
-  !$omp target update from(CS%dx2h, CS%dy2h, CS%dx_dyT, CS%dy_dxT)
-
+  enddo ; enddo
   do j=Jsq,Jeq+1 ; do i=Isq,Ieq+1
     CS%reduction_xx(i,j) = 1.0
     if ((G%dy_Cu(I,j) > 0.0) .and. (G%dy_Cu(I,j) < G%dyCu(I,j)) .and. &
@@ -3012,7 +2863,6 @@ subroutine hor_visc_init(Time, G, GV, US, param_file, diag, CS, ADp)
         (G%dx_Cv(i,J-1) < G%dxCv(i,J-1) * CS%reduction_xx(i,j))) &
       CS%reduction_xx(i,j) = G%dx_Cv(i,J-1) / (G%dxCv(i,J-1))
   enddo ; enddo
-
   do J=js-1,Jeq ; do I=is-1,Ieq
     CS%reduction_xy(I,J) = 1.0
     if ((G%dy_Cu(I,j) > 0.0) .and. (G%dy_Cu(I,j) < G%dyCu(I,j)) .and. &
@@ -3423,30 +3273,6 @@ subroutine hor_visc_init(Time, G, GV, US, param_file, diag, CS, ADp)
       'Depth integrated work done by the biharmonic lateral friction', &
       'W m-2', conversion=US%RZ3_T3_to_W_m2*US%L_to_Z**2)
 
-
-  ! TODO: Position these after their respective loops (and run loops on device)
-  !$omp target enter data map(to: CS%Idxdy2u, CS%Idxdy2v) if (CS%biharmonic)
-  !$omp target enter data map(to: CS%Idx2dyCu, CS%Idx2dyCv) if (CS%biharmonic)
-
-  !$omp target enter data map(to: CS%Kh_bg_xx, CS%Kh_bg_xy) if (CS%Laplacian)
-  !$omp target enter data map(to: CS%Kh_max_xx) if (CS%Laplacian)
-  !$omp target enter data map(to: CS%Kh_max_xy) &
-  !$omp   if (CS%Laplacian .and. CS%bound_Kh)
-  !$omp target enter data map(to: CS%Laplac2_const_xx) if (CS%Laplacian)
-  !$omp target enter data map(to: CS%Laplac3_const_xx) if (CS%Laplacian)
-  !$omp target enter data map(to: CS%Laplac2_const_xy) if (CS%Smagorinsky_Kh)
-
-  !$omp target enter data map(to: CS%Ah_bg_xx, CS%Ah_bg_xy) if (CS%biharmonic)
-  !$omp target enter data map(to: CS%reduction_xx, CS%reduction_xy)
-  !$omp target enter data map(to: CS%Biharm_const_xx, CS%Biharm_const2_xx) &
-  !$omp   if (CS%Smagorinsky_Ah .or. CS%Leith_Ah .or. CS%use_Leithy)
-  !$omp target enter data map(to: CS%Biharm_const_xy) &
-  !$omp   if (CS%Smagorinsky_Ah .or. CS%Leith_Ah)
-  !$omp target enter data map(to: CS%Biharm_const2_xy) &
-  !$omp   if (CS%bound_Coriolis .and. (CS%Smagorinsky_Ah .or. CS%Leith_Ah))
-  !$omp target enter data map(to: CS%Ah_max_xx) if (CS%bound_Ah)
-  !$omp target enter data map(to: CS%Ah_max_xy) if (CS%bound_Ah)
-
 end subroutine hor_visc_init
 
 !> hor_visc_vel_stencil returns the horizontal viscosity input velocity stencil size
@@ -3662,34 +3488,6 @@ end subroutine smooth_x9_uv
 !> Deallocates any variables allocated in hor_visc_init.
 subroutine hor_visc_end(CS)
   type(hor_visc_CS), intent(inout) :: CS !< Horizontal viscosity control structure
-
-  !$omp target exit data map(delete: CS%DX_dyT, CS%DY_dxT)
-  !$omp target exit data map(delete: CS%Dx_dyBu, CS%DY_dxBu)
-
-  !$omp target exit data map(delete: CS%Idxdy2u, CS%Idxdy2v) if (CS%biharmonic)
-  !$omp target exit data map(delete: CS%Idx2dyCu, CS%Idx2dyCv) if (CS%biharmonic)
-  !$omp target exit data map(delete: CS%dx2q, CS%dy2q)
-  !$omp target exit data map(delete: CS%dx2h, CS%dy2h)
-
-  !$omp target exit data map(delete: CS%Kh_bg_xx, CS%Kh_bg_xy) if (CS%Laplacian)
-  !$omp target exit data map(delete: CS%Kh_Max_xx) if (CS%Laplacian)
-  !$omp target exit data map(delete: CS%Kh_max_xy) &
-  !$omp   if (CS%Laplacian .and. CS%bound_Kh)
-  !$omp target exit data map(delete: CS%Laplac2_const_xx) if (CS%Laplacian)
-  !$omp target exit data map(delete: CS%Laplac3_const_xx) if (CS%Laplacian)
-  !$omp target exit data map(delete: CS%Laplac2_const_xy) if (CS%Smagorinsky_Kh)
-
-  !$omp target exit data map(delete: CS%Ah_bg_xx, CS%Ah_bg_xy) if (CS%biharmonic)
-  !$omp target exit data map(delete: CS%reduction_xx, CS%reduction_xy)
-  !$omp target exit data map(delete: CS%Biharm_const_xx, CS%Biharm_const2_xx) &
-  !$omp   if (CS%Smagorinsky_Ah .or. CS%Leith_Ah .or. CS%use_Leithy)
-  !$omp target exit data map(delete: CS%Biharm_const_xy) &
-  !$omp   if (CS%Smagorinsky_Ah .or. CS%Leith_Ah)
-  !$omp target exit data map(delete: CS%Biharm_const2_xy) &
-  !$omp   if (CS%bound_Coriolis .and. (CS%Smagorinsky_Ah .or. CS%Leith_Ah))
-  !$omp target exit data map(delete: CS%Ah_max_xx) if (CS%bound_Ah)
-  !$omp target exit data map(delete: CS%Ah_max_xy) if (CS%bound_Ah)
-
   if (CS%Laplacian .or. CS%biharmonic) then
     DEALLOC_(CS%dx2h) ; DEALLOC_(CS%dx2q) ; DEALLOC_(CS%dy2h) ; DEALLOC_(CS%dy2q)
     DEALLOC_(CS%dx_dyT) ; DEALLOC_(CS%dy_dxT) ; DEALLOC_(CS%dx_dyBu) ; DEALLOC_(CS%dy_dxBu)
