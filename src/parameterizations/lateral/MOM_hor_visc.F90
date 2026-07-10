@@ -467,7 +467,7 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
   integer :: is_vort, ie_vort, js_vort, je_vort  ! Loop ranges for vorticity terms
   integer :: is_Kh, ie_Kh, js_Kh, je_Kh  ! Loop ranges for thickness point viscosities
   integer :: is, ie, js, je, Isq, Ieq, Jsq, Jeq, nz
-  integer :: i, j, k, n
+  integer :: i, j, k, kk, n, kstart, kend, kmax
   real :: inv_PI3, inv_PI2, inv_PI6 ! Powers of the inverse of pi [nondim]
   real :: tmp
 
@@ -722,7 +722,10 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
   !$OMP   visc_limit_h, visc_limit_h_frac, visc_limit_h_flag, &
   !$OMP   visc_limit_q, visc_limit_q_frac, visc_limit_q_flag &
   !$OMP )
-  do k=1,nz
+  do kstart=1,nz,nkblock
+    kend = min(kstart+nkblock-1,nz)
+    kmax = kend-kstart+1
+    k=kstart
 
     ! The following are the forms of the horizontal tension and horizontal
     ! shearing strain advocated by Smagorinsky (1993) and discussed in
@@ -735,43 +738,48 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
     ! TODO: Explore methods for retaining both the syntax and speedup.
 
     ! Calculate horizontal tension
-    do j=Jsq-1,Jeq+2 ; do i=Isq-1,Ieq+2
-      dudx(i,j,1) = CS%DY_dxT(i,j)*((G%IdyCu(I,j) * u(I,j,k)) - &
-                                  (G%IdyCu(I-1,j) * u(I-1,j,k)))
-      dvdy(i,j,1) = CS%DX_dyT(i,j)*((G%IdxCv(i,J) * v(i,J,k)) - &
-                                  (G%IdxCv(i,J-1) * v(i,J-1,k)))
-      sh_xx(i,j,1) = dudx(i,j,1) - dvdy(i,j,1)
-    enddo ; enddo
+    do kk=1,kmax ; do j=Jsq-1,Jeq+2 ; do i=Isq-1,Ieq+2
+      k = kstart + kk - 1
+      dudx(i,j,kk) = CS%DY_dxT(i,j)*((G%IdyCu(I,j) * u(I,j,k)) - &
+                                    (G%IdyCu(I-1,j) * u(I-1,j,k)))
+      dvdy(i,j,kk) = CS%DX_dyT(i,j)*((G%IdxCv(i,J) * v(i,J,k)) - &
+                                    (G%IdxCv(i,J-1) * v(i,J-1,k)))
+      sh_xx(i,j,kk) = dudx(i,j,kk) - dvdy(i,j,kk)
+    enddo ; enddo ; enddo
 
     ! Components for the shearing strain
-    do J=js_vort,je_vort ; do I=is_vort,ie_vort
-      dvdx(I,J,1) = CS%DY_dxBu(I,J)*((v(i+1,J,k)*G%IdyCv(i+1,J)) - (v(i,J,k)*G%IdyCv(i,J)))
-      dudy(I,J,1) = CS%DX_dyBu(I,J)*((u(I,j+1,k)*G%IdxCu(I,j+1)) - (u(I,j,k)*G%IdxCu(I,j)))
-    enddo ; enddo
+    do kk=1,kmax ; do J=js_vort,je_vort ; do I=is_vort,ie_vort
+      k = kstart + kk - 1
+      dvdx(I,J,kk) = CS%DY_dxBu(I,J)*((v(i+1,J,k)*G%IdyCv(i+1,J)) - (v(i,J,k)*G%IdyCv(i,J)))
+      dudy(I,J,kk) = CS%DX_dyBu(I,J)*((u(I,j+1,k)*G%IdxCu(I,j+1)) - (u(I,j,k)*G%IdxCu(I,j)))
+    enddo ; enddo ; enddo
 
     if (CS%use_Leithy) then
       ! Calculate horizontal tension from smoothed velocity
-      do j=Jsq,Jeq+1 ; do i=Isq,Ieq+1
+      do kk=1,kmax ; do j=Jsq,Jeq+1 ; do i=Isq,Ieq+1
+        k = kstart + kk - 1
         dudx_smooth = CS%DY_dxT(i,j)*((G%IdyCu(I,j) * u_smooth(I,j,k)) - &
                                            (G%IdyCu(I-1,j) * u_smooth(I-1,j,k)))
         dvdy_smooth = CS%DX_dyT(i,j)*((G%IdxCv(i,J) * v_smooth(i,J,k)) - &
                                            (G%IdxCv(i,J-1) * v_smooth(i,J-1,k)))
-        sh_xx_smooth(i,j,1) = dudx_smooth - dvdy_smooth
-      enddo ; enddo
+        sh_xx_smooth(i,j,kk) = dudx_smooth - dvdy_smooth
+      enddo ; enddo ; enddo
 
       ! Components for the shearing strain from smoothed velocity
-      do J=js_Kh-1,je_Kh ; do I=is_Kh-1,ie_Kh
-        dvdx_smooth(I,J,1) = CS%DY_dxBu(I,J) * &
+      do kk=1,kmax ; do J=js_Kh-1,je_Kh ; do I=is_Kh-1,ie_Kh
+        k = kstart + kk - 1
+        dvdx_smooth(I,J,kk) = CS%DY_dxBu(I,J) * &
                          ((v_smooth(i+1,J,k)*G%IdyCv(i+1,J)) - (v_smooth(i,J,k)*G%IdyCv(i,J)))
-        dudy_smooth(I,J,1) = CS%DX_dyBu(I,J) * &
+        dudy_smooth(I,J,kk) = CS%DX_dyBu(I,J) * &
                          ((u_smooth(I,j+1,k)*G%IdxCu(I,j+1)) - (u_smooth(I,j,k)*G%IdxCu(I,j)))
-      enddo ; enddo
+      enddo ; enddo ; enddo
     endif ! use Leith+E
 
     if (CS%id_normstress > 0) then
-      do j=js,je ; do i=is,ie
-        NoSt(i,j,k) = sh_xx(i,j,1)
-      enddo ; enddo
+      do kk=1,kmax ; do j=js,je ; do i=is,ie
+        k = kstart + kk - 1
+        NoSt(i,j,k) = sh_xx(i,j,kk)
+      enddo ; enddo ; enddo
     endif
 
     ! Interpolate the thicknesses to velocity points.
@@ -780,26 +788,32 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
     ! even with OBCs if the accelerations are zeroed at OBC points, in which
     ! case the j-loop for h_u could collapse to j=js=1,je+1. -RWH
     if (use_cont_huv) then
-      do j=js-2,je+2 ; do I=Isq-1,Ieq+1
-        h_u(I,j,1) = hu_cont(I,j,k)
-      enddo ; enddo
-      do J=Jsq-1,Jeq+1 ; do i=is-2,ie+2
-        h_v(i,J,1) = hv_cont(i,J,k)
-      enddo ; enddo
+      do kk=1,kmax ; do j=js-2,je+2 ; do I=Isq-1,Ieq+1
+        k = kstart + kk - 1
+        h_u(I,j,kk) = hu_cont(I,j,k)
+      enddo ; enddo ; enddo
+      do kk=1,kmax ; do J=Jsq-1,Jeq+1 ; do i=is-2,ie+2
+        k = kstart + kk - 1
+        h_v(i,J,kk) = hv_cont(i,J,k)
+      enddo ; enddo ; enddo
     elseif (CS%use_land_mask) then
-      do j=js-2,je+2 ; do I=is-2,Ieq+1
-        h_u(I,j,1) = 0.5 * (G%mask2dT(i,j)*h(i,j,k) + G%mask2dT(i+1,j)*h(i+1,j,k))
-      enddo ; enddo
-      do J=js-2,Jeq+1 ; do i=is-2,ie+2
-        h_v(i,J,1) = 0.5 * (G%mask2dT(i,j)*h(i,j,k) + G%mask2dT(i,j+1)*h(i,j+1,k))
-      enddo ; enddo
+      do kk=1,kmax ; do j=js-2,je+2 ; do I=is-2,Ieq+1
+        k = kstart + kk - 1
+        h_u(I,j,kk) = 0.5 * (G%mask2dT(i,j)*h(i,j,k) + G%mask2dT(i+1,j)*h(i+1,j,k))
+      enddo ; enddo ; enddo
+      do kk=1,kmax ; do J=js-2,Jeq+1 ; do i=is-2,ie+2
+        k = kstart + kk - 1
+        h_v(i,J,kk) = 0.5 * (G%mask2dT(i,j)*h(i,j,k) + G%mask2dT(i,j+1)*h(i,j+1,k))
+      enddo ; enddo ; enddo
     else
-      do j=js-2,je+2 ; do I=is-2,Ieq+1
-        h_u(I,j,1) = 0.5 * (h(i,j,k) + h(i+1,j,k))
-      enddo ; enddo
-      do J=js-2,Jeq+1 ; do i=is-2,ie+2
-        h_v(i,J,1) = 0.5 * (h(i,j,k) + h(i,j+1,k))
-      enddo ; enddo
+      do kk=1,kmax ; do j=js-2,je+2 ; do I=is-2,Ieq+1
+        k = kstart + kk - 1
+        h_u(I,j,kk) = 0.5 * (h(i,j,k) + h(i+1,j,k))
+      enddo ; enddo ; enddo
+      do kk=1,kmax ; do J=js-2,Jeq+1 ; do i=is-2,ie+2
+        k = kstart + kk - 1
+        h_v(i,J,kk) = 0.5 * (h(i,j,k) + h(i,j+1,k))
+      enddo ; enddo ; enddo
     endif
 
     ! Adjust contributions to shearing strain and interpolated values of
@@ -808,59 +822,61 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
       J = OBC%segment(n)%HI%JsdB ; I = OBC%segment(n)%HI%IsdB
       if (apply_OBC_strain) then
         if (OBC%segment(n)%is_N_or_S .and. (J >= Js_vort) .and. (J <= Je_vort)) then
-          do I = max(OBC%segment(n)%HI%IsdB,Is_vort), min(OBC%segment(n)%HI%IedB,Ie_vort)
+          do kk=1,kmax ; do I = max(OBC%segment(n)%HI%IsdB,Is_vort), min(OBC%segment(n)%HI%IedB,Ie_vort)
+            k = kstart + kk - 1
             select case (OBC%strain_config)
               case (OBC_STRAIN_ZERO)
-                dvdx(I,J,1) = 0. ; dudy(I,J,1) = 0.
+                dvdx(I,J,kk) = 0. ; dudy(I,J,kk) = 0.
               case (OBC_STRAIN_FREESLIP)
-                dudy(I,J,1) = 0.
+                dudy(I,J,kk) = 0.
               case (OBC_STRAIN_COMPUTED)
                 if (OBC%segment(n)%direction == OBC_DIRECTION_N) then
-                  dudy(I,J,1) = 2.0*CS%DX_dyBu(I,J)* &
+                  dudy(I,J,kk) = 2.0*CS%DX_dyBu(I,J)* &
                               (OBC%segment(n)%tangential_vel(I,J,k) - u(I,j,k))*G%IdxCu(I,j)
                 else
-                  dudy(I,J,1) = 2.0*CS%DX_dyBu(I,J)* &
+                  dudy(I,J,kk) = 2.0*CS%DX_dyBu(I,J)* &
                               (u(I,j+1,k) - OBC%segment(n)%tangential_vel(I,J,k))*G%IdxCu(I,j+1)
                 endif
               case (OBC_STRAIN_SPECIFIED)
                 if (OBC%segment(n)%direction == OBC_DIRECTION_N) then
-                  dudy(I,J,1) = CS%DX_dyBu(I,J)*OBC%segment(n)%tangential_grad(I,J,k)*G%IdxCu(I,j)*G%dxBu(I,J)
+                  dudy(I,J,kk) = CS%DX_dyBu(I,J)*OBC%segment(n)%tangential_grad(I,J,k)*G%IdxCu(I,j)*G%dxBu(I,J)
                 else
-                  dudy(I,J,1) = CS%DX_dyBu(I,J)*OBC%segment(n)%tangential_grad(I,J,k)*G%IdxCu(I,j+1)*G%dxBu(I,J)
+                  dudy(I,J,kk) = CS%DX_dyBu(I,J)*OBC%segment(n)%tangential_grad(I,J,k)*G%IdxCu(I,j+1)*G%dxBu(I,J)
                 endif
             end select
             if (CS%use_Leithy) then
-              dvdx_smooth(I,J,1) = dvdx(I,J,1)
-              dudy_smooth(I,J,1) = dudy(I,J,1)
+              dvdx_smooth(I,J,kk) = dvdx(I,J,kk)
+              dudy_smooth(I,J,kk) = dudy(I,J,kk)
             endif
-          enddo
+          enddo ; enddo
         elseif (OBC%segment(n)%is_E_or_W .and. (I >= is_vort) .and. (I <= ie_vort)) then
-          do J = max(OBC%segment(n)%HI%JsdB,js_vort), min(OBC%segment(n)%HI%JedB,je_vort)
+          do kk=1,kmax ; do J = max(OBC%segment(n)%HI%JsdB,js_vort), min(OBC%segment(n)%HI%JedB,je_vort)
+            k = kstart + kk - 1
             select case (OBC%strain_config)
               case (OBC_STRAIN_ZERO)
-                dvdx(I,J,1) = 0. ; dudy(I,J,1) = 0.
+                dvdx(I,J,kk) = 0. ; dudy(I,J,kk) = 0.
               case (OBC_STRAIN_FREESLIP)
-                dvdx(I,J,1) = 0.
+                dvdx(I,J,kk) = 0.
               case (OBC_STRAIN_COMPUTED)
                 if (OBC%segment(n)%direction == OBC_DIRECTION_E) then
-                  dvdx(I,J,1) = 2.0*CS%DY_dxBu(I,J)* &
+                  dvdx(I,J,kk) = 2.0*CS%DY_dxBu(I,J)* &
                               (OBC%segment(n)%tangential_vel(I,J,k) - v(i,J,k))*G%IdyCv(i,J)
                 else
-                  dvdx(I,J,1) = 2.0*CS%DY_dxBu(I,J)* &
+                  dvdx(I,J,kk) = 2.0*CS%DY_dxBu(I,J)* &
                               (v(i+1,J,k) - OBC%segment(n)%tangential_vel(I,J,k))*G%IdyCv(i+1,J)
                 endif
               case (OBC_STRAIN_SPECIFIED)
                 if (OBC%segment(n)%direction == OBC_DIRECTION_E) then
-                  dvdx(I,J,1) = CS%DY_dxBu(I,J)*OBC%segment(n)%tangential_grad(I,J,k)*G%IdyCv(i,J)*G%dxBu(I,J)
+                  dvdx(I,J,kk) = CS%DY_dxBu(I,J)*OBC%segment(n)%tangential_grad(I,J,k)*G%IdyCv(i,J)*G%dxBu(I,J)
                 else
-                  dvdx(I,J,1) = CS%DY_dxBu(I,J)*OBC%segment(n)%tangential_grad(I,J,k)*G%IdyCv(i+1,J)*G%dxBu(I,J)
+                  dvdx(I,J,kk) = CS%DY_dxBu(I,J)*OBC%segment(n)%tangential_grad(I,J,k)*G%IdyCv(i+1,J)*G%dxBu(I,J)
                 endif
             end select
             if (CS%use_Leithy) then
-              dvdx_smooth(I,J,1) = dvdx(I,J,1)
-              dudy_smooth(I,J,1) = dudy(I,J,1)
+              dvdx_smooth(I,J,kk) = dvdx(I,J,kk)
+              dudy_smooth(I,J,kk) = dudy(I,J,kk)
             endif
-          enddo
+          enddo ; enddo
         endif
       endif
 
@@ -870,27 +886,31 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
         ! are always zeroed out at OBC points, in which case the i-loop below
         ! becomes do i=is-1,ie+1. -RWH
         if ((J >= js-2) .and. (J <= Jeq+1)) then
-          do i = max(is-2,OBC%segment(n)%HI%isd), min(ie+2,OBC%segment(n)%HI%ied)
-            h_v(i,J,1) = h(i,j,k)
-          enddo
+          do kk=1,kmax ; do i = max(is-2,OBC%segment(n)%HI%isd), min(ie+2,OBC%segment(n)%HI%ied)
+            k = kstart + kk - 1
+            h_v(i,J,kk) = h(i,j,k)
+          enddo ; enddo
         endif
       elseif (OBC%segment(n)%direction == OBC_DIRECTION_S) then
         if ((J >= js-2) .and. (J <= Jeq+1)) then
-          do i = max(is-2,OBC%segment(n)%HI%isd), min(ie+2,OBC%segment(n)%HI%ied)
-            h_v(i,J,1) = h(i,j+1,k)
-          enddo
+          do kk=1,kmax ; do i = max(is-2,OBC%segment(n)%HI%isd), min(ie+2,OBC%segment(n)%HI%ied)
+            k = kstart + kk - 1
+            h_v(i,J,kk) = h(i,j+1,k)
+          enddo ; enddo
         endif
       elseif (OBC%segment(n)%direction == OBC_DIRECTION_E) then
         if ((I >= is-2) .and. (I <= Ieq+1)) then
-          do j = max(js-2,OBC%segment(n)%HI%jsd), min(je+2,OBC%segment(n)%HI%jed)
-            h_u(I,j,1) = h(i,j,k)
-          enddo
+          do kk=1,kmax ; do j = max(js-2,OBC%segment(n)%HI%jsd), min(je+2,OBC%segment(n)%HI%jed)
+            k = kstart + kk - 1
+            h_u(I,j,kk) = h(i,j,k)
+          enddo ; enddo
         endif
       elseif (OBC%segment(n)%direction == OBC_DIRECTION_W) then
         if ((I >= is-2) .and. (I <= Ieq+1)) then
-          do j = max(js-2,OBC%segment(n)%HI%jsd), min(je+2,OBC%segment(n)%HI%jed)
-            h_u(I,j,1) = h(i+1,j,k)
-          enddo
+          do kk=1,kmax ; do j = max(js-2,OBC%segment(n)%HI%jsd), min(je+2,OBC%segment(n)%HI%jed)
+            k = kstart + kk - 1
+            h_u(I,j,kk) = h(i+1,j,k)
+          enddo ; enddo
         endif
       endif
     enddo ; endif
@@ -899,27 +919,27 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
       J = OBC%segment(n)%HI%JsdB ; I = OBC%segment(n)%HI%IsdB
       if (OBC%segment(n)%direction == OBC_DIRECTION_N) then
         if ((J >= js-2) .and. (J <= je)) then
-          do I = max(is-2,OBC%segment(n)%HI%IsdB), min(Ieq+1,OBC%segment(n)%HI%IedB)
-            h_u(I,j+1,1) = h_u(I,j,1)
-          enddo
+          do kk=1,kmax ; do I = max(is-2,OBC%segment(n)%HI%IsdB), min(Ieq+1,OBC%segment(n)%HI%IedB)
+            h_u(I,j+1,kk) = h_u(I,j,kk)
+          enddo ; enddo
         endif
       elseif (OBC%segment(n)%direction == OBC_DIRECTION_S) then
         if ((J >= js-1) .and. (J <= je+1)) then
-          do I = max(is-2,OBC%segment(n)%HI%isd), min(Ieq+1,OBC%segment(n)%HI%ied)
-            h_u(I,j,1) = h_u(I,j+1,1)
-          enddo
+          do kk=1,kmax ; do I = max(is-2,OBC%segment(n)%HI%isd), min(Ieq+1,OBC%segment(n)%HI%ied)
+            h_u(I,j,kk) = h_u(I,j+1,kk)
+          enddo ; enddo
         endif
       elseif (OBC%segment(n)%direction == OBC_DIRECTION_E) then
         if ((I >= is-2) .and. (I <= ie)) then
-          do J = max(js-2,OBC%segment(n)%HI%jsd), min(Jeq+1,OBC%segment(n)%HI%jed)
-            h_v(i+1,J,1) = h_v(i,J,1)
-          enddo
+          do kk=1,kmax ; do J = max(js-2,OBC%segment(n)%HI%jsd), min(Jeq+1,OBC%segment(n)%HI%jed)
+            h_v(i+1,J,kk) = h_v(i,J,kk)
+          enddo ; enddo
         endif
       elseif (OBC%segment(n)%direction == OBC_DIRECTION_W) then
         if ((I >= is-1) .and. (I <= ie+1)) then
-          do J = max(js-2,OBC%segment(n)%HI%jsd), min(Jeq+1,OBC%segment(n)%HI%jed)
-            h_v(i,J,1) = h_v(i+1,J,1)
-          enddo
+          do kk=1,kmax ; do J = max(js-2,OBC%segment(n)%HI%jsd), min(Jeq+1,OBC%segment(n)%HI%jed)
+            h_v(i,J,kk) = h_v(i+1,J,kk)
+          enddo ; enddo
         endif
       endif
     enddo ; endif
