@@ -1644,144 +1644,149 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
 
       if ((CS%Leith_Kh) .or. (CS%Leith_Ah)) then
         if (CS%use_QG_Leith_visc) then
-          do J=js-1,Jeq ; do I=is-1,Ieq
-            grad_vort = grad_vort_mag_q(I,J,1) + grad_div_mag_q(I,J,1)
-            grad_vort_qg = 3. * grad_vort_mag_q_2d(I,J,1)
-            vert_vort_mag(I,J,1) = min(grad_vort, grad_vort_qg)
-          enddo ; enddo
+          do kk=1,kmax ; do J=js-1,Jeq ; do I=is-1,Ieq
+            grad_vort = grad_vort_mag_q(I,J,kk) + grad_div_mag_q(I,J,kk)
+            grad_vort_qg = 3. * grad_vort_mag_q_2d(I,J,kk)
+            vert_vort_mag(I,J,kk) = min(grad_vort, grad_vort_qg)
+          enddo ; enddo ; enddo
         else
-          do J=js-1,Jeq ; do I=is-1,Ieq
-            vert_vort_mag(I,J,1) = grad_vort_mag_q(I,J,1) + grad_div_mag_q(I,J,1)
-          enddo ; enddo
+          do kk=1,kmax ; do J=js-1,Jeq ; do I=is-1,Ieq
+            vert_vort_mag(I,J,kk) = grad_vort_mag_q(I,J,kk) + grad_div_mag_q(I,J,kk)
+          enddo ; enddo ; enddo
         endif
       endif
 
       ! Static (pre-computed) background viscosity
-      do J=js-1,Jeq ; do I=is-1,Ieq
-        Kh(I,J,1) = CS%Kh_bg_xy(I,J)
-      enddo ; enddo
+      do kk=1,kmax ; do J=js-1,Jeq ; do I=is-1,Ieq
+        Kh(I,J,kk) = CS%Kh_bg_xy(I,J)
+      enddo ; enddo ; enddo
 
       if (CS%Smagorinsky_Kh) then
         if (CS%add_LES_viscosity) then
-          do J=js-1,Jeq ; do I=is-1,Ieq
-            Kh(I,J,1) = Kh(I,J,1) + CS%Laplac2_const_xy(I,J) * Shear_mag(I,J,1)
-          enddo ; enddo
+          do kk=1,kmax ; do J=js-1,Jeq ; do I=is-1,Ieq
+            Kh(I,J,kk) = Kh(I,J,kk) + CS%Laplac2_const_xy(I,J) * Shear_mag(I,J,kk)
+          enddo ; enddo ; enddo
         else
-          do J=js-1,Jeq ; do I=is-1,Ieq
-            Kh(I,J,1) = max(Kh(I,J,1), CS%Laplac2_const_xy(I,J) * Shear_mag(I,J,1) )
-          enddo ; enddo
+          do kk=1,kmax ; do J=js-1,Jeq ; do I=is-1,Ieq
+            Kh(I,J,kk) = max(Kh(I,J,kk), CS%Laplac2_const_xy(I,J) * Shear_mag(I,J,kk) )
+          enddo ; enddo ; enddo
         endif
       endif
 
       if (CS%Leith_Kh) then
         if (CS%add_LES_viscosity) then
-          do J=js-1,Jeq ; do I=is-1,Ieq
-            Kh(I,J,1) = Kh(I,J,1) + CS%Laplac3_const_xy(I,J) * vert_vort_mag(I,J,1) * inv_PI3 ! Is this right? -AJA
-          enddo ; enddo
+          do kk=1,kmax ; do J=js-1,Jeq ; do I=is-1,Ieq
+            Kh(I,J,kk) = Kh(I,J,kk) + CS%Laplac3_const_xy(I,J) * vert_vort_mag(I,J,kk) * inv_PI3 ! Is this right? -AJA
+          enddo ; enddo ; enddo
         else
-          do J=js-1,Jeq ; do I=is-1,Ieq
-            Kh(I,J,1) = max(Kh(I,J,1), CS%Laplac3_const_xy(I,J) * vert_vort_mag(I,J,1) * inv_PI3)
-          enddo ; enddo
+          do kk=1,kmax ; do J=js-1,Jeq ; do I=is-1,Ieq
+            Kh(I,J,kk) = max(Kh(I,J,kk), CS%Laplac3_const_xy(I,J) * vert_vort_mag(I,J,kk) * inv_PI3)
+          enddo ; enddo ; enddo
         endif
       endif
 
       ! All viscosity contributions above are subject to resolution scaling
 
       if (rescale_Kh) then
-        do J=js-1,Jeq ; do I=is-1,Ieq
-          Kh(I,J,1) = VarMix%Res_fn_q(I,J) * Kh(I,J,1)
-        enddo ; enddo
+        do kk=1,kmax ; do J=js-1,Jeq ; do I=is-1,Ieq
+          Kh(I,J,kk) = VarMix%Res_fn_q(I,J) * Kh(I,J,kk)
+        enddo ; enddo ; enddo
       endif
 
-      do J=js-1,Jeq ; do I=is-1,Ieq
-        Kh(I,J,1) = max(Kh(I,J,1), CS%Kh_bg_min) ! Place a floor on the viscosity, if desired.
-      enddo ; enddo
+      do kk=1,kmax ; do J=js-1,Jeq ; do I=is-1,Ieq
+        Kh(I,J,kk) = max(Kh(I,J,kk), CS%Kh_bg_min) ! Place a floor on the viscosity, if desired.
+      enddo ; enddo ; enddo
 
       if (use_MEKE_Ku .and. .not. CS%EY24_EBT_BS) then
         if (use_kh_struct) then
-          do J=js-1,Jeq ; do I=is-1,Ieq
+          do kk=1,kmax ; do J=js-1,Jeq ; do I=is-1,Ieq
+            k = kstart + kk - 1
             meke_res_fn = 1.
             if (CS%res_scale_MEKE) meke_res_fn = VarMix%Res_fn_q(I,J)
 
-            Kh(I,J,1) = Kh(I,J,1) + 0.25*( ((MEKE%Ku(i,j)*VarMix%BS_struct(i,j,k)) + &
+            Kh(I,J,kk) = Kh(I,J,kk) + 0.25*( ((MEKE%Ku(i,j)*VarMix%BS_struct(i,j,k)) + &
                                        (MEKE%Ku(i+1,j+1)*VarMix%BS_struct(i+1,j+1,k))) + &
                                        ((MEKE%Ku(i+1,j)*VarMix%BS_struct(i+1,j,k)) + &
                                        (MEKE%Ku(i,j+1)*VarMix%BS_struct(i,j+1,k))) ) * meke_res_fn
-          enddo ; enddo
+          enddo ; enddo ; enddo
         else
-          do J=js-1,Jeq ; do I=is-1,Ieq
+          do kk=1,kmax ; do J=js-1,Jeq ; do I=is-1,Ieq
             meke_res_fn = 1.
             if (CS%res_scale_MEKE) meke_res_fn = VarMix%Res_fn_q(I,J)
 
-            Kh(I,J,1) = Kh(I,J,1) + 0.25 * ( &
+            Kh(I,J,kk) = Kh(I,J,kk) + 0.25 * ( &
                 (MEKE%Ku(i,j) + MEKE%Ku(i+1,j+1)) + &
                                        (MEKE%Ku(i+1,j) + &
                                         MEKE%Ku(i,j+1)) ) * meke_res_fn
-          enddo ; enddo
+          enddo ; enddo ; enddo
         endif
       endif
 
       if (CS%anisotropic) then
         ! *Add* the shear component of anisotropic viscosity
-        do J=js-1,Jeq ; do I=is-1,Ieq
-            Kh(I,J,1) = Kh(I,J,1) + CS%Kh_aniso * CS%n1n2_q(I,J)**2
-        enddo ; enddo
+        do kk=1,kmax ; do J=js-1,Jeq ; do I=is-1,Ieq
+            Kh(I,J,kk) = Kh(I,J,kk) + CS%Kh_aniso * CS%n1n2_q(I,J)**2
+        enddo ; enddo ; enddo
       endif
 
-      do J=js-1,Jeq ; do I=is-1,Ieq
+      do kk=1,kmax ; do J=js-1,Jeq ; do I=is-1,Ieq
         ! Newer method of bounding for stability
         if ((CS%bound_Kh) .and. (CS%bound_Ah)) then
-          visc_bound_rem(I,J,1) = 1.0
-          Kh_max_here = hrat_min(I,J,1) * CS%Kh_Max_xy(I,J)
-          if (Kh(I,J,1) >= Kh_max_here) then
-            visc_bound_rem(I,J,1) = 0.0
-            Kh(I,J,1) = Kh_max_here
-          elseif ((Kh(I,J,1) > 0.0) .or. (CS%backscatter_underbound .and. (Kh_max_here > 0.0))) then
-            visc_bound_rem(I,J,1) = 1.0 - Kh(I,J,1) / Kh_max_here
+          visc_bound_rem(I,J,kk) = 1.0
+          Kh_max_here = hrat_min(I,J,kk) * CS%Kh_Max_xy(I,J)
+          if (Kh(I,J,kk) >= Kh_max_here) then
+            visc_bound_rem(I,J,kk) = 0.0
+            Kh(I,J,kk) = Kh_max_here
+          elseif ((Kh(I,J,kk) > 0.0) .or. (CS%backscatter_underbound .and. (Kh_max_here > 0.0))) then
+            visc_bound_rem(I,J,kk) = 1.0 - Kh(I,J,kk) / Kh_max_here
           endif
         elseif (CS%bound_Kh) then
-          Kh(I,J,1) = min(Kh(I,J,1), hrat_min(I,J,1) * CS%Kh_Max_xy(I,J))
+          Kh(I,J,kk) = min(Kh(I,J,kk), hrat_min(I,J,kk) * CS%Kh_Max_xy(I,J))
         endif
-      enddo ; enddo
+      enddo ; enddo ; enddo
 
       if (CS%use_Leithy) then
         ! Leith+E doesn't recompute Kh at q points, it just interpolates it from h to q points
-        do J=js-1,Jeq ; do I=is-1,Ieq
-          Kh(I,J,1) = 0.25 * ((Kh_h(i,j,k) + Kh_h(i+1,j+1,k)) + (Kh_h(i,j+1,k) + Kh_h(i+1,j,k)))
-        enddo ; enddo
+        do kk=1,kmax ; do J=js-1,Jeq ; do I=is-1,Ieq
+          k = kstart + kk - 1
+          Kh(I,J,kk) = 0.25 * ((Kh_h(i,j,k) + Kh_h(i+1,j+1,k)) + (Kh_h(i,j+1,k) + Kh_h(i+1,j,k)))
+        enddo ; enddo ; enddo
       endif
 
       if (CS%id_Kh_q > 0 .or. CS%debug) then
-        do J=js-1,Jeq ; do I=is-1,Ieq
-          Kh_q(I,J,k) = Kh(I,J,1)
-        enddo ; enddo
+        do kk=1,kmax ; do J=js-1,Jeq ; do I=is-1,Ieq
+          k = kstart + kk - 1
+          Kh_q(I,J,k) = Kh(I,J,kk)
+        enddo ; enddo ; enddo
       endif
 
       if (CS%id_vort_xy_q > 0) then
-        do J=js-1,Jeq ; do I=is-1,Ieq
-          vort_xy_q(I,J,k) = vort_xy(I,J,1)
-        enddo ; enddo
+        do kk=1,kmax ; do J=js-1,Jeq ; do I=is-1,Ieq
+          k = kstart + kk - 1
+          vort_xy_q(I,J,k) = vort_xy(I,J,kk)
+        enddo ; enddo ; enddo
       endif
 
       if (CS%id_sh_xy_q > 0) then
-        do J=js-1,Jeq ; do I=is-1,Ieq
-          sh_xy_q(I,J,k) = sh_xy(I,J,1)
-        enddo ; enddo
+        do kk=1,kmax ; do J=js-1,Jeq ; do I=is-1,Ieq
+          k = kstart + kk - 1
+          sh_xy_q(I,J,k) = sh_xy(I,J,kk)
+        enddo ; enddo ; enddo
       endif
 
       if (.not. CS%use_Leithy) then
-        do J=js-1,Jeq ; do I=is-1,Ieq
-          str_xy(I,J,1) = -Kh(I,J,1) * sh_xy(I,J,1)
-        enddo ; enddo
+        do kk=1,kmax ; do J=js-1,Jeq ; do I=is-1,Ieq
+          str_xy(I,J,kk) = -Kh(I,J,kk) * sh_xy(I,J,kk)
+        enddo ; enddo ; enddo
       else
-        do J=js-1,Jeq ; do I=is-1,Ieq
-          str_xy(I,J,1) = -Kh(I,J,1) * sh_xy_smooth(I,J,1)
-        enddo ; enddo
+        do kk=1,kmax ; do J=js-1,Jeq ; do I=is-1,Ieq
+          str_xy(I,J,kk) = -Kh(I,J,kk) * sh_xy_smooth(I,J,kk)
+        enddo ; enddo ; enddo
       endif
     else
-      do J=js-1,Jeq ; do I=is-1,Ieq
-        str_xy(I,J,1) = 0.
-      enddo ; enddo
+      do kk=1,kmax ; do J=js-1,Jeq ; do I=is-1,Ieq
+        str_xy(I,J,kk) = 0.
+      enddo ; enddo ; enddo
     endif ! get harmonic coefficient Kh at q points and harmonic part of str_xy
 
     if (CS%anisotropic) then
