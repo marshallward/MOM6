@@ -37,7 +37,7 @@ implicit none ; private
 
 #include <MOM_memory.h>
 
-public horizontal_viscosity, hor_visc_init, hor_visc_end, hor_visc_vel_stencil
+public horizontal_viscosity, hor_visc_nkblock, hor_visc_init, hor_visc_end, hor_visc_vel_stencil
 
 !> Control structure for horizontal viscosity
 type, public :: hor_visc_CS ; private
@@ -120,6 +120,7 @@ type, public :: hor_visc_CS ; private
   logical :: res_scale_MEKE  !< If true, the viscosity contribution from MEKE is scaled by
                              !! the resolution function.
   logical :: use_GME         !< If true, use GME backscatter scheme.
+  integer :: nkblock         !< The k block size used in horizontal viscosity calculations [nondim].
   integer :: answer_date     !< The vintage of the order of arithmetic and expressions in the
                              !! horizontal viscosity calculations.  Values below 20190101 recover
                              !! the answers from the end of 2018, while higher values use updated
@@ -253,8 +254,6 @@ type, public :: hor_visc_CS ; private
 
 end type hor_visc_CS
 
-  integer, parameter :: nkblock = 1
-
 contains
 
 !> Calculates the acceleration due to the horizontal viscosity.
@@ -270,7 +269,7 @@ contains
 !!   v(is-2:ie+2,js-2:je+2)
 !!   h(is-1:ie+1,js-1:je+1) or up to h(is-2:ie+2,js-2:je+2) with some Leith options.
 subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, GV, US, &
-                                CS, tv, dt, OBC, BT, TD, ADp, hu_cont, hv_cont, STOCH)
+                                CS, nkblock, tv, dt, OBC, BT, TD, ADp, hu_cont, hv_cont, STOCH)
   type(ocean_grid_type),         intent(in)  :: G      !< The ocean's grid structure.
   type(verticalGrid_type),       intent(in)  :: GV     !< The ocean's vertical grid structure.
   real, dimension(SZIB_(G),SZJ_(G),SZK_(GV)), &
@@ -294,6 +293,7 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
   type(VarMix_CS),               intent(inout) :: VarMix !< Variable mixing control structure
   type(unit_scale_type),         intent(in)    :: US   !< A dimensional unit scaling type
   type(hor_visc_CS),             intent(inout) :: CS   !< Horizontal viscosity control structure
+  integer,                       intent(in)    :: nkblock !< The effective k-block size [nondim]
   type(thermo_var_ptrs),         intent(in)    :: tv   !< A structure pointing to various
                                                        !! thermodynamic variables
   real,                          intent(in)    :: dt   !< Time increment [T ~> s]
@@ -503,7 +503,7 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
   skeb_use_frict = .false.
   if (present(STOCH)) skeb_use_frict = STOCH%skeb_use_frict
 
-  m_leithy(:,:,1) = 0.0 ! Initialize
+  if (CS%use_Leithy) m_leithy(:,:,:) = 0.0 ! Initialize
 
   if (present(OBC)) then ; if (associated(OBC)) then ; if (OBC%OBC_pe) then
     apply_OBC = OBC%Flather_u_BCs_exist_globally .or. OBC%Flather_v_BCs_exist_globally
@@ -1311,7 +1311,11 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
 
         if (CS%use_Leithy) then
           ! Get m_leithy
-          if (CS%smooth_Ah) m_leithy(:,:,1) = 0.0 ! This is here to initialize domain edge halo values.
+          if (CS%smooth_Ah) then
+            do kk=1,kmax
+              m_leithy(:,:,kk) = 0.0 ! This is here to initialize domain edge halo values.
+            enddo
+          endif
           do concurrent (kk=1:kmax, j=js_Kh:je_Kh, i=is_Kh:ie_Kh)
             Del2vort_h = 0.25 * ((Del2vort_q(I,J,kk) + Del2vort_q(I-1,J-1,kk)) + &
                                  (Del2vort_q(I-1,J,kk) + Del2vort_q(I,J-1,kk)))
@@ -1329,10 +1333,12 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
           enddo
 
           if (CS%smooth_Ah) then
-            ! Smooth m_leithy.  A single call smoothes twice.
-            call pass_var(m_leithy(:,:,1), G%Domain, halo=2)
-            call smooth_x9_h(G, m_leithy(:,:,1), zero_land=.true.)
-            call pass_var(m_leithy(:,:,1), G%Domain)
+            do kk=1,kmax
+              ! Smooth m_leithy.  A single call smoothes twice.
+              call pass_var(m_leithy(:,:,kk), G%Domain, halo=2)
+              call smooth_x9_h(G, m_leithy(:,:,kk), zero_land=.true.)
+              call pass_var(m_leithy(:,:,kk), G%Domain)
+            enddo
           endif
           ! Get Ah
           do concurrent (kk=1:kmax, j=js_Kh:je_Kh, i=is_Kh:ie_Kh)
@@ -1344,14 +1350,18 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
           enddo
           if (CS%smooth_Ah) then
             ! Smooth Ah before applying upper bound.  Square Ah, then smooth, then take its square root.
-            Ah_sq(:,:,1) = 0.0 ! This is here to initialize domain edge halo values.
+            do kk=1,kmax
+              Ah_sq(:,:,kk) = 0.0 ! This is here to initialize domain edge halo values.
+            enddo
             do concurrent (kk=1:kmax, j=js_Kh:je_Kh, i=is_Kh:ie_Kh)
               Ah_sq(i,j,kk) = Ah(i,j,kk)**2
             enddo
-            call pass_var(Ah_sq(:,:,1), G%Domain, halo=2)
-            ! A single call smoothes twice.
-            call smooth_x9_h(G, Ah_sq(:,:,1), zero_land=.false.)
-            call pass_var(Ah_sq(:,:,1), G%Domain)
+            do kk=1,kmax
+              call pass_var(Ah_sq(:,:,kk), G%Domain, halo=2)
+              ! A single call smoothes twice.
+              call smooth_x9_h(G, Ah_sq(:,:,kk), zero_land=.false.)
+              call pass_var(Ah_sq(:,:,kk), G%Domain)
+            enddo
             do concurrent (kk=1:kmax, j=js_Kh:je_Kh, i=is_Kh:ie_Kh)
               k = kstart + kk - 1
               Ah_h(i,j,k) = max(CS%Ah_bg_xx(i,j), sqrt(max(0., Ah_sq(i,j,kk))))
@@ -2332,6 +2342,13 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
 
 end subroutine horizontal_viscosity
 
+!> Returns the effective k-block size for horizontal_viscosity calls.
+integer function hor_visc_nkblock(CS, GV)
+  type(hor_visc_CS),       intent(in) :: CS !< Horizontal viscosity control structure
+  type(verticalGrid_type), intent(in) :: GV !< The ocean's vertical grid structure.
+  hor_visc_nkblock = merge(GV%ke, CS%nkblock, CS%nkblock==0)
+end function hor_visc_nkblock
+
 !> Calculates the barotropic tension and shearing strain fields and the GME
 !! efficiency and isopycnal height diffusivity fields that are used within
 !! horizontal_viscosity when GME (CS%use_GME) is active. The caller must
@@ -2383,10 +2400,10 @@ subroutine hor_visc_GME_setup(G, GV, US, CS, h, BT, TD, &
                                                        !! [L2 T-1 ~> m2 s-1]
   real, dimension(SZIB_(G),SZJB_(G),SZK_(GV)), &
                                   intent(out)   :: GME_coeff_q !< GME coeff. at q-points [L2 T-1 ~> m2 s-1]
-  real, dimension(SZI_(G),SZJ_(G),nkblock), &
+  real, dimension(SZI_(G),SZJ_(G),merge(GV%ke,CS%nkblock,CS%nkblock==0)), &
                                   intent(out)   :: str_xx_GME !< Smoothed diagonal term in the
                                                        !! stress tensor from GME [L2 T-2 ~> m2 s-2]
-  real, dimension(SZIB_(G),SZJB_(G),nkblock), &
+  real, dimension(SZIB_(G),SZJB_(G),merge(GV%ke,CS%nkblock,CS%nkblock==0)), &
                                   intent(out)   :: str_xy_GME !< Smoothed cross term in the
                                                        !! stress tensor from GME [L2 T-2 ~> m2 s-2]
   ! Local variables
@@ -2560,6 +2577,11 @@ subroutine hor_visc_init(Time, G, GV, US, param_file, diag, CS, ADp)
   integer :: is, ie, js, je, Isq, Ieq, Jsq, Jeq, nz
   integer :: isd, ied, jsd, jed, IsdB, IedB, JsdB, JedB
   integer :: i, j
+#ifdef __NVCOMPILER_OPENMP_GPU
+  integer, parameter :: default_nkblock = 0
+#else
+  integer, parameter :: default_nkblock = 1
+#endif
   ! This include declares and sets the variable "version".
 # include "version_variable.h"
   character(len=40)  :: mdl = "MOM_hor_visc"  ! module name
@@ -2576,6 +2598,12 @@ subroutine hor_visc_init(Time, G, GV, US, param_file, diag, CS, ADp)
   CS%diag => diag
   ! Read parameters and write them to the model log.
   call log_version(param_file, mdl, version, "")
+
+  call get_param(param_file, mdl, "HORVISC_NKBLOCK", CS%nkblock, &
+                 "The k-direction block size used in horizontal viscosity calculations. "//&
+                 "The default 0 setting dynamically uses the full vertical column.", &
+                 default=default_nkblock, layoutParam=.true.)
+  if (CS%nkblock < 0) call MOM_error(FATAL, "HORVISC_NKBLOCK must be >= 0.")
 
   call get_param(param_file, mdl, "USE_CIRCULATION_IN_HORVISC", CS%use_circulation, &
                  "Use circulation theorem to compute vorticity in horvisc module (for ZB20 or Leith)", &
