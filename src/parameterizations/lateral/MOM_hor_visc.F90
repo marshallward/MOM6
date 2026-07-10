@@ -1350,53 +1350,53 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
       ! Determine the biharmonic viscosity at h points, using the
       ! largest value from several parameterizations. Also get the
       ! biharmonic component of str_xx.
-      do j=js_Kh,je_Kh ; do i=is_Kh,ie_Kh
-        Ah(i,j,1) = CS%Ah_bg_xx(i,j)
-      enddo ; enddo
+      do kk=1,kmax ; do j=js_Kh,je_Kh ; do i=is_Kh,ie_Kh
+        Ah(i,j,kk) = CS%Ah_bg_xx(i,j)
+      enddo ; enddo ; enddo
 
       if ((CS%Smagorinsky_Ah) .or. (CS%Leith_Ah) .or. (CS%use_Leithy)) then
         if (CS%Smagorinsky_Ah) then
           if (CS%bound_Coriolis) then
-            do j=js_Kh,je_Kh ; do i=is_Kh,ie_Kh
-              AhSm = Shear_mag(i,j,1) * (CS%Biharm_const_xx(i,j) &
-                  + CS%Biharm_const2_xx(i,j) * Shear_mag(i,j,1))
-              Ah(i,j,1) = max(Ah(i,j,1), AhSm)
-            enddo ; enddo
+            do kk=1,kmax ; do j=js_Kh,je_Kh ; do i=is_Kh,ie_Kh
+              AhSm = Shear_mag(i,j,kk) * (CS%Biharm_const_xx(i,j) &
+                  + CS%Biharm_const2_xx(i,j) * Shear_mag(i,j,kk))
+              Ah(i,j,kk) = max(Ah(i,j,kk), AhSm)
+            enddo ; enddo ; enddo
           else
-            do j=js_Kh,je_Kh ; do i=is_Kh,ie_Kh
-              AhSm = CS%Biharm_const_xx(i,j) * Shear_mag(i,j,1)
-              Ah(i,j,1) = max(Ah(i,j,1), AhSm)
-            enddo ; enddo
+            do kk=1,kmax ; do j=js_Kh,je_Kh ; do i=is_Kh,ie_Kh
+              AhSm = CS%Biharm_const_xx(i,j) * Shear_mag(i,j,kk)
+              Ah(i,j,kk) = max(Ah(i,j,kk), AhSm)
+            enddo ; enddo ; enddo
           endif
         endif
 
         if (CS%Leith_Ah) then
-          do j=js_Kh,je_Kh ; do i=is_Kh,ie_Kh
-            Del2vort_h = 0.25 * ((Del2vort_q(I,J,1) + Del2vort_q(I-1,J-1,1)) + &
-                                 (Del2vort_q(I-1,J,1) + Del2vort_q(I,J-1,1)))
+          do kk=1,kmax ; do j=js_Kh,je_Kh ; do i=is_Kh,ie_Kh
+            Del2vort_h = 0.25 * ((Del2vort_q(I,J,kk) + Del2vort_q(I-1,J-1,kk)) + &
+                                 (Del2vort_q(I-1,J,kk) + Del2vort_q(I,J-1,kk)))
             AhLth = CS%Biharm6_const_xx(i,j) * abs(Del2vort_h) * inv_PI6
-            Ah(i,j,1) = max(Ah(i,j,1), AhLth)
-          enddo ; enddo
+            Ah(i,j,kk) = max(Ah(i,j,kk), AhLth)
+          enddo ; enddo ; enddo
         endif
 
         if (CS%use_Leithy) then
           ! Get m_leithy
           if (CS%smooth_Ah) m_leithy(:,:,1) = 0.0 ! This is here to initialize domain edge halo values.
-          do j=js_Kh,je_Kh ; do i=is_Kh,ie_Kh
-            Del2vort_h = 0.25 * ((Del2vort_q(I,J,1) + Del2vort_q(I-1,J-1,1)) + &
-                                 (Del2vort_q(I-1,J,1) + Del2vort_q(I,J-1,1)))
+          do kk=1,kmax ; do j=js_Kh,je_Kh ; do i=is_Kh,ie_Kh
+            Del2vort_h = 0.25 * ((Del2vort_q(I,J,kk) + Del2vort_q(I-1,J-1,kk)) + &
+                                 (Del2vort_q(I-1,J,kk) + Del2vort_q(I,J-1,kk)))
             AhLth  = CS%Biharm6_const_xx(i,j) * inv_PI6 * abs(Del2vort_h)
             if (AhLth <= CS%Ah_bg_xx(i,j)) then
-              m_leithy(i,j,1) = 0.0
+              m_leithy(i,j,kk) = 0.0
             else
-              if ((CS%m_const_leithy(i,j)*vert_vort_mag(i,j,1)) < abs(vort_xy_smooth(i,j,1))) then
-                m_leithy(i,j,1) = CS%c_K * (vert_vort_mag(i,j,1) / vort_xy_smooth(i,j,1))**2
+              if ((CS%m_const_leithy(i,j)*vert_vort_mag(i,j,kk)) < abs(vort_xy_smooth(i,j,kk))) then
+                m_leithy(i,j,kk) = CS%c_K * (vert_vort_mag(i,j,kk) / vort_xy_smooth(i,j,kk))**2
               else
-                m_leithy(i,j,1) = CS%m_leithy_max(i,j)
+                m_leithy(i,j,kk) = CS%m_leithy_max(i,j)
               endif
-              m_leithy(i,j,1) = G%mask2dBu(i,j) * m_leithy(i,j,1)
+              m_leithy(i,j,kk) = G%mask2dBu(i,j) * m_leithy(i,j,kk)
             endif
-          enddo ; enddo
+          enddo ; enddo ; enddo
 
           if (CS%smooth_Ah) then
             ! Smooth m_leithy.  A single call smoothes twice.
@@ -1405,31 +1405,33 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
             call pass_var(m_leithy(:,:,1), G%Domain)
           endif
           ! Get Ah
-          do j=js_Kh,je_Kh ; do i=is_Kh,ie_Kh
-            Del2vort_h = 0.25 * ((Del2vort_q(I,J,1) + Del2vort_q(I-1,J-1,1)) + &
-                                 (Del2vort_q(I-1,J,1) + Del2vort_q(I,J-1,1)))
+          do kk=1,kmax ; do j=js_Kh,je_Kh ; do i=is_Kh,ie_Kh
+            Del2vort_h = 0.25 * ((Del2vort_q(I,J,kk) + Del2vort_q(I-1,J-1,kk)) + &
+                                 (Del2vort_q(I-1,J,kk) + Del2vort_q(I,J-1,kk)))
             AhLthy = CS%Biharm6_const_xx(i,j) * inv_PI6 * &
-                    sqrt(max(0.,Del2vort_h**2 - m_leithy(i,j,1)*vert_vort_mag_smooth(i,j,1)**2))
-            Ah(i,j,1) = max(CS%Ah_bg_xx(i,j), AhLthy)
-          enddo ; enddo
+                    sqrt(max(0.,Del2vort_h**2 - m_leithy(i,j,kk)*vert_vort_mag_smooth(i,j,kk)**2))
+            Ah(i,j,kk) = max(CS%Ah_bg_xx(i,j), AhLthy)
+          enddo ; enddo ; enddo
           if (CS%smooth_Ah) then
             ! Smooth Ah before applying upper bound.  Square Ah, then smooth, then take its square root.
             Ah_sq(:,:,1) = 0.0 ! This is here to initialize domain edge halo values.
-            do j=js_Kh,je_Kh ; do i=is_Kh,ie_Kh
-              Ah_sq(i,j,1) = Ah(i,j,1)**2
-            enddo ; enddo
+            do kk=1,kmax ; do j=js_Kh,je_Kh ; do i=is_Kh,ie_Kh
+              Ah_sq(i,j,kk) = Ah(i,j,kk)**2
+            enddo ; enddo ; enddo
             call pass_var(Ah_sq(:,:,1), G%Domain, halo=2)
             ! A single call smoothes twice.
             call smooth_x9_h(G, Ah_sq(:,:,1), zero_land=.false.)
             call pass_var(Ah_sq(:,:,1), G%Domain)
-            do j=js_Kh,je_Kh ; do i=is_Kh,ie_Kh
-              Ah_h(i,j,k) = max(CS%Ah_bg_xx(i,j), sqrt(max(0., Ah_sq(i,j,1))))
-              Ah(i,j,1)     = Ah_h(i,j,k)
-            enddo ; enddo
+            do kk=1,kmax ; do j=js_Kh,je_Kh ; do i=is_Kh,ie_Kh
+              k = kstart + kk - 1
+              Ah_h(i,j,k) = max(CS%Ah_bg_xx(i,j), sqrt(max(0., Ah_sq(i,j,kk))))
+              Ah(i,j,kk)    = Ah_h(i,j,k)
+            enddo ; enddo ; enddo
           else
-            do j=js_Kh,je_Kh ; do i=is_Kh,ie_Kh
-              Ah_h(i,j,k) = Ah(i,j,1)
-            enddo ; enddo
+            do kk=1,kmax ; do j=js_Kh,je_Kh ; do i=is_Kh,ie_Kh
+              k = kstart + kk - 1
+              Ah_h(i,j,k) = Ah(i,j,kk)
+            enddo ; enddo ; enddo
           endif
         endif
 
@@ -1437,76 +1439,82 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
 
       if (use_MEKE_Au) then
         ! *Add* the MEKE contribution
-        do j=js_Kh,je_Kh ; do i=is_Kh,ie_Kh
-          Ah(i,j,1) = Ah(i,j,1) + MEKE%Au(i,j)
-        enddo ; enddo
+        do kk=1,kmax ; do j=js_Kh,je_Kh ; do i=is_Kh,ie_Kh
+          Ah(i,j,kk) = Ah(i,j,kk) + MEKE%Au(i,j)
+        enddo ; enddo ; enddo
       endif
 
       if (CS%Re_Ah > 0.0) then
-        do j=js_Kh,je_Kh ; do i=is_Kh,ie_Kh
+        do kk=1,kmax ; do j=js_Kh,je_Kh ; do i=is_Kh,ie_Kh
+          k = kstart + kk - 1
           KE = 0.125*(((u(I,j,k)+u(I-1,j,k))**2) + ((v(i,J,k)+v(i,J-1,k))**2))
-          Ah(i,j,1) = sqrt(KE) * CS%Re_Ah_const_xx(i,j)
-        enddo ; enddo
+          Ah(i,j,kk) = sqrt(KE) * CS%Re_Ah_const_xx(i,j)
+        enddo ; enddo ; enddo
       endif
 
       if (CS%bound_Ah) then
         if (CS%bound_Kh) then
-          do j=js_Kh,je_Kh ; do i=is_Kh,ie_Kh
-            Ah(i,j,1) = min(Ah(i,j,1), visc_bound_rem(i,j,1) * hrat_min(i,j,1) * CS%Ah_Max_xx(i,j))
-          enddo ; enddo
+          do kk=1,kmax ; do j=js_Kh,je_Kh ; do i=is_Kh,ie_Kh
+            Ah(i,j,kk) = min(Ah(i,j,kk), visc_bound_rem(i,j,kk) * hrat_min(i,j,kk) * CS%Ah_Max_xx(i,j))
+          enddo ; enddo ; enddo
         else
-          do j=js_Kh,je_Kh ; do i=is_Kh,ie_Kh
-            Ah(i,j,1) = min(Ah(i,j,1), hrat_min(i,j,1) * CS%Ah_Max_xx(i,j))
-          enddo ; enddo
+          do kk=1,kmax ; do j=js_Kh,je_Kh ; do i=is_Kh,ie_Kh
+            Ah(i,j,kk) = min(Ah(i,j,kk), hrat_min(i,j,kk) * CS%Ah_Max_xx(i,j))
+          enddo ; enddo ; enddo
         endif
       endif
 
       if (CS%EY24_EBT_BS) then
-          do j=js_Kh,je_Kh ; do i=is_Kh,ie_Kh
-            tmp = CS%KS_coef * hrat_min(i,j,1) * CS%Ah_Max_xx_KS(i,j)
+          do kk=1,kmax ; do j=js_Kh,je_Kh ; do i=is_Kh,ie_Kh
+            k = kstart + kk - 1
+            tmp = CS%KS_coef * hrat_min(i,j,kk) * CS%Ah_Max_xx_KS(i,j)
             visc_limit_h(i,j,k) = tmp
-            visc_limit_h_frac(i,j,k) = Ah(i,j,1) / (CS%KS_coef * hrat_min(i,j,1) * CS%Ah_Max_xx_KS(i,j))
-            if (Ah(i,j,1) >= tmp) then
+            visc_limit_h_frac(i,j,k) = Ah(i,j,kk) / (CS%KS_coef * hrat_min(i,j,kk) * CS%Ah_Max_xx_KS(i,j))
+            if (Ah(i,j,kk) >= tmp) then
               visc_limit_h_flag(i,j,k) = 1.
             endif
-          enddo ; enddo
+          enddo ; enddo ; enddo
       endif
 
       if ((CS%id_Ah_h>0) .or. CS%debug .or. CS%use_Leithy) then
-        do j=js_Kh,je_Kh ; do i=is_Kh,ie_Kh
-          Ah_h(i,j,k) = Ah(i,j,1)
-        enddo ; enddo
+        do kk=1,kmax ; do j=js_Kh,je_Kh ; do i=is_Kh,ie_Kh
+          k = kstart + kk - 1
+          Ah_h(i,j,k) = Ah(i,j,kk)
+        enddo ; enddo ; enddo
       endif
 
       if (CS%use_Leithy) then
         ! Compute Leith+E Kh after bounds have been applied to Ah
         ! and after it has been smoothed. Kh = -m_leithy * Ah
-        do j=js_Kh,je_Kh ; do i=is_Kh,ie_Kh
-          Kh(i,j,1) = -m_leithy(i,j,1) * Ah(i,j,1)
-          Kh_h(i,j,k) = Kh(i,j,1)
-        enddo ; enddo
+        do kk=1,kmax ; do j=js_Kh,je_Kh ; do i=is_Kh,ie_Kh
+          k = kstart + kk - 1
+          Kh(i,j,kk) = -m_leithy(i,j,kk) * Ah(i,j,kk)
+          Kh_h(i,j,k) = Kh(i,j,kk)
+        enddo ; enddo ; enddo
       endif
 
       if (CS%id_grid_Re_Ah > 0) then
-        do j=js,je ; do i=is,ie
+        do kk=1,kmax ; do j=js,je ; do i=is,ie
+          k = kstart + kk - 1
           KE = 0.125 * (((u(I,j,k) + u(I-1,j,k))**2) + ((v(i,J,k) + v(i,J-1,k))**2))
-          grid_Ah = max(Ah(i,j,1), CS%min_grid_Ah)
+          grid_Ah = max(Ah(i,j,kk), CS%min_grid_Ah)
           grid_Re_Ah(i,j,k) = (sqrt(KE) * CS%grid_sp_h3(i,j)) / grid_Ah
-        enddo ; enddo
+        enddo ; enddo ; enddo
       endif
 
-      do j=Jsq,Jeq+1 ; do i=Isq,Ieq+1
-        d_del2u = (G%IdyCu(I,j) * Del2u(I,j,1)) - (G%IdyCu(I-1,j) * Del2u(I-1,j,1))
-        d_del2v = (G%IdxCv(i,J) * Del2v(i,J,1)) - (G%IdxCv(i,J-1) * Del2v(i,J-1,1))
-        d_str = Ah(i,j,1) * ((CS%DY_dxT(i,j) * d_del2u) - (CS%DX_dyT(i,j) * d_del2v))
+      do kk=1,kmax ; do j=Jsq,Jeq+1 ; do i=Isq,Ieq+1
+        k = kstart + kk - 1
+        d_del2u = (G%IdyCu(I,j) * Del2u(I,j,kk)) - (G%IdyCu(I-1,j) * Del2u(I-1,j,kk))
+        d_del2v = (G%IdxCv(i,J) * Del2v(i,J,kk)) - (G%IdxCv(i,J-1) * Del2v(i,J-1,kk))
+        d_str = Ah(i,j,kk) * ((CS%DY_dxT(i,j) * d_del2u) - (CS%DX_dyT(i,j) * d_del2v))
 
-        str_xx(i,j,1) = str_xx(i,j,1) + d_str
+        str_xx(i,j,kk) = str_xx(i,j,kk) + d_str
 
-        if (CS%use_Leithy) str_xx(i,j,1) = str_xx(i,j,1) - Kh(i,j,1) * sh_xx_smooth(i,j,1)
+        if (CS%use_Leithy) str_xx(i,j,kk) = str_xx(i,j,kk) - Kh(i,j,kk) * sh_xx_smooth(i,j,kk)
 
         ! Keep a copy of the biharmonic contribution for backscatter parameterization
-        bhstr_xx(i,j,1) = d_str * (h(i,j,k) * CS%reduction_xx(i,j))
-      enddo ; enddo
+        bhstr_xx(i,j,kk) = d_str * (h(i,j,k) * CS%reduction_xx(i,j))
+      enddo ; enddo ; enddo
     endif ! Get biharmonic coefficient at h points and biharmonic part of str_xx
 
     ! Backscatter using MEKE
