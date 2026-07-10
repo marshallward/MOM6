@@ -872,7 +872,7 @@ subroutine set_masks_for_axes(G, diag_cs)
           if (h_mask(i,j,k-1) + h_mask(i,j,k) > 0.) mTi(i,j,k) = 1.
         end do
         if(h_mask(i,j,nk) > 0.) mTi(i,j,nk+1) = 1.
-      end do  
+      end do
 
       h_axes => diag_cs%remap_axesTi(c) ! Use the w-point masks to generate the u-, v- and q- masks
       h_mask => h_axes%mask3d
@@ -906,7 +906,7 @@ subroutine set_masks_for_axes(G, diag_cs)
       allocate( axes%mask3d(G%IsdB:G%IedB,G%JsdB:G%JedB,nk+1), source=0. )
       mBi => axes%mask3d
       !$omp target enter data map(alloc: mBi)
-      do concurrent(k=1:nk+1, J=G%jsc-1:G%jec, I=G%isc-1:G%iec, &
+      do concurrent(k=1:nk, J=G%jsc-1:G%jec, I=G%isc-1:G%iec, &
           (h_mask(i,j,k) + h_mask(i+1,j+1,k) + &
            h_mask(i+1,j,k) + h_mask(i,j+1,k) > 0.))
         mBi(I,J,k) = 1.
@@ -4901,7 +4901,7 @@ subroutine downsample_mask_2d(field_in, field_out, dl, isc_o, jsc_o, isd_o, jsd_
     field_out(i,j) = 0.0
   enddo
 
-  do concurrent(j=jsd_d:jed_d, i=isd_d:ied_d) DO_LOCALITY(local(i0,j0,tot_non_zero,ii,jj))
+  do concurrent(j=jsc_d:jec_d, i=isc_d:iec_d) DO_LOCALITY(local(i0,j0,tot_non_zero,ii,jj))
     i0 = isc_o+dl*(i-isc_d)
     j0 = jsc_o+dl*(j-jsc_d)
     tot_non_zero = 0.0
