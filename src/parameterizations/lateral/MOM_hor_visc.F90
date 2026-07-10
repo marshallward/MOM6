@@ -1995,11 +1995,12 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
     endif ! use_GME
 
     ! Evaluate 1/h x.Div(h Grad u) or the biharmonic equivalent.
-    do j=js,je ; do I=Isq,Ieq
-      diffu(I,j,k) = ((G%IdxCu(I,j)*((CS%dx2q(I,J-1)*str_xy(I,J-1,1)) - (CS%dx2q(I,J)*str_xy(I,J,1))) + &
-                       G%IdyCu(I,j)*((CS%dy2h(i,j)*str_xx(i,j,1)) - (CS%dy2h(i+1,j)*str_xx(i+1,j,1)))) * &
-                     G%IareaCu(I,j)) / (h_u(I,j,1) + h_neglect)
-    enddo ; enddo
+    do kk=1,kmax ; do j=js,je ; do I=Isq,Ieq
+      k = kstart + kk - 1
+      diffu(I,j,k) = ((G%IdxCu(I,j)*((CS%dx2q(I,J-1)*str_xy(I,J-1,kk)) - (CS%dx2q(I,J)*str_xy(I,J,kk))) + &
+                       G%IdyCu(I,j)*((CS%dy2h(i,j)*str_xx(i,j,kk)) - (CS%dy2h(i+1,j)*str_xx(i+1,j,kk)))) * &
+                     G%IareaCu(I,j)) / (h_u(I,j,kk) + h_neglect)
+    enddo ; enddo ; enddo
 
     if (apply_OBC) then
       ! This is not the right boundary condition. If all the masking of tendencies are done
@@ -2007,19 +2008,21 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
       do n=1,OBC%number_of_segments
         if (OBC%segment(n)%is_E_or_W) then
           I = OBC%segment(n)%HI%IsdB
-          do j=OBC%segment(n)%HI%jsd,OBC%segment(n)%HI%jed
+          do kk=1,kmax ; do j=OBC%segment(n)%HI%jsd,OBC%segment(n)%HI%jed
+            k = kstart + kk - 1
             diffu(I,j,k) = 0.
-          enddo
+          enddo ; enddo
         endif
       enddo
     endif
 
     ! Evaluate 1/h y.Div(h Grad u) or the biharmonic equivalent.
-    do J=Jsq,Jeq ; do i=is,ie
-      diffv(i,J,k) = ((G%IdyCv(i,J)*((CS%dy2q(I-1,J)*str_xy(I-1,J,1)) - (CS%dy2q(I,J)*str_xy(I,J,1))) - &
-                       G%IdxCv(i,J)*((CS%dx2h(i,j)*str_xx(i,j,1)) - (CS%dx2h(i,j+1)*str_xx(i,j+1,1)))) * &
-                     G%IareaCv(i,J)) / (h_v(i,J,1) + h_neglect)
-    enddo ; enddo
+    do kk=1,kmax ; do J=Jsq,Jeq ; do i=is,ie
+      k = kstart + kk - 1
+      diffv(i,J,k) = ((G%IdyCv(i,J)*((CS%dy2q(I-1,J)*str_xy(I-1,J,kk)) - (CS%dy2q(I,J)*str_xy(I,J,kk))) - &
+                       G%IdxCv(i,J)*((CS%dx2h(i,j)*str_xx(i,j,kk)) - (CS%dx2h(i,j+1)*str_xx(i,j+1,kk)))) * &
+                     G%IareaCv(i,J)) / (h_v(i,J,kk) + h_neglect)
+    enddo ; enddo ; enddo
 
     if (apply_OBC) then
       ! This is not the right boundary condition. If all the masking of tendencies are done
@@ -2027,9 +2030,10 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
       do n=1,OBC%number_of_segments
         if (OBC%segment(n)%is_N_or_S) then
           J = OBC%segment(n)%HI%JsdB
-          do i=OBC%segment(n)%HI%isd,OBC%segment(n)%HI%ied
+          do kk=1,kmax ; do i=OBC%segment(n)%HI%isd,OBC%segment(n)%HI%ied
+            k = kstart + kk - 1
             diffv(i,J,k) = 0.
-          enddo
+          enddo ; enddo
         endif
       enddo
     endif
