@@ -1519,72 +1519,74 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
 
     ! Backscatter using MEKE
     if (CS%EY24_EBT_BS) then
-      do j=Jsq,Jeq+1 ; do i=Isq,Ieq+1
+      do kk=1,kmax ; do j=Jsq,Jeq+1 ; do i=Isq,Ieq+1
+        k = kstart + kk - 1
         if (visc_limit_h_flag(i,j,k) > 0) then
-          Kh_BS(i,j,1) = 0.
+          Kh_BS(i,j,kk) = 0.
         else
           if (use_kh_struct) then
-            Kh_BS(i,j,1) = MEKE%Ku(i,j) * VarMix%BS_struct(i,j,k)
+            Kh_BS(i,j,kk) = MEKE%Ku(i,j) * VarMix%BS_struct(i,j,k)
           else
-            Kh_BS(i,j,1) = MEKE%Ku(i,j)
+            Kh_BS(i,j,kk) = MEKE%Ku(i,j)
           endif
         endif
-      enddo ; enddo
+      enddo ; enddo ; enddo
 
-      do j=Jsq,Jeq+1 ; do i=Isq,Ieq+1
-        str_xx_BS(i,j,1) = -Kh_BS(i,j,1) * sh_xx(i,j,1)
-      enddo ; enddo
+      do kk=1,kmax ; do j=Jsq,Jeq+1 ; do i=Isq,Ieq+1
+        str_xx_BS(i,j,kk) = -Kh_BS(i,j,kk) * sh_xx(i,j,kk)
+      enddo ; enddo ; enddo
 
       if (CS%id_BS_coeff_h>0) then
-        do j=Jsq,Jeq+1 ; do i=Isq,Ieq+1
-          BS_coeff_h(i,j,k) = Kh_BS(i,j,1)
-        enddo ; enddo
+        do kk=1,kmax ; do j=Jsq,Jeq+1 ; do i=Isq,Ieq+1
+          k = kstart + kk - 1
+          BS_coeff_h(i,j,k) = Kh_BS(i,j,kk)
+        enddo ; enddo ; enddo
       endif
 
-      do j=Jsq,Jeq+1 ; do i=Isq,Ieq+1
-        str_xx(i,j,1) = str_xx(i,j,1) + str_xx_BS(i,j,1)
-      enddo ; enddo
+      do kk=1,kmax ; do j=Jsq,Jeq+1 ; do i=Isq,Ieq+1
+        str_xx(i,j,kk) = str_xx(i,j,kk) + str_xx_BS(i,j,kk)
+      enddo ; enddo ; enddo
     endif ! Backscatter
 
     if (CS%biharmonic) then
       ! Gradient of Laplacian, for use in bi-harmonic term
-      do J=js-1,Jeq ; do I=is-1,Ieq
-        dDel2vdx(I,J,1) = CS%DY_dxBu(I,J)*((Del2v(i+1,J,1)*G%IdyCv(i+1,J)) - (Del2v(i,J,1)*G%IdyCv(i,J)))
-        dDel2udy(I,J,1) = CS%DX_dyBu(I,J)*((Del2u(I,j+1,1)*G%IdxCu(I,j+1)) - (Del2u(I,j,1)*G%IdxCu(I,j)))
-      enddo ; enddo
+      do kk=1,kmax ; do J=js-1,Jeq ; do I=is-1,Ieq
+        dDel2vdx(I,J,kk) = CS%DY_dxBu(I,J)*((Del2v(i+1,J,kk)*G%IdyCv(i+1,J)) - (Del2v(i,J,kk)*G%IdyCv(i,J)))
+        dDel2udy(I,J,kk) = CS%DX_dyBu(I,J)*((Del2u(I,j+1,kk)*G%IdxCu(I,j+1)) - (Del2u(I,j,kk)*G%IdxCu(I,j)))
+      enddo ; enddo ; enddo
       ! Adjust contributions to shearing strain on open boundaries.
       if (apply_OBC) then ; if ((OBC%strain_config == OBC_STRAIN_ZERO) .or. &
                                 (OBC%strain_config == OBC_STRAIN_FREESLIP)) then
         do n=1,OBC%number_of_segments
           J = OBC%segment(n)%HI%JsdB ; I = OBC%segment(n)%HI%IsdB
           if (OBC%segment(n)%is_N_or_S .and. (J >= js-1) .and. (J <= Jeq)) then
-            do I=OBC%segment(n)%HI%IsdB,OBC%segment(n)%HI%IedB
+            do kk=1,kmax ; do I=OBC%segment(n)%HI%IsdB,OBC%segment(n)%HI%IedB
               if (OBC%strain_config == OBC_STRAIN_ZERO) then
-                dDel2vdx(I,J,1) = 0. ; dDel2udy(I,J,1) = 0.
+                dDel2vdx(I,J,kk) = 0. ; dDel2udy(I,J,kk) = 0.
               elseif (OBC%strain_config == OBC_STRAIN_FREESLIP) then
-                dDel2udy(I,J,1) = 0.
+                dDel2udy(I,J,kk) = 0.
               endif
-            enddo
+            enddo ; enddo
           elseif (OBC%segment(n)%is_E_or_W .and. (I >= is-1) .and. (I <= Ieq)) then
-            do J=OBC%segment(n)%HI%JsdB,OBC%segment(n)%HI%JedB
+            do kk=1,kmax ; do J=OBC%segment(n)%HI%JsdB,OBC%segment(n)%HI%JedB
               if (OBC%strain_config == OBC_STRAIN_ZERO) then
-                dDel2vdx(I,J,1) = 0. ; dDel2udy(I,J,1) = 0.
+                dDel2vdx(I,J,kk) = 0. ; dDel2udy(I,J,kk) = 0.
               elseif (OBC%strain_config == OBC_STRAIN_FREESLIP) then
-                dDel2vdx(I,J,1) = 0.
+                dDel2vdx(I,J,kk) = 0.
               endif
-            enddo
+            enddo ; enddo
           endif
         enddo
       endif ; endif
     endif
 
     if ((CS%Smagorinsky_Kh) .or. (CS%Smagorinsky_Ah)) then
-      do J=js-1,Jeq ; do I=is-1,Ieq
-        sh_xy_sq = sh_xy(I,J,1)**2
-        sh_xx_sq = 0.25 * ( ((sh_xx(i,j,1)**2) + (sh_xx(i+1,j+1,1)**2)) &
-                          + ((sh_xx(i,j+1,1)**2) + (sh_xx(i+1,j,1)**2)) )
-        Shear_mag(I,J,1) = sqrt(sh_xy_sq + sh_xx_sq)
-      enddo ; enddo
+      do kk=1,kmax ; do J=js-1,Jeq ; do I=is-1,Ieq
+        sh_xy_sq = sh_xy(I,J,kk)**2
+        sh_xx_sq = 0.25 * ( ((sh_xx(i,j,kk)**2) + (sh_xx(i+1,j+1,kk)**2)) &
+                          + ((sh_xx(i,j+1,kk)**2) + (sh_xx(i+1,j,kk)**2)) )
+        Shear_mag(I,J,kk) = sqrt(sh_xy_sq + sh_xx_sq)
+      enddo ; enddo ; enddo
     endif
 
     do J=js-1,Jeq ; do I=is-1,Ieq
