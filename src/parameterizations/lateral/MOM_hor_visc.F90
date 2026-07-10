@@ -684,6 +684,24 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
     ! call pass_vector(slope_x, slope_y, G%Domain, halo=2)
   endif
 
+  if (find_FrictWork .and. allocated(MEKE%mom_src)) then
+    do j=js,je ; do i=is,ie
+      MEKE%mom_src(i,j) = 0.
+    enddo ; enddo
+
+    if (allocated(MEKE%mom_src_bh)) then
+      do j=js,je ; do i=is,ie
+        MEKE%mom_src_bh(i,j) = 0.
+      enddo ; enddo
+    endif
+
+    if (allocated(MEKE%GME_snk)) then
+      do j=js,je ; do i=is,ie
+        MEKE%GME_snk(i,j) = 0.
+      enddo ; enddo
+    endif
+  endif
+
   !$OMP parallel do default(none) if (.not. CS%smooth_AH) &
   !$OMP shared( &
   !$OMP   CS, G, GV, US, OBC, VarMix, MEKE, u, v, h, uh, vh, &
@@ -2217,6 +2235,12 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
                    + (CS%dy2q(I,J-1)*((vh(i+1,J-1,k)*G%IareaCv(i+1,J-1)/(h_v(i+1,J-1,kk)+h_neglect)) &
                                     - (vh(i,J-1,k)*G%IareaCv(i,J-1)/(h_v(i,J-1,kk)+h_neglect)))) )) ) )) )
       enddo ; enddo ; enddo ; endif
+      if (allocated(MEKE%GME_snk)) then
+        do kk=1,kmax ; do j=js,je ; do i=is,ie
+          k = kstart+kk-1
+          MEKE%GME_snk(i,j) = MEKE%GME_snk(i,j) + FrictWork_GME(i,j,k)
+        enddo ; enddo ; enddo
+      endif
     endif
 
     if (skeb_use_frict) then ; do kk=1,kmax ; do j=js,je ; do i=is,ie
@@ -2232,23 +2256,6 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
     if (find_FrictWork .and. allocated(MEKE%mom_src)) then
       do kk=1,kmax
         k = kstart + kk - 1
-        if (k==1) then
-          do j=js,je ; do i=is,ie
-            MEKE%mom_src(i,j) = 0.
-          enddo ; enddo
-
-          if (allocated(MEKE%mom_src_bh)) then
-            do j=js,je ; do i=is,ie
-              MEKE%mom_src_bh(i,j) = 0.
-            enddo ; enddo
-          endif
-
-          if (allocated(MEKE%GME_snk)) then
-            do j=js,je ; do i=is,ie
-              MEKE%GME_snk(i,j) = 0.
-            enddo ; enddo
-          endif
-        endif
         if (MEKE%backscatter_Ro_c /= 0.) then
           do j=js,je ; do i=is,ie
             FatH = 0.25*( (abs(G%CoriolisBu(I-1,J-1)) + abs(G%CoriolisBu(I,J))) + &
@@ -2292,11 +2299,6 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
           endif
         endif ! MEKE%backscatter_Ro_c
 
-        if (CS%use_GME .and. allocated(MEKE%GME_snk)) then
-          do j=js,je ; do i=is,ie
-            MEKE%GME_snk(i,j) = MEKE%GME_snk(i,j) + FrictWork_GME(i,j,k)
-          enddo ; enddo
-        endif
       enddo ! kk-loop
     endif ! find_FrictWork and associated(mom_src)
   enddo ! end of k loop
