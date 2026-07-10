@@ -1589,49 +1589,52 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
       enddo ; enddo ; enddo
     endif
 
-    do J=js-1,Jeq ; do I=is-1,Ieq
-      h2uq = 4.0 * (h_u(I,j,1) * h_u(I,j+1,1))
-      h2vq = 4.0 * (h_v(i,J,1) * h_v(i+1,J,1))
-      hq(I,J,1) = (2.0 * (h2uq * h2vq)) &
-          / (h_neglect3 + (h2uq + h2vq) * ((h_u(I,j,1) + h_u(I,j+1,1)) + (h_v(i,J,1) + h_v(i+1,J,1))))
-    enddo ; enddo
+    do kk=1,kmax ; do J=js-1,Jeq ; do I=is-1,Ieq
+      h2uq = 4.0 * (h_u(I,j,kk) * h_u(I,j+1,kk))
+      h2vq = 4.0 * (h_v(i,J,kk) * h_v(i+1,J,kk))
+      hq(I,J,kk) = (2.0 * (h2uq * h2vq)) &
+          / (h_neglect3 + (h2uq + h2vq) * ((h_u(I,j,kk) + h_u(I,j+1,kk)) + (h_v(i,J,kk) + h_v(i+1,J,kk))))
+    enddo ; enddo ; enddo
 
     if (CS%bound_Ah .or. CS%bound_Kh) then
-      do J=js-1,Jeq ; do I=is-1,Ieq
-        h_min = min(h_u(I,j,1), h_u(I,j+1,1), h_v(i,J,1), h_v(i+1,J,1))
-        hrat_min(I,J,1) = min(1.0, h_min / (hq(I,J,1) + h_neglect))
-      enddo ; enddo
+      do kk=1,kmax ; do J=js-1,Jeq ; do I=is-1,Ieq
+        h_min = min(h_u(I,j,kk), h_u(I,j+1,kk), h_v(i,J,kk), h_v(i+1,J,kk))
+        hrat_min(I,J,kk) = min(1.0, h_min / (hq(I,J,kk) + h_neglect))
+      enddo ; enddo ; enddo
 
     endif
 
     if (CS%no_slip) then
-      do J=js-1,Jeq ; do I=is-1,Ieq
+      do kk=1,kmax ; do J=js-1,Jeq ; do I=is-1,Ieq
         if (CS%no_slip .and. (G%mask2dBu(I,J) < 0.5)) then
           if ((G%mask2dCu(I,j) + G%mask2dCu(I,j+1)) + &
               (G%mask2dCv(i,J) + G%mask2dCv(i+1,J)) > 0.0) then
             ! This is a coastal vorticity point, so modify hq and hrat_min.
 
-            hu = G%mask2dCu(I,j) * h_u(I,j,1) + G%mask2dCu(I,j+1) * h_u(I,j+1,1)
-            hv = G%mask2dCv(i,J) * h_v(i,J,1) + G%mask2dCv(i+1,J) * h_v(i+1,J,1)
+            hu = G%mask2dCu(I,j) * h_u(I,j,kk) + G%mask2dCu(I,j+1) * h_u(I,j+1,kk)
+            hv = G%mask2dCv(i,J) * h_v(i,J,kk) + G%mask2dCv(i+1,J) * h_v(i+1,J,kk)
             if ((G%mask2dCu(I,j) + G%mask2dCu(I,j+1)) * &
                 (G%mask2dCv(i,J) + G%mask2dCv(i+1,J)) == 0.0) then
               ! Only one of hu and hv is nonzero, so just add them.
-              hq(I,J,1) = hu + hv
-              hrat_min(I,J,1) = 1.0
+              hq(I,J,kk) = hu + hv
+              hrat_min(I,J,kk) = 1.0
             else
               ! Both hu and hv are nonzero, so take the harmonic mean.
-              hq(I,J,1) = 2.0 * (hu * hv) / ((hu + hv) + h_neglect)
-              hrat_min(I,J,1) = min(1.0, min(hu, hv) / (hq(I,J,1) + h_neglect) )
+              hq(I,J,kk) = 2.0 * (hu * hv) / ((hu + hv) + h_neglect)
+              hrat_min(I,J,kk) = min(1.0, min(hu, hv) / (hq(I,J,kk) + h_neglect) )
             endif
           endif
         endif
-      enddo ; enddo
+      enddo ; enddo ; enddo
     endif
 
     ! Pass the velocity gradients and thickness to ZB2020
     if (CS%use_ZB2020) then
-      call ZB2020_copy_gradient_and_thickness(sh_xx(:,:,1), sh_xy(:,:,1), vort_xy(:,:,1), hq(:,:,1), &
-                                              G, GV, CS%ZB2020, k)
+      do kk=1,kmax
+        k = kstart + kk - 1
+        call ZB2020_copy_gradient_and_thickness(sh_xx(:,:,kk), sh_xy(:,:,kk), vort_xy(:,:,kk), hq(:,:,kk), &
+                                                 G, GV, CS%ZB2020, k)
+      enddo
     endif
 
     if (CS%Laplacian) then
