@@ -1790,106 +1790,110 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
     endif ! get harmonic coefficient Kh at q points and harmonic part of str_xy
 
     if (CS%anisotropic) then
-      do J=js-1,Jeq ; do I=is-1,Ieq
+      do kk=1,kmax ; do J=js-1,Jeq ; do I=is-1,Ieq
         ! Horizontal-tension averaged to q-points
-        local_strain = 0.25 * ( (sh_xx(i,j,1) + sh_xx(i+1,j+1,1)) + (sh_xx(i+1,j,1) + sh_xx(i,j+1,1)) )
+        local_strain = 0.25 * ( (sh_xx(i,j,kk) + sh_xx(i+1,j+1,kk)) + (sh_xx(i+1,j,kk) + sh_xx(i,j+1,kk)) )
         ! *Add* the tension contribution to the xy-component of stress
-        str_xy(I,J,1) = str_xy(I,J,1) - CS%Kh_aniso * CS%n1n2_q(I,J) * CS%n1n1_m_n2n2_q(I,J) * local_strain
-      enddo ; enddo
+        str_xy(I,J,kk) = str_xy(I,J,kk) - CS%Kh_aniso * CS%n1n2_q(I,J) * CS%n1n1_m_n2n2_q(I,J) * local_strain
+      enddo ; enddo ; enddo
     endif
 
     if (CS%biharmonic) then
       ! Determine the biharmonic viscosity at q points, using the
       ! largest value from several parameterizations. Also get the
       ! biharmonic component of str_xy.
-      do J=js-1,Jeq ; do I=is-1,Ieq
-        Ah(I,J,1) = CS%Ah_bg_xy(I,J)
-      enddo ; enddo
+      do kk=1,kmax ; do J=js-1,Jeq ; do I=is-1,Ieq
+        Ah(I,J,kk) = CS%Ah_bg_xy(I,J)
+      enddo ; enddo ; enddo
 
       if (CS%Smagorinsky_Ah .or. CS%Leith_Ah) then
         if (CS%Smagorinsky_Ah) then
           if (CS%bound_Coriolis) then
-            do J=js-1,Jeq ; do I=is-1,Ieq
-              AhSm = Shear_mag(I,J,1) * (CS%Biharm_const_xy(I,J) &
-                  + CS%Biharm_const2_xy(I,J) * Shear_mag(I,J,1))
-              Ah(I,J,1) = max(Ah(I,J,1), AhSm)
-            enddo ; enddo
+            do kk=1,kmax ; do J=js-1,Jeq ; do I=is-1,Ieq
+              AhSm = Shear_mag(I,J,kk) * (CS%Biharm_const_xy(I,J) &
+                  + CS%Biharm_const2_xy(I,J) * Shear_mag(I,J,kk))
+              Ah(I,J,kk) = max(Ah(I,J,kk), AhSm)
+            enddo ; enddo ; enddo
           else
-            do J=js-1,Jeq ; do I=is-1,Ieq
-              AhSm = CS%Biharm_const_xy(I,J) * Shear_mag(I,J,1)
-              Ah(I,J,1) = max(Ah(I,J,1), AhSm)
-            enddo ; enddo
+            do kk=1,kmax ; do J=js-1,Jeq ; do I=is-1,Ieq
+              AhSm = CS%Biharm_const_xy(I,J) * Shear_mag(I,J,kk)
+              Ah(I,J,kk) = max(Ah(I,J,kk), AhSm)
+            enddo ; enddo ; enddo
           endif
         endif
 
         if (CS%Leith_Ah) then
-          do J=js-1,Jeq ; do I=is-1,Ieq
-            AhLth = CS%Biharm6_const_xy(I,J) * abs(Del2vort_q(I,J,1)) * inv_PI6
-            Ah(I,J,1) = max(Ah(I,J,1), AhLth)
-          enddo ; enddo
+          do kk=1,kmax ; do J=js-1,Jeq ; do I=is-1,Ieq
+            AhLth = CS%Biharm6_const_xy(I,J) * abs(Del2vort_q(I,J,kk)) * inv_PI6
+            Ah(I,J,kk) = max(Ah(I,J,kk), AhLth)
+          enddo ; enddo ; enddo
         endif
       endif ! Smagorinsky_Ah or Leith_Ah
 
       if (use_MEKE_Au) then
         ! *Add* the MEKE contribution
-        do J=js-1,Jeq ; do I=is-1,Ieq
-          Ah(I,J,1) = Ah(I,J,1) + 0.25 * ( &
+        do kk=1,kmax ; do J=js-1,Jeq ; do I=is-1,Ieq
+          Ah(I,J,kk) = Ah(I,J,kk) + 0.25 * ( &
               (MEKE%Au(i,j) + MEKE%Au(i+1,j+1)) + (MEKE%Au(i+1,j) + MEKE%Au(i,j+1)) )
-        enddo ; enddo
+        enddo ; enddo ; enddo
       endif
 
       if (CS%Re_Ah > 0.0) then
-        do J=js-1,Jeq ; do I=is-1,Ieq
+        do kk=1,kmax ; do J=js-1,Jeq ; do I=is-1,Ieq
+          k = kstart + kk - 1
           KE = 0.125 * (((u(I,j,k) + u(I,j+1,k))**2) + ((v(i,J,k) + v(i+1,J,k))**2))
-          Ah(I,J,1) = sqrt(KE) * CS%Re_Ah_const_xy(I,J)
-        enddo ; enddo
+          Ah(I,J,kk) = sqrt(KE) * CS%Re_Ah_const_xy(I,J)
+        enddo ; enddo ; enddo
       endif
 
       if (CS%bound_Ah) then
         if (CS%bound_Kh) then
-          do J=js-1,Jeq ; do I=is-1,Ieq
-            Ah(I,J,1) = min(Ah(I,J,1), visc_bound_rem(I,J,1) * hrat_min(I,J,1) * CS%Ah_Max_xy(I,J))
-          enddo ; enddo
+          do kk=1,kmax ; do J=js-1,Jeq ; do I=is-1,Ieq
+            Ah(I,J,kk) = min(Ah(I,J,kk), visc_bound_rem(I,J,kk) * hrat_min(I,J,kk) * CS%Ah_Max_xy(I,J))
+          enddo ; enddo ; enddo
         else
-          do J=js-1,Jeq ; do I=is-1,Ieq
-            Ah(I,J,1) = min(Ah(I,J,1), hrat_min(I,J,1) * CS%Ah_Max_xy(I,J))
-          enddo ; enddo
+          do kk=1,kmax ; do J=js-1,Jeq ; do I=is-1,Ieq
+            Ah(I,J,kk) = min(Ah(I,J,kk), hrat_min(I,J,kk) * CS%Ah_Max_xy(I,J))
+          enddo ; enddo ; enddo
         endif
       endif
 
       if (CS%EY24_EBT_BS) then
-          do J=js-1,Jeq ; do I=is-1,Ieq
-            tmp = CS%KS_coef *hrat_min(I,J,1) * CS%Ah_Max_xy_KS(I,J)
+          do kk=1,kmax ; do J=js-1,Jeq ; do I=is-1,Ieq
+            k = kstart + kk - 1
+            tmp = CS%KS_coef *hrat_min(I,J,kk) * CS%Ah_Max_xy_KS(I,J)
             visc_limit_q(I,J,k) = tmp
-            visc_limit_q_frac(i,j,k) = Ah(i,j,1) / (CS%KS_coef * hrat_min(i,j,1) * CS%Ah_Max_xy_KS(i,j))
-            if (Ah(I,J,1) >= tmp) then
+            visc_limit_q_frac(i,j,k) = Ah(i,j,kk) / (CS%KS_coef * hrat_min(i,j,kk) * CS%Ah_Max_xy_KS(i,j))
+            if (Ah(I,J,kk) >= tmp) then
               visc_limit_q_flag(I,J,k) = 1.
             endif
-          enddo ; enddo
+          enddo ; enddo ; enddo
       endif
 
       ! Leith+E doesn't recompute Ah at q points, it just interpolates it from h to q points
       if (CS%use_Leithy) then
-        do J=js-1,Jeq ; do I=is-1,Ieq
-          Ah(I,J,1) = 0.25 * ((Ah_h(i,j,k) + Ah_h(i+1,j+1,k)) + (Ah_h(i,j+1,k) + Ah_h(i+1,j,k)))
-        enddo ; enddo
+        do kk=1,kmax ; do J=js-1,Jeq ; do I=is-1,Ieq
+          k = kstart + kk - 1
+          Ah(I,J,kk) = 0.25 * ((Ah_h(i,j,k) + Ah_h(i+1,j+1,k)) + (Ah_h(i,j+1,k) + Ah_h(i+1,j,k)))
+        enddo ; enddo ; enddo
       endif
 
       if (CS%id_Ah_q>0 .or. CS%debug) then
-        do J=js-1,Jeq ; do I=is-1,Ieq
-          Ah_q(I,J,k) = Ah(I,J,1)
-        enddo ; enddo
+        do kk=1,kmax ; do J=js-1,Jeq ; do I=is-1,Ieq
+          k = kstart + kk - 1
+          Ah_q(I,J,k) = Ah(I,J,kk)
+        enddo ; enddo ; enddo
       endif
 
       ! Again, need to initialize str_xy as if its biharmonic
-      do J=js-1,Jeq ; do I=is-1,Ieq
-        d_str = Ah(I,J,1) * (dDel2vdx(I,J,1) + dDel2udy(I,J,1))
+      do kk=1,kmax ; do J=js-1,Jeq ; do I=is-1,Ieq
+        d_str = Ah(I,J,kk) * (dDel2vdx(I,J,kk) + dDel2udy(I,J,kk))
 
-        str_xy(I,J,1) = str_xy(I,J,1) + d_str
+        str_xy(I,J,kk) = str_xy(I,J,kk) + d_str
 
         ! Keep a copy of the biharmonic contribution for backscatter parameterization
-        bhstr_xy(I,J,1) = d_str * (hq(I,J,1) * G%mask2dBu(I,J) * CS%reduction_xy(I,J))
-      enddo ; enddo
+        bhstr_xy(I,J,kk) = d_str * (hq(I,J,kk) * G%mask2dBu(I,J) * CS%reduction_xy(I,J))
+      enddo ; enddo ; enddo
     endif ! Get Ah at q points and biharmonic part of str_xy
 
     ! Backscatter using MEKE
