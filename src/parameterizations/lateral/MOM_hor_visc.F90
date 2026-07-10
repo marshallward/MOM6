@@ -314,8 +314,6 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
     vort_xy_dy, & ! y-derivative of vertical vorticity (d/dy(dv/dx - du/dy)) [L-1 T-1 ~> m-1 s-1]
     vort_xy_dy_smooth, & ! y-derivative of smoothed vertical vorticity [L-1 T-1 ~> m-1 s-1]
     div_xx_dx     ! x-derivative of horizontal divergence (d/dx(du/dx + dv/dy)) [L-1 T-1 ~> m-1 s-1]
-  real, dimension(SZIB_(G),SZJ_(G)) :: &
-    ubtav         ! zonal barotropic velocity averaged over a baroclinic time-step [L T-1 ~> m s-1]
   real, dimension(SZI_(G),SZJB_(G),nkblock) :: &
     Del2v, &      ! The v-component of the Laplacian of velocity [L-1 T-1 ~> m-1 s-1]
     h_v, &        ! Thickness interpolated to v points [H ~> m or kg m-2].
@@ -323,7 +321,6 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
     vort_xy_dx_smooth, & ! x-derivative of smoothed vertical vorticity [L-1 T-1 ~> m-1 s-1]
     div_xx_dy     ! y-derivative of horizontal divergence (d/dy(du/dx + dv/dy)) [L-1 T-1 ~> m-1 s-1]
   real, dimension(SZI_(G),SZJB_(G)) :: &
-    vbtav, &      ! meridional barotropic velocity averaged over a baroclinic time-step [L T-1 ~> m s-1]
     dudx_bt, dvdy_bt ! components in the barotropic horizontal tension [T-1 ~> s-1]
   real, dimension(SZI_(G),SZJ_(G),nkblock) :: &
     div_xx, &     ! Estimate of horizontal divergence at h-points [T-1 ~> s-1]
@@ -341,15 +338,14 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
     grad_vort_mag_h, & ! Magnitude of vorticity gradient at h-points [L-1 T-1 ~> m-1 s-1]
     grad_vort_mag_h_2d, & ! Magnitude of 2d vorticity gradient at h-points [L-1 T-1 ~> m-1 s-1]
     grad_div_mag_h, &     ! Magnitude of divergence gradient at h-points [L-1 T-1 ~> m-1 s-1]
-    dudx, dvdy, &    ! components in the horizontal tension [T-1 ~> s-1]
-    GME_effic_h, &  ! The filtered efficiency of the GME terms at h points [nondim]
+    dudx, dvdy      ! components in the horizontal tension [T-1 ~> s-1]
+  real, dimension(SZI_(G),SZJ_(G)) :: &
+    GME_effic_h   ! The filtered efficiency of the GME terms at h points [nondim]
+  real, dimension(SZI_(G),SZJ_(G),nkblock) :: &
     m_leithy, &   ! Kh=m_leithy*Ah in Leith+E parameterization [L-2 ~> m-2]
     Ah_sq, &      ! The square of the biharmonic viscosity [L8 T-2 ~> m8 s-2]
-    htot, &       ! The total thickness of all layers [H ~> m or kg m-2]
     str_xx_BS      ! The diagonal term in the stress tensor due to backscatter [H L2 T-2 ~> m3 s-2 or kg s-2]
   real :: Del2vort_h ! Laplacian of vorticity at h-points [L-2 T-1 ~> m-2 s-1]
-  real :: grad_vel_mag_bt_h ! Magnitude of the barotropic velocity gradient tensor squared at h-points [T-2 ~> s-2]
-  real :: boundary_mask_h ! A mask that zeroes out cells with at least one land edge [nondim]
 
   real, dimension(SZIB_(G),SZJB_(G),nkblock) :: &
     dvdx, dudy, & ! components in the shearing strain [T-1 ~> s-1]
@@ -373,12 +369,12 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
     grad_vort_mag_q_2d, & ! Magnitude of 2d vorticity gradient at q-points [L-1 T-1 ~> m-1 s-1]
     Del2vort_q, & ! Laplacian of vorticity at q-points [L-2 T-1 ~> m-2 s-1]
     grad_div_mag_q, &  ! Magnitude of divergence gradient at q-points [L-1 T-1 ~> m-1 s-1]
-    hq, &          ! harmonic mean of the harmonic means of the u- & v point thicknesses [H ~> m or kg m-2]
+    hq             ! harmonic mean of the harmonic means of the u- & v point thicknesses [H ~> m or kg m-2]
                    ! This form guarantees that hq/hu < 4.
-    GME_effic_q, & ! The filtered efficiency of the GME terms at q points [nondim]
+  real, dimension(SZIB_(G),SZJB_(G)) :: &
+    GME_effic_q   ! The filtered efficiency of the GME terms at q points [nondim]
+  real, dimension(SZIB_(G),SZJB_(G),nkblock) :: &
     str_xy_BS      ! The cross term in the stress tensor due to backscatter [H L2 T-2 ~> m3 s-2 or kg s-2]
-  real :: grad_vel_mag_bt_q ! Magnitude of the barotropic velocity gradient tensor squared at q-points [T-2 ~> s-2]
-  real :: boundary_mask_q ! A mask that zeroes out cells with at least one land edge [nondim]
 
   real, dimension(SZIB_(G),SZJB_(G),SZK_(GV)) :: &
     Ah_q, &      ! biharmonic viscosity at corner points [L4 T-1 ~> m4 s-1]
@@ -429,8 +425,6 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
   real :: hu, hv     ! Thicknesses interpolated by arithmetic means to corner
                      ! points; these are first interpolated to u or v velocity
                      ! points where masks are applied [H ~> m or kg m-2].
-  real :: h_arith_q  ! The arithmetic mean total thickness at q points [H ~> m or kg m-2]
-  real :: I_GME_h0   ! The inverse of GME tapering scale [H-1 ~> m-1 or m2 kg-1]
   real :: h_neglect  ! thickness so small it can be lost in roundoff and so neglected [H ~> m or kg m-2]
   real :: h_neglect3 ! h_neglect^3 [H3 ~> m3 or kg3 m-6]
   real :: h_min      ! Minimum h at the 4 neighboring velocity points [H ~> m]
@@ -575,93 +569,11 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
   endif
 
   if (CS%use_GME) then
-
-    ! Initialize diagnostic arrays with zeros
-    GME_coeff_h(:,:,:) = 0.0
-    GME_coeff_q(:,:,:) = 0.0
-    str_xx_GME(:,:,:) = 0.0
-    str_xy_GME(:,:,:) = 0.0
-
-    ! Get barotropic velocities and their gradients
-    call barotropic_get_tav(BT, ubtav, vbtav, G, US)
-
-    call pass_vector(ubtav, vbtav, G%Domain)
-    call pass_var(h, G%domain, halo=2)
-
-    ! Calculate the barotropic horizontal tension
-    do j=js-2,je+2 ; do i=is-2,ie+2
-      dudx_bt(i,j) = CS%DY_dxT(i,j)*((G%IdyCu(I,j) * ubtav(I,j)) - &
-                                     (G%IdyCu(I-1,j) * ubtav(I-1,j)))
-      dvdy_bt(i,j) = CS%DX_dyT(i,j)*((G%IdxCv(i,J) * vbtav(i,J)) - &
-                                     (G%IdxCv(i,J-1) * vbtav(i,J-1)))
-    enddo ; enddo
-    do j=Jsq-1,Jeq+2 ; do i=Isq-1,Ieq+2
-      sh_xx_bt(i,j) = dudx_bt(i,j) - dvdy_bt(i,j)
-    enddo ; enddo
-
-    ! Components for the barotropic shearing strain
-    do J=Jsq-2,Jeq+2 ; do I=Isq-2,Ieq+2
-      dvdx_bt(I,J) = CS%DY_dxBu(I,J)*((vbtav(i+1,J)*G%IdyCv(i+1,J)) &
-                                    - (vbtav(i,J)*G%IdyCv(i,J)))
-      dudy_bt(I,J) = CS%DX_dyBu(I,J)*((ubtav(I,j+1)*G%IdxCu(I,j+1)) &
-                                    - (ubtav(I,j)*G%IdxCu(I,j)))
-    enddo ; enddo
-
-    if (CS%no_slip) then
-      do J=js-2,je+1 ; do I=is-2,ie+1
-        sh_xy_bt(I,J) = (2.0-G%mask2dBu(I,J)) * ( dvdx_bt(I,J) + dudy_bt(I,J) )
-      enddo ; enddo
-    else
-      do J=js-2,je+1 ; do I=is-2,ie+1
-        sh_xy_bt(I,J) = G%mask2dBu(I,J) * ( dvdx_bt(I,J) + dudy_bt(I,J) )
-      enddo ; enddo
-    endif
-
-    do j=js-2,je+2 ; do i=is-2,ie+2
-      htot(i,j,1) = 0.0
-    enddo ; enddo
-    do k=1,nz ; do j=js-2,je+2 ; do i=is-2,ie+2
-      htot(i,j,1) = htot(i,j,1) + h(i,j,k)
-    enddo ; enddo ; enddo
-
-    I_GME_h0 = 1.0 / CS%GME_h0
-    do j=Jsq-1,Jeq+2 ; do i=Isq-1,Ieq+2
-      boundary_mask_h = (G%mask2dCu(I,j) * G%mask2dCu(I-1,j)) * (G%mask2dCv(i,J) * G%mask2dCv(i,J-1))
-      grad_vel_mag_bt_h = G%mask2dT(I,J) * boundary_mask_h * (dudx_bt(i,j)**2 + dvdy_bt(i,j)**2 + &
-            (0.25*((dvdx_bt(I,J)+dvdx_bt(I-1,J-1)) + (dvdx_bt(I,J-1)+dvdx_bt(I-1,J))))**2 + &
-            (0.25*((dudy_bt(I,J)+dudy_bt(I-1,J-1)) + (dudy_bt(I,J-1)+dudy_bt(I-1,J))))**2)
-      ! Probably the following test could be simplified to
-      ! if (boundary_mask_h * G%mask2dT(I,J) > 0.0) then
-      if (grad_vel_mag_bt_h > 0.0) then
-        GME_effic_h(i,j,1) = CS%GME_efficiency * G%mask2dT(I,J) * (MIN(htot(i,j,1) * I_GME_h0, 1.0)**2)
-      else
-        GME_effic_h(i,j,1) = 0.0
-      endif
-    enddo ; enddo
-
-    do J=js-2,je+1 ; do I=is-2,ie+1
-      boundary_mask_q = (G%mask2dCv(i,J) * G%mask2dCv(i+1,J)) * (G%mask2dCu(I,j) * G%mask2dCu(I,j+1))
-      grad_vel_mag_bt_q = G%mask2dBu(I,J) * boundary_mask_q * (dvdx_bt(I,J)**2 + dudy_bt(I,J)**2 + &
-            (0.25*((dudx_bt(i,j)+dudx_bt(i+1,j+1)) + (dudx_bt(i,j+1)+dudx_bt(i+1,j))))**2 + &
-            (0.25*((dvdy_bt(i,j)+dvdy_bt(i+1,j+1)) + (dvdy_bt(i,j+1)+dvdy_bt(i+1,j))))**2)
-      ! Probably the following test could be simplified to
-      ! if (boundary_mask_q * G%mask2dBu(I,J) > 0.0) then
-      if (grad_vel_mag_bt_q > 0.0) then
-        h_arith_q = 0.25 * ((htot(i,j,1) + htot(i+1,j+1,1)) + (htot(i+1,j,1) + htot(i,j+1,1)))
-        GME_effic_q(I,J,1) = CS%GME_efficiency * G%mask2dBu(I,J) * (MIN(h_arith_q * I_GME_h0, 1.0)**2)
-      else
-        GME_effic_q(I,J,1) = 0.0
-      endif
-    enddo ; enddo
-
-    call thickness_diffuse_get_KH(TD, KH_u_GME, KH_v_GME, G, GV)
-
-    call pass_vector(KH_u_GME, KH_v_GME, G%domain, To_All+Scalar_Pair)
-
-    if (CS%debug) &
-      call uvchksum("GME KH[u,v]_GME", KH_u_GME, KH_v_GME, G%HI, haloshift=2, unscale=US%L_to_m**2*US%s_to_T)
-
-  endif ! use_GME
+    call hor_visc_GME_setup(G, GV, US, CS, h, BT, TD, &
+                             dudx_bt, dvdy_bt, dvdx_bt, dudy_bt, sh_xx_bt, sh_xy_bt, &
+                             GME_effic_h, GME_effic_q, KH_u_GME, KH_v_GME, &
+                             GME_coeff_h, GME_coeff_q, str_xx_GME, str_xy_GME)
+  endif
 
   if (CS%use_Leithy) then
     ! Smooth the velocity. Right now it happens twice. In the future
@@ -1953,7 +1865,7 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
       ! The wider halo here is to permit one pass of smoothing without a halo update.
       do concurrent (kk=1:kmax, j=Jsq-1:Jeq+2, i=Isq-1:Ieq+2)
         k = kstart + kk - 1
-        GME_coeff = GME_effic_h(i,j,1) * 0.25 * &
+        GME_coeff = GME_effic_h(i,j) * 0.25 * &
             ((KH_u_GME(I,j,k)+KH_u_GME(I-1,j,k)) + (KH_v_GME(i,J,k)+KH_v_GME(i,J-1,k)))
         GME_coeff = MIN(GME_coeff, CS%GME_limiter)
 
@@ -1964,7 +1876,7 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
       ! The wider halo here is to permit one pass of smoothing without a halo update.
       do concurrent (kk=1:kmax, J=js-2:je+1, I=is-2:ie+1)
         k = kstart + kk - 1
-        GME_coeff = GME_effic_q(I,J,1) * 0.25 * &
+        GME_coeff = GME_effic_q(I,J) * 0.25 * &
             ((KH_u_GME(I,j,k)+KH_u_GME(I,j+1,k)) + (KH_v_GME(i,J,k)+KH_v_GME(i+1,J,k)))
         GME_coeff = MIN(GME_coeff, CS%GME_limiter)
 
@@ -2419,6 +2331,168 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
   endif
 
 end subroutine horizontal_viscosity
+
+!> Calculates the barotropic tension and shearing strain fields and the GME
+!! efficiency and isopycnal height diffusivity fields that are used within
+!! horizontal_viscosity when GME (CS%use_GME) is active. The caller must
+!! only invoke this routine when CS%use_GME is true.
+subroutine hor_visc_GME_setup(G, GV, US, CS, h, BT, TD, &
+                               dudx_bt, dvdy_bt, dvdx_bt, dudy_bt, sh_xx_bt, sh_xy_bt, &
+                               GME_effic_h, GME_effic_q, KH_u_GME, KH_v_GME, &
+                               GME_coeff_h, GME_coeff_q, str_xx_GME, str_xy_GME)
+  type(ocean_grid_type),         intent(in)    :: G      !< The ocean's grid structure.
+  type(verticalGrid_type),       intent(in)    :: GV     !< The ocean's vertical grid structure.
+  type(unit_scale_type),         intent(in)    :: US     !< A dimensional unit scaling type
+  type(hor_visc_CS),             intent(inout) :: CS     !< Horizontal viscosity control structure
+  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)), &
+                                  intent(inout) :: h      !< Layer thicknesses [H ~> m or kg m-2].
+  type(barotropic_CS),           optional, intent(in) :: BT !< Barotropic control structure
+  type(thickness_diffuse_CS),    optional, intent(in) :: TD !< Thickness diffusion control structure
+  real, dimension(SZI_(G),SZJB_(G)), &
+                                  intent(out)   :: dudx_bt !< x-component in the barotropic
+                                                       !! horizontal tension [T-1 ~> s-1]
+  real, dimension(SZI_(G),SZJB_(G)), &
+                                  intent(out)   :: dvdy_bt !< y-component in the barotropic
+                                                       !! horizontal tension [T-1 ~> s-1]
+  real, dimension(SZIB_(G),SZJB_(G)), &
+                                  intent(out)   :: dvdx_bt !< x-component in the barotropic
+                                                       !! shearing strain [T-1 ~> s-1]
+  real, dimension(SZIB_(G),SZJB_(G)), &
+                                  intent(out)   :: dudy_bt !< y-component in the barotropic
+                                                       !! shearing strain [T-1 ~> s-1]
+  real, dimension(SZI_(G),SZJ_(G)), &
+                                  intent(out)   :: sh_xx_bt !< Barotropic horizontal tension
+                                                       !! (du/dx - dv/dy) including metric terms [T-1 ~> s-1]
+  real, dimension(SZIB_(G),SZJB_(G)), &
+                                  intent(out)   :: sh_xy_bt !< Barotropic horizontal shearing strain
+                                                       !! (du/dy + dv/dx) including metric terms [T-1 ~> s-1]
+  real, dimension(SZI_(G),SZJ_(G)), &
+                                  intent(out)   :: GME_effic_h !< The filtered efficiency of the
+                                                       !! GME terms at h points [nondim]
+  real, dimension(SZIB_(G),SZJB_(G)), &
+                                  intent(out)   :: GME_effic_q !< The filtered efficiency of the
+                                                       !! GME terms at q points [nondim]
+  real, dimension(SZIB_(G),SZJ_(G),SZK_(GV)+1), &
+                                  intent(out)   :: KH_u_GME !< Isopycnal height diffusivities in
+                                                       !! u-columns [L2 T-1 ~> m2 s-1]
+  real, dimension(SZI_(G),SZJB_(G),SZK_(GV)+1), &
+                                  intent(out)   :: KH_v_GME !< Isopycnal height diffusivities in
+                                                       !! v-columns [L2 T-1 ~> m2 s-1]
+  real, dimension(SZI_(G),SZJ_(G),SZK_(G)), &
+                                  intent(out)   :: GME_coeff_h !< GME coefficient at h-points
+                                                       !! [L2 T-1 ~> m2 s-1]
+  real, dimension(SZIB_(G),SZJB_(G),SZK_(GV)), &
+                                  intent(out)   :: GME_coeff_q !< GME coeff. at q-points [L2 T-1 ~> m2 s-1]
+  real, dimension(SZI_(G),SZJ_(G),nkblock), &
+                                  intent(out)   :: str_xx_GME !< Smoothed diagonal term in the
+                                                       !! stress tensor from GME [L2 T-2 ~> m2 s-2]
+  real, dimension(SZIB_(G),SZJB_(G),nkblock), &
+                                  intent(out)   :: str_xy_GME !< Smoothed cross term in the
+                                                       !! stress tensor from GME [L2 T-2 ~> m2 s-2]
+  ! Local variables
+  real, dimension(SZIB_(G),SZJ_(G)) :: &
+    ubtav         ! zonal barotropic velocity averaged over a baroclinic time-step [L T-1 ~> m s-1]
+  real, dimension(SZI_(G),SZJB_(G)) :: &
+    vbtav         ! meridional barotropic velocity averaged over a baroclinic time-step [L T-1 ~> m s-1]
+  real, dimension(SZI_(G),SZJ_(G)) :: &
+    htot          ! The total thickness of all layers [H ~> m or kg m-2]
+  real :: grad_vel_mag_bt_h ! Magnitude of the barotropic velocity gradient tensor squared at h-points [T-2 ~> s-2]
+  real :: boundary_mask_h ! A mask that zeroes out cells with at least one land edge [nondim]
+  real :: grad_vel_mag_bt_q ! Magnitude of the barotropic velocity gradient tensor squared at q-points [T-2 ~> s-2]
+  real :: boundary_mask_q ! A mask that zeroes out cells with at least one land edge [nondim]
+  real :: h_arith_q  ! The arithmetic mean total thickness at q points [H ~> m or kg m-2]
+  real :: I_GME_h0   ! The inverse of GME tapering scale [H-1 ~> m-1 or m2 kg-1]
+  integer :: i, j, k, is, ie, js, je, Isq, Ieq, Jsq, Jeq, nz
+
+  is  = G%isc  ; ie  = G%iec  ; js  = G%jsc  ; je  = G%jec ; nz = GV%ke
+  Isq = G%IscB ; Ieq = G%IecB ; Jsq = G%JscB ; Jeq = G%JecB
+
+  ! Initialize diagnostic arrays with zeros
+  GME_coeff_h(:,:,:) = 0.0
+  GME_coeff_q(:,:,:) = 0.0
+  str_xx_GME(:,:,:) = 0.0
+  str_xy_GME(:,:,:) = 0.0
+
+  ! Get barotropic velocities and their gradients
+  call barotropic_get_tav(BT, ubtav, vbtav, G, US)
+
+  call pass_vector(ubtav, vbtav, G%Domain)
+  call pass_var(h, G%domain, halo=2)
+
+  ! Calculate the barotropic horizontal tension
+  do j=js-2,je+2 ; do i=is-2,ie+2
+    dudx_bt(i,j) = CS%DY_dxT(i,j)*((G%IdyCu(I,j) * ubtav(I,j)) - &
+                                   (G%IdyCu(I-1,j) * ubtav(I-1,j)))
+    dvdy_bt(i,j) = CS%DX_dyT(i,j)*((G%IdxCv(i,J) * vbtav(i,J)) - &
+                                   (G%IdxCv(i,J-1) * vbtav(i,J-1)))
+  enddo ; enddo
+  do j=Jsq-1,Jeq+2 ; do i=Isq-1,Ieq+2
+    sh_xx_bt(i,j) = dudx_bt(i,j) - dvdy_bt(i,j)
+  enddo ; enddo
+
+  ! Components for the barotropic shearing strain
+  do J=Jsq-2,Jeq+2 ; do I=Isq-2,Ieq+2
+    dvdx_bt(I,J) = CS%DY_dxBu(I,J)*((vbtav(i+1,J)*G%IdyCv(i+1,J)) &
+                                  - (vbtav(i,J)*G%IdyCv(i,J)))
+    dudy_bt(I,J) = CS%DX_dyBu(I,J)*((ubtav(I,j+1)*G%IdxCu(I,j+1)) &
+                                  - (ubtav(I,j)*G%IdxCu(I,j)))
+  enddo ; enddo
+
+  if (CS%no_slip) then
+    do J=js-2,je+1 ; do I=is-2,ie+1
+      sh_xy_bt(I,J) = (2.0-G%mask2dBu(I,J)) * ( dvdx_bt(I,J) + dudy_bt(I,J) )
+    enddo ; enddo
+  else
+    do J=js-2,je+1 ; do I=is-2,ie+1
+      sh_xy_bt(I,J) = G%mask2dBu(I,J) * ( dvdx_bt(I,J) + dudy_bt(I,J) )
+    enddo ; enddo
+  endif
+
+  do j=js-2,je+2 ; do i=is-2,ie+2
+    htot(i,j) = 0.0
+  enddo ; enddo
+  do k=1,nz ; do j=js-2,je+2 ; do i=is-2,ie+2
+    htot(i,j) = htot(i,j) + h(i,j,k)
+  enddo ; enddo ; enddo
+
+  I_GME_h0 = 1.0 / CS%GME_h0
+  do j=Jsq-1,Jeq+2 ; do i=Isq-1,Ieq+2
+    boundary_mask_h = (G%mask2dCu(I,j) * G%mask2dCu(I-1,j)) * (G%mask2dCv(i,J) * G%mask2dCv(i,J-1))
+    grad_vel_mag_bt_h = G%mask2dT(I,J) * boundary_mask_h * (dudx_bt(i,j)**2 + dvdy_bt(i,j)**2 + &
+          (0.25*((dvdx_bt(I,J)+dvdx_bt(I-1,J-1)) + (dvdx_bt(I,J-1)+dvdx_bt(I-1,J))))**2 + &
+          (0.25*((dudy_bt(I,J)+dudy_bt(I-1,J-1)) + (dudy_bt(I,J-1)+dudy_bt(I-1,J))))**2)
+    ! Probably the following test could be simplified to
+    ! if (boundary_mask_h * G%mask2dT(I,J) > 0.0) then
+    if (grad_vel_mag_bt_h > 0.0) then
+      GME_effic_h(i,j) = CS%GME_efficiency * G%mask2dT(I,J) * (MIN(htot(i,j) * I_GME_h0, 1.0)**2)
+    else
+      GME_effic_h(i,j) = 0.0
+    endif
+  enddo ; enddo
+
+  do J=js-2,je+1 ; do I=is-2,ie+1
+    boundary_mask_q = (G%mask2dCv(i,J) * G%mask2dCv(i+1,J)) * (G%mask2dCu(I,j) * G%mask2dCu(I,j+1))
+    grad_vel_mag_bt_q = G%mask2dBu(I,J) * boundary_mask_q * (dvdx_bt(I,J)**2 + dudy_bt(I,J)**2 + &
+          (0.25*((dudx_bt(i,j)+dudx_bt(i+1,j+1)) + (dudx_bt(i,j+1)+dudx_bt(i+1,j))))**2 + &
+          (0.25*((dvdy_bt(i,j)+dvdy_bt(i+1,j+1)) + (dvdy_bt(i,j+1)+dvdy_bt(i+1,j))))**2)
+    ! Probably the following test could be simplified to
+    ! if (boundary_mask_q * G%mask2dBu(I,J) > 0.0) then
+    if (grad_vel_mag_bt_q > 0.0) then
+      h_arith_q = 0.25 * ((htot(i,j) + htot(i+1,j+1)) + (htot(i+1,j) + htot(i,j+1)))
+      GME_effic_q(I,J) = CS%GME_efficiency * G%mask2dBu(I,J) * (MIN(h_arith_q * I_GME_h0, 1.0)**2)
+    else
+      GME_effic_q(I,J) = 0.0
+    endif
+  enddo ; enddo
+
+  call thickness_diffuse_get_KH(TD, KH_u_GME, KH_v_GME, G, GV)
+
+  call pass_vector(KH_u_GME, KH_v_GME, G%domain, To_All+Scalar_Pair)
+
+  if (CS%debug) &
+    call uvchksum("GME KH[u,v]_GME", KH_u_GME, KH_v_GME, G%HI, haloshift=2, unscale=US%L_to_m**2*US%s_to_T)
+
+end subroutine hor_visc_GME_setup
 
 !> Allocates space for and calculates static variables used by horizontal_viscosity.
 !! hor_visc_init calculates and stores the values of a number of metric functions that
