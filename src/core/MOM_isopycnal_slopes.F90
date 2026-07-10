@@ -120,20 +120,20 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
   logical :: local_open_u_BC, local_open_v_BC ! True if u- or v-face OBCs exist anywhere in the global domain.
   logical :: OBC_friendly  ! If true, open boundary conditions are in use and only interior data should
                         ! be used to calculate N2 at OBC faces.
-  integer, dimension(3,2) :: EOSdom_tile    !< 1-based EOS domain for the current tile [nondim].
-  integer, dimension(2)   :: EOSdom_tile_h1 !< 1-based EOS domain for h-point fills (one extra column) [nondim].
+  integer, dimension(3,2) :: EOSdom_block    !< 1-based EOS domain for the current tile [nondim].
+  integer, dimension(2)   :: EOSdom_block_h1 !< 1-based EOS domain for h-point fills (one extra column) [nondim].
   integer :: is, ie, js, je, nz, IsdB
   integer :: i, j, k
-  integer :: istart, iend !< First and last global i (or I) indices of the current tile [nondim].
-  integer :: jstart, jend !< First and last global j (or J) indices of the current tile [nondim].
-  integer :: kstart, kend !< First and last global K (or K) indices of the current tile [nondim].
-  integer :: ii, jj, kk   !< Tile-local 1-based i, j, and k indices [nondim].
+  integer :: istart, iend !< First and last global i (or I) indices of the current tile.
+  integer :: jstart, jend !< First and last global j (or J) indices of the current tile.
+  integer :: kstart, kend !< First and last global K (or K) indices of the current tile.
+  integer :: ii, jj, kk   !< Tile-local 1-based i, j, and k indices.
   integer :: delta_i, delta_j
   integer :: ie_read, je_read        !< Read-only extent of the h-point tile used to supply the
                                      !! ii+1 (or jj+1) access needed by the Stanley stencil; equal
                                      !! to ie (or je) plus one column/row when use_stanley is true,
                                      !! and otherwise equal to ie (or je).
-  integer :: iend_fill, jend_fill    !< Last i (or j) index filled into the Stanley h-point tile,
+  integer :: iend_stanley, jend_stanley    !< Last i (or j) index filled into the Stanley h-point tile,
                                      !! as opposed to iend/jend, which bound what is actually written
                                      !! to the output arrays this tile.
 
@@ -241,15 +241,13 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
     enddo
   enddo
 
-  ! Initialise GxSpV tile to the Boussinesq default G/rho0; overwritten below if
-  ! non-Boussinesq SpV_avg is available.
   do concurrent(kk=1:nkblock, jj=1:njblock, ii=1:niblock)
-    GxSpV_uvh(ii,jj,kk) = G_Rho0
+    GxSpV_uvh(ii,jj,kk) = G_Rho0 ! This will be changed if both use_EOS and allocated(tv%SpV_avg) are true
   enddo
 
   ! Stanley param needs access to h-point element ii+1, so when using stanley param,
-  ! write chunks of size block - 1 instead of chunks of size block to prevent out of
-  ! range writes but read up to ie+1 to include all values needed for slope computation
+  ! iterate in chunks of size block - 1 but read chunks of size block to ensure blocks
+  ! always included needed elements. Allow access to element ie+1 so element ie is filled
   if (use_stanley) then
     delta_i = niblock - 1
     ie_read = ie + 1
@@ -258,28 +256,27 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
     ie_read = ie
   endif
 
-  ! Tiled zonal loop
+  ! Calculate the zonal isopycnal slope.
   do kstart=2,nz,nkblock ; do jstart=js,je,njblock ; do istart=is-1,ie,delta_i
     iend = min(istart + delta_i - 1, ie)
-    iend_fill = min(istart + niblock - 1, ie_read)
+    iend_stanley = min(istart + niblock - 1, ie_read)
     jend = min(jstart + njblock - 1, je)
     kend = min(kstart + nkblock - 1, nz)
-    EOSdom_tile(1,1) = 1 ; EOSdom_tile(1,2) = iend - istart + 1
-    EOSdom_tile(2,1) = 1 ; EOSdom_tile(2,2) = jend - jstart + 1
-    EOSdom_tile(3,1) = 1 ; EOSdom_tile(3,2) = kend - kstart + 1
+    EOSdom_block(1,1) = 1 ; EOSdom_block(1,2) = iend - istart + 1
+    EOSdom_block(2,1) = 1 ; EOSdom_block(2,2) = jend - jstart + 1
+    EOSdom_block(3,1) = 1 ; EOSdom_block(3,2) = kend - kstart + 1
 
     if (use_EOS) then
       ! Fill tile T_uvh/S_uvh/pres_uvh at u-points
       do concurrent(kk=1:kend-kstart+1, jj=1:jend-jstart+1, II=1:iend-istart+1)
-        I = istart + II - 1  ! global I
-        j = jstart + jj - 1  ! global j
-        k = kstart + kk - 1  ! global k
+        I = istart + II - 1
+        j = jstart + jj - 1
+        k = kstart + kk - 1
         pres_uvh(ii,jj,kk) = 0.5*(pres(i,j,K) + pres(i+1,j,K))
         T_uvh(ii,jj,kk) = 0.25*((T(i,j,k) + T(i+1,j,k)) + (T(i,j,k-1) + T(i+1,j,k-1)))
         S_uvh(ii,jj,kk) = 0.25*((S(i,j,k) + S(i+1,j,k)) + (S(i,j,k-1) + S(i+1,j,k-1)))
       enddo
 
-      ! UMW NOTE: Vibecoded and untested
       if (OBC_friendly) then
         !$omp target update from(T_uvh, S_uvh, pres_uvh)
 
@@ -336,14 +333,14 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
 
       call calculate_density_derivs(T_uvh, S_uvh, pres_uvh, &
                                     drho_dT, drho_dS, &
-                                    tv%eqn_of_state, EOSdom_tile)
+                                    tv%eqn_of_state, EOSdom_block)
 
       if (use_stanley) then
-        ! Refill T_uvh/S_uvh/pres_uvh at h-points for the Stanley second-derivative calculation.
-        ! This tile is filled one column beyond the write range (out to iend_fill = iend+1) to
-        ! supply the ii+1 access used by the compute loop below.
-        EOSdom_tile_h1(1) = 1 ; EOSdom_tile_h1(2) = iend_fill - istart + 1
-        do concurrent(kk=1:kend-kstart+1, jj=1:jend-jstart+1, ii=1:iend_fill-istart+1)
+        ! Reset T_uvh/S_uvh/pres_uvh at h-points for the Stanley second-derivative calculation.
+        ! This loop fills all niblock elements of the _uvh arrays and can access index ie+1 of T
+        ! and S to ensure there always exists an ii+1 element for the compute loop below.
+        EOSdom_block_h1(1) = 1 ; EOSdom_block_h1(2) = iend_stanley - istart + 1
+        do concurrent(kk=1:kend-kstart+1, jj=1:jend-jstart+1, ii=1:iend_stanley-istart+1)
           i = istart + ii - 1
           j = jstart + jj - 1
           k = kstart + kk - 1
@@ -352,11 +349,13 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
           S_uvh(ii,jj,kk) = 0.5*(S(i,j,k) + S(i,j,k-1))
         enddo
 
-        ! UMW TODO: Make 3d version of this
+        ! TODO: Make 3D version of this
         do kk=1,kend-kstart+1 ; do jj=1,jend-jstart+1
+          ! The second line below would correspond to arguments
+          !            drho_dS_dS, drho_dS_dT, drho_dT_dT, drho_dS_dP, drho_dT_dP, &
           call calculate_density_second_derivs(T_uvh(:,jj,kk), S_uvh(:,jj,kk), pres_uvh(:,jj,kk), &
                      scrap, scrap, drho_dT_dT_h(:,jj,kk), scrap, scrap, &
-                     tv%eqn_of_state, dom=EOSdom_tile_h1)
+                     tv%eqn_of_state, dom=EOSdom_block_h1)
         enddo ; enddo
       endif ! end use_stanley
 
@@ -365,26 +364,31 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
     ! Zonal slope compute over the tile
     do concurrent(kk=1:kend-kstart+1, jj=1:jend-jstart+1, II=1:iend-istart+1) &
         DO_LOCALITY(local(drdkL, drdkR, drdiA, drdiB, I, j))
-      I = istart + II - 1  ! global I
-      j = jstart + jj - 1  ! global j
-      k = kstart + kk - 1  ! global k
+      I = istart + II - 1
+      j = jstart + jj - 1
+      k = kstart + kk - 1
 
       if (use_EOS) then
+        ! Estimate the horizontal density gradients along layers.
         drdiA = drho_dT(ii,jj,kk) * (T(i+1,j,k-1)-T(i,j,k-1)) + &
                 drho_dS(ii,jj,kk) * (S(i+1,j,k-1)-S(i,j,k-1))
         drdiB = drho_dT(ii,jj,kk) * (T(i+1,j,k)-T(i,j,k)) + &
                 drho_dS(ii,jj,kk) * (S(i+1,j,k)-S(i,j,k))
+
+        ! Estimate the vertical density gradients times the grid spacing.
         drdkL = (drho_dT(ii,jj,kk) * (T(i,j,k)-T(i,j,k-1)) + &
                   drho_dS(ii,jj,kk) * (S(i,j,k)-S(i,j,k-1)))
         drdkR = (drho_dT(ii,jj,kk) * (T(i+1,j,k)-T(i+1,j,k-1)) + &
                   drho_dS(ii,jj,kk) * (S(i+1,j,k)-S(i+1,j,k-1)))
         if (use_stanley) then
+          ! Correction to the horizontal density gradient due to nonlinearity in
+          ! the EOS rectifying SGS temperature anomalies
           drdiA = drdiA + 0.5 * ((drho_dT_dT_h(ii+1,jj,kk) * tv%varT(i+1,j,K-1)) - &
                                 (drho_dT_dT_h(ii,jj,kk) * tv%varT(i,j,K-1)) )
           drdiB = drdiB + 0.5 * ((drho_dT_dT_h(ii+1,jj,kk) * tv%varT(i+1,j,K)) - &
                                 (drho_dT_dT_h(ii,jj,kk) * tv%varT(i,j,K)) )
         endif
-      else ! .not. use_EOS: layers are constant density
+      else
         drdiA = 0.0 ; drdiB = 0.0
         drdkL = GV%Rlay(K)-GV%Rlay(K-1) ; drdkR = drdkL
       endif
@@ -404,15 +408,20 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
         dzaR = 0.5*(e(i+1,j,K-1) - e(i+1,j,K+1)) + dz_neglect
       endif
       if (present(dzu)) dzu(I,j,K) = 0.5*( dzaL + dzaR )
+      ! Use the harmonic mean thicknesses to weight the horizontal gradients.
+      ! These unnormalized weights have been rearranged to minimize divisions.
       wtA = hg2A*haB ; wtB = hg2B*haA
       wtL = hg2L*(haR*dzaR) ; wtR = hg2R*(haL*dzaL)
 
       drdz = ((wtL * drdkL) + (wtR * drdkR)) / ((dzaL*wtL) + (dzaR*wtR))
+      ! The expression for drdz above is mathematically equivalent to:
+      !   drdz = ((hg2L/haL) * drdkL/dzaL + (hg2R/haR) * drdkR/dzaR) / &
+      !          ((hg2L/haL) + (hg2R/haR))
+      ! which is an estimate of the gradient of density across geopotentials.
       if (present_N2_u) then
-        !UMW NOTE: Vibecoded and untested
         if (OBC_friendly) then ; if (OBC%segnum_u(I,j) /= 0) then
           if (OBC%segnum_u(I,j) > 0) then !  OBC_DIRECTION_E
-            drdz = drdkL / dzaL
+            drdz = drdkL / dzaL ! Note that drdz is not used for slopes at OBC faces.
             if (use_EOS .and. allocated(tv%SpV_avg)) &
               GxSpV_uvh(ii,jj,kk) = GV%g_Earth * 0.5 * (tv%SpV_avg(i,j,k) + tv%SpV_avg(i,j,k-1))
           elseif (OBC%segnum_u(I,j) < 0) then !  OBC_DIRECTION_W
@@ -421,25 +430,37 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
               GxSpV_uvh(ii,jj,kk) = GV%g_Earth * 0.5 * (tv%SpV_avg(i+1,j,k) + tv%SpV_avg(i+1,j,k-1))
           endif
         endif ; endif
-        N2_u(I,j,k) = GxSpV_uvh(ii,jj,kk) * drdz * G%mask2dCu(I,j)
+        N2_u(I,j,k) = GxSpV_uvh(ii,jj,kk) * drdz * G%mask2dCu(I,j) ! Square of buoyancy freq. [L2 Z-2 T-2 ~> s-2]
       endif
 
       if (use_EOS) then
         drdx = ((wtA * drdiA + wtB * drdiB) / (wtA + wtB) - &
                 drdz * (e(i,j,K)-e(i+1,j,K))) * G%IdxCu(I,j)
+
+        ! This estimate of slope is accurate for small slopes, but bounded
+        ! to be between -1 and 1.
         mag_grad2 = (US%Z_to_L*drdx)**2 + drdz**2
         if (mag_grad2 > 0.0) then
           slope = drdx / sqrt(mag_grad2)
-        else
+        else ! Just in case mag_grad2 = 0 ever.
           slope = 0.0
         endif
-      else
+      else ! With .not.use_EOS, the layers are constant density.
         slope = (e(i+1,j,K)-e(i,j,K)) * G%IdxCu(I,j)
       endif
 
       if (local_open_u_BC) then
         if (OBC%segnum_u(I,j) /= 0) then
-          if (OBC%segment(abs(OBC%segnum_u(I,j)))%open) slope = 0.
+          if (OBC%segment(abs(OBC%segnum_u(I,j)))%open) then
+            slope = 0.
+            ! This and/or the masking code below is to make slopes match inside
+            ! land mask. Might not be necessary except for DEBUG output.
+!           if (OBC%segnum_u(I,j) > 0) then !  OBC_DIRECTION_E
+!             slope_x(I+1,j,K) = 0.
+!           else
+!             slope_x(I-1,j,K) = 0.
+!           endif
+          endif
         endif
         slope = slope * max(G%mask2dT(i,j), G%mask2dT(i+1,j))
       endif
@@ -464,24 +485,23 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
   do kstart=2,nz, nkblock ; do jstart=js-1,je,delta_j ; do istart=is,ie,niblock
     iend = min(istart + niblock - 1, ie)
     jend = min(jstart + delta_j - 1, je)
-    jend_fill = min(jstart + njblock - 1, je_read)
+    jend_stanley = min(jstart + njblock - 1, je_read)
     kend = min(kstart + nkblock - 1, nz)
-    EOSdom_tile(1,1) = 1 ; EOSdom_tile(1,2) = iend - istart + 1
-    EOSdom_tile(2,1) = 1 ; EOSdom_tile(2,2) = jend - jstart + 1
-    EOSdom_tile(3,1) = 1 ; EOSdom_tile(3,2) = kend - kstart + 1
+    EOSdom_block(1,1) = 1 ; EOSdom_block(1,2) = iend - istart + 1
+    EOSdom_block(2,1) = 1 ; EOSdom_block(2,2) = jend - jstart + 1
+    EOSdom_block(3,1) = 1 ; EOSdom_block(3,2) = kend - kstart + 1
 
     if (use_EOS) then
       ! Fill tile T_uvh/S_uvh/pres_uvh at v-points
       do concurrent(kk=1:kend-kstart+1, jj=1:jend-jstart+1, ii=1:iend-istart+1)
-        i = istart + ii - 1  ! global i
-        j = jstart + jj - 1  ! global J
-        k = kstart + kk - 1  ! global k
+        i = istart + ii - 1
+        j = jstart + jj - 1
+        k = kstart + kk - 1
         pres_uvh(ii,jj,kk) = 0.5*(pres(i,j,K) + pres(i,j+1,K))
         T_uvh(ii,jj,kk) = 0.25*((T(i,j,K) + T(i,j+1,K)) + (T(i,j,K-1) + T(i,j+1,K-1)))
         S_uvh(ii,jj,kk) = 0.25*((S(i,j,K) + S(i,j+1,K)) + (S(i,j,K-1) + S(i,j+1,K-1)))
       enddo
 
-      ! UMW NOTE: Vibecoded and untested
       if (OBC_friendly) then
         !$omp target update from(T_uvh, S_uvh, pres_uvh)
 
@@ -536,12 +556,12 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
 
       call calculate_density_derivs(T_uvh, S_uvh, pres_uvh, &
                                     drho_dT, drho_dS, &
-                                    tv%eqn_of_state, EOSdom_tile)
+                                    tv%eqn_of_state, EOSdom_block)
 
       if (use_stanley) then
-        ! Refill at h-points for Stanley second derivatives.
-        EOSdom_tile_h1(1) = 1 ; EOSdom_tile_h1(2) = iend - istart + 1
-        do concurrent(kk=1:kend-kstart+1, jj=1:jend_fill-jstart+1, ii=1:iend-istart+1)
+        ! Reset at h-points for Stanley second derivatives.
+        EOSdom_block_h1(1) = 1 ; EOSdom_block_h1(2) = iend - istart + 1
+        do concurrent(kk=1:kend-kstart+1, jj=1:jend_stanley-jstart+1, ii=1:iend-istart+1)
           i = istart + ii - 1
           j = jstart + jj - 1
           k = kstart + kk - 1
@@ -550,11 +570,13 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
           S_uvh(ii,jj,kk) = 0.5*(S(i,j,K) + S(i,j,K-1))
         enddo
 
-        ! UMW TODO: Make 3d versions of this
-        do kk=1,kend-kstart+1 ; do jj=1,jend_fill-jstart+1
+        ! TODO: Make 3D version of this
+        do kk=1,kend-kstart+1 ; do jj=1,jend_stanley-jstart+1
+          ! The second line below would correspond to arguments
+          !            drho_dS_dS, drho_dS_dT, drho_dT_dT, drho_dS_dP, drho_dT_dP, &
           call calculate_density_second_derivs(T_uvh(:,jj,kk), S_uvh(:,jj,kk), pres_uvh(:,jj,kk), &
                      scrap, scrap, drho_dT_dT_h(:,jj,kk), scrap, scrap, &
-                     tv%eqn_of_state, dom=EOSdom_tile_h1)
+                     tv%eqn_of_state, dom=EOSdom_block_h1)
         enddo ; enddo
       endif ! end use_stanley
 
@@ -563,20 +585,25 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
     ! Meridional slope compute over the tile
     do concurrent(kk=1:kend-kstart+1, jj=1:jend-jstart+1, ii=1:iend-istart+1) &
         DO_LOCALITY(local(drdkL, drdkR, drdjA, drdjB, i, J))
-      i = istart + ii - 1  ! global i (h-point)
-      J = jstart + jj - 1  ! global J (v-face)
-      K = kstart + kk - 1  ! global k
+      i = istart + ii - 1
+      J = jstart + jj - 1
+      K = kstart + kk - 1
 
       if (use_EOS) then
+        ! Estimate the horizontal density gradients along layers.
         drdjA = drho_dT(ii,jj,kk) * (T(i,j+1,k-1)-T(i,j,k-1)) + &
                 drho_dS(ii,jj,kk) * (S(i,j+1,k-1)-S(i,j,k-1))
         drdjB = drho_dT(ii,jj,kk) * (T(i,j+1,k)-T(i,j,k)) + &
                 drho_dS(ii,jj,kk) * (S(i,j+1,k)-S(i,j,k))
+
+        ! Estimate the vertical density gradients times the grid spacing.
         drdkL = (drho_dT(ii,jj,kk) * (T(i,j,K)-T(i,j,K-1)) + &
                   drho_dS(ii,jj,kk) * (S(i,j,K)-S(i,j,K-1)))
         drdkR = (drho_dT(ii,jj,kk) * (T(i,j+1,K)-T(i,j+1,K-1)) + &
                   drho_dS(ii,jj,kk) * (S(i,j+1,K)-S(i,j+1,K-1)))
         if (use_stanley) then
+          ! Correction to the horizontal density gradient due to nonlinearity in
+          ! the EOS rectifying SGS temperature anomalies
           drdjA = drdjA + 0.5 * ((drho_dT_dT_h(ii,jj+1,kk) * tv%varT(i,j+1,K-1)) - &
                                 (drho_dT_dT_h(ii,jj,kk) * tv%varT(i,j,K-1)) )
           drdjB = drdjB + 0.5 * ((drho_dT_dT_h(ii,jj+1,kk) * tv%varT(i,j+1,K)) - &
@@ -602,15 +629,20 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
         dzaR = 0.5*(e(i,j+1,K-1) - e(i,j+1,K+1)) + dz_neglect
       endif
       if (present(dzv)) dzv(i,J,K) = 0.5*( dzaL + dzaR )
+      ! Use the harmonic mean thicknesses to weight the horizontal gradients.
+      ! These unnormalized weights have been rearranged to minimize divisions.
       wtA = hg2A*haB ; wtB = hg2B*haA
       wtL = hg2L*(haR*dzaR) ; wtR = hg2R*(haL*dzaL)
 
       drdz = ((wtL * drdkL) + (wtR * drdkR)) / ((dzaL*wtL) + (dzaR*wtR))
+      ! The expression for drdz above is mathematically equivalent to:
+      !   drdz = ((hg2L/haL) * drdkL/dzaL + (hg2R/haR) * drdkR/dzaR) / &
+      !          ((hg2L/haL) + (hg2R/haR))
+      ! which is an estimate of the gradient of density across geopotentials.
       if (present_N2_v) then
-        ! UMW note: vibecoded and untested
         if (OBC_friendly) then ; if (OBC%segnum_v(i,J) /= 0) then
           if (OBC%segnum_v(i,J) > 0) then !  OBC_DIRECTION_N
-            drdz = drdkL / dzaL
+            drdz = drdkL / dzaL  ! Note that drdz is not used for slopes at OBC faces.
             if (use_EOS .and. allocated(tv%SpV_avg)) &
               GxSpV_uvh(ii,jj,kk) = GV%g_Earth * 0.5 * (tv%SpV_avg(i,j,k) + tv%SpV_avg(i,j,k-1))
           elseif (OBC%segnum_v(i,J) < 0) then !  OBC_DIRECTION_S
@@ -619,25 +651,37 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
               GxSpV_uvh(ii,jj,kk) = GV%g_Earth * 0.5 * (tv%SpV_avg(i,j+1,k) + tv%SpV_avg(i,j+1,k-1))
           endif
         endif ; endif
-        N2_v(i,J,K) = GxSpV_uvh(ii,jj,kk) * drdz * G%mask2dCv(i,J)
+        N2_v(i,J,K) = GxSpV_uvh(ii,jj,kk) * drdz * G%mask2dCv(i,J) ! Square of buoyancy freq. [L2 Z-2 T-2 ~> s-2]
       endif
 
       if (use_EOS) then
         drdy = ((wtA * drdjA + wtB * drdjB) / (wtA + wtB) - &
                 drdz * (e(i,j,K)-e(i,j+1,K))) * G%IdyCv(i,J)
+
+        ! This estimate of slope is accurate for small slopes, but bounded
+        ! to be between -1 and 1.
         mag_grad2 = (US%Z_to_L*drdy)**2 + drdz**2
         if (mag_grad2 > 0.0) then
           slope = drdy / sqrt(mag_grad2)
-        else
+        else ! Just in case mag_grad2 = 0 ever.
           slope = 0.0
         endif
-      else
+      else ! With .not.use_EOS, the layers are constant density.
         slope = (e(i,j+1,K)-e(i,j,K)) * G%IdyCv(i,J)
       endif
 
       if (local_open_v_BC) then
         if (OBC%segnum_v(i,J) /= 0) then
-          if (OBC%segment(abs(OBC%segnum_v(i,J)))%open) slope = 0.
+          if (OBC%segment(abs(OBC%segnum_v(i,J)))%open) then
+            slope = 0.
+            ! This and/or the masking code below is to make slopes match inside
+            ! land mask. Might not be necessary except for DEBUG output.
+!           if (OBC%segnum_v(i,J)) > 0) then ! OBC_DIRECTION_N
+!             slope_y(i,J+1,K) = 0.
+!           else
+!             slope_y(i,J-1,K) = 0.
+!           endif
+          endif
         endif
         slope = slope * max(G%mask2dT(i,j), G%mask2dT(i,j+1))
       endif

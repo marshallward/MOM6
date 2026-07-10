@@ -1657,7 +1657,7 @@ subroutine VarMix_init(Time, G, GV, US, param_file, diag, CS)
   integer, parameter :: default_nkblock = 0
 #else
   integer, parameter :: default_niblock = 0
-  integer, parameter :: default_njblock = 2
+  integer, parameter :: default_njblock = 1
   integer, parameter :: default_nkblock = 1
 #endif
 
@@ -1779,14 +1779,16 @@ subroutine VarMix_init(Time, G, GV, US, param_file, diag, CS)
   ! Isopycnal blocking parameters
   call get_param(param_file, mdl, "ISOPYCNAL_NIBLOCK", CS%niblock, &
                  "The i-direction block size used to calculate isopycnal slopes. "//&
-                 "If 0, defaults to 64, except when "//&
-                 "running with OpenMP offload, in which case the full computational "//&
-                 "domain width is used.", default=default_niblock, layoutParam=.true.)
+                 "If 0, or when running with OpenMP offload, "//&
+                 "the full computational domain width is used. "//&
+                 "If USE_STANLEY_ISO is true, ISOPYCNAL_NIBLOCK cannot equal 1.", &
+                 default=default_niblock, layoutParam=.true.)
   call get_param(param_file, mdl, "ISOPYCNAL_NJBLOCK", CS%njblock, &
                  "The j-direction block size used to calculate isopycnal slopes. "//&
-                 "If 0, defaults to 1, except when "//&
-                 "running with OpenMP offload, in which case the full computational "//&
-                 "domain height is used.", default=default_njblock, layoutParam=.true.)
+                 "If 0, defaults to 1, except when running with OpenMP offload, "//&
+                 "in which case the full computational domain height is used. " //&
+                 "If USE_STANLEY_ISO is true, ISOPYCNAL_NJBLOCK cannot equal 1.", &
+                 default=default_njblock, layoutParam=.true.)
   call get_param(param_file, mdl, "ISOPYCNAL_NKBLOCK", CS%nkblock, &
                  "The j-direction block size used to calculate isopycnal slopes. "//&
                  "If 0, defaults to 1 , except when "//&
