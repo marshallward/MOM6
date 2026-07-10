@@ -1003,34 +1003,35 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
     ! Vorticity
     if ((CS%Leith_Kh) .or. (CS%Leith_Ah) .or. (CS%use_Leithy) .or. (CS%id_vort_xy_q>0) .or. CS%use_ZB2020) then
       if (CS%no_slip) then
-        do J=js_vort,je_vort ; do I=is_vort,ie_vort
-          vort_xy(I,J,1) = (2.0-G%mask2dBu(I,J)) * ( dvdx(I,J,1) - dudy(I,J,1) )
-        enddo ; enddo
+        do kk=1,kmax ; do J=js_vort,je_vort ; do I=is_vort,ie_vort
+          vort_xy(I,J,kk) = (2.0-G%mask2dBu(I,J)) * ( dvdx(I,J,kk) - dudy(I,J,kk) )
+        enddo ; enddo ; enddo
       else
         if (CS%use_circulation) then
-          do J=js_vort,je_vort ; do I=is_vort,ie_vort
-            vort_xy(I,J,1) = G%mask2dBu(I,J) * G%IareaBu(I,J) * (  &
+          do kk=1,kmax ; do J=js_vort,je_vort ; do I=is_vort,ie_vort
+            k = kstart + kk - 1
+            vort_xy(I,J,kk) = G%mask2dBu(I,J) * G%IareaBu(I,J) * (  &
               ((v(i+1,J,k)*G%dyCv(i+1,J)) - (v(i,J,k)*G%dyCv(i,J)))  &
             - ((u(I,j+1,k)*G%dxCu(I,j+1)) - (u(I,j,k)*G%dxCu(I,j)))  &
              )
-          enddo ; enddo
+          enddo ; enddo ; enddo
         else
-          do J=js_vort,je_vort ; do I=is_vort,ie_vort
-            vort_xy(I,J,1) = G%mask2dBu(I,J) * ( dvdx(I,J,1) - dudy(I,J,1) )
-          enddo ; enddo
+          do kk=1,kmax ; do J=js_vort,je_vort ; do I=is_vort,ie_vort
+            vort_xy(I,J,kk) = G%mask2dBu(I,J) * ( dvdx(I,J,kk) - dudy(I,J,kk) )
+          enddo ; enddo ; enddo
         endif
       endif
     endif
 
     if (CS%use_Leithy) then
       if (CS%no_slip) then
-        do J=js_Kh-1,je_Kh ; do I=is_Kh-1,ie_Kh
-          vort_xy_smooth(I,J,1) = (2.0-G%mask2dBu(I,J)) * ( dvdx_smooth(I,J,1) - dudy_smooth(I,J,1) )
-        enddo ; enddo
+        do kk=1,kmax ; do J=js_Kh-1,je_Kh ; do I=is_Kh-1,ie_Kh
+          vort_xy_smooth(I,J,kk) = (2.0-G%mask2dBu(I,J)) * ( dvdx_smooth(I,J,kk) - dudy_smooth(I,J,kk) )
+        enddo ; enddo ; enddo
       else
-        do J=js_Kh-1,je_Kh ; do I=is_Kh-1,ie_Kh
-          vort_xy_smooth(I,J,1) = G%mask2dBu(I,J) * ( dvdx_smooth(I,J,1) - dudy_smooth(I,J,1) )
-        enddo ; enddo
+        do kk=1,kmax ; do J=js_Kh-1,je_Kh ; do I=is_Kh-1,ie_Kh
+          vort_xy_smooth(I,J,kk) = G%mask2dBu(I,J) * ( dvdx_smooth(I,J,kk) - dudy_smooth(I,J,kk) )
+        enddo ; enddo ; enddo
       endif
     endif
 
@@ -1038,127 +1039,131 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
     if ((CS%Leith_Kh) .or. (CS%Leith_Ah) .or. (CS%use_Leithy)) then
 
       ! Vorticity gradient
-      do J=js-2,je_Kh ; do i=is_Kh-1,ie_Kh+1
+      do kk=1,kmax ; do J=js-2,je_Kh ; do i=is_Kh-1,ie_Kh+1
         DY_dxBu = G%dyBu(I,J) * G%IdxBu(I,J)
-        vort_xy_dx(i,J,1) = DY_dxBu * ((vort_xy(I,J,1) * G%IdyCu(I,j)) - (vort_xy(I-1,J,1) * G%IdyCu(I-1,j)))
-      enddo ; enddo
+        vort_xy_dx(i,J,kk) = DY_dxBu * ((vort_xy(I,J,kk) * G%IdyCu(I,j)) - (vort_xy(I-1,J,kk) * G%IdyCu(I-1,j)))
+      enddo ; enddo ; enddo
 
-      do j=js_Kh-1,je_Kh+1 ; do I=is-2,ie_Kh
+      do kk=1,kmax ; do j=js_Kh-1,je_Kh+1 ; do I=is-2,ie_Kh
         DX_dyBu = G%dxBu(I,J) * G%IdyBu(I,J)
-        vort_xy_dy(I,j,1) = DX_dyBu * ((vort_xy(I,J,1) * G%IdxCv(i,J)) - (vort_xy(I,J-1,1) * G%IdxCv(i,J-1)))
-      enddo ; enddo
+        vort_xy_dy(I,j,kk) = DX_dyBu * ((vort_xy(I,J,kk) * G%IdxCv(i,J)) - (vort_xy(I,J-1,kk) * G%IdxCv(i,J-1)))
+      enddo ; enddo ; enddo
 
       if (CS%use_Leithy) then
         ! Gradient of smoothed vorticity
-        do J=js_Kh-1,je_Kh ; do i=is_Kh,ie_Kh
+        do kk=1,kmax ; do J=js_Kh-1,je_Kh ; do i=is_Kh,ie_Kh
           DY_dxBu = G%dyBu(I,J) * G%IdxBu(I,J)
-          vort_xy_dx_smooth(i,J,1) = DY_dxBu * &
-                      ((vort_xy_smooth(I,J,1) * G%IdyCu(I,j)) - (vort_xy_smooth(I-1,J,1) * G%IdyCu(I-1,j)))
-        enddo ; enddo
+          vort_xy_dx_smooth(i,J,kk) = DY_dxBu * &
+                      ((vort_xy_smooth(I,J,kk) * G%IdyCu(I,j)) - (vort_xy_smooth(I-1,J,kk) * G%IdyCu(I-1,j)))
+        enddo ; enddo ; enddo
 
-        do j=js_Kh,je_Kh ; do I=is_Kh-1,ie_Kh
+        do kk=1,kmax ; do j=js_Kh,je_Kh ; do I=is_Kh-1,ie_Kh
           DX_dyBu = G%dxBu(I,J) * G%IdyBu(I,J)
-          vort_xy_dy_smooth(I,j,1) = DX_dyBu * &
-                      ((vort_xy_smooth(I,J,1) * G%IdxCv(i,J)) - (vort_xy_smooth(I,J-1,1) * G%IdxCv(i,J-1)))
-        enddo ; enddo
+          vort_xy_dy_smooth(I,j,kk) = DX_dyBu * &
+                      ((vort_xy_smooth(I,J,kk) * G%IdxCv(i,J)) - (vort_xy_smooth(I,J-1,kk) * G%IdxCv(i,J-1)))
+        enddo ; enddo ; enddo
       endif ! If Leithy
 
       ! Laplacian of vorticity
       ! if (CS%Leith_Ah .or. CS%use_Leithy) then
-      do J=js_Kh-1,je_Kh ; do I=is_Kh-1,ie_Kh
+      do kk=1,kmax ; do J=js_Kh-1,je_Kh ; do I=is_Kh-1,ie_Kh
         DY_dxBu = G%dyBu(I,J) * G%IdxBu(I,J)
         DX_dyBu = G%dxBu(I,J) * G%IdyBu(I,J)
 
-        Del2vort_q(I,J,1) = DY_dxBu * ((vort_xy_dx(i+1,J,1) * G%IdyCv(i+1,J)) - (vort_xy_dx(i,J,1) * G%IdyCv(i,J))) + &
-                          DX_dyBu * ((vort_xy_dy(I,j+1,1) * G%IdyCu(I,j+1)) - (vort_xy_dy(I,j,1) * G%IdyCu(I,j)))
-      enddo ; enddo
+        Del2vort_q(I,J,kk) = DY_dxBu * ((vort_xy_dx(i+1,J,kk) * G%IdyCv(i+1,J)) &
+                                        - (vort_xy_dx(i,J,kk) * G%IdyCv(i,J))) + &
+                          DX_dyBu * ((vort_xy_dy(I,j+1,kk) * G%IdyCu(I,j+1)) - (vort_xy_dy(I,j,kk) * G%IdyCu(I,j)))
+      enddo ; enddo ; enddo
       ! endif
 
       if (CS%modified_Leith) then
 
         ! Divergence
-        do j=js_Kh-1,je_Kh+1 ; do i=is_Kh-1,ie_Kh+1
-          div_xx(i,j,1) = dudx(i,j,1) + dvdy(i,j,1)
-        enddo ; enddo
+        do kk=1,kmax ; do j=js_Kh-1,je_Kh+1 ; do i=is_Kh-1,ie_Kh+1
+          div_xx(i,j,kk) = dudx(i,j,kk) + dvdy(i,j,kk)
+        enddo ; enddo ; enddo
 
         ! Divergence gradient
-        do j=js-1,je+1 ; do I=is_Kh-1,ie_Kh
-          div_xx_dx(I,j,1) = G%IdxCu(I,j)*(div_xx(i+1,j,1) - div_xx(i,j,1))
-        enddo ; enddo
-        do J=js_Kh-1,je_Kh ; do i=is-1,ie+1
-          div_xx_dy(i,J,1) = G%IdyCv(i,J)*(div_xx(i,j+1,1) - div_xx(i,j,1))
-        enddo ; enddo
+        do kk=1,kmax ; do j=js-1,je+1 ; do I=is_Kh-1,ie_Kh
+          div_xx_dx(I,j,kk) = G%IdxCu(I,j)*(div_xx(i+1,j,kk) - div_xx(i,j,kk))
+        enddo ; enddo ; enddo
+        do kk=1,kmax ; do J=js_Kh-1,je_Kh ; do i=is-1,ie+1
+          div_xx_dy(i,J,kk) = G%IdyCv(i,J)*(div_xx(i,j+1,kk) - div_xx(i,j,kk))
+        enddo ; enddo ; enddo
 
         ! Magnitude of divergence gradient
-        do j=js_Kh,je_Kh ; do i=is_Kh,ie_Kh
-          grad_div_mag_h(i,j,1) = sqrt(((0.5*(div_xx_dx(I,j,1) + div_xx_dx(I-1,j,1)))**2) + &
-                                     ((0.5*(div_xx_dy(i,J,1) + div_xx_dy(i,J-1,1)))**2))
-        enddo ; enddo
-        do J=js-1,Jeq ; do I=is-1,Ieq
-          grad_div_mag_q(I,J,1) = sqrt(((0.5*(div_xx_dx(I,j,1) + div_xx_dx(I,j+1,1)))**2) + &
-                                     ((0.5*(div_xx_dy(i,J,1) + div_xx_dy(i+1,J,1)))**2))
-        enddo ; enddo
+        do kk=1,kmax ; do j=js_Kh,je_Kh ; do i=is_Kh,ie_Kh
+          grad_div_mag_h(i,j,kk) = sqrt(((0.5*(div_xx_dx(I,j,kk) + div_xx_dx(I-1,j,kk)))**2) + &
+                                     ((0.5*(div_xx_dy(i,J,kk) + div_xx_dy(i,J-1,kk)))**2))
+        enddo ; enddo ; enddo
+        do kk=1,kmax ; do J=js-1,Jeq ; do I=is-1,Ieq
+          grad_div_mag_q(I,J,kk) = sqrt(((0.5*(div_xx_dx(I,j,kk) + div_xx_dx(I,j+1,kk)))**2) + &
+                                     ((0.5*(div_xx_dy(i,J,kk) + div_xx_dy(i+1,J,kk)))**2))
+        enddo ; enddo ; enddo
 
       else
 
-        do j=js-1,je+1 ; do I=is_Kh-1,ie_Kh
-          div_xx_dx(I,j,1) = 0.0
-        enddo ; enddo
-        do J=js_Kh-1,je_Kh ; do i=is-1,ie+1
-          div_xx_dy(i,J,1) = 0.0
-        enddo ; enddo
-        do j=js_Kh,je_Kh ; do i=is_Kh,ie_Kh
-          grad_div_mag_h(i,j,1) = 0.0
-        enddo ; enddo
-        do J=js-1,Jeq ; do I=is-1,Ieq
-          grad_div_mag_q(I,J,1) = 0.0
-        enddo ; enddo
+        do kk=1,kmax ; do j=js-1,je+1 ; do I=is_Kh-1,ie_Kh
+          div_xx_dx(I,j,kk) = 0.0
+        enddo ; enddo ; enddo
+        do kk=1,kmax ; do J=js_Kh-1,je_Kh ; do i=is-1,ie+1
+          div_xx_dy(i,J,kk) = 0.0
+        enddo ; enddo ; enddo
+        do kk=1,kmax ; do j=js_Kh,je_Kh ; do i=is_Kh,ie_Kh
+          grad_div_mag_h(i,j,kk) = 0.0
+        enddo ; enddo ; enddo
+        do kk=1,kmax ; do J=js-1,Jeq ; do I=is-1,Ieq
+          grad_div_mag_q(I,J,kk) = 0.0
+        enddo ; enddo ; enddo
 
       endif ! CS%modified_Leith
 
       ! Add in beta for the Leith viscosity
       if (CS%use_beta_in_Leith) then
-        do J=js-2,Jeq+1 ; do i=is-1,ie+1
-          vort_xy_dx(i,J,1) = vort_xy_dx(i,J,1) + 0.5 * ( G%dF_dx(i,j) + G%dF_dx(i,j+1))
-        enddo ; enddo
-        do j=js-1,je+1 ; do I=is-2,Ieq+1
-          vort_xy_dy(I,j,1) = vort_xy_dy(I,j,1) + 0.5 * ( G%dF_dy(i,j) + G%dF_dy(i+1,j))
-        enddo ; enddo
+        do kk=1,kmax ; do J=js-2,Jeq+1 ; do i=is-1,ie+1
+          vort_xy_dx(i,J,kk) = vort_xy_dx(i,J,kk) + 0.5 * ( G%dF_dx(i,j) + G%dF_dx(i,j+1))
+        enddo ; enddo ; enddo
+        do kk=1,kmax ; do j=js-1,je+1 ; do I=is-2,Ieq+1
+          vort_xy_dy(I,j,kk) = vort_xy_dy(I,j,kk) + 0.5 * ( G%dF_dy(i,j) + G%dF_dy(i+1,j))
+        enddo ; enddo ; enddo
       endif ! CS%use_beta_in_Leith
 
       if (CS%use_QG_Leith_visc) then
 
-        do j=js_Kh,je_Kh ; do i=is_Kh,ie_Kh
-          grad_vort_mag_h_2d(i,j,1) = SQRT(((0.5*(vort_xy_dx(i,J,1) + vort_xy_dx(i,J-1,1)))**2) + &
-                                         ((0.5*(vort_xy_dy(I,j,1) + vort_xy_dy(I-1,j,1)))**2) )
-        enddo ; enddo
-        do J=js-1,Jeq ; do I=is-1,Ieq
-          grad_vort_mag_q_2d(I,J,1) = SQRT(((0.5*(vort_xy_dx(i,J,1) + vort_xy_dx(i+1,J,1)))**2) + &
-                                         ((0.5*(vort_xy_dy(I,j,1) + vort_xy_dy(I,j+1,1)))**2) )
-        enddo ; enddo
+        do kk=1,kmax ; do j=js_Kh,je_Kh ; do i=is_Kh,ie_Kh
+          grad_vort_mag_h_2d(i,j,kk) = SQRT(((0.5*(vort_xy_dx(i,J,kk) + vort_xy_dx(i,J-1,kk)))**2) + &
+                                         ((0.5*(vort_xy_dy(I,j,kk) + vort_xy_dy(I-1,j,kk)))**2) )
+        enddo ; enddo ; enddo
+        do kk=1,kmax ; do J=js-1,Jeq ; do I=is-1,Ieq
+          grad_vort_mag_q_2d(I,J,kk) = SQRT(((0.5*(vort_xy_dx(i,J,kk) + vort_xy_dx(i+1,J,kk)))**2) + &
+                                         ((0.5*(vort_xy_dy(I,j,kk) + vort_xy_dy(I,j+1,kk)))**2) )
+        enddo ; enddo ; enddo
 
         ! This accumulates terms, some of which are in VarMix.
-        call calc_QG_Leith_viscosity(VarMix, G, GV, US, h, dz, k, div_xx_dx(:,:,1), div_xx_dy(:,:,1), &
-                                     slope_x, slope_y, vort_xy_dx(:,:,1), vort_xy_dy(:,:,1))
+        do kk=1,kmax
+          k = kstart + kk - 1
+          call calc_QG_Leith_viscosity(VarMix, G, GV, US, h, dz, k, div_xx_dx(:,:,kk), div_xx_dy(:,:,kk), &
+                                       slope_x, slope_y, vort_xy_dx(:,:,kk), vort_xy_dy(:,:,kk))
+        enddo
 
       endif
 
-      do j=js_Kh,je_Kh ; do i=is_Kh,ie_Kh
-        grad_vort_mag_h(i,j,1) = SQRT(((0.5*(vort_xy_dx(i,J,1) + vort_xy_dx(i,J-1,1)))**2) + &
-                                    ((0.5*(vort_xy_dy(I,j,1) + vort_xy_dy(I-1,j,1)))**2) )
-      enddo ; enddo
-      do J=js-1,Jeq ; do I=is-1,Ieq
-        grad_vort_mag_q(I,J,1) = SQRT(((0.5*(vort_xy_dx(i,J,1) + vort_xy_dx(i+1,J,1)))**2) + &
-                                    ((0.5*(vort_xy_dy(I,j,1) + vort_xy_dy(I,j+1,1)))**2) )
-      enddo ; enddo
+      do kk=1,kmax ; do j=js_Kh,je_Kh ; do i=is_Kh,ie_Kh
+        grad_vort_mag_h(i,j,kk) = SQRT(((0.5*(vort_xy_dx(i,J,kk) + vort_xy_dx(i,J-1,kk)))**2) + &
+                                    ((0.5*(vort_xy_dy(I,j,kk) + vort_xy_dy(I-1,j,kk)))**2) )
+      enddo ; enddo ; enddo
+      do kk=1,kmax ; do J=js-1,Jeq ; do I=is-1,Ieq
+        grad_vort_mag_q(I,J,kk) = SQRT(((0.5*(vort_xy_dx(i,J,kk) + vort_xy_dx(i+1,J,kk)))**2) + &
+                                    ((0.5*(vort_xy_dy(I,j,kk) + vort_xy_dy(I,j+1,kk)))**2) )
+      enddo ; enddo ; enddo
 
       if (CS%use_Leithy) then
-        do j=js_Kh,je_Kh ; do i=is_Kh,ie_Kh
-          vert_vort_mag_smooth(i,j,1) = SQRT(((0.5*(vort_xy_dx_smooth(i,J,1) + &
-                                                  vort_xy_dx_smooth(i,J-1,1)))**2) + &
-                                           ((0.5*(vort_xy_dy_smooth(I,j,1) + &
-                                                  vort_xy_dy_smooth(I-1,j,1)))**2) )
-        enddo ; enddo
+        do kk=1,kmax ; do j=js_Kh,je_Kh ; do i=is_Kh,ie_Kh
+          vert_vort_mag_smooth(i,j,kk) = SQRT(((0.5*(vort_xy_dx_smooth(i,J,kk) + &
+                                                  vort_xy_dx_smooth(i,J-1,kk)))**2) + &
+                                           ((0.5*(vort_xy_dy_smooth(I,j,kk) + &
+                                                  vort_xy_dy_smooth(I-1,j,kk)))**2) )
+        enddo ; enddo ; enddo
       endif ! Leithy
 
     endif ! CS%Leith_Kh
