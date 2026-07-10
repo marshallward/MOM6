@@ -2254,52 +2254,52 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
     ! the vertically integrated MEKE source term, and adjusting for any
     ! energy loss seen as a reduction in the (biharmonic) frictional source term.
     if (find_FrictWork .and. allocated(MEKE%mom_src)) then
-      do kk=1,kmax
-        k = kstart + kk - 1
-        if (MEKE%backscatter_Ro_c /= 0.) then
-          do j=js,je ; do i=is,ie
-            FatH = 0.25*( (abs(G%CoriolisBu(I-1,J-1)) + abs(G%CoriolisBu(I,J))) + &
-                          (abs(G%CoriolisBu(I-1,J)) + abs(G%CoriolisBu(I,J-1))) )
-            Shear_mag_bc = sqrt(sh_xx(i,j,kk) * sh_xx(i,j,kk) + &
-              0.25*(((sh_xy(I-1,J-1,kk)*sh_xy(I-1,J-1,kk)) + (sh_xy(I,J,kk)*sh_xy(I,J,kk))) + &
-                    ((sh_xy(I-1,J,kk)*sh_xy(I-1,J,kk)) + (sh_xy(I,J-1,kk)*sh_xy(I,J-1,kk)))))
-            if ((CS%answer_date > 20190101) .and. (CS%answer_date < 20241201)) then
-              FatH = (US%s_to_T*FatH)**MEKE%backscatter_Ro_pow ! f^n
-              ! Note the hard-coded dimensional constant in the following line that can not
-              ! be rescaled for dimensional consistency.
-              Shear_mag_bc = (((US%s_to_T * Shear_mag_bc)**MEKE%backscatter_Ro_pow) + 1.e-30) &
-                          * MEKE%backscatter_Ro_c ! c * D^n
-              ! The Rossby number function is g(Ro) = 1/(1+c.Ro^n)
-              ! RoScl = 1 - g(Ro)
-              RoScl = Shear_mag_bc / (FatH + Shear_mag_bc) ! = 1 - f^n/(f^n+c*D^n)
+      if (MEKE%backscatter_Ro_c /= 0.) then
+        do kk=1,kmax ; do j=js,je ; do i=is,ie
+          k = kstart + kk - 1
+          FatH = 0.25*( (abs(G%CoriolisBu(I-1,J-1)) + abs(G%CoriolisBu(I,J))) + &
+                        (abs(G%CoriolisBu(I-1,J)) + abs(G%CoriolisBu(I,J-1))) )
+          Shear_mag_bc = sqrt(sh_xx(i,j,kk) * sh_xx(i,j,kk) + &
+            0.25*(((sh_xy(I-1,J-1,kk)*sh_xy(I-1,J-1,kk)) + (sh_xy(I,J,kk)*sh_xy(I,J,kk))) + &
+                  ((sh_xy(I-1,J,kk)*sh_xy(I-1,J,kk)) + (sh_xy(I,J-1,kk)*sh_xy(I,J-1,kk)))))
+          if ((CS%answer_date > 20190101) .and. (CS%answer_date < 20241201)) then
+            FatH = (US%s_to_T*FatH)**MEKE%backscatter_Ro_pow ! f^n
+            ! Note the hard-coded dimensional constant in the following line that can not
+            ! be rescaled for dimensional consistency.
+            Shear_mag_bc = (((US%s_to_T * Shear_mag_bc)**MEKE%backscatter_Ro_pow) + 1.e-30) &
+                        * MEKE%backscatter_Ro_c ! c * D^n
+            ! The Rossby number function is g(Ro) = 1/(1+c.Ro^n)
+            ! RoScl = 1 - g(Ro)
+            RoScl = Shear_mag_bc / (FatH + Shear_mag_bc) ! = 1 - f^n/(f^n+c*D^n)
+          else
+            if (FatH <= backscat_subround*Shear_mag_bc) then
+              RoScl = 1.0
             else
-              if (FatH <= backscat_subround*Shear_mag_bc) then
-                RoScl = 1.0
-              else
-                Sh_F_pow = MEKE%backscatter_Ro_c * (Shear_mag_bc / FatH)**MEKE%backscatter_Ro_pow
-                RoScl = Sh_F_pow / (1.0 + Sh_F_pow) ! = 1 - f^n/(f^n+c*D^n)
-              endif
+              Sh_F_pow = MEKE%backscatter_Ro_c * (Shear_mag_bc / FatH)**MEKE%backscatter_Ro_pow
+              RoScl = Sh_F_pow / (1.0 + Sh_F_pow) ! = 1 - f^n/(f^n+c*D^n)
             endif
-
-            MEKE%mom_src(i,j) = MEKE%mom_src(i,j) + (FrictWork(i,j,k) - RoScl*FrictWork_bh(i,j,k))
-
-            if (allocated(MEKE%mom_src_bh)) &
-              MEKE%mom_src_bh(i,j) = MEKE%mom_src_bh(i,j) &
-                  + (FrictWork_bh(i,j,k) - RoScl * FrictWork_bh(i,j,k))
-          enddo ; enddo
-        else
-          do j=js,je ; do i=is,ie
-            MEKE%mom_src(i,j) = MEKE%mom_src(i,j) + FrictWork(i,j,k)
-          enddo ; enddo
-
-          if (allocated(MEKE%mom_src_bh)) then
-            do j=js,je ; do i=is,ie
-              MEKE%mom_src_bh(i,j) = MEKE%mom_src_bh(i,j) + FrictWork_bh(i,j,k)
-            enddo ; enddo
           endif
-        endif ! MEKE%backscatter_Ro_c
 
-      enddo ! kk-loop
+          MEKE%mom_src(i,j) = MEKE%mom_src(i,j) + (FrictWork(i,j,k) - RoScl*FrictWork_bh(i,j,k))
+
+          if (allocated(MEKE%mom_src_bh)) &
+            MEKE%mom_src_bh(i,j) = MEKE%mom_src_bh(i,j) &
+                + (FrictWork_bh(i,j,k) - RoScl * FrictWork_bh(i,j,k))
+        enddo ; enddo ; enddo
+      else
+        do kk=1,kmax ; do j=js,je ; do i=is,ie
+          k = kstart + kk - 1
+          MEKE%mom_src(i,j) = MEKE%mom_src(i,j) + FrictWork(i,j,k)
+        enddo ; enddo ; enddo
+
+        if (allocated(MEKE%mom_src_bh)) then
+          do kk=1,kmax ; do j=js,je ; do i=is,ie
+            k = kstart + kk - 1
+            MEKE%mom_src_bh(i,j) = MEKE%mom_src_bh(i,j) + FrictWork_bh(i,j,k)
+          enddo ; enddo ; enddo
+        endif
+      endif ! MEKE%backscatter_Ro_c
+
     endif ! find_FrictWork and associated(mom_src)
   enddo ! end of k loop
 
