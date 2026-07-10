@@ -1898,43 +1898,47 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
 
     ! Backscatter using MEKE
     if (CS%EY24_EBT_BS) then
-      do J=js-1,Jeq ; do I=is-1,Ieq
+      do kk=1,kmax ; do J=js-1,Jeq ; do I=is-1,Ieq
+        k = kstart + kk - 1
         if (visc_limit_q_flag(I,J,k) > 0) then
-          Kh_BS(I,J,1) = 0.
+          Kh_BS(I,J,kk) = 0.
         else
           if (use_kh_struct) then
-            Kh_BS(I,J,1) = 0.25*( ((MEKE%Ku(i,j)*VarMix%BS_struct(i,j,k)) + &
+            Kh_BS(I,J,kk) = 0.25*( ((MEKE%Ku(i,j)*VarMix%BS_struct(i,j,k)) + &
                                  (MEKE%Ku(i+1,j+1)*VarMix%BS_struct(i+1,j+1,k))) + &
                                 ((MEKE%Ku(i+1,j)*VarMix%BS_struct(i+1,j,k)) + &
                                  (MEKE%Ku(i,j+1)*VarMix%BS_struct(i,j+1,k))) )
           else
-            Kh_BS(I,J,1) = 0.25*( (MEKE%Ku(i,j) + MEKE%Ku(i+1,j+1)) + &
+            Kh_BS(I,J,kk) = 0.25*( (MEKE%Ku(i,j) + MEKE%Ku(i+1,j+1)) + &
                                 (MEKE%Ku(i+1,j) + MEKE%Ku(i,j+1)) )
           endif
         endif
-      enddo ; enddo
+      enddo ; enddo ; enddo
 
-      do J=js-1,Jeq ; do I=is-1,Ieq
-        str_xy_BS(I,J,1) = -Kh_BS(I,J,1) * (sh_xy(I,J,1))
-      enddo ; enddo
+      do kk=1,kmax ; do J=js-1,Jeq ; do I=is-1,Ieq
+        str_xy_BS(I,J,kk) = -Kh_BS(I,J,kk) * (sh_xy(I,J,kk))
+      enddo ; enddo ; enddo
 
       if (CS%id_BS_coeff_q>0) then
-        do J=js-1,Jeq ; do I=is-1,Ieq
-          BS_coeff_q(I,J,k) = Kh_BS(I,J,1)
-        enddo ; enddo
+        do kk=1,kmax ; do J=js-1,Jeq ; do I=is-1,Ieq
+          k = kstart + kk - 1
+          BS_coeff_q(I,J,k) = Kh_BS(I,J,kk)
+        enddo ; enddo ; enddo
       endif
 
-      do J=js-1,Jeq ; do I=is-1,Ieq
-        str_xy(I,J,1) = str_xy(I,J,1) + str_xy_BS(I,J,1)
-      enddo ; enddo
+      do kk=1,kmax ; do J=js-1,Jeq ; do I=is-1,Ieq
+        str_xy(I,J,kk) = str_xy(I,J,kk) + str_xy_BS(I,J,kk)
+      enddo ; enddo ; enddo
     endif ! Backscatter
 
     if (CS%use_GME) then
-      ! The wider halo here is to permit one pass of smoothing without a halo update.
-      do j=Jsq-1,Jeq+2 ; do i=Isq-1,Ieq+2
-        GME_coeff = GME_effic_h(i,j,1) * 0.25 * &
-            ((KH_u_GME(I,j,k)+KH_u_GME(I-1,j,k)) + (KH_v_GME(i,J,k)+KH_v_GME(i,J-1,k)))
-        GME_coeff = MIN(GME_coeff, CS%GME_limiter)
+      do kk=1,kmax
+        k = kstart + kk - 1
+        ! The wider halo here is to permit one pass of smoothing without a halo update.
+        do j=Jsq-1,Jeq+2 ; do i=Isq-1,Ieq+2
+          GME_coeff = GME_effic_h(i,j,1) * 0.25 * &
+              ((KH_u_GME(I,j,k)+KH_u_GME(I-1,j,k)) + (KH_v_GME(i,J,k)+KH_v_GME(i,J-1,k)))
+          GME_coeff = MIN(GME_coeff, CS%GME_limiter)
 
         if ((CS%id_GME_coeff_h>0) .or. find_FrictWork) GME_coeff_h(i,j,k) = GME_coeff
         str_xx_GME(i,j,1) = GME_coeff * sh_xx_bt(i,j)
@@ -1969,22 +1973,24 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
           str_xy(I,J,1) = (str_xy(I,J,1) + str_xy_GME(I,J,1)) * (hq(I,J,1) * G%mask2dBu(I,J) * CS%reduction_xy(I,J))
         enddo ; enddo
       endif
+      enddo ! kk-loop
 
     else ! .not. use_GME
       ! This changes the units of str_xx from [L2 T-2 ~> m2 s-2] to [H L2 T-2 ~> m3 s-2 or kg s-2].
-      do j=Jsq,Jeq+1 ; do i=Isq,Ieq+1
-        str_xx(i,j,1) = str_xx(i,j,1) * (h(i,j,k) * CS%reduction_xx(i,j))
-      enddo ; enddo
+      do kk=1,kmax ; do j=Jsq,Jeq+1 ; do i=Isq,Ieq+1
+        k = kstart + kk - 1
+        str_xx(i,j,kk) = str_xx(i,j,kk) * (h(i,j,k) * CS%reduction_xx(i,j))
+      enddo ; enddo ; enddo
 
       ! This changes the units of str_xy from [L2 T-2 ~> m2 s-2] to [H L2 T-2 ~> m3 s-2 or kg s-2].
       if (CS%no_slip) then
-        do J=js-1,Jeq ; do I=is-1,Ieq
-          str_xy(I,J,1) = str_xy(I,J,1) * (hq(I,J,1) * CS%reduction_xy(I,J))
-        enddo ; enddo
+        do kk=1,kmax ; do J=js-1,Jeq ; do I=is-1,Ieq
+          str_xy(I,J,kk) = str_xy(I,J,kk) * (hq(I,J,kk) * CS%reduction_xy(I,J))
+        enddo ; enddo ; enddo
       else
-        do J=js-1,Jeq ; do I=is-1,Ieq
-          str_xy(I,J,1) = str_xy(I,J,1) * (hq(I,J,1) * G%mask2dBu(I,J) * CS%reduction_xy(I,J))
-        enddo ; enddo
+        do kk=1,kmax ; do J=js-1,Jeq ; do I=is-1,Ieq
+          str_xy(I,J,kk) = str_xy(I,J,kk) * (hq(I,J,kk) * G%mask2dBu(I,J) * CS%reduction_xy(I,J))
+        enddo ; enddo ; enddo
       endif
     endif ! use_GME
 
