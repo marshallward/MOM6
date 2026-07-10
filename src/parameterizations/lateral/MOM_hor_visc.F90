@@ -947,52 +947,54 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
     ! Shearing strain (including no-slip boundary conditions at the 2-D land-sea mask).
     ! dudy and dvdx include modifications at OBCs from above.
     if (CS%no_slip) then
-      do J=js-2,Jeq+1 ; do I=is-2,Ieq+1
-        sh_xy(I,J,1) = (2.0-G%mask2dBu(I,J)) * ( dvdx(I,J,1) + dudy(I,J,1) )
-        if (CS%id_shearstress > 0) ShSt(I,J,k) = sh_xy(I,J,1)
-      enddo ; enddo
+      do kk=1,kmax ; do J=js-2,Jeq+1 ; do I=is-2,Ieq+1
+        k = kstart + kk - 1
+        sh_xy(I,J,kk) = (2.0-G%mask2dBu(I,J)) * ( dvdx(I,J,kk) + dudy(I,J,kk) )
+        if (CS%id_shearstress > 0) ShSt(I,J,k) = sh_xy(I,J,kk)
+      enddo ; enddo ; enddo
     else
-      do J=js-2,Jeq+1 ; do I=is-2,Ieq+1
-        sh_xy(I,J,1) = G%mask2dBu(I,J) * ( dvdx(I,J,1) + dudy(I,J,1) )
-        if (CS%id_shearstress > 0) ShSt(I,J,k) = sh_xy(I,J,1)
-      enddo ; enddo
+      do kk=1,kmax ; do J=js-2,Jeq+1 ; do I=is-2,Ieq+1
+        k = kstart + kk - 1
+        sh_xy(I,J,kk) = G%mask2dBu(I,J) * ( dvdx(I,J,kk) + dudy(I,J,kk) )
+        if (CS%id_shearstress > 0) ShSt(I,J,k) = sh_xy(I,J,kk)
+      enddo ; enddo ; enddo
     endif
 
     if (CS%use_Leithy) then
       ! Shearing strain (including no-slip boundary conditions at the 2-D land-sea mask).
       ! dudy_smooth and dvdx_smooth do not (yet) include modifications at OBCs from above.
       if (CS%no_slip) then
-        do J=js-1,Jeq ; do I=is-1,Ieq
-          sh_xy_smooth(I,J,1) = (2.0-G%mask2dBu(I,J)) * ( dvdx_smooth(I,J,1) + dudy_smooth(I,J,1) )
-        enddo ; enddo
+        do kk=1,kmax ; do J=js-1,Jeq ; do I=is-1,Ieq
+          sh_xy_smooth(I,J,kk) = (2.0-G%mask2dBu(I,J)) * ( dvdx_smooth(I,J,kk) + dudy_smooth(I,J,kk) )
+        enddo ; enddo ; enddo
       else
-        do J=js-1,Jeq ; do I=is-1,Ieq
-          sh_xy_smooth(I,J,1) = G%mask2dBu(I,J) * ( dvdx_smooth(I,J,1) + dudy_smooth(I,J,1) )
-        enddo ; enddo
+        do kk=1,kmax ; do J=js-1,Jeq ; do I=is-1,Ieq
+          sh_xy_smooth(I,J,kk) = G%mask2dBu(I,J) * ( dvdx_smooth(I,J,kk) + dudy_smooth(I,J,kk) )
+        enddo ; enddo ; enddo
       endif
     endif ! use Leith+E
 
     !  Evaluate Del2u = x.Div(Grad u) and Del2v = y.Div( Grad u)
     if (CS%biharmonic) then
-      do j=js-1,Jeq+1 ; do I=Isq-1,Ieq+1
-        Del2u(I,j,1) = CS%Idx2dyCu(I,j) * ((CS%dx2q(I,J)*sh_xy(I,J,1)) - (CS%dx2q(I,J-1)*sh_xy(I,J-1,1))) + &
-                     CS%Idxdy2u(I,j) * ((CS%dy2h(i+1,j)*sh_xx(i+1,j,1)) - (CS%dy2h(i,j)*sh_xx(i,j,1)))
-      enddo ; enddo
-      do J=Jsq-1,Jeq+1 ; do i=is-1,Ieq+1
-        Del2v(i,J,1) = CS%Idxdy2v(i,J) * ((CS%dy2q(I,J)*sh_xy(I,J,1)) - (CS%dy2q(I-1,J)*sh_xy(I-1,J,1))) - &
-                     CS%Idx2dyCv(i,J) * ((CS%dx2h(i,j+1)*sh_xx(i,j+1,1)) - (CS%dx2h(i,j)*sh_xx(i,j,1)))
-      enddo ; enddo
+      do kk=1,kmax ; do j=js-1,Jeq+1 ; do I=Isq-1,Ieq+1
+        Del2u(I,j,kk) = CS%Idx2dyCu(I,j) * ((CS%dx2q(I,J)*sh_xy(I,J,kk)) - (CS%dx2q(I,J-1)*sh_xy(I,J-1,kk))) + &
+                     CS%Idxdy2u(I,j) * ((CS%dy2h(i+1,j)*sh_xx(i+1,j,kk)) - (CS%dy2h(i,j)*sh_xx(i,j,kk)))
+      enddo ; enddo ; enddo
+      do kk=1,kmax ; do J=Jsq-1,Jeq+1 ; do i=is-1,Ieq+1
+        Del2v(i,J,kk) = CS%Idxdy2v(i,J) * ((CS%dy2q(I,J)*sh_xy(I,J,kk)) - (CS%dy2q(I-1,J)*sh_xy(I-1,J,kk))) - &
+                     CS%Idx2dyCv(i,J) * ((CS%dx2h(i,j+1)*sh_xx(i,j+1,kk)) - (CS%dx2h(i,j)*sh_xx(i,j,kk)))
+      enddo ; enddo ; enddo
       if (apply_OBC) then ; if (OBC%zero_biharmonic) then
         do n=1,OBC%number_of_segments
           I = OBC%segment(n)%HI%IsdB ; J = OBC%segment(n)%HI%JsdB
           if (OBC%segment(n)%is_N_or_S .and. (J >= Jsq-1) .and. (J <= Jeq+1)) then
-            do I=OBC%segment(n)%HI%isd,OBC%segment(n)%HI%ied
-              Del2v(i,J,1) = 0.
-            enddo
+            do kk=1,kmax ; do I=OBC%segment(n)%HI%isd,OBC%segment(n)%HI%ied
+              Del2v(i,J,kk) = 0.
+            enddo ; enddo
           elseif (OBC%segment(n)%is_E_or_W .and. (I >= Isq-1) .and. (I <= Ieq+1)) then
-            do j=OBC%segment(n)%HI%jsd,OBC%segment(n)%HI%jed
-              Del2u(I,j,1) = 0.
-            enddo
+            do kk=1,kmax ; do j=OBC%segment(n)%HI%jsd,OBC%segment(n)%HI%jed
+              Del2u(I,j,kk) = 0.
+            enddo ; enddo
           endif
         enddo
       endif ; endif
