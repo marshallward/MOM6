@@ -28,7 +28,7 @@
 !   * vertically_interpolate_diag_field, which calls vertically_interpolate_field
 !   * horizontally_average_diag_field, which calls horizontally_average_field
 
-
+#include "do_concurrent_compat.h"
 module MOM_diag_remap
 
 use MOM_coms,             only : reproducing_sum_EFP, EFP_to_real
@@ -520,14 +520,12 @@ subroutine diag_remap_calc_hmask(remap_cs, G, mask, h)
   nz = remap_cs%nz
 
   ! Zero the mask on the device
-  !$omp target teams distribute parallel do collapse(3)
-  do k = 1, nz ; do j = G%jsd, G%jed ; do i = G%isd, G%ied
+  do concurrent(k = 1:nz, j = G%jsd:G%jed, i = G%isd:G%ied)
     mask(i,j,k) = 0.
-  enddo ; enddo ; enddo
+  end do
 
   ! Compute mask: (i,j) parallelized on GPU, k-loop sequential (cumulative h_err)
-  !$omp target teams distribute parallel do collapse(2) private(h_tot, h_err, k)
-  do j=G%jsc-1,G%jec+1 ; do i=G%isc-1,G%iec+1
+  do concurrent(j = G%jsc-1:G%jec+1, i = G%isc-1:G%iec+1) DO_LOCALITY(local(h_tot, h_err, k))
     if (G%mask2dT(i,j)>0.) then
       if (mask_vanished_layers) then
         h_tot = 0.
@@ -550,7 +548,7 @@ subroutine diag_remap_calc_hmask(remap_cs, G, mask, h)
         enddo
       endif
     endif
-  enddo ; enddo
+  enddo
 
 end subroutine diag_remap_calc_hmask
 
