@@ -344,7 +344,6 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
     grad_vort_mag_h_2d, & ! Magnitude of 2d vorticity gradient at h-points [L-1 T-1 ~> m-1 s-1]
     grad_div_mag_h, &     ! Magnitude of divergence gradient at h-points [L-1 T-1 ~> m-1 s-1]
     dudx, dvdy, &    ! components in the horizontal tension [T-1 ~> s-1]
-    dudx_smooth, dvdy_smooth, & ! components in the horizontal tension from smoothed velocity [T-1 ~> s-1]
     GME_effic_h, &  ! The filtered efficiency of the GME terms at h points [nondim]
     m_leithy, &   ! Kh=m_leithy*Ah in Leith+E parameterization [L-2 ~> m-2]
     Ah_sq, &      ! The square of the biharmonic viscosity [L8 T-2 ~> m8 s-2]
@@ -458,6 +457,7 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
   real :: grad_vort_qg ! QG-based vorticity gradient magnitude [L-1 T-1 ~> m-1 s-1]
   real :: grid_Kh   ! Laplacian viscosity bound by grid [L2 T-1 ~> m2 s-1]
   real :: grid_Ah   ! Biharmonic viscosity bound by grid [L4 T-1 ~> m4 s-1]
+  real :: dudx_smooth, dvdy_smooth ! components in the horizontal tension from smoothed velocity [T-1 ~> s-1]
 
   logical :: rescale_Kh
   logical :: find_FrictWork
@@ -756,11 +756,11 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
     if (CS%use_Leithy) then
       ! Calculate horizontal tension from smoothed velocity
       do j=Jsq,Jeq+1 ; do i=Isq,Ieq+1
-        dudx_smooth(i,j,1) = CS%DY_dxT(i,j)*((G%IdyCu(I,j) * u_smooth(I,j,k)) - &
+        dudx_smooth = CS%DY_dxT(i,j)*((G%IdyCu(I,j) * u_smooth(I,j,k)) - &
                                            (G%IdyCu(I-1,j) * u_smooth(I-1,j,k)))
-        dvdy_smooth(i,j,1) = CS%DX_dyT(i,j)*((G%IdxCv(i,J) * v_smooth(i,J,k)) - &
+        dvdy_smooth = CS%DX_dyT(i,j)*((G%IdxCv(i,J) * v_smooth(i,J,k)) - &
                                            (G%IdxCv(i,J-1) * v_smooth(i,J-1,k)))
-        sh_xx_smooth(i,j,1) = dudx_smooth(i,j,1) - dvdy_smooth(i,j,1)
+        sh_xx_smooth(i,j,1) = dudx_smooth - dvdy_smooth
       enddo ; enddo
 
       ! Components for the shearing strain from smoothed velocity
