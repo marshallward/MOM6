@@ -332,11 +332,9 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
   real, dimension(SZI_(G),SZJ_(G)) :: &
     sh_xx_bt      ! barotropic horizontal tension (du/dx - dv/dy) including metric terms [T-1 ~> s-1]
   real, dimension(SZI_(G),SZJ_(G),nkblock) :: &
-    str_xx        ! str_xx is the diagonal term in the stress tensor [H L2 T-2 ~> m3 s-2 or kg s-2], but
+    str_xx, &     ! str_xx is the diagonal term in the stress tensor [H L2 T-2 ~> m3 s-2 or kg s-2], but
                   ! at some points in the code it is not yet layer integrated, so is in [L2 T-2 ~> m2 s-2].
-  real, dimension(SZI_(G),SZJ_(G)) :: &
-    str_xx_GME    ! smoothed diagonal term in the stress tensor from GME [L2 T-2 ~> m2 s-2]
-  real, dimension(SZI_(G),SZJ_(G),nkblock) :: &
+    str_xx_GME, & ! smoothed diagonal term in the stress tensor from GME [L2 T-2 ~> m2 s-2]
     bhstr_xx, &   ! A copy of str_xx that only contains the biharmonic contribution [H L2 T-2 ~> m3 s-2 or kg s-2]
     FrictWorkIntz, & ! depth integrated energy dissipated by lateral friction [R Z L2 T-3 ~> W m-2]
     FrictWorkIntz_bh, & ! depth integrated energy dissipated by biharmonic lateral friction [R Z L2 T-3 ~> W m-2]
@@ -365,11 +363,9 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
   real, dimension(SZIB_(G),SZJB_(G)) :: &
     sh_xy_bt      ! barotropic horizontal shearing strain (du/dy + dv/dx) inc. metric terms [T-1 ~> s-1]
   real, dimension(SZIB_(G),SZJB_(G),nkblock) :: &
-    str_xy        ! str_xy is the cross term in the stress tensor [H L2 T-2 ~> m3 s-2 or kg s-2], but
+    str_xy, &     ! str_xy is the cross term in the stress tensor [H L2 T-2 ~> m3 s-2 or kg s-2], but
                   ! at some points in the code it is not yet layer integrated, so is in [L2 T-2 ~> m2 s-2].
-  real, dimension(SZIB_(G),SZJB_(G)) :: &
-    str_xy_GME    ! smoothed cross term in the stress tensor from GME [L2 T-2 ~> m2 s-2]
-  real, dimension(SZIB_(G),SZJB_(G),nkblock) :: &
+    str_xy_GME, & ! smoothed cross term in the stress tensor from GME [L2 T-2 ~> m2 s-2]
     bhstr_xy, &   ! A copy of str_xy that only contains the biharmonic contribution [H L2 T-2 ~> m3 s-2 or kg s-2]
     vort_xy, &    ! Vertical vorticity (dv/dx - du/dy) including metric terms [T-1 ~> s-1]
     vort_xy_smooth, & ! Vertical vorticity including metric terms, smoothed [T-1 ~> s-1]
@@ -583,8 +579,8 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
     ! Initialize diagnostic arrays with zeros
     GME_coeff_h(:,:,:) = 0.0
     GME_coeff_q(:,:,:) = 0.0
-    str_xx_GME(:,:) = 0.0
-    str_xy_GME(:,:) = 0.0
+    str_xx_GME(:,:,1) = 0.0
+    str_xy_GME(:,:,1) = 0.0
 
     ! Get barotropic velocities and their gradients
     call barotropic_get_tav(BT, ubtav, vbtav, G, US)
@@ -1885,7 +1881,7 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
         GME_coeff = MIN(GME_coeff, CS%GME_limiter)
 
         if ((CS%id_GME_coeff_h>0) .or. find_FrictWork) GME_coeff_h(i,j,k) = GME_coeff
-        str_xx_GME(i,j) = GME_coeff * sh_xx_bt(i,j)
+        str_xx_GME(i,j,1) = GME_coeff * sh_xx_bt(i,j)
       enddo ; enddo
 
       ! The wider halo here is to permit one pass of smoothing without a halo update.
@@ -1895,26 +1891,26 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
         GME_coeff = MIN(GME_coeff, CS%GME_limiter)
 
         if (CS%id_GME_coeff_q>0) GME_coeff_q(I,J,k) = GME_coeff
-        str_xy_GME(I,J) = GME_coeff * sh_xy_bt(I,J)
+        str_xy_GME(I,J,1) = GME_coeff * sh_xy_bt(I,J)
       enddo ; enddo
 
       ! Applying GME diagonal term.  This is linear and the arguments can be rescaled.
-      call smooth_GME(CS, G, GME_flux_h=str_xx_GME)
-      call smooth_GME(CS, G, GME_flux_q=str_xy_GME)
+      call smooth_GME(CS, G, GME_flux_h=str_xx_GME(:,:,1))
+      call smooth_GME(CS, G, GME_flux_q=str_xy_GME(:,:,1))
 
       ! This changes the units of str_xx from [L2 T-2 ~> m2 s-2] to [H L2 T-2 ~> m3 s-2 or kg s-2].
       do j=Jsq,Jeq+1 ; do i=Isq,Ieq+1
-        str_xx(i,j,1) = (str_xx(i,j,1) + str_xx_GME(i,j)) * (h(i,j,k) * CS%reduction_xx(i,j))
+        str_xx(i,j,1) = (str_xx(i,j,1) + str_xx_GME(i,j,1)) * (h(i,j,k) * CS%reduction_xx(i,j))
       enddo ; enddo
 
       ! This adds in GME and changes the units of str_xx from [L2 T-2 ~> m2 s-2] to [H L2 T-2 ~> m3 s-2 or kg s-2].
       if (CS%no_slip) then
         do J=js-1,Jeq ; do I=is-1,Ieq
-          str_xy(I,J,1) = (str_xy(I,J,1) + str_xy_GME(I,J)) * (hq(I,J,1) * CS%reduction_xy(I,J))
+          str_xy(I,J,1) = (str_xy(I,J,1) + str_xy_GME(I,J,1)) * (hq(I,J,1) * CS%reduction_xy(I,J))
         enddo ; enddo
       else
         do J=js-1,Jeq ; do I=is-1,Ieq
-          str_xy(I,J,1) = (str_xy(I,J,1) + str_xy_GME(I,J)) * (hq(I,J,1) * G%mask2dBu(I,J) * CS%reduction_xy(I,J))
+          str_xy(I,J,1) = (str_xy(I,J,1) + str_xy_GME(I,J,1)) * (hq(I,J,1) * G%mask2dBu(I,J) * CS%reduction_xy(I,J))
         enddo ; enddo
       endif
 
@@ -2103,45 +2099,45 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
       ! Diagnose   str_xx_GME*d_x u - str_yy_GME*d_y v + str_xy_GME*(d_y u + d_x v)
       ! This is the old formulation that includes energy diffusion
         FrictWork_GME(i,j,k) = GV%H_to_RZ * ( &
-                ((str_xx_GME(i,j)*(u(I,j,k)-u(I-1,j,k))*G%IdxT(i,j))    &
-               - (str_xx_GME(i,j)*(v(i,J,k)-v(i,J-1,k))*G%IdyT(i,j)))   &
-              + 0.25*(( (str_xy_GME(I,J) *                              &
+                ((str_xx_GME(i,j,1)*(u(I,j,k)-u(I-1,j,k))*G%IdxT(i,j))    &
+               - (str_xx_GME(i,j,1)*(v(i,J,k)-v(i,J-1,k))*G%IdyT(i,j)))   &
+              + 0.25*(( (str_xy_GME(I,J,1) *                              &
                          (((u(I,j+1,k)-u(I,j,k))*G%IdyBu(I,J))          &
                         + ((v(i+1,J,k)-v(i,J,k))*G%IdxBu(I,J))))        &
-                      + (str_xy_GME(I-1,J-1) *                          &
+                      + (str_xy_GME(I-1,J-1,1) *                          &
                          (((u(I-1,j,k)-u(I-1,j-1,k))*G%IdyBu(I-1,J-1))  &
                         + ((v(i,J-1,k)-v(i-1,J-1,k))*G%IdxBu(I-1,J-1)))) ) &
-                    + ( (str_xy_GME(I-1,J) *                            &
+                    + ( (str_xy_GME(I-1,J,1) *                            &
                          (((u(I-1,j+1,k)-u(I-1,j,k))*G%IdyBu(I-1,J))    &
                         + ((v(i,J,k)-v(i-1,J,k))*G%IdxBu(I-1,J))))      &
-                      + (str_xy_GME(I,J-1) *                            &
+                      + (str_xy_GME(I,J-1,1) *                            &
                          (((u(I,j,k)-u(I,j-1,k))*G%IdyBu(I,J-1))        &
                         + ((v(i+1,J-1,k)-v(i,J-1,k))*G%IdxBu(I,J-1)))) ) ) )
         enddo ; enddo
       else ; do j=js,je ; do i=is,ie
         FrictWork_GME(i,j,k) = GV%H_to_RZ * G%IareaT(i,j) * ( &
-            ((str_xx_GME(i,j)*CS%dy2h(i,j) * ( &
+            ((str_xx_GME(i,j,1)*CS%dy2h(i,j) * ( &
                   (uh(I,j,k)*G%dxCu(I,j)*G%IdyCu(I,j)*G%IareaCu(I,j)/(h_u(I,j,1)+h_neglect)) &
                 - (uh(I-1,j,k)*G%dxCu(I-1,j)*G%IdyCu(I-1,j)*G%IareaCu(I-1,j)/(h_u(I-1,j,1)+h_neglect)) ) ) &
-           - (str_xx_GME(i,j)*CS%dx2h(i,j) * ( &
+           - (str_xx_GME(i,j,1)*CS%dx2h(i,j) * ( &
                   (vh(i,J,k)*G%dyCv(i,J)*G%IdxCv(i,J)*G%IareaCv(i,J)/(h_v(i,J,1)+h_neglect)) &
                 - (vh(i,J-1,k)*G%dyCv(i,J-1)*G%IdxCv(i,J-1)*G%IareaCv(i,J-1)/(h_v(i,J-1,1)+h_neglect)) ) )) &
-       + (0.25*(((str_xy_GME(I,J)*(                                     &
+       + (0.25*(((str_xy_GME(I,J,1)*(                                     &
                      (CS%dx2q(I,J)*((uh(I,j+1,k)*G%IareaCu(I,j+1)/(h_u(I,j+1,1)+h_neglect)) &
                                   - (uh(I,j,k)*G%IareaCu(I,j)/(h_u(I,j,1)+h_neglect))))            &
                    + (CS%dy2q(I,J)*((vh(i+1,J,k)*G%IareaCv(i+1,J)/(h_v(i+1,J,1)+h_neglect)) &
                                   - (vh(i,J,k)*G%IareaCv(i,J)/(h_v(i,J,1)+h_neglect)))) ))          &
-                +(str_xy_GME(I-1,J-1)*(                                 &
+                +(str_xy_GME(I-1,J-1,1)*(                                 &
                      (CS%dx2q(I-1,J-1)*((uh(I-1,j,k)*G%IareaCu(I-1,j)/(h_u(I-1,j,1)+h_neglect)) &
                                       - (uh(I-1,j-1,k)*G%IareaCu(I-1,j-1)/(h_u(I-1,j-1,1)+h_neglect))))    &
                    + (CS%dy2q(I-1,J-1)*((vh(i,J-1,k)*G%IareaCv(i,J-1)/(h_v(i,J-1,1)+h_neglect)) &
                                       - (vh(i-1,J-1,k)*G%IareaCv(i-1,J-1)/(h_v(i-1,J-1,1)+h_neglect)))) )) ) &
-               +((str_xy_GME(I-1,J)*(                                   &
+               +((str_xy_GME(I-1,J,1)*(                                   &
                      (CS%dx2q(I-1,J)*((uh(I-1,j+1,k)*G%IareaCu(I-1,j+1)/(h_u(I-1,j+1,1)+h_neglect)) &
                                     - (uh(I-1,j,k)*G%IareaCu(I-1,j)/(h_u(I-1,j,1)+h_neglect))))      &
                    + (CS%dy2q(I-1,J)*((vh(i,J,k)*G%IareaCv(i,J)/(h_v(i,J,1)+h_neglect)) &
                                     - (vh(i-1,J,k)*G%IareaCv(i-1,J)/(h_v(i-1,J,1)+h_neglect)))) ))        &
-                +(str_xy_GME(I,J-1)*(                                   &
+                +(str_xy_GME(I,J-1,1)*(                                   &
                      (CS%dx2q(I,J-1)*((uh(I,j,k)*G%IareaCu(I,j)/(h_u(I,j,1)+h_neglect)) &
                                     - (uh(I,j-1,k)*G%IareaCu(I,j-1)/(h_u(I,j-1,1)+h_neglect))))          &
                    + (CS%dy2q(I,J-1)*((vh(i+1,J-1,k)*G%IareaCv(i+1,J-1)/(h_v(i+1,J-1,1)+h_neglect)) &
