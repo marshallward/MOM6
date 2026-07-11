@@ -312,20 +312,13 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
   ! Local variables
   real, dimension(SZIB_(G),SZJ_(G),nkblock) :: &
     Del2u, &      ! The u-component of the Laplacian of velocity [L-1 T-1 ~> m-1 s-1]
-    h_u, &        ! Thickness interpolated to u points [H ~> m or kg m-2].
-    vort_xy_dy, & ! y-derivative of vertical vorticity (d/dy(dv/dx - du/dy)) [L-1 T-1 ~> m-1 s-1]
-    vort_xy_dy_smooth, & ! y-derivative of smoothed vertical vorticity [L-1 T-1 ~> m-1 s-1]
-    div_xx_dx     ! x-derivative of horizontal divergence (d/dx(du/dx + dv/dy)) [L-1 T-1 ~> m-1 s-1]
+    h_u           ! Thickness interpolated to u points [H ~> m or kg m-2].
   real, dimension(SZI_(G),SZJB_(G),nkblock) :: &
     Del2v, &      ! The v-component of the Laplacian of velocity [L-1 T-1 ~> m-1 s-1]
-    h_v, &        ! Thickness interpolated to v points [H ~> m or kg m-2].
-    vort_xy_dx, & ! x-derivative of vertical vorticity (d/dx(dv/dx - du/dy)) [L-1 T-1 ~> m-1 s-1]
-    vort_xy_dx_smooth, & ! x-derivative of smoothed vertical vorticity [L-1 T-1 ~> m-1 s-1]
-    div_xx_dy     ! y-derivative of horizontal divergence (d/dy(du/dx + dv/dy)) [L-1 T-1 ~> m-1 s-1]
+    h_v           ! Thickness interpolated to v points [H ~> m or kg m-2].
   real, dimension(SZI_(G),SZJB_(G)) :: &
     dudx_bt, dvdy_bt ! components in the barotropic horizontal tension [T-1 ~> s-1]
   real, dimension(SZI_(G),SZJ_(G),nkblock) :: &
-    div_xx, &     ! Estimate of horizontal divergence at h-points [T-1 ~> s-1]
     sh_xx, &      ! horizontal tension (du/dx - dv/dy) including metric terms [T-1 ~> s-1]
     sh_xx_smooth  ! horizontal tension from smoothed velocity including metric terms [T-1 ~> s-1]
   real, dimension(SZI_(G),SZJ_(G)) :: &
@@ -654,12 +647,9 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
   !$omp                              dvdx_smooth, dudy_smooth, sh_xy_smooth) if (CS%use_Leithy)
   !$omp target enter data map(alloc: vort_xy, vort_xy_smooth) &
   !$omp   if ((CS%Leith_Kh) .or. (CS%Leith_Ah) .or. (CS%use_Leithy) .or. (CS%id_vort_xy_q>0) .or. CS%use_ZB2020)
-  !$omp target enter data map(alloc: vort_xy_dx, vort_xy_dy, vort_xy_dx_smooth, vort_xy_dy_smooth, &
-  !$omp                              div_xx_dx, div_xx_dy) if (CS%use_QG_Leith_visc)
   !$omp target enter data map(alloc: grad_vort_mag_h, grad_vort_mag_h_2d, grad_div_mag_h, &
   !$omp                              grad_vort_mag_q, grad_vort_mag_q_2d, grad_div_mag_q, Del2vort_q) &
   !$omp   if ((CS%Leith_Kh) .or. (CS%Leith_Ah))
-  !$omp target enter data map(alloc: div_xx) if (CS%Laplacian .or. CS%biharmonic)
   !$omp target enter data map(alloc: slope_x, slope_y) &
   !$omp   if (CS%use_QG_Leith_visc .and. ((CS%Leith_Kh) .or. (CS%Leith_Ah)))
   !$omp target enter data map(alloc: dz) &
@@ -993,135 +983,12 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
 
 
     if ((CS%Leith_Kh) .or. (CS%Leith_Ah) .or. (CS%use_Leithy)) then
-
-      ! Vorticity gradient
-      do concurrent (kk=1:kmax, J=js-2:je_Kh, i=is_Kh-1:ie_Kh+1) DO_LOCALITY(local(DY_dxBu))
-        DY_dxBu = G%dyBu(I,J) * G%IdxBu(I,J)
-        vort_xy_dx(i,J,kk) = DY_dxBu * ((vort_xy(I,J,kk) * G%IdyCu(I,j)) - (vort_xy(I-1,J,kk) * G%IdyCu(I-1,j)))
-      enddo
-
-      do concurrent (kk=1:kmax, j=js_Kh-1:je_Kh+1, I=is-2:ie_Kh) DO_LOCALITY(local(DX_dyBu))
-        DX_dyBu = G%dxBu(I,J) * G%IdyBu(I,J)
-        vort_xy_dy(I,j,kk) = DX_dyBu * ((vort_xy(I,J,kk) * G%IdxCv(i,J)) - (vort_xy(I,J-1,kk) * G%IdxCv(i,J-1)))
-      enddo
-
-      if (CS%use_Leithy) then
-        ! Gradient of smoothed vorticity
-        do concurrent (kk=1:kmax, J=js_Kh-1:je_Kh, i=is_Kh:ie_Kh) DO_LOCALITY(local(DY_dxBu))
-          DY_dxBu = G%dyBu(I,J) * G%IdxBu(I,J)
-          vort_xy_dx_smooth(i,J,kk) = DY_dxBu * &
-                      ((vort_xy_smooth(I,J,kk) * G%IdyCu(I,j)) - (vort_xy_smooth(I-1,J,kk) * G%IdyCu(I-1,j)))
-        enddo
-
-        do concurrent (kk=1:kmax, j=js_Kh:je_Kh, I=is_Kh-1:ie_Kh) DO_LOCALITY(local(DX_dyBu))
-          DX_dyBu = G%dxBu(I,J) * G%IdyBu(I,J)
-          vort_xy_dy_smooth(I,j,kk) = DX_dyBu * &
-                      ((vort_xy_smooth(I,J,kk) * G%IdxCv(i,J)) - (vort_xy_smooth(I,J-1,kk) * G%IdxCv(i,J-1)))
-        enddo
-      endif ! If Leithy
-
-      ! Laplacian of vorticity
-      ! if (CS%Leith_Ah .or. CS%use_Leithy) then
-      do concurrent (kk=1:kmax, J=js_Kh-1:je_Kh, I=is_Kh-1:ie_Kh) DO_LOCALITY(local(DY_dxBu, DX_dyBu))
-        DY_dxBu = G%dyBu(I,J) * G%IdxBu(I,J)
-        DX_dyBu = G%dxBu(I,J) * G%IdyBu(I,J)
-
-        Del2vort_q(I,J,kk) = DY_dxBu * ((vort_xy_dx(i+1,J,kk) * G%IdyCv(i+1,J)) &
-                                        - (vort_xy_dx(i,J,kk) * G%IdyCv(i,J))) + &
-                          DX_dyBu * ((vort_xy_dy(I,j+1,kk) * G%IdyCu(I,j+1)) - (vort_xy_dy(I,j,kk) * G%IdyCu(I,j)))
-      enddo
-      ! endif
-
-      if (CS%modified_Leith) then
-
-        ! Divergence
-        do concurrent (kk=1:kmax, j=js_Kh-1:je_Kh+1, i=is_Kh-1:ie_Kh+1)
-          div_xx(i,j,kk) = dudx(i,j,kk) + dvdy(i,j,kk)
-        enddo
-
-        ! Divergence gradient
-        do concurrent (kk=1:kmax, j=js-1:je+1, I=is_Kh-1:ie_Kh)
-          div_xx_dx(I,j,kk) = G%IdxCu(I,j)*(div_xx(i+1,j,kk) - div_xx(i,j,kk))
-        enddo
-        do concurrent (kk=1:kmax, J=js_Kh-1:je_Kh, i=is-1:ie+1)
-          div_xx_dy(i,J,kk) = G%IdyCv(i,J)*(div_xx(i,j+1,kk) - div_xx(i,j,kk))
-        enddo
-
-        ! Magnitude of divergence gradient
-        do concurrent (kk=1:kmax, j=js_Kh:je_Kh, i=is_Kh:ie_Kh)
-          grad_div_mag_h(i,j,kk) = sqrt(((0.5*(div_xx_dx(I,j,kk) + div_xx_dx(I-1,j,kk)))**2) + &
-                                     ((0.5*(div_xx_dy(i,J,kk) + div_xx_dy(i,J-1,kk)))**2))
-        enddo
-        do concurrent (kk=1:kmax, J=js-1:Jeq, I=is-1:Ieq)
-          grad_div_mag_q(I,J,kk) = sqrt(((0.5*(div_xx_dx(I,j,kk) + div_xx_dx(I,j+1,kk)))**2) + &
-                                     ((0.5*(div_xx_dy(i,J,kk) + div_xx_dy(i+1,J,kk)))**2))
-        enddo
-
-      else
-
-        do concurrent (kk=1:kmax, j=js-1:je+1, I=is_Kh-1:ie_Kh)
-          div_xx_dx(I,j,kk) = 0.0
-        enddo
-        do concurrent (kk=1:kmax, J=js_Kh-1:je_Kh, i=is-1:ie+1)
-          div_xx_dy(i,J,kk) = 0.0
-        enddo
-        do concurrent (kk=1:kmax, j=js_Kh:je_Kh, i=is_Kh:ie_Kh)
-          grad_div_mag_h(i,j,kk) = 0.0
-        enddo
-        do concurrent (kk=1:kmax, J=js-1:Jeq, I=is-1:Ieq)
-          grad_div_mag_q(I,J,kk) = 0.0
-        enddo
-
-      endif ! CS%modified_Leith
-
-      ! Add in beta for the Leith viscosity
-      if (CS%use_beta_in_Leith) then
-        do concurrent (kk=1:kmax, J=js-2:Jeq+1, i=is-1:ie+1)
-          vort_xy_dx(i,J,kk) = vort_xy_dx(i,J,kk) + 0.5 * ( G%dF_dx(i,j) + G%dF_dx(i,j+1))
-        enddo
-        do concurrent (kk=1:kmax, j=js-1:je+1, I=is-2:Ieq+1)
-          vort_xy_dy(I,j,kk) = vort_xy_dy(I,j,kk) + 0.5 * ( G%dF_dy(i,j) + G%dF_dy(i+1,j))
-        enddo
-      endif ! CS%use_beta_in_Leith
-
-      if (CS%use_QG_Leith_visc) then
-
-        do concurrent (kk=1:kmax, j=js_Kh:je_Kh, i=is_Kh:ie_Kh)
-          grad_vort_mag_h_2d(i,j,kk) = SQRT(((0.5*(vort_xy_dx(i,J,kk) + vort_xy_dx(i,J-1,kk)))**2) + &
-                                         ((0.5*(vort_xy_dy(I,j,kk) + vort_xy_dy(I-1,j,kk)))**2) )
-        enddo
-        do concurrent (kk=1:kmax, J=js-1:Jeq, I=is-1:Ieq)
-          grad_vort_mag_q_2d(I,J,kk) = SQRT(((0.5*(vort_xy_dx(i,J,kk) + vort_xy_dx(i+1,J,kk)))**2) + &
-                                         ((0.5*(vort_xy_dy(I,j,kk) + vort_xy_dy(I,j+1,kk)))**2) )
-        enddo
-
-        ! This accumulates terms, some of which are in VarMix.
-        do kk=1,kmax
-          k = kstart + kk - 1
-          call calc_QG_Leith_viscosity(VarMix, G, GV, US, h, dz, k, div_xx_dx(:,:,kk), div_xx_dy(:,:,kk), &
-                                       slope_x, slope_y, vort_xy_dx(:,:,kk), vort_xy_dy(:,:,kk))
-        enddo
-
-      endif
-
-      do concurrent (kk=1:kmax, j=js_Kh:je_Kh, i=is_Kh:ie_Kh)
-        grad_vort_mag_h(i,j,kk) = SQRT(((0.5*(vort_xy_dx(i,J,kk) + vort_xy_dx(i,J-1,kk)))**2) + &
-                                    ((0.5*(vort_xy_dy(I,j,kk) + vort_xy_dy(I-1,j,kk)))**2) )
-      enddo
-      do concurrent (kk=1:kmax, J=js-1:Jeq, I=is-1:Ieq)
-        grad_vort_mag_q(I,J,kk) = SQRT(((0.5*(vort_xy_dx(i,J,kk) + vort_xy_dx(i+1,J,kk)))**2) + &
-                                    ((0.5*(vort_xy_dy(I,j,kk) + vort_xy_dy(I,j+1,kk)))**2) )
-      enddo
-
-      if (CS%use_Leithy) then
-        do concurrent (kk=1:kmax, j=js_Kh:je_Kh, i=is_Kh:ie_Kh)
-          vert_vort_mag_smooth(i,j,kk) = SQRT(((0.5*(vort_xy_dx_smooth(i,J,kk) + &
-                                                  vort_xy_dx_smooth(i,J-1,kk)))**2) + &
-                                           ((0.5*(vort_xy_dy_smooth(I,j,kk) + &
-                                                  vort_xy_dy_smooth(I-1,j,kk)))**2) )
-        enddo
-      endif ! Leithy
-
+      call hor_visc_Leith_grad(G, GV, US, CS, VarMix, nkblock, kstart, kmax, &
+                                is, ie, js, je, is_Kh, ie_Kh, js_Kh, je_Kh, Ieq, Jeq, &
+                                h, dz, slope_x, slope_y, dudx, dvdy, vort_xy, vort_xy_smooth, &
+                                grad_vort_mag_h, grad_vort_mag_h_2d, grad_div_mag_h, &
+                                grad_vort_mag_q, grad_vort_mag_q_2d, grad_div_mag_q, &
+                                vert_vort_mag_smooth, Del2vort_q)
     endif ! CS%Leith_Kh
 
     if ((CS%Smagorinsky_Kh) .or. (CS%Smagorinsky_Ah)) then
@@ -2297,12 +2164,9 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
   !$omp                              dvdx_smooth, dudy_smooth, sh_xy_smooth) if (CS%use_Leithy)
   !$omp target exit data map(delete: vort_xy, vort_xy_smooth) &
   !$omp   if ((CS%Leith_Kh) .or. (CS%Leith_Ah) .or. (CS%use_Leithy) .or. (CS%id_vort_xy_q>0) .or. CS%use_ZB2020)
-  !$omp target exit data map(delete: vort_xy_dx, vort_xy_dy, vort_xy_dx_smooth, vort_xy_dy_smooth, &
-  !$omp                              div_xx_dx, div_xx_dy) if (CS%use_QG_Leith_visc)
   !$omp target exit data map(delete: grad_vort_mag_h, grad_vort_mag_h_2d, grad_div_mag_h, &
   !$omp                              grad_vort_mag_q, grad_vort_mag_q_2d, grad_div_mag_q, Del2vort_q) &
   !$omp   if ((CS%Leith_Kh) .or. (CS%Leith_Ah))
-  !$omp target exit data map(delete: div_xx) if (CS%Laplacian .or. CS%biharmonic)
   !$omp target exit data map(delete: slope_x, slope_y) &
   !$omp   if (CS%use_QG_Leith_visc .and. ((CS%Leith_Kh) .or. (CS%Leith_Ah)))
   !$omp target exit data map(delete: dz) &
@@ -2416,6 +2280,214 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
   endif
 
 end subroutine horizontal_viscosity
+
+!> Calculates the magnitude of the vorticity and divergence gradients, and the
+!! Laplacian of vorticity, that are used within horizontal_viscosity by the Leith,
+!! modified Leith, Leith+E, and QG Leith viscosity schemes. The caller must only
+!! invoke this routine when CS%Leith_Kh, CS%Leith_Ah, or CS%use_Leithy is true.
+subroutine hor_visc_Leith_grad(G, GV, US, CS, VarMix, nkblock, kstart, kmax, &
+                                is, ie, js, je, is_Kh, ie_Kh, js_Kh, je_Kh, Ieq, Jeq, &
+                                h, dz, slope_x, slope_y, dudx, dvdy, vort_xy, vort_xy_smooth, &
+                                grad_vort_mag_h, grad_vort_mag_h_2d, grad_div_mag_h, &
+                                grad_vort_mag_q, grad_vort_mag_q_2d, grad_div_mag_q, &
+                                vert_vort_mag_smooth, Del2vort_q)
+  type(ocean_grid_type),         intent(in)    :: G      !< The ocean's grid structure.
+  type(verticalGrid_type),       intent(in)    :: GV     !< The ocean's vertical grid structure.
+  type(unit_scale_type),         intent(in)    :: US     !< A dimensional unit scaling type
+  type(hor_visc_CS),             intent(in)    :: CS     !< Horizontal viscosity control structure
+  type(VarMix_CS),               intent(inout) :: VarMix !< Variable mixing control structure
+  integer,                       intent(in)    :: nkblock !< The k-block size used to size the following arrays [nondim]
+  integer,                       intent(in)    :: kstart !< The first absolute k-layer of the current k-block
+  integer,                       intent(in)    :: kmax   !< The number of active k-layers in the current k-block
+  integer,                       intent(in)    :: is, ie, js, je !< Loop ranges for the h-point viscosities
+  integer,                       intent(in)    :: is_Kh, ie_Kh, js_Kh, je_Kh !< Loop ranges for the
+                                                       !! thickness point viscosities
+  integer,                       intent(in)    :: Ieq, Jeq !< The last index in each direction at q-points
+  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)), &
+                                  intent(in)    :: h      !< Layer thicknesses [H ~> m or kg m-2].
+  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)), &
+                                  intent(in)    :: dz     !< Height change across layers [Z ~> m]
+  real, dimension(SZIB_(G),SZJ_(G),SZK_(GV)+1), &
+                                  intent(inout) :: slope_x !< Isopycnal slope in i-direction [Z L-1 ~> nondim]
+  real, dimension(SZI_(G),SZJB_(G),SZK_(GV)+1), &
+                                  intent(inout) :: slope_y !< Isopycnal slope in j-direction [Z L-1 ~> nondim]
+  real, dimension(SZI_(G),SZJ_(G),nkblock), &
+                                  intent(in)    :: dudx   !< x-derivative of the horizontal tension [T-1 ~> s-1]
+  real, dimension(SZI_(G),SZJ_(G),nkblock), &
+                                  intent(in)    :: dvdy   !< y-derivative of the horizontal tension [T-1 ~> s-1]
+  real, dimension(SZIB_(G),SZJB_(G),nkblock), &
+                                  intent(in)    :: vort_xy !< Vertical vorticity (dv/dx - du/dy) including
+                                                       !! metric terms [T-1 ~> s-1]
+  real, dimension(SZIB_(G),SZJB_(G),nkblock), &
+                                  intent(in)    :: vort_xy_smooth !< Vertical vorticity including metric
+                                                       !! terms, smoothed [T-1 ~> s-1]
+  real, dimension(SZI_(G),SZJ_(G),nkblock), &
+                                  intent(out)   :: grad_vort_mag_h !< Magnitude of vorticity gradient at
+                                                       !! h-points [L-1 T-1 ~> m-1 s-1]
+  real, dimension(SZI_(G),SZJ_(G),nkblock), &
+                                  intent(out)   :: grad_vort_mag_h_2d !< Magnitude of 2d vorticity gradient
+                                                       !! at h-points [L-1 T-1 ~> m-1 s-1]
+  real, dimension(SZI_(G),SZJ_(G),nkblock), &
+                                  intent(out)   :: grad_div_mag_h !< Magnitude of divergence gradient at
+                                                       !! h-points [L-1 T-1 ~> m-1 s-1]
+  real, dimension(SZIB_(G),SZJB_(G),nkblock), &
+                                  intent(out)   :: grad_vort_mag_q !< Magnitude of vorticity gradient at
+                                                       !! q-points [L-1 T-1 ~> m-1 s-1]
+  real, dimension(SZIB_(G),SZJB_(G),nkblock), &
+                                  intent(out)   :: grad_vort_mag_q_2d !< Magnitude of 2d vorticity gradient
+                                                       !! at q-points [L-1 T-1 ~> m-1 s-1]
+  real, dimension(SZIB_(G),SZJB_(G),nkblock), &
+                                  intent(out)   :: grad_div_mag_q !< Magnitude of divergence gradient at
+                                                       !! q-points [L-1 T-1 ~> m-1 s-1]
+  real, dimension(SZIB_(G),SZJB_(G),nkblock), &
+                                  intent(out)   :: vert_vort_mag_smooth !< Magnitude of gradient of smoothed
+                                                       !! vertical vorticity (h or q) [L-1 T-1 ~> m-1 s-1]
+  real, dimension(SZIB_(G),SZJB_(G),nkblock), &
+                                  intent(out)   :: Del2vort_q !< Laplacian of vorticity at q-points
+                                                       !! [L-2 T-1 ~> m-2 s-1]
+  ! Local variables
+  real, dimension(SZI_(G),SZJB_(G),nkblock) :: &
+    vort_xy_dx, &        ! x-derivative of vertical vorticity (d/dx(dv/dx - du/dy)) [L-1 T-1 ~> m-1 s-1]
+    vort_xy_dx_smooth, & ! x-derivative of smoothed vertical vorticity [L-1 T-1 ~> m-1 s-1]
+    div_xx_dy            ! y-derivative of horizontal divergence (d/dy(du/dx + dv/dy)) [L-1 T-1 ~> m-1 s-1]
+  real, dimension(SZIB_(G),SZJ_(G),nkblock) :: &
+    vort_xy_dy, &        ! y-derivative of vertical vorticity (d/dy(dv/dx - du/dy)) [L-1 T-1 ~> m-1 s-1]
+    vort_xy_dy_smooth, & ! y-derivative of smoothed vertical vorticity [L-1 T-1 ~> m-1 s-1]
+    div_xx_dx            ! x-derivative of horizontal divergence (d/dx(du/dx + dv/dy)) [L-1 T-1 ~> m-1 s-1]
+  real, dimension(SZI_(G),SZJ_(G),nkblock) :: &
+    div_xx               ! Estimate of horizontal divergence at h-points [T-1 ~> s-1]
+  real :: DY_dxBu ! Ratio of meridional over zonal grid spacing at vertices [nondim]
+  real :: DX_dyBu ! Ratio of zonal over meridional grid spacing at vertices [nondim]
+  integer :: i, j, k, kk
+
+  ! Vorticity gradient
+  do concurrent (kk=1:kmax, J=js-2:je_Kh, i=is_Kh-1:ie_Kh+1) DO_LOCALITY(local(DY_dxBu))
+    DY_dxBu = G%dyBu(I,J) * G%IdxBu(I,J)
+    vort_xy_dx(i,J,kk) = DY_dxBu * ((vort_xy(I,J,kk) * G%IdyCu(I,j)) - (vort_xy(I-1,J,kk) * G%IdyCu(I-1,j)))
+  enddo
+
+  do concurrent (kk=1:kmax, j=js_Kh-1:je_Kh+1, I=is-2:ie_Kh) DO_LOCALITY(local(DX_dyBu))
+    DX_dyBu = G%dxBu(I,J) * G%IdyBu(I,J)
+    vort_xy_dy(I,j,kk) = DX_dyBu * ((vort_xy(I,J,kk) * G%IdxCv(i,J)) - (vort_xy(I,J-1,kk) * G%IdxCv(i,J-1)))
+  enddo
+
+  if (CS%use_Leithy) then
+    ! Gradient of smoothed vorticity
+    do concurrent (kk=1:kmax, J=js_Kh-1:je_Kh, i=is_Kh:ie_Kh) DO_LOCALITY(local(DY_dxBu))
+      DY_dxBu = G%dyBu(I,J) * G%IdxBu(I,J)
+      vort_xy_dx_smooth(i,J,kk) = DY_dxBu * &
+                  ((vort_xy_smooth(I,J,kk) * G%IdyCu(I,j)) - (vort_xy_smooth(I-1,J,kk) * G%IdyCu(I-1,j)))
+    enddo
+
+    do concurrent (kk=1:kmax, j=js_Kh:je_Kh, I=is_Kh-1:ie_Kh) DO_LOCALITY(local(DX_dyBu))
+      DX_dyBu = G%dxBu(I,J) * G%IdyBu(I,J)
+      vort_xy_dy_smooth(I,j,kk) = DX_dyBu * &
+                  ((vort_xy_smooth(I,J,kk) * G%IdxCv(i,J)) - (vort_xy_smooth(I,J-1,kk) * G%IdxCv(i,J-1)))
+    enddo
+  endif ! If Leithy
+
+  ! Laplacian of vorticity
+  ! if (CS%Leith_Ah .or. CS%use_Leithy) then
+  do concurrent (kk=1:kmax, J=js_Kh-1:je_Kh, I=is_Kh-1:ie_Kh) DO_LOCALITY(local(DY_dxBu, DX_dyBu))
+    DY_dxBu = G%dyBu(I,J) * G%IdxBu(I,J)
+    DX_dyBu = G%dxBu(I,J) * G%IdyBu(I,J)
+
+    Del2vort_q(I,J,kk) = DY_dxBu * ((vort_xy_dx(i+1,J,kk) * G%IdyCv(i+1,J)) - (vort_xy_dx(i,J,kk) * G%IdyCv(i,J))) + &
+                      DX_dyBu * ((vort_xy_dy(I,j+1,kk) * G%IdyCu(I,j+1)) - (vort_xy_dy(I,j,kk) * G%IdyCu(I,j)))
+  enddo
+  ! endif
+
+  if (CS%modified_Leith) then
+
+    ! Divergence
+    do concurrent (kk=1:kmax, j=js_Kh-1:je_Kh+1, i=is_Kh-1:ie_Kh+1)
+      div_xx(i,j,kk) = dudx(i,j,kk) + dvdy(i,j,kk)
+    enddo
+
+    ! Divergence gradient
+    do concurrent (kk=1:kmax, j=js-1:je+1, I=is_Kh-1:ie_Kh)
+      div_xx_dx(I,j,kk) = G%IdxCu(I,j)*(div_xx(i+1,j,kk) - div_xx(i,j,kk))
+    enddo
+    do concurrent (kk=1:kmax, J=js_Kh-1:je_Kh, i=is-1:ie+1)
+      div_xx_dy(i,J,kk) = G%IdyCv(i,J)*(div_xx(i,j+1,kk) - div_xx(i,j,kk))
+    enddo
+
+    ! Magnitude of divergence gradient
+    do concurrent (kk=1:kmax, j=js_Kh:je_Kh, i=is_Kh:ie_Kh)
+      grad_div_mag_h(i,j,kk) = sqrt(((0.5*(div_xx_dx(I,j,kk) + div_xx_dx(I-1,j,kk)))**2) + &
+                                 ((0.5*(div_xx_dy(i,J,kk) + div_xx_dy(i,J-1,kk)))**2))
+    enddo
+    do concurrent (kk=1:kmax, J=js-1:Jeq, I=is-1:Ieq)
+      grad_div_mag_q(I,J,kk) = sqrt(((0.5*(div_xx_dx(I,j,kk) + div_xx_dx(I,j+1,kk)))**2) + &
+                                 ((0.5*(div_xx_dy(i,J,kk) + div_xx_dy(i+1,J,kk)))**2))
+    enddo
+
+  else
+
+    do concurrent (kk=1:kmax, j=js-1:je+1, I=is_Kh-1:ie_Kh)
+      div_xx_dx(I,j,kk) = 0.0
+    enddo
+    do concurrent (kk=1:kmax, J=js_Kh-1:je_Kh, i=is-1:ie+1)
+      div_xx_dy(i,J,kk) = 0.0
+    enddo
+    do concurrent (kk=1:kmax, j=js_Kh:je_Kh, i=is_Kh:ie_Kh)
+      grad_div_mag_h(i,j,kk) = 0.0
+    enddo
+    do concurrent (kk=1:kmax, J=js-1:Jeq, I=is-1:Ieq)
+      grad_div_mag_q(I,J,kk) = 0.0
+    enddo
+
+  endif ! CS%modified_Leith
+
+  ! Add in beta for the Leith viscosity
+  if (CS%use_beta_in_Leith) then
+    do concurrent (kk=1:kmax, J=js-2:Jeq+1, i=is-1:ie+1)
+      vort_xy_dx(i,J,kk) = vort_xy_dx(i,J,kk) + 0.5 * ( G%dF_dx(i,j) + G%dF_dx(i,j+1))
+    enddo
+    do concurrent (kk=1:kmax, j=js-1:je+1, I=is-2:Ieq+1)
+      vort_xy_dy(I,j,kk) = vort_xy_dy(I,j,kk) + 0.5 * ( G%dF_dy(i,j) + G%dF_dy(i+1,j))
+    enddo
+  endif ! CS%use_beta_in_Leith
+
+  if (CS%use_QG_Leith_visc) then
+
+    do concurrent (kk=1:kmax, j=js_Kh:je_Kh, i=is_Kh:ie_Kh)
+      grad_vort_mag_h_2d(i,j,kk) = SQRT(((0.5*(vort_xy_dx(i,J,kk) + vort_xy_dx(i,J-1,kk)))**2) + &
+                                     ((0.5*(vort_xy_dy(I,j,kk) + vort_xy_dy(I-1,j,kk)))**2) )
+    enddo
+    do concurrent (kk=1:kmax, J=js-1:Jeq, I=is-1:Ieq)
+      grad_vort_mag_q_2d(I,J,kk) = SQRT(((0.5*(vort_xy_dx(i,J,kk) + vort_xy_dx(i+1,J,kk)))**2) + &
+                                     ((0.5*(vort_xy_dy(I,j,kk) + vort_xy_dy(I,j+1,kk)))**2) )
+    enddo
+
+    ! This accumulates terms, some of which are in VarMix.
+    do kk=1,kmax
+      k = kstart + kk - 1
+      call calc_QG_Leith_viscosity(VarMix, G, GV, US, h, dz, k, div_xx_dx(:,:,kk), div_xx_dy(:,:,kk), &
+                                   slope_x, slope_y, vort_xy_dx(:,:,kk), vort_xy_dy(:,:,kk))
+    enddo
+
+  endif
+
+  do concurrent (kk=1:kmax, j=js_Kh:je_Kh, i=is_Kh:ie_Kh)
+    grad_vort_mag_h(i,j,kk) = SQRT(((0.5*(vort_xy_dx(i,J,kk) + vort_xy_dx(i,J-1,kk)))**2) + &
+                                ((0.5*(vort_xy_dy(I,j,kk) + vort_xy_dy(I-1,j,kk)))**2) )
+  enddo
+  do concurrent (kk=1:kmax, J=js-1:Jeq, I=is-1:Ieq)
+    grad_vort_mag_q(I,J,kk) = SQRT(((0.5*(vort_xy_dx(i,J,kk) + vort_xy_dx(i+1,J,kk)))**2) + &
+                                ((0.5*(vort_xy_dy(I,j,kk) + vort_xy_dy(I,j+1,kk)))**2) )
+  enddo
+
+  if (CS%use_Leithy) then
+    do concurrent (kk=1:kmax, j=js_Kh:je_Kh, i=is_Kh:ie_Kh)
+      vert_vort_mag_smooth(i,j,kk) = SQRT(((0.5*(vort_xy_dx_smooth(i,J,kk) + &
+                                              vort_xy_dx_smooth(i,J-1,kk)))**2) + &
+                                       ((0.5*(vort_xy_dy_smooth(I,j,kk) + &
+                                              vort_xy_dy_smooth(I-1,j,kk)))**2) )
+    enddo
+  endif ! Leithy
+
+end subroutine hor_visc_Leith_grad
 
 !> Returns the effective k-block size for horizontal_viscosity calls.
 integer function hor_visc_nkblock(CS, GV)
