@@ -2,6 +2,8 @@
 ! See the LICENSE file for licensing information.
 ! SPDX-License-Identifier: Apache-2.0
 
+#include "do_concurrent_compat.h"
+
 !> Calculates horizontal viscosity and viscous stresses
 module MOM_hor_visc
 
@@ -680,7 +682,7 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
     ! TODO: Explore methods for retaining both the syntax and speedup.
 
     ! Calculate horizontal tension
-    do concurrent (kk=1:kmax, j=Jsq-1:Jeq+2, i=Isq-1:Ieq+2)
+    do concurrent (kk=1:kmax, j=Jsq-1:Jeq+2, i=Isq-1:Ieq+2) DO_LOCALITY(local(k))
       k = kstart + kk - 1
       dudx(i,j,kk) = CS%DY_dxT(i,j)*((G%IdyCu(I,j) * u(I,j,k)) - &
                                     (G%IdyCu(I-1,j) * u(I-1,j,k)))
@@ -690,7 +692,7 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
     enddo
 
     ! Components for the shearing strain
-    do concurrent (kk=1:kmax, J=js_vort:je_vort, I=is_vort:ie_vort)
+    do concurrent (kk=1:kmax, J=js_vort:je_vort, I=is_vort:ie_vort) DO_LOCALITY(local(k))
       k = kstart + kk - 1
       dvdx(I,J,kk) = CS%DY_dxBu(I,J)*((v(i+1,J,k)*G%IdyCv(i+1,J)) - (v(i,J,k)*G%IdyCv(i,J)))
       dudy(I,J,kk) = CS%DX_dyBu(I,J)*((u(I,j+1,k)*G%IdxCu(I,j+1)) - (u(I,j,k)*G%IdxCu(I,j)))
@@ -698,7 +700,7 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
 
     if (CS%use_Leithy) then
       ! Calculate horizontal tension from smoothed velocity
-      do concurrent (kk=1:kmax, j=Jsq:Jeq+1, i=Isq:Ieq+1)
+      do concurrent (kk=1:kmax, j=Jsq:Jeq+1, i=Isq:Ieq+1) DO_LOCALITY(local(k, dudx_smooth, dvdy_smooth))
         k = kstart + kk - 1
         dudx_smooth = CS%DY_dxT(i,j)*((G%IdyCu(I,j) * u_smooth(I,j,k)) - &
                                            (G%IdyCu(I-1,j) * u_smooth(I-1,j,k)))
@@ -708,7 +710,7 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
       enddo
 
       ! Components for the shearing strain from smoothed velocity
-      do concurrent (kk=1:kmax, J=js_Kh-1:je_Kh, I=is_Kh-1:ie_Kh)
+      do concurrent (kk=1:kmax, J=js_Kh-1:je_Kh, I=is_Kh-1:ie_Kh) DO_LOCALITY(local(k))
         k = kstart + kk - 1
         dvdx_smooth(I,J,kk) = CS%DY_dxBu(I,J) * &
                          ((v_smooth(i+1,J,k)*G%IdyCv(i+1,J)) - (v_smooth(i,J,k)*G%IdyCv(i,J)))
@@ -718,7 +720,7 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
     endif ! use Leith+E
 
     if (CS%id_normstress > 0) then
-      do concurrent (kk=1:kmax, j=js:je, i=is:ie)
+      do concurrent (kk=1:kmax, j=js:je, i=is:ie) DO_LOCALITY(local(k))
         k = kstart + kk - 1
         NoSt(i,j,k) = sh_xx(i,j,kk)
       enddo
@@ -730,29 +732,29 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
     ! even with OBCs if the accelerations are zeroed at OBC points, in which
     ! case the j-loop for h_u could collapse to j=js=1,je+1. -RWH
     if (use_cont_huv) then
-      do concurrent (kk=1:kmax, j=js-2:je+2, I=Isq-1:Ieq+1)
+      do concurrent (kk=1:kmax, j=js-2:je+2, I=Isq-1:Ieq+1) DO_LOCALITY(local(k))
         k = kstart + kk - 1
         h_u(I,j,kk) = hu_cont(I,j,k)
       enddo
-      do concurrent (kk=1:kmax, J=Jsq-1:Jeq+1, i=is-2:ie+2)
+      do concurrent (kk=1:kmax, J=Jsq-1:Jeq+1, i=is-2:ie+2) DO_LOCALITY(local(k))
         k = kstart + kk - 1
         h_v(i,J,kk) = hv_cont(i,J,k)
       enddo
     elseif (CS%use_land_mask) then
-      do concurrent (kk=1:kmax, j=js-2:je+2, I=is-2:Ieq+1)
+      do concurrent (kk=1:kmax, j=js-2:je+2, I=is-2:Ieq+1) DO_LOCALITY(local(k))
         k = kstart + kk - 1
         h_u(I,j,kk) = 0.5 * (G%mask2dT(i,j)*h(i,j,k) + G%mask2dT(i+1,j)*h(i+1,j,k))
       enddo
-      do concurrent (kk=1:kmax, J=js-2:Jeq+1, i=is-2:ie+2)
+      do concurrent (kk=1:kmax, J=js-2:Jeq+1, i=is-2:ie+2) DO_LOCALITY(local(k))
         k = kstart + kk - 1
         h_v(i,J,kk) = 0.5 * (G%mask2dT(i,j)*h(i,j,k) + G%mask2dT(i,j+1)*h(i,j+1,k))
       enddo
     else
-      do concurrent (kk=1:kmax, j=js-2:je+2, I=is-2:Ieq+1)
+      do concurrent (kk=1:kmax, j=js-2:je+2, I=is-2:Ieq+1) DO_LOCALITY(local(k))
         k = kstart + kk - 1
         h_u(I,j,kk) = 0.5 * (h(i,j,k) + h(i+1,j,k))
       enddo
-      do concurrent (kk=1:kmax, J=js-2:Jeq+1, i=is-2:ie+2)
+      do concurrent (kk=1:kmax, J=js-2:Jeq+1, i=is-2:ie+2) DO_LOCALITY(local(k))
         k = kstart + kk - 1
         h_v(i,J,kk) = 0.5 * (h(i,j,k) + h(i,j+1,k))
       enddo
@@ -764,7 +766,9 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
       J = OBC%segment(n)%HI%JsdB ; I = OBC%segment(n)%HI%IsdB
       if (apply_OBC_strain) then
         if (OBC%segment(n)%is_N_or_S .and. (J >= Js_vort) .and. (J <= Je_vort)) then
-          do concurrent (kk=1:kmax, I=max(OBC%segment(n)%HI%IsdB,Is_vort):min(OBC%segment(n)%HI%IedB,Ie_vort))
+          do concurrent (kk=1:kmax, &
+                         I=max(OBC%segment(n)%HI%IsdB,Is_vort):min(OBC%segment(n)%HI%IedB,Ie_vort)) &
+                         DO_LOCALITY(local(k))
             k = kstart + kk - 1
             select case (OBC%strain_config)
               case (OBC_STRAIN_ZERO)
@@ -792,7 +796,9 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
             endif
           enddo
         elseif (OBC%segment(n)%is_E_or_W .and. (I >= is_vort) .and. (I <= ie_vort)) then
-          do concurrent (kk=1:kmax, J=max(OBC%segment(n)%HI%JsdB,js_vort):min(OBC%segment(n)%HI%JedB,je_vort))
+          do concurrent (kk=1:kmax, &
+                         J=max(OBC%segment(n)%HI%JsdB,js_vort):min(OBC%segment(n)%HI%JedB,je_vort)) &
+                         DO_LOCALITY(local(k))
             k = kstart + kk - 1
             select case (OBC%strain_config)
               case (OBC_STRAIN_ZERO)
@@ -828,28 +834,36 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
         ! are always zeroed out at OBC points, in which case the i-loop below
         ! becomes do i=is-1,ie+1. -RWH
         if ((J >= js-2) .and. (J <= Jeq+1)) then
-          do concurrent (kk=1:kmax, i=max(is-2,OBC%segment(n)%HI%isd):min(ie+2,OBC%segment(n)%HI%ied))
+          do concurrent (kk=1:kmax, &
+                         i=max(is-2,OBC%segment(n)%HI%isd):min(ie+2,OBC%segment(n)%HI%ied)) &
+                         DO_LOCALITY(local(k))
             k = kstart + kk - 1
             h_v(i,J,kk) = h(i,j,k)
           enddo
         endif
       elseif (OBC%segment(n)%direction == OBC_DIRECTION_S) then
         if ((J >= js-2) .and. (J <= Jeq+1)) then
-          do concurrent (kk=1:kmax, i=max(is-2,OBC%segment(n)%HI%isd):min(ie+2,OBC%segment(n)%HI%ied))
+          do concurrent (kk=1:kmax, &
+                         i=max(is-2,OBC%segment(n)%HI%isd):min(ie+2,OBC%segment(n)%HI%ied)) &
+                         DO_LOCALITY(local(k))
             k = kstart + kk - 1
             h_v(i,J,kk) = h(i,j+1,k)
           enddo
         endif
       elseif (OBC%segment(n)%direction == OBC_DIRECTION_E) then
         if ((I >= is-2) .and. (I <= Ieq+1)) then
-          do concurrent (kk=1:kmax, j=max(js-2,OBC%segment(n)%HI%jsd):min(je+2,OBC%segment(n)%HI%jed))
+          do concurrent (kk=1:kmax, &
+                         j=max(js-2,OBC%segment(n)%HI%jsd):min(je+2,OBC%segment(n)%HI%jed)) &
+                         DO_LOCALITY(local(k))
             k = kstart + kk - 1
             h_u(I,j,kk) = h(i,j,k)
           enddo
         endif
       elseif (OBC%segment(n)%direction == OBC_DIRECTION_W) then
         if ((I >= is-2) .and. (I <= Ieq+1)) then
-          do concurrent (kk=1:kmax, j=max(js-2,OBC%segment(n)%HI%jsd):min(je+2,OBC%segment(n)%HI%jed))
+          do concurrent (kk=1:kmax, &
+                         j=max(js-2,OBC%segment(n)%HI%jsd):min(je+2,OBC%segment(n)%HI%jed)) &
+                         DO_LOCALITY(local(k))
             k = kstart + kk - 1
             h_u(I,j,kk) = h(i+1,j,k)
           enddo
@@ -889,13 +903,13 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
     ! Shearing strain (including no-slip boundary conditions at the 2-D land-sea mask).
     ! dudy and dvdx include modifications at OBCs from above.
     if (CS%no_slip) then
-      do concurrent (kk=1:kmax, J=js-2:Jeq+1, I=is-2:Ieq+1)
+      do concurrent (kk=1:kmax, J=js-2:Jeq+1, I=is-2:Ieq+1) DO_LOCALITY(local(k))
         k = kstart + kk - 1
         sh_xy(I,J,kk) = (2.0-G%mask2dBu(I,J)) * ( dvdx(I,J,kk) + dudy(I,J,kk) )
         if (CS%id_shearstress > 0) ShSt(I,J,k) = sh_xy(I,J,kk)
       enddo
     else
-      do concurrent (kk=1:kmax, J=js-2:Jeq+1, I=is-2:Ieq+1)
+      do concurrent (kk=1:kmax, J=js-2:Jeq+1, I=is-2:Ieq+1) DO_LOCALITY(local(k))
         k = kstart + kk - 1
         sh_xy(I,J,kk) = G%mask2dBu(I,J) * ( dvdx(I,J,kk) + dudy(I,J,kk) )
         if (CS%id_shearstress > 0) ShSt(I,J,k) = sh_xy(I,J,kk)
@@ -950,7 +964,7 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
         enddo
       else
         if (CS%use_circulation) then
-          do concurrent (kk=1:kmax, J=js_vort:je_vort, I=is_vort:ie_vort)
+          do concurrent (kk=1:kmax, J=js_vort:je_vort, I=is_vort:ie_vort) DO_LOCALITY(local(k))
             k = kstart + kk - 1
             vort_xy(I,J,kk) = G%mask2dBu(I,J) * G%IareaBu(I,J) * (  &
               ((v(i+1,J,k)*G%dyCv(i+1,J)) - (v(i,J,k)*G%dyCv(i,J)))  &
@@ -981,25 +995,25 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
     if ((CS%Leith_Kh) .or. (CS%Leith_Ah) .or. (CS%use_Leithy)) then
 
       ! Vorticity gradient
-      do concurrent (kk=1:kmax, J=js-2:je_Kh, i=is_Kh-1:ie_Kh+1)
+      do concurrent (kk=1:kmax, J=js-2:je_Kh, i=is_Kh-1:ie_Kh+1) DO_LOCALITY(local(DY_dxBu))
         DY_dxBu = G%dyBu(I,J) * G%IdxBu(I,J)
         vort_xy_dx(i,J,kk) = DY_dxBu * ((vort_xy(I,J,kk) * G%IdyCu(I,j)) - (vort_xy(I-1,J,kk) * G%IdyCu(I-1,j)))
       enddo
 
-      do concurrent (kk=1:kmax, j=js_Kh-1:je_Kh+1, I=is-2:ie_Kh)
+      do concurrent (kk=1:kmax, j=js_Kh-1:je_Kh+1, I=is-2:ie_Kh) DO_LOCALITY(local(DX_dyBu))
         DX_dyBu = G%dxBu(I,J) * G%IdyBu(I,J)
         vort_xy_dy(I,j,kk) = DX_dyBu * ((vort_xy(I,J,kk) * G%IdxCv(i,J)) - (vort_xy(I,J-1,kk) * G%IdxCv(i,J-1)))
       enddo
 
       if (CS%use_Leithy) then
         ! Gradient of smoothed vorticity
-        do concurrent (kk=1:kmax, J=js_Kh-1:je_Kh, i=is_Kh:ie_Kh)
+        do concurrent (kk=1:kmax, J=js_Kh-1:je_Kh, i=is_Kh:ie_Kh) DO_LOCALITY(local(DY_dxBu))
           DY_dxBu = G%dyBu(I,J) * G%IdxBu(I,J)
           vort_xy_dx_smooth(i,J,kk) = DY_dxBu * &
                       ((vort_xy_smooth(I,J,kk) * G%IdyCu(I,j)) - (vort_xy_smooth(I-1,J,kk) * G%IdyCu(I-1,j)))
         enddo
 
-        do concurrent (kk=1:kmax, j=js_Kh:je_Kh, I=is_Kh-1:ie_Kh)
+        do concurrent (kk=1:kmax, j=js_Kh:je_Kh, I=is_Kh-1:ie_Kh) DO_LOCALITY(local(DX_dyBu))
           DX_dyBu = G%dxBu(I,J) * G%IdyBu(I,J)
           vort_xy_dy_smooth(I,j,kk) = DX_dyBu * &
                       ((vort_xy_smooth(I,J,kk) * G%IdxCv(i,J)) - (vort_xy_smooth(I,J-1,kk) * G%IdxCv(i,J-1)))
@@ -1008,7 +1022,7 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
 
       ! Laplacian of vorticity
       ! if (CS%Leith_Ah .or. CS%use_Leithy) then
-      do concurrent (kk=1:kmax, J=js_Kh-1:je_Kh, I=is_Kh-1:ie_Kh)
+      do concurrent (kk=1:kmax, J=js_Kh-1:je_Kh, I=is_Kh-1:ie_Kh) DO_LOCALITY(local(DY_dxBu, DX_dyBu))
         DY_dxBu = G%dyBu(I,J) * G%IdxBu(I,J)
         DX_dyBu = G%dxBu(I,J) * G%IdyBu(I,J)
 
@@ -1111,7 +1125,7 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
     endif ! CS%Leith_Kh
 
     if ((CS%Smagorinsky_Kh) .or. (CS%Smagorinsky_Ah)) then
-      do concurrent (kk=1:kmax, j=js_Kh:je_Kh, i=is_Kh:ie_Kh)
+      do concurrent (kk=1:kmax, j=js_Kh:je_Kh, i=is_Kh:ie_Kh) DO_LOCALITY(local(sh_xx_sq, sh_xy_sq))
         sh_xx_sq = sh_xx(i,j,kk)**2
         sh_xy_sq = 0.25 * ( ((sh_xy(I-1,J-1,kk)**2) + (sh_xy(I,J,kk)**2)) &
                           + ((sh_xy(I-1,J,kk)**2) + (sh_xy(I,J-1,kk)**2)) )
@@ -1120,7 +1134,7 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
     endif
 
     if (CS%bound_Ah .or. CS%bound_Kh) then
-      do concurrent (kk=1:kmax, j=js_Kh:je_Kh, i=is_Kh:ie_Kh)
+      do concurrent (kk=1:kmax, j=js_Kh:je_Kh, i=is_Kh:ie_Kh) DO_LOCALITY(local(k, h_min))
         k = kstart + kk - 1
         h_min = min(h_u(I,j,kk), h_u(I-1,j,kk), h_v(i,J,kk), h_v(i,J-1,kk))
         hrat_min(i,j,kk) = min(1.0, h_min / (h(i,j,k) + h_neglect))
@@ -1134,7 +1148,7 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
 
       if ((CS%Leith_Kh) .or. (CS%Leith_Ah) .or. (CS%use_Leithy)) then
         if (CS%use_QG_Leith_visc) then
-          do concurrent (kk=1:kmax, j=js_Kh:je_Kh, i=is_Kh:ie_Kh)
+          do concurrent (kk=1:kmax, j=js_Kh:je_Kh, i=is_Kh:ie_Kh) DO_LOCALITY(local(grad_vort, grad_vort_qg))
             grad_vort = grad_vort_mag_h(i,j,kk) + grad_div_mag_h(i,j,kk)
             grad_vort_qg = 3. * grad_vort_mag_h_2d(i,j,kk)
             vert_vort_mag(i,j,kk) = min(grad_vort, grad_vort_qg)
@@ -1184,12 +1198,12 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
         ! *Add* the MEKE contribution (which might be negative)
         if (use_kh_struct) then
           if (CS%res_scale_MEKE) then
-            do concurrent (kk=1:kmax, j=js_Kh:je_Kh, i=is_Kh:ie_Kh)
+            do concurrent (kk=1:kmax, j=js_Kh:je_Kh, i=is_Kh:ie_Kh) DO_LOCALITY(local(k))
               k = kstart + kk - 1
               Kh(i,j,kk) = Kh(i,j,kk) + MEKE%Ku(i,j) * VarMix%Res_fn_h(i,j) * VarMix%BS_struct(i,j,k)
             enddo
           else
-            do concurrent (kk=1:kmax, j=js_Kh:je_Kh, i=is_Kh:ie_Kh)
+            do concurrent (kk=1:kmax, j=js_Kh:je_Kh, i=is_Kh:ie_Kh) DO_LOCALITY(local(k))
               k = kstart + kk - 1
               Kh(i,j,kk) = Kh(i,j,kk) + MEKE%Ku(i,j) * VarMix%BS_struct(i,j,k)
             enddo
@@ -1216,7 +1230,7 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
 
       ! Newer method of bounding for stability
       if ((CS%bound_Kh) .and. (CS%bound_Ah)) then
-        do concurrent (kk=1:kmax, j=js_Kh:je_Kh, i=is_Kh:ie_Kh)
+        do concurrent (kk=1:kmax, j=js_Kh:je_Kh, i=is_Kh:ie_Kh) DO_LOCALITY(local(Kh_max_here))
           visc_bound_rem(i,j,kk) = 1.0
           Kh_max_here = hrat_min(i,j,kk) * CS%Kh_Max_xx(i,j)
           if (Kh(i,j,kk) >= Kh_max_here) then
@@ -1241,14 +1255,14 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
       endif
 
       if (CS%id_Kh_h>0 .or. CS%debug) then
-        do concurrent (kk=1:kmax, j=js_Kh:je_Kh, i=is_Kh:ie_Kh)
+        do concurrent (kk=1:kmax, j=js_Kh:je_Kh, i=is_Kh:ie_Kh) DO_LOCALITY(local(k))
           k = kstart + kk - 1
           Kh_h(i,j,k) = Kh(i,j,kk)
         enddo
       endif
 
       if (CS%id_grid_Re_Kh>0) then
-        do concurrent (kk=1:kmax, j=js:je, i=is:ie)
+        do concurrent (kk=1:kmax, j=js:je, i=is:ie) DO_LOCALITY(local(k, KE, grid_Kh))
           k = kstart + kk - 1
           KE = 0.125*(((u(I,j,k)+u(I-1,j,k))**2) + ((v(i,J,k)+v(i,J-1,k))**2))
           grid_Kh = max(Kh(i,j,kk), CS%min_grid_Kh)
@@ -1257,14 +1271,14 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
       endif
 
       if (CS%id_div_xx_h>0) then
-        do concurrent (kk=1:kmax, j=js:je, i=is:ie)
+        do concurrent (kk=1:kmax, j=js:je, i=is:ie) DO_LOCALITY(local(k))
           k = kstart + kk - 1
           div_xx_h(i,j,k) = dudx(i,j,kk) + dvdy(i,j,kk)
         enddo
       endif
 
       if (CS%id_sh_xx_h>0) then
-        do concurrent (kk=1:kmax, j=js:je, i=is:ie)
+        do concurrent (kk=1:kmax, j=js:je, i=is:ie) DO_LOCALITY(local(k))
           k = kstart + kk - 1
           sh_xx_h(i,j,k) = sh_xx(i,j,kk)
         enddo
@@ -1299,13 +1313,13 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
       if ((CS%Smagorinsky_Ah) .or. (CS%Leith_Ah) .or. (CS%use_Leithy)) then
         if (CS%Smagorinsky_Ah) then
           if (CS%bound_Coriolis) then
-            do concurrent (kk=1:kmax, j=js_Kh:je_Kh, i=is_Kh:ie_Kh)
+            do concurrent (kk=1:kmax, j=js_Kh:je_Kh, i=is_Kh:ie_Kh) DO_LOCALITY(local(AhSm))
               AhSm = Shear_mag(i,j,kk) * (CS%Biharm_const_xx(i,j) &
                   + CS%Biharm_const2_xx(i,j) * Shear_mag(i,j,kk))
               Ah(i,j,kk) = max(Ah(i,j,kk), AhSm)
             enddo
           else
-            do concurrent (kk=1:kmax, j=js_Kh:je_Kh, i=is_Kh:ie_Kh)
+            do concurrent (kk=1:kmax, j=js_Kh:je_Kh, i=is_Kh:ie_Kh) DO_LOCALITY(local(AhSm))
               AhSm = CS%Biharm_const_xx(i,j) * Shear_mag(i,j,kk)
               Ah(i,j,kk) = max(Ah(i,j,kk), AhSm)
             enddo
@@ -1313,7 +1327,7 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
         endif
 
         if (CS%Leith_Ah) then
-          do concurrent (kk=1:kmax, j=js_Kh:je_Kh, i=is_Kh:ie_Kh)
+          do concurrent (kk=1:kmax, j=js_Kh:je_Kh, i=is_Kh:ie_Kh) DO_LOCALITY(local(Del2vort_h, AhLth))
             Del2vort_h = 0.25 * ((Del2vort_q(I,J,kk) + Del2vort_q(I-1,J-1,kk)) + &
                                  (Del2vort_q(I-1,J,kk) + Del2vort_q(I,J-1,kk)))
             AhLth = CS%Biharm6_const_xx(i,j) * abs(Del2vort_h) * inv_PI6
@@ -1328,7 +1342,7 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
               m_leithy(:,:,kk) = 0.0 ! This is here to initialize domain edge halo values.
             enddo
           endif
-          do concurrent (kk=1:kmax, j=js_Kh:je_Kh, i=is_Kh:ie_Kh)
+          do concurrent (kk=1:kmax, j=js_Kh:je_Kh, i=is_Kh:ie_Kh) DO_LOCALITY(local(Del2vort_h, AhLth))
             Del2vort_h = 0.25 * ((Del2vort_q(I,J,kk) + Del2vort_q(I-1,J-1,kk)) + &
                                  (Del2vort_q(I-1,J,kk) + Del2vort_q(I,J-1,kk)))
             AhLth  = CS%Biharm6_const_xx(i,j) * inv_PI6 * abs(Del2vort_h)
@@ -1353,7 +1367,7 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
             enddo
           endif
           ! Get Ah
-          do concurrent (kk=1:kmax, j=js_Kh:je_Kh, i=is_Kh:ie_Kh)
+          do concurrent (kk=1:kmax, j=js_Kh:je_Kh, i=is_Kh:ie_Kh) DO_LOCALITY(local(Del2vort_h, AhLthy))
             Del2vort_h = 0.25 * ((Del2vort_q(I,J,kk) + Del2vort_q(I-1,J-1,kk)) + &
                                  (Del2vort_q(I-1,J,kk) + Del2vort_q(I,J-1,kk)))
             AhLthy = CS%Biharm6_const_xx(i,j) * inv_PI6 * &
@@ -1374,13 +1388,13 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
               call smooth_x9_h(G, Ah_sq(:,:,kk), zero_land=.false.)
               call pass_var(Ah_sq(:,:,kk), G%Domain)
             enddo
-            do concurrent (kk=1:kmax, j=js_Kh:je_Kh, i=is_Kh:ie_Kh)
+            do concurrent (kk=1:kmax, j=js_Kh:je_Kh, i=is_Kh:ie_Kh) DO_LOCALITY(local(k))
               k = kstart + kk - 1
               Ah_h(i,j,k) = max(CS%Ah_bg_xx(i,j), sqrt(max(0., Ah_sq(i,j,kk))))
               Ah(i,j,kk)    = Ah_h(i,j,k)
             enddo
           else
-            do concurrent (kk=1:kmax, j=js_Kh:je_Kh, i=is_Kh:ie_Kh)
+            do concurrent (kk=1:kmax, j=js_Kh:je_Kh, i=is_Kh:ie_Kh) DO_LOCALITY(local(k))
               k = kstart + kk - 1
               Ah_h(i,j,k) = Ah(i,j,kk)
             enddo
@@ -1397,7 +1411,7 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
       endif
 
       if (CS%Re_Ah > 0.0) then
-        do concurrent (kk=1:kmax, j=js_Kh:je_Kh, i=is_Kh:ie_Kh)
+        do concurrent (kk=1:kmax, j=js_Kh:je_Kh, i=is_Kh:ie_Kh) DO_LOCALITY(local(k, KE))
           k = kstart + kk - 1
           KE = 0.125*(((u(I,j,k)+u(I-1,j,k))**2) + ((v(i,J,k)+v(i,J-1,k))**2))
           Ah(i,j,kk) = sqrt(KE) * CS%Re_Ah_const_xx(i,j)
@@ -1417,7 +1431,7 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
       endif
 
       if (CS%EY24_EBT_BS) then
-          do concurrent (kk=1:kmax, j=js_Kh:je_Kh, i=is_Kh:ie_Kh)
+          do concurrent (kk=1:kmax, j=js_Kh:je_Kh, i=is_Kh:ie_Kh) DO_LOCALITY(local(k, tmp))
             k = kstart + kk - 1
             tmp = CS%KS_coef * hrat_min(i,j,kk) * CS%Ah_Max_xx_KS(i,j)
             visc_limit_h(i,j,k) = tmp
@@ -1429,7 +1443,7 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
       endif
 
       if ((CS%id_Ah_h>0) .or. CS%debug .or. CS%use_Leithy) then
-        do concurrent (kk=1:kmax, j=js_Kh:je_Kh, i=is_Kh:ie_Kh)
+        do concurrent (kk=1:kmax, j=js_Kh:je_Kh, i=is_Kh:ie_Kh) DO_LOCALITY(local(k))
           k = kstart + kk - 1
           Ah_h(i,j,k) = Ah(i,j,kk)
         enddo
@@ -1438,7 +1452,7 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
       if (CS%use_Leithy) then
         ! Compute Leith+E Kh after bounds have been applied to Ah
         ! and after it has been smoothed. Kh = -m_leithy * Ah
-        do concurrent (kk=1:kmax, j=js_Kh:je_Kh, i=is_Kh:ie_Kh)
+        do concurrent (kk=1:kmax, j=js_Kh:je_Kh, i=is_Kh:ie_Kh) DO_LOCALITY(local(k))
           k = kstart + kk - 1
           Kh(i,j,kk) = -m_leithy(i,j,kk) * Ah(i,j,kk)
           Kh_h(i,j,k) = Kh(i,j,kk)
@@ -1446,7 +1460,7 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
       endif
 
       if (CS%id_grid_Re_Ah > 0) then
-        do concurrent (kk=1:kmax, j=js:je, i=is:ie)
+        do concurrent (kk=1:kmax, j=js:je, i=is:ie) DO_LOCALITY(local(k, KE, grid_Ah))
           k = kstart + kk - 1
           KE = 0.125 * (((u(I,j,k) + u(I-1,j,k))**2) + ((v(i,J,k) + v(i,J-1,k))**2))
           grid_Ah = max(Ah(i,j,kk), CS%min_grid_Ah)
@@ -1454,7 +1468,7 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
         enddo
       endif
 
-      do concurrent (kk=1:kmax, j=Jsq:Jeq+1, i=Isq:Ieq+1)
+      do concurrent (kk=1:kmax, j=Jsq:Jeq+1, i=Isq:Ieq+1) DO_LOCALITY(local(k, d_del2u, d_del2v, d_str))
         k = kstart + kk - 1
         d_del2u = (G%IdyCu(I,j) * Del2u(I,j,kk)) - (G%IdyCu(I-1,j) * Del2u(I-1,j,kk))
         d_del2v = (G%IdxCv(i,J) * Del2v(i,J,kk)) - (G%IdxCv(i,J-1) * Del2v(i,J-1,kk))
@@ -1471,7 +1485,7 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
 
     ! Backscatter using MEKE
     if (CS%EY24_EBT_BS) then
-      do concurrent (kk=1:kmax, j=Jsq:Jeq+1, i=Isq:Ieq+1)
+      do concurrent (kk=1:kmax, j=Jsq:Jeq+1, i=Isq:Ieq+1) DO_LOCALITY(local(k))
         k = kstart + kk - 1
         if (visc_limit_h_flag(i,j,k) > 0) then
           Kh_BS(i,j,kk) = 0.
@@ -1489,7 +1503,7 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
       enddo
 
       if (CS%id_BS_coeff_h>0) then
-        do concurrent (kk=1:kmax, j=Jsq:Jeq+1, i=Isq:Ieq+1)
+        do concurrent (kk=1:kmax, j=Jsq:Jeq+1, i=Isq:Ieq+1) DO_LOCALITY(local(k))
           k = kstart + kk - 1
           BS_coeff_h(i,j,k) = Kh_BS(i,j,kk)
         enddo
@@ -1533,7 +1547,7 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
     endif
 
     if ((CS%Smagorinsky_Kh) .or. (CS%Smagorinsky_Ah)) then
-      do concurrent (kk=1:kmax, J=js-1:Jeq, I=is-1:Ieq)
+      do concurrent (kk=1:kmax, J=js-1:Jeq, I=is-1:Ieq) DO_LOCALITY(local(sh_xy_sq, sh_xx_sq))
         sh_xy_sq = sh_xy(I,J,kk)**2
         sh_xx_sq = 0.25 * ( ((sh_xx(i,j,kk)**2) + (sh_xx(i+1,j+1,kk)**2)) &
                           + ((sh_xx(i,j+1,kk)**2) + (sh_xx(i+1,j,kk)**2)) )
@@ -1541,7 +1555,7 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
       enddo
     endif
 
-    do concurrent (kk=1:kmax, J=js-1:Jeq, I=is-1:Ieq)
+    do concurrent (kk=1:kmax, J=js-1:Jeq, I=is-1:Ieq) DO_LOCALITY(local(h2uq, h2vq))
       h2uq = 4.0 * (h_u(I,j,kk) * h_u(I,j+1,kk))
       h2vq = 4.0 * (h_v(i,J,kk) * h_v(i+1,J,kk))
       hq(I,J,kk) = (2.0 * (h2uq * h2vq)) &
@@ -1549,7 +1563,7 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
     enddo
 
     if (CS%bound_Ah .or. CS%bound_Kh) then
-      do concurrent (kk=1:kmax, J=js-1:Jeq, I=is-1:Ieq)
+      do concurrent (kk=1:kmax, J=js-1:Jeq, I=is-1:Ieq) DO_LOCALITY(local(h_min))
         h_min = min(h_u(I,j,kk), h_u(I,j+1,kk), h_v(i,J,kk), h_v(i+1,J,kk))
         hrat_min(I,J,kk) = min(1.0, h_min / (hq(I,J,kk) + h_neglect))
       enddo
@@ -1557,7 +1571,7 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
     endif
 
     if (CS%no_slip) then
-      do concurrent (kk=1:kmax, J=js-1:Jeq, I=is-1:Ieq)
+      do concurrent (kk=1:kmax, J=js-1:Jeq, I=is-1:Ieq) DO_LOCALITY(local(hu, hv))
         if (CS%no_slip .and. (G%mask2dBu(I,J) < 0.5)) then
           if ((G%mask2dCu(I,j) + G%mask2dCu(I,j+1)) + &
               (G%mask2dCv(i,J) + G%mask2dCv(i+1,J)) > 0.0) then
@@ -1596,7 +1610,7 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
 
       if ((CS%Leith_Kh) .or. (CS%Leith_Ah)) then
         if (CS%use_QG_Leith_visc) then
-          do concurrent (kk=1:kmax, J=js-1:Jeq, I=is-1:Ieq)
+          do concurrent (kk=1:kmax, J=js-1:Jeq, I=is-1:Ieq) DO_LOCALITY(local(grad_vort, grad_vort_qg))
             grad_vort = grad_vort_mag_q(I,J,kk) + grad_div_mag_q(I,J,kk)
             grad_vort_qg = 3. * grad_vort_mag_q_2d(I,J,kk)
             vert_vort_mag(I,J,kk) = min(grad_vort, grad_vort_qg)
@@ -1651,7 +1665,7 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
 
       if (use_MEKE_Ku .and. .not. CS%EY24_EBT_BS) then
         if (use_kh_struct) then
-          do concurrent (kk=1:kmax, J=js-1:Jeq, I=is-1:Ieq)
+          do concurrent (kk=1:kmax, J=js-1:Jeq, I=is-1:Ieq) DO_LOCALITY(local(k, meke_res_fn))
             k = kstart + kk - 1
             meke_res_fn = 1.
             if (CS%res_scale_MEKE) meke_res_fn = VarMix%Res_fn_q(I,J)
@@ -1662,7 +1676,7 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
                                        (MEKE%Ku(i,j+1)*VarMix%BS_struct(i,j+1,k))) ) * meke_res_fn
           enddo
         else
-          do concurrent (kk=1:kmax, J=js-1:Jeq, I=is-1:Ieq)
+          do concurrent (kk=1:kmax, J=js-1:Jeq, I=is-1:Ieq) DO_LOCALITY(local(meke_res_fn))
             meke_res_fn = 1.
             if (CS%res_scale_MEKE) meke_res_fn = VarMix%Res_fn_q(I,J)
 
@@ -1681,7 +1695,7 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
         enddo
       endif
 
-      do concurrent (kk=1:kmax, J=js-1:Jeq, I=is-1:Ieq)
+      do concurrent (kk=1:kmax, J=js-1:Jeq, I=is-1:Ieq) DO_LOCALITY(local(Kh_max_here))
         ! Newer method of bounding for stability
         if ((CS%bound_Kh) .and. (CS%bound_Ah)) then
           visc_bound_rem(I,J,kk) = 1.0
@@ -1699,28 +1713,28 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
 
       if (CS%use_Leithy) then
         ! Leith+E doesn't recompute Kh at q points, it just interpolates it from h to q points
-        do concurrent (kk=1:kmax, J=js-1:Jeq, I=is-1:Ieq)
+        do concurrent (kk=1:kmax, J=js-1:Jeq, I=is-1:Ieq) DO_LOCALITY(local(k))
           k = kstart + kk - 1
           Kh(I,J,kk) = 0.25 * ((Kh_h(i,j,k) + Kh_h(i+1,j+1,k)) + (Kh_h(i,j+1,k) + Kh_h(i+1,j,k)))
         enddo
       endif
 
       if (CS%id_Kh_q > 0 .or. CS%debug) then
-        do concurrent (kk=1:kmax, J=js-1:Jeq, I=is-1:Ieq)
+        do concurrent (kk=1:kmax, J=js-1:Jeq, I=is-1:Ieq) DO_LOCALITY(local(k))
           k = kstart + kk - 1
           Kh_q(I,J,k) = Kh(I,J,kk)
         enddo
       endif
 
       if (CS%id_vort_xy_q > 0) then
-        do concurrent (kk=1:kmax, J=js-1:Jeq, I=is-1:Ieq)
+        do concurrent (kk=1:kmax, J=js-1:Jeq, I=is-1:Ieq) DO_LOCALITY(local(k))
           k = kstart + kk - 1
           vort_xy_q(I,J,k) = vort_xy(I,J,kk)
         enddo
       endif
 
       if (CS%id_sh_xy_q > 0) then
-        do concurrent (kk=1:kmax, J=js-1:Jeq, I=is-1:Ieq)
+        do concurrent (kk=1:kmax, J=js-1:Jeq, I=is-1:Ieq) DO_LOCALITY(local(k))
           k = kstart + kk - 1
           sh_xy_q(I,J,k) = sh_xy(I,J,kk)
         enddo
@@ -1742,7 +1756,7 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
     endif ! get harmonic coefficient Kh at q points and harmonic part of str_xy
 
     if (CS%anisotropic) then
-      do concurrent (kk=1:kmax, J=js-1:Jeq, I=is-1:Ieq)
+      do concurrent (kk=1:kmax, J=js-1:Jeq, I=is-1:Ieq) DO_LOCALITY(local(local_strain))
         ! Horizontal-tension averaged to q-points
         local_strain = 0.25 * ( (sh_xx(i,j,kk) + sh_xx(i+1,j+1,kk)) + (sh_xx(i+1,j,kk) + sh_xx(i,j+1,kk)) )
         ! *Add* the tension contribution to the xy-component of stress
@@ -1761,13 +1775,13 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
       if (CS%Smagorinsky_Ah .or. CS%Leith_Ah) then
         if (CS%Smagorinsky_Ah) then
           if (CS%bound_Coriolis) then
-            do concurrent (kk=1:kmax, J=js-1:Jeq, I=is-1:Ieq)
+            do concurrent (kk=1:kmax, J=js-1:Jeq, I=is-1:Ieq) DO_LOCALITY(local(AhSm))
               AhSm = Shear_mag(I,J,kk) * (CS%Biharm_const_xy(I,J) &
                   + CS%Biharm_const2_xy(I,J) * Shear_mag(I,J,kk))
               Ah(I,J,kk) = max(Ah(I,J,kk), AhSm)
             enddo
           else
-            do concurrent (kk=1:kmax, J=js-1:Jeq, I=is-1:Ieq)
+            do concurrent (kk=1:kmax, J=js-1:Jeq, I=is-1:Ieq) DO_LOCALITY(local(AhSm))
               AhSm = CS%Biharm_const_xy(I,J) * Shear_mag(I,J,kk)
               Ah(I,J,kk) = max(Ah(I,J,kk), AhSm)
             enddo
@@ -1775,7 +1789,7 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
         endif
 
         if (CS%Leith_Ah) then
-          do concurrent (kk=1:kmax, J=js-1:Jeq, I=is-1:Ieq)
+          do concurrent (kk=1:kmax, J=js-1:Jeq, I=is-1:Ieq) DO_LOCALITY(local(AhLth))
             AhLth = CS%Biharm6_const_xy(I,J) * abs(Del2vort_q(I,J,kk)) * inv_PI6
             Ah(I,J,kk) = max(Ah(I,J,kk), AhLth)
           enddo
@@ -1791,7 +1805,7 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
       endif
 
       if (CS%Re_Ah > 0.0) then
-        do concurrent (kk=1:kmax, J=js-1:Jeq, I=is-1:Ieq)
+        do concurrent (kk=1:kmax, J=js-1:Jeq, I=is-1:Ieq) DO_LOCALITY(local(k, KE))
           k = kstart + kk - 1
           KE = 0.125 * (((u(I,j,k) + u(I,j+1,k))**2) + ((v(i,J,k) + v(i+1,J,k))**2))
           Ah(I,J,kk) = sqrt(KE) * CS%Re_Ah_const_xy(I,J)
@@ -1811,7 +1825,7 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
       endif
 
       if (CS%EY24_EBT_BS) then
-          do concurrent (kk=1:kmax, J=js-1:Jeq, I=is-1:Ieq)
+          do concurrent (kk=1:kmax, J=js-1:Jeq, I=is-1:Ieq) DO_LOCALITY(local(k, tmp))
             k = kstart + kk - 1
             tmp = CS%KS_coef *hrat_min(I,J,kk) * CS%Ah_Max_xy_KS(I,J)
             visc_limit_q(I,J,k) = tmp
@@ -1824,21 +1838,21 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
 
       ! Leith+E doesn't recompute Ah at q points, it just interpolates it from h to q points
       if (CS%use_Leithy) then
-        do concurrent (kk=1:kmax, J=js-1:Jeq, I=is-1:Ieq)
+        do concurrent (kk=1:kmax, J=js-1:Jeq, I=is-1:Ieq) DO_LOCALITY(local(k))
           k = kstart + kk - 1
           Ah(I,J,kk) = 0.25 * ((Ah_h(i,j,k) + Ah_h(i+1,j+1,k)) + (Ah_h(i,j+1,k) + Ah_h(i+1,j,k)))
         enddo
       endif
 
       if (CS%id_Ah_q>0 .or. CS%debug) then
-        do concurrent (kk=1:kmax, J=js-1:Jeq, I=is-1:Ieq)
+        do concurrent (kk=1:kmax, J=js-1:Jeq, I=is-1:Ieq) DO_LOCALITY(local(k))
           k = kstart + kk - 1
           Ah_q(I,J,k) = Ah(I,J,kk)
         enddo
       endif
 
       ! Again, need to initialize str_xy as if its biharmonic
-      do concurrent (kk=1:kmax, J=js-1:Jeq, I=is-1:Ieq)
+      do concurrent (kk=1:kmax, J=js-1:Jeq, I=is-1:Ieq) DO_LOCALITY(local(d_str))
         d_str = Ah(I,J,kk) * (dDel2vdx(I,J,kk) + dDel2udy(I,J,kk))
 
         str_xy(I,J,kk) = str_xy(I,J,kk) + d_str
@@ -1850,7 +1864,7 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
 
     ! Backscatter using MEKE
     if (CS%EY24_EBT_BS) then
-      do concurrent (kk=1:kmax, J=js-1:Jeq, I=is-1:Ieq)
+      do concurrent (kk=1:kmax, J=js-1:Jeq, I=is-1:Ieq) DO_LOCALITY(local(k))
         k = kstart + kk - 1
         if (visc_limit_q_flag(I,J,k) > 0) then
           Kh_BS(I,J,kk) = 0.
@@ -1872,7 +1886,7 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
       enddo
 
       if (CS%id_BS_coeff_q>0) then
-        do concurrent (kk=1:kmax, J=js-1:Jeq, I=is-1:Ieq)
+        do concurrent (kk=1:kmax, J=js-1:Jeq, I=is-1:Ieq) DO_LOCALITY(local(k))
           k = kstart + kk - 1
           BS_coeff_q(I,J,k) = Kh_BS(I,J,kk)
         enddo
@@ -1885,7 +1899,7 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
 
     if (CS%use_GME) then
       ! The wider halo here is to permit one pass of smoothing without a halo update.
-      do concurrent (kk=1:kmax, j=Jsq-1:Jeq+2, i=Isq-1:Ieq+2)
+      do concurrent (kk=1:kmax, j=Jsq-1:Jeq+2, i=Isq-1:Ieq+2) DO_LOCALITY(local(k, GME_coeff))
         k = kstart + kk - 1
         GME_coeff = GME_effic_h(i,j) * 0.25 * &
             ((KH_u_GME(I,j,k)+KH_u_GME(I-1,j,k)) + (KH_v_GME(i,J,k)+KH_v_GME(i,J-1,k)))
@@ -1896,7 +1910,7 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
       enddo
 
       ! The wider halo here is to permit one pass of smoothing without a halo update.
-      do concurrent (kk=1:kmax, J=js-2:je+1, I=is-2:ie+1)
+      do concurrent (kk=1:kmax, J=js-2:je+1, I=is-2:ie+1) DO_LOCALITY(local(k, GME_coeff))
         k = kstart + kk - 1
         GME_coeff = GME_effic_q(I,J) * 0.25 * &
             ((KH_u_GME(I,j,k)+KH_u_GME(I,j+1,k)) + (KH_v_GME(i,J,k)+KH_v_GME(i+1,J,k)))
@@ -1917,7 +1931,7 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
       !$omp target update to(str_xx_GME, str_xy_GME)
 
       ! This changes the units of str_xx from [L2 T-2 ~> m2 s-2] to [H L2 T-2 ~> m3 s-2 or kg s-2].
-      do concurrent (kk=1:kmax, j=Jsq:Jeq+1, i=Isq:Ieq+1)
+      do concurrent (kk=1:kmax, j=Jsq:Jeq+1, i=Isq:Ieq+1) DO_LOCALITY(local(k))
         k = kstart + kk - 1
         str_xx(i,j,kk) = (str_xx(i,j,kk) + str_xx_GME(i,j,kk)) * (h(i,j,k) * CS%reduction_xx(i,j))
       enddo
@@ -1935,7 +1949,7 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
 
     else ! .not. use_GME
       ! This changes the units of str_xx from [L2 T-2 ~> m2 s-2] to [H L2 T-2 ~> m3 s-2 or kg s-2].
-      do concurrent (kk=1:kmax, j=Jsq:Jeq+1, i=Isq:Ieq+1)
+      do concurrent (kk=1:kmax, j=Jsq:Jeq+1, i=Isq:Ieq+1) DO_LOCALITY(local(k))
         k = kstart + kk - 1
         str_xx(i,j,kk) = str_xx(i,j,kk) * (h(i,j,k) * CS%reduction_xx(i,j))
       enddo
@@ -1953,7 +1967,7 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
     endif ! use_GME
 
     ! Evaluate 1/h x.Div(h Grad u) or the biharmonic equivalent.
-    do concurrent (kk=1:kmax, j=js:je, I=Isq:Ieq)
+    do concurrent (kk=1:kmax, j=js:je, I=Isq:Ieq) DO_LOCALITY(local(k))
       k = kstart + kk - 1
       diffu(I,j,k) = ((G%IdxCu(I,j)*((CS%dx2q(I,J-1)*str_xy(I,J-1,kk)) - (CS%dx2q(I,J)*str_xy(I,J,kk))) + &
                        G%IdyCu(I,j)*((CS%dy2h(i,j)*str_xx(i,j,kk)) - (CS%dy2h(i+1,j)*str_xx(i+1,j,kk)))) * &
@@ -1966,7 +1980,7 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
       do n=1,OBC%number_of_segments
         if (OBC%segment(n)%is_E_or_W) then
           I = OBC%segment(n)%HI%IsdB
-          do concurrent (kk=1:kmax, j=OBC%segment(n)%HI%jsd:OBC%segment(n)%HI%jed)
+          do concurrent (kk=1:kmax, j=OBC%segment(n)%HI%jsd:OBC%segment(n)%HI%jed) DO_LOCALITY(local(k))
             k = kstart + kk - 1
             diffu(I,j,k) = 0.
           enddo
@@ -1975,7 +1989,7 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
     endif
 
     ! Evaluate 1/h y.Div(h Grad u) or the biharmonic equivalent.
-    do concurrent (kk=1:kmax, J=Jsq:Jeq, i=is:ie)
+    do concurrent (kk=1:kmax, J=Jsq:Jeq, i=is:ie) DO_LOCALITY(local(k))
       k = kstart + kk - 1
       diffv(i,J,k) = ((G%IdyCv(i,J)*((CS%dy2q(I-1,J)*str_xy(I-1,J,kk)) - (CS%dy2q(I,J)*str_xy(I,J,kk))) - &
                        G%IdxCv(i,J)*((CS%dx2h(i,j)*str_xx(i,j,kk)) - (CS%dx2h(i,j+1)*str_xx(i,j+1,kk)))) * &
@@ -1988,7 +2002,7 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
       do n=1,OBC%number_of_segments
         if (OBC%segment(n)%is_N_or_S) then
           J = OBC%segment(n)%HI%JsdB
-          do concurrent (kk=1:kmax, i=OBC%segment(n)%HI%isd:OBC%segment(n)%HI%ied)
+          do concurrent (kk=1:kmax, i=OBC%segment(n)%HI%isd:OBC%segment(n)%HI%ied) DO_LOCALITY(local(k))
             k = kstart + kk - 1
             diffv(i,J,k) = 0.
           enddo
@@ -2000,7 +2014,7 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
       if (CS%FrictWork_bug) then
         ! Diagnose   str_xx*d_x u - str_yy*d_y v + str_xy*(d_y u + d_x v)
         ! This is the old formulation that includes energy diffusion
-        do concurrent (kk=1:kmax, j=js:je, i=is:ie)
+        do concurrent (kk=1:kmax, j=js:je, i=is:ie) DO_LOCALITY(local(k))
           k = kstart + kk - 1
           FrictWork(i,j,k) = GV%H_to_RZ * ( &
                   ((str_xx(i,j,kk) * (u(I,j,k)-u(I-1,j,k))*G%IdxT(i,j))    &
@@ -2019,7 +2033,7 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
                         + ((v(i+1,J-1,k)-v(i,J-1,k))*G%IdxBu(I,J-1)))) ) ) )
         enddo
       else
-        do concurrent (kk=1:kmax, j=js:je, i=is:ie)
+        do concurrent (kk=1:kmax, j=js:je, i=is:ie) DO_LOCALITY(local(k))
           k = kstart + kk - 1
           FrictWork(i,j,k) = GV%H_to_RZ * G%IareaT(i,j) * ( &
             ((str_xx(i,j,kk)*CS%dy2h(i,j) * ( &
@@ -2053,7 +2067,7 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
       endif
 
       if (CS%EY24_EBT_BS) then
-        do concurrent (kk=1:kmax, j=js:je, i=is:ie)
+        do concurrent (kk=1:kmax, j=js:je, i=is:ie) DO_LOCALITY(local(k))
           k = kstart + kk - 1
           FrictWork(i,j,k) = (1. - visc_limit_h_flag(i,j,k)) * FrictWork(i,j,k)
         enddo
@@ -2064,7 +2078,7 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
       if (CS%FrictWork_bug) then
         ! Diagnose   bhstr_xx*d_x u - bhstr_yy*d_y v + bhstr_xy*(d_y u + d_x v)
         ! This is the old formulation that includes energy diffusion !cyc
-        do concurrent (kk=1:kmax, j=js:je, i=is:ie)
+        do concurrent (kk=1:kmax, j=js:je, i=is:ie) DO_LOCALITY(local(k))
           k = kstart + kk - 1
           FrictWork_bh(i,j,k) = GV%H_to_RZ * ( &
                   ((bhstr_xx(i,j,kk) * (u(I,j,k)-u(I-1,j,k))*G%IdxT(i,j))  &
@@ -2083,7 +2097,7 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
                       + ((v(i+1,J-1,k)-v(i,J-1,k))*G%IdxBu(I,J-1)))) ) ) )
         enddo
       else
-        do concurrent (kk=1:kmax, j=js:je, i=is:ie)
+        do concurrent (kk=1:kmax, j=js:je, i=is:ie) DO_LOCALITY(local(k))
           k = kstart + kk - 1
           ! Diagnose   bhstr_xx*d_x u - bhstr_yy*d_y v + bhstr_xy*(d_y u + d_x v)
           FrictWork_bh(i,j,k) = GV%H_to_RZ * G%IareaT(i,j) * ( &
@@ -2117,7 +2131,7 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
       endif
 
       if (CS%EY24_EBT_BS) then
-        do concurrent (kk=1:kmax, j=js:je, i=is:ie)
+        do concurrent (kk=1:kmax, j=js:je, i=is:ie) DO_LOCALITY(local(k))
           k = kstart + kk - 1
           FrictWork_bh(i,j,k) = (1. - visc_limit_h_flag(i,j,k)) * FrictWork_bh(i,j,k)
         enddo
@@ -2125,7 +2139,7 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
     endif
 
     if (CS%use_GME) then
-      if (CS%FrictWork_bug) then ; do concurrent (kk=1:kmax, j=js:je, i=is:ie)
+      if (CS%FrictWork_bug) then ; do concurrent (kk=1:kmax, j=js:je, i=is:ie) DO_LOCALITY(local(k))
         k = kstart + kk - 1
       ! Diagnose   str_xx_GME*d_x u - str_yy_GME*d_y v + str_xy_GME*(d_y u + d_x v)
       ! This is the old formulation that includes energy diffusion
@@ -2145,7 +2159,7 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
                          (((u(I,j,k)-u(I,j-1,k))*G%IdyBu(I,J-1))        &
                         + ((v(i+1,J-1,k)-v(i,J-1,k))*G%IdxBu(I,J-1)))) ) ) )
         enddo
-      else ; do concurrent (kk=1:kmax, j=js:je, i=is:ie)
+      else ; do concurrent (kk=1:kmax, j=js:je, i=is:ie) DO_LOCALITY(local(k))
         k = kstart + kk - 1
         FrictWork_GME(i,j,k) = GV%H_to_RZ * G%IareaT(i,j) * ( &
             ((str_xx_GME(i,j,kk)*CS%dy2h(i,j) * ( &
@@ -2178,7 +2192,7 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
       if (allocated(MEKE%GME_snk)) then
         do concurrent (j=js:je)
           do kk=1,kmax
-            do concurrent (i=is:ie)
+            do concurrent (i=is:ie) DO_LOCALITY(local(k))
               k = kstart+kk-1
               MEKE%GME_snk(i,j) = MEKE%GME_snk(i,j) + FrictWork_GME(i,j,k)
             enddo
@@ -2187,7 +2201,7 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
       endif
     endif
 
-    if (skeb_use_frict) then ; do concurrent (kk=1:kmax, j=js:je, i=is:ie)
+    if (skeb_use_frict) then ; do concurrent (kk=1:kmax, j=js:je, i=is:ie) DO_LOCALITY(local(k))
       k = kstart + kk - 1
       ! Note that the sign convention is FrictWork < 0 means energy dissipation.
       STOCH%skeb_diss(i,j,k) = STOCH%skeb_diss(i,j,k) - STOCH%skeb_frict_coef * &
@@ -2201,7 +2215,7 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
       if (MEKE%backscatter_Ro_c /= 0.) then
         do concurrent (j=js:je)
           do kk=1,kmax
-            do concurrent (i=is:ie)
+            do concurrent (i=is:ie) DO_LOCALITY(local(k, FatH, Shear_mag_bc, RoScl, Sh_F_pow))
               k = kstart + kk - 1
               FatH = 0.25*( (abs(G%CoriolisBu(I-1,J-1)) + abs(G%CoriolisBu(I,J))) + &
                             (abs(G%CoriolisBu(I-1,J)) + abs(G%CoriolisBu(I,J-1))) )
@@ -2237,7 +2251,7 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
       else
         do concurrent (j=js:je)
           do kk=1,kmax
-            do concurrent (i=is:ie)
+            do concurrent (i=is:ie) DO_LOCALITY(local(k))
               k = kstart + kk - 1
               MEKE%mom_src(i,j) = MEKE%mom_src(i,j) + FrictWork(i,j,k)
             enddo
@@ -2247,7 +2261,7 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
         if (allocated(MEKE%mom_src_bh)) then
           do concurrent (j=js:je)
             do kk=1,kmax
-              do concurrent (i=is:ie)
+              do concurrent (i=is:ie) DO_LOCALITY(local(k))
                 k = kstart + kk - 1
                 MEKE%mom_src_bh(i,j) = MEKE%mom_src_bh(i,j) + FrictWork_bh(i,j,k)
               enddo
