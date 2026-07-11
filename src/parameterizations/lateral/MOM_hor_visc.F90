@@ -337,8 +337,7 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
   real, dimension(SZI_(G),SZJ_(G)) :: &
     GME_effic_h   ! The filtered efficiency of the GME terms at h points [nondim]
   real, dimension(SZI_(G),SZJ_(G),nkblock) :: &
-    m_leithy, &   ! Kh=m_leithy*Ah in Leith+E parameterization [L-2 ~> m-2]
-    Ah_sq         ! The square of the biharmonic viscosity [L8 T-2 ~> m8 s-2]
+    m_leithy      ! Kh=m_leithy*Ah in Leith+E parameterization [L-2 ~> m-2]
   real :: Del2vort_h ! Laplacian of vorticity at h-points [L-2 T-1 ~> m-2 s-1]
 
   real, dimension(SZIB_(G),SZJB_(G),nkblock) :: &
@@ -409,7 +408,6 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
     v_smooth         ! Meridional velocity, smoothed with a spatial low-pass filter [L T-1 ~> m s-1]
   real :: AhSm       ! Smagorinsky biharmonic viscosity [L4 T-1 ~> m4 s-1]
   real :: AhLth      ! 2D Leith biharmonic viscosity [L4 T-1 ~> m4 s-1]
-  real :: AhLthy     ! 2D Leith+E biharmonic viscosity [L4 T-1 ~> m4 s-1]
   real :: Shear_mag_bc  ! Shear_mag value in backscatter [T-1 ~> s-1]
   real :: sh_xx_sq   ! Square of tension (sh_xx) [T-2 ~> s-2]
   real :: sh_xy_sq   ! Square of shearing strain (sh_xy) [T-2 ~> s-2]
@@ -638,7 +636,7 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
   !$omp   if (CS%EY24_EBT_BS)
   !$omp target enter data map(alloc: vert_vort_mag, vert_vort_mag_smooth) &
   !$omp   if ((CS%Leith_Kh) .or. (CS%Leith_Ah) .or. (CS%use_Leithy) .or. (CS%id_vort_xy_q>0) .or. CS%use_ZB2020)
-  !$omp target enter data map(alloc: m_leithy, Ah_sq) if (CS%use_Leithy)
+  !$omp target enter data map(alloc: m_leithy) if (CS%use_Leithy)
   !$omp target enter data map(alloc: dudx_smooth, dvdy_smooth, sh_xx_smooth, &
   !$omp                              dvdx_smooth, dudy_smooth, sh_xy_smooth) if (CS%use_Leithy)
   !$omp target enter data map(alloc: vort_xy, vort_xy_smooth) &
@@ -1199,69 +1197,9 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
         endif
 
         if (CS%use_Leithy) then
-          ! Get m_leithy
-          if (CS%smooth_Ah) then
-            do kk=1,kmax
-              m_leithy(:,:,kk) = 0.0 ! This is here to initialize domain edge halo values.
-            enddo
-          endif
-          do concurrent (kk=1:kmax, j=js_Kh:je_Kh, i=is_Kh:ie_Kh) DO_LOCALITY(local(Del2vort_h, AhLth))
-            Del2vort_h = 0.25 * ((Del2vort_q(I,J,kk) + Del2vort_q(I-1,J-1,kk)) + &
-                                 (Del2vort_q(I-1,J,kk) + Del2vort_q(I,J-1,kk)))
-            AhLth  = CS%Biharm6_const_xx(i,j) * inv_PI6 * abs(Del2vort_h)
-            if (AhLth <= CS%Ah_bg_xx(i,j)) then
-              m_leithy(i,j,kk) = 0.0
-            else
-              if ((CS%m_const_leithy(i,j)*vert_vort_mag(i,j,kk)) < abs(vort_xy_smooth(i,j,kk))) then
-                m_leithy(i,j,kk) = CS%c_K * (vert_vort_mag(i,j,kk) / vort_xy_smooth(i,j,kk))**2
-              else
-                m_leithy(i,j,kk) = CS%m_leithy_max(i,j)
-              endif
-              m_leithy(i,j,kk) = G%mask2dBu(i,j) * m_leithy(i,j,kk)
-            endif
-          enddo
-
-          if (CS%smooth_Ah) then
-            do kk=1,kmax
-              ! Smooth m_leithy.  A single call smoothes twice.
-              call pass_var(m_leithy(:,:,kk), G%Domain, halo=2)
-              call smooth_x9_h(G, m_leithy(:,:,kk), zero_land=.true.)
-              call pass_var(m_leithy(:,:,kk), G%Domain)
-            enddo
-          endif
-          ! Get Ah
-          do concurrent (kk=1:kmax, j=js_Kh:je_Kh, i=is_Kh:ie_Kh) DO_LOCALITY(local(Del2vort_h, AhLthy))
-            Del2vort_h = 0.25 * ((Del2vort_q(I,J,kk) + Del2vort_q(I-1,J-1,kk)) + &
-                                 (Del2vort_q(I-1,J,kk) + Del2vort_q(I,J-1,kk)))
-            AhLthy = CS%Biharm6_const_xx(i,j) * inv_PI6 * &
-                    sqrt(max(0.,Del2vort_h**2 - m_leithy(i,j,kk)*vert_vort_mag_smooth(i,j,kk)**2))
-            Ah(i,j,kk) = max(CS%Ah_bg_xx(i,j), AhLthy)
-          enddo
-          if (CS%smooth_Ah) then
-            ! Smooth Ah before applying upper bound.  Square Ah, then smooth, then take its square root.
-            do kk=1,kmax
-              Ah_sq(:,:,kk) = 0.0 ! This is here to initialize domain edge halo values.
-            enddo
-            do concurrent (kk=1:kmax, j=js_Kh:je_Kh, i=is_Kh:ie_Kh)
-              Ah_sq(i,j,kk) = Ah(i,j,kk)**2
-            enddo
-            do kk=1,kmax
-              call pass_var(Ah_sq(:,:,kk), G%Domain, halo=2)
-              ! A single call smoothes twice.
-              call smooth_x9_h(G, Ah_sq(:,:,kk), zero_land=.false.)
-              call pass_var(Ah_sq(:,:,kk), G%Domain)
-            enddo
-            do concurrent (kk=1:kmax, j=js_Kh:je_Kh, i=is_Kh:ie_Kh) DO_LOCALITY(local(k))
-              k = kstart + kk - 1
-              Ah_h(i,j,k) = max(CS%Ah_bg_xx(i,j), sqrt(max(0., Ah_sq(i,j,kk))))
-              Ah(i,j,kk)    = Ah_h(i,j,k)
-            enddo
-          else
-            do concurrent (kk=1:kmax, j=js_Kh:je_Kh, i=is_Kh:ie_Kh) DO_LOCALITY(local(k))
-              k = kstart + kk - 1
-              Ah_h(i,j,k) = Ah(i,j,kk)
-            enddo
-          endif
+          call hor_visc_Leithy_Ah(G, GV, CS, nkblock, kstart, kmax, is_Kh, ie_Kh, js_Kh, je_Kh, inv_PI6, &
+                                  Del2vort_q, vert_vort_mag, vert_vort_mag_smooth, vort_xy_smooth, &
+                                  Ah, Ah_h, m_leithy)
         endif
 
       endif ! Smagorinsky_Ah or Leith_Ah or Leith+E
@@ -2101,7 +2039,7 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
   !$omp   if (CS%EY24_EBT_BS)
   !$omp target exit data map(delete: vert_vort_mag, vert_vort_mag_smooth) &
   !$omp   if ((CS%Leith_Kh) .or. (CS%Leith_Ah) .or. (CS%use_Leithy) .or. (CS%id_vort_xy_q>0) .or. CS%use_ZB2020)
-  !$omp target exit data map(delete: m_leithy, Ah_sq) if (CS%use_Leithy)
+  !$omp target exit data map(delete: m_leithy) if (CS%use_Leithy)
   !$omp target exit data map(delete: dudx_smooth, dvdy_smooth, sh_xx_smooth, &
   !$omp                              dvdx_smooth, dudy_smooth, sh_xy_smooth) if (CS%use_Leithy)
   !$omp target exit data map(delete: vort_xy, vort_xy_smooth) &
@@ -2560,6 +2498,113 @@ subroutine hor_visc_backscatter_q(G, GV, CS, MEKE, VarMix, use_kh_struct, nkbloc
   enddo
 
 end subroutine hor_visc_backscatter_q
+
+!> Computes the Leith+E antisymmetric-viscosity ratio m_leithy, and updates the
+!! biharmonic viscosity Ah (and Ah_h) to include the Leith+E contribution, optionally
+!! smoothing m_leithy and Ah in the process. The caller must only invoke this
+!! routine when CS%use_Leithy is true.
+subroutine hor_visc_Leithy_Ah(G, GV, CS, nkblock, kstart, kmax, is_Kh, ie_Kh, js_Kh, je_Kh, inv_PI6, &
+                               Del2vort_q, vert_vort_mag, vert_vort_mag_smooth, vort_xy_smooth, &
+                               Ah, Ah_h, m_leithy)
+  type(ocean_grid_type),   intent(in)    :: G   !< The ocean's grid structure.
+  type(verticalGrid_type), intent(in)    :: GV  !< The ocean's vertical grid structure.
+  type(hor_visc_CS),       intent(in)    :: CS  !< Horizontal viscosity control structure
+  integer,                 intent(in)    :: nkblock !< The k-block size used to size the following arrays [nondim]
+  integer,                 intent(in)    :: kstart  !< The first absolute k-layer of the current k-block
+  integer,                 intent(in)    :: kmax    !< The number of active k-layers in the current k-block
+  integer,                 intent(in)    :: is_Kh, ie_Kh, js_Kh, je_Kh !< Loop ranges for the
+                                                 !! thickness point viscosities
+  real,                    intent(in)    :: inv_PI6 !< The inverse of pi to the sixth power [nondim]
+  real, dimension(SZIB_(G),SZJB_(G),nkblock), &
+                           intent(in)    :: Del2vort_q !< Laplacian of vorticity at q-points [L-2 T-1 ~> m-2 s-1]
+  real, dimension(SZIB_(G),SZJB_(G),nkblock), &
+                           intent(in)    :: vert_vort_mag !< Magnitude of the vertical vorticity
+                                                 !! gradient (h or q) [L-1 T-1 ~> m-1 s-1]
+  real, dimension(SZIB_(G),SZJB_(G),nkblock), &
+                           intent(in)    :: vert_vort_mag_smooth !< Magnitude of gradient of smoothed
+                                                 !! vertical vorticity (h or q) [L-1 T-1 ~> m-1 s-1]
+  real, dimension(SZIB_(G),SZJB_(G),nkblock), &
+                           intent(in)    :: vort_xy_smooth !< Vertical vorticity including metric
+                                                 !! terms, smoothed [T-1 ~> s-1]
+  real, dimension(SZIB_(G),SZJB_(G),nkblock), &
+                           intent(inout) :: Ah  !< biharmonic viscosity (h or q) [L4 T-1 ~> m4 s-1]
+  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)), &
+                           intent(inout) :: Ah_h !< biharmonic viscosity at thickness points [L4 T-1 ~> m4 s-1]
+  real, dimension(SZI_(G),SZJ_(G),nkblock), &
+                           intent(out)   :: m_leithy !< Kh=m_leithy*Ah in Leith+E parameterization [L-2 ~> m-2]
+  ! Local variables
+  real, dimension(SZI_(G),SZJ_(G),nkblock) :: &
+    Ah_sq  ! The square of the biharmonic viscosity [L8 T-2 ~> m8 s-2]
+  real :: Del2vort_h ! Laplacian of vorticity at h-points [L-2 T-1 ~> m-2 s-1]
+  real :: AhLth      ! 2D Leith biharmonic viscosity [L4 T-1 ~> m4 s-1]
+  real :: AhLthy     ! 2D Leith+E biharmonic viscosity [L4 T-1 ~> m4 s-1]
+  integer :: i, j, k, kk
+
+  ! Get m_leithy
+  if (CS%smooth_Ah) then
+    do kk=1,kmax
+      m_leithy(:,:,kk) = 0.0 ! This is here to initialize domain edge halo values.
+    enddo
+  endif
+  do concurrent (kk=1:kmax, j=js_Kh:je_Kh, i=is_Kh:ie_Kh) DO_LOCALITY(local(Del2vort_h, AhLth))
+    Del2vort_h = 0.25 * ((Del2vort_q(I,J,kk) + Del2vort_q(I-1,J-1,kk)) + &
+                         (Del2vort_q(I-1,J,kk) + Del2vort_q(I,J-1,kk)))
+    AhLth  = CS%Biharm6_const_xx(i,j) * inv_PI6 * abs(Del2vort_h)
+    if (AhLth <= CS%Ah_bg_xx(i,j)) then
+      m_leithy(i,j,kk) = 0.0
+    else
+      if ((CS%m_const_leithy(i,j)*vert_vort_mag(i,j,kk)) < abs(vort_xy_smooth(i,j,kk))) then
+        m_leithy(i,j,kk) = CS%c_K * (vert_vort_mag(i,j,kk) / vort_xy_smooth(i,j,kk))**2
+      else
+        m_leithy(i,j,kk) = CS%m_leithy_max(i,j)
+      endif
+      m_leithy(i,j,kk) = G%mask2dBu(i,j) * m_leithy(i,j,kk)
+    endif
+  enddo
+
+  if (CS%smooth_Ah) then
+    do kk=1,kmax
+      ! Smooth m_leithy.  A single call smoothes twice.
+      call pass_var(m_leithy(:,:,kk), G%Domain, halo=2)
+      call smooth_x9_h(G, m_leithy(:,:,kk), zero_land=.true.)
+      call pass_var(m_leithy(:,:,kk), G%Domain)
+    enddo
+  endif
+  ! Get Ah
+  do concurrent (kk=1:kmax, j=js_Kh:je_Kh, i=is_Kh:ie_Kh) DO_LOCALITY(local(Del2vort_h, AhLthy))
+    Del2vort_h = 0.25 * ((Del2vort_q(I,J,kk) + Del2vort_q(I-1,J-1,kk)) + &
+                         (Del2vort_q(I-1,J,kk) + Del2vort_q(I,J-1,kk)))
+    AhLthy = CS%Biharm6_const_xx(i,j) * inv_PI6 * &
+            sqrt(max(0.,Del2vort_h**2 - m_leithy(i,j,kk)*vert_vort_mag_smooth(i,j,kk)**2))
+    Ah(i,j,kk) = max(CS%Ah_bg_xx(i,j), AhLthy)
+  enddo
+  if (CS%smooth_Ah) then
+    ! Smooth Ah before applying upper bound.  Square Ah, then smooth, then take its square root.
+    do kk=1,kmax
+      Ah_sq(:,:,kk) = 0.0 ! This is here to initialize domain edge halo values.
+    enddo
+    do concurrent (kk=1:kmax, j=js_Kh:je_Kh, i=is_Kh:ie_Kh)
+      Ah_sq(i,j,kk) = Ah(i,j,kk)**2
+    enddo
+    do kk=1,kmax
+      call pass_var(Ah_sq(:,:,kk), G%Domain, halo=2)
+      ! A single call smoothes twice.
+      call smooth_x9_h(G, Ah_sq(:,:,kk), zero_land=.false.)
+      call pass_var(Ah_sq(:,:,kk), G%Domain)
+    enddo
+    do concurrent (kk=1:kmax, j=js_Kh:je_Kh, i=is_Kh:ie_Kh) DO_LOCALITY(local(k))
+      k = kstart + kk - 1
+      Ah_h(i,j,k) = max(CS%Ah_bg_xx(i,j), sqrt(max(0., Ah_sq(i,j,kk))))
+      Ah(i,j,kk)    = Ah_h(i,j,k)
+    enddo
+  else
+    do concurrent (kk=1:kmax, j=js_Kh:je_Kh, i=is_Kh:ie_Kh) DO_LOCALITY(local(k))
+      k = kstart + kk - 1
+      Ah_h(i,j,k) = Ah(i,j,kk)
+    enddo
+  endif
+
+end subroutine hor_visc_Leithy_Ah
 
 !> Returns the effective k-block size for horizontal_viscosity calls.
 integer function hor_visc_nkblock(CS, GV)
