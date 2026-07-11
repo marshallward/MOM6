@@ -819,8 +819,7 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
         ! becomes do i=is-1,ie+1. -RWH
         if ((J >= js-2) .and. (J <= Jeq+1)) then
           do concurrent (kk=1:kmax, &
-                         i=max(is-2,OBC%segment(n)%HI%isd):min(ie+2,OBC%segment(n)%HI%ied)) &
-                         DO_LOCALITY(local(k))
+                         i=max(is-2,OBC%segment(n)%HI%isd):min(ie+2,OBC%segment(n)%HI%ied)) DO_LOCALITY(local(k))
             k = kstart + kk - 1
             h_v(i,J,kk) = h(i,j,k)
           enddo
@@ -828,8 +827,7 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
       elseif (OBC%segment(n)%direction == OBC_DIRECTION_S) then
         if ((J >= js-2) .and. (J <= Jeq+1)) then
           do concurrent (kk=1:kmax, &
-                         i=max(is-2,OBC%segment(n)%HI%isd):min(ie+2,OBC%segment(n)%HI%ied)) &
-                         DO_LOCALITY(local(k))
+                         i=max(is-2,OBC%segment(n)%HI%isd):min(ie+2,OBC%segment(n)%HI%ied)) DO_LOCALITY(local(k))
             k = kstart + kk - 1
             h_v(i,J,kk) = h(i,j+1,k)
           enddo
@@ -837,8 +835,7 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
       elseif (OBC%segment(n)%direction == OBC_DIRECTION_E) then
         if ((I >= is-2) .and. (I <= Ieq+1)) then
           do concurrent (kk=1:kmax, &
-                         j=max(js-2,OBC%segment(n)%HI%jsd):min(je+2,OBC%segment(n)%HI%jed)) &
-                         DO_LOCALITY(local(k))
+                         j=max(js-2,OBC%segment(n)%HI%jsd):min(je+2,OBC%segment(n)%HI%jed)) DO_LOCALITY(local(k))
             k = kstart + kk - 1
             h_u(I,j,kk) = h(i,j,k)
           enddo
@@ -846,8 +843,7 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
       elseif (OBC%segment(n)%direction == OBC_DIRECTION_W) then
         if ((I >= is-2) .and. (I <= Ieq+1)) then
           do concurrent (kk=1:kmax, &
-                         j=max(js-2,OBC%segment(n)%HI%jsd):min(je+2,OBC%segment(n)%HI%jed)) &
-                         DO_LOCALITY(local(k))
+                         j=max(js-2,OBC%segment(n)%HI%jsd):min(je+2,OBC%segment(n)%HI%jed)) DO_LOCALITY(local(k))
             k = kstart + kk - 1
             h_u(I,j,kk) = h(i+1,j,k)
           enddo
@@ -1936,7 +1932,7 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
                    + (CS%dy2q(I,J-1)*((vh(i+1,J-1,k)*G%IareaCv(i+1,J-1)/(h_v(i+1,J-1,kk)+h_neglect)) &
                                     - (vh(i,J-1,k)*G%IareaCv(i,J-1)/(h_v(i,J-1,kk)+h_neglect)))) )) ) )) )
       enddo ; endif
-      if (allocated(MEKE%GME_snk)) then
+      if (find_FrictWork .and. allocated(MEKE%mom_src) .and. allocated(MEKE%GME_snk)) then
         do concurrent (j=js:je)
           do kk=1,kmax
             do concurrent (i=is:ie) DO_LOCALITY(local(k))
@@ -2179,10 +2175,16 @@ subroutine hor_visc_Leith_grad(G, GV, US, CS, VarMix, nkblock, kstart, kmax, &
   integer,                       intent(in)    :: nkblock !< The k-block size used to size the following arrays [nondim]
   integer,                       intent(in)    :: kstart !< The first absolute k-layer of the current k-block
   integer,                       intent(in)    :: kmax   !< The number of active k-layers in the current k-block
-  integer,                       intent(in)    :: is, ie, js, je !< Loop ranges for the h-point viscosities
-  integer,                       intent(in)    :: is_Kh, ie_Kh, js_Kh, je_Kh !< Loop ranges for the
-                                                       !! thickness point viscosities
-  integer,                       intent(in)    :: Ieq, Jeq !< The last index in each direction at q-points
+  integer,                       intent(in)    :: is     !< Start i-loop index for the h-point viscosities
+  integer,                       intent(in)    :: ie     !< End i-loop index for the h-point viscosities
+  integer,                       intent(in)    :: js     !< Start j-loop index for the h-point viscosities
+  integer,                       intent(in)    :: je     !< End j-loop index for the h-point viscosities
+  integer,                       intent(in)    :: is_Kh  !< Start i-loop index for the thickness point viscosities
+  integer,                       intent(in)    :: ie_Kh  !< End i-loop index for the thickness point viscosities
+  integer,                       intent(in)    :: js_Kh  !< Start j-loop index for the thickness point viscosities
+  integer,                       intent(in)    :: je_Kh  !< End j-loop index for the thickness point viscosities
+  integer,                       intent(in)    :: Ieq    !< The last i-index at q-points
+  integer,                       intent(in)    :: Jeq    !< The last j-index at q-points
   real, dimension(SZI_(G),SZJ_(G),SZK_(GV)), &
                                   intent(in)    :: h      !< Layer thicknesses [H ~> m or kg m-2].
   real, dimension(SZI_(G),SZJ_(G),SZK_(GV)), &
@@ -2383,7 +2385,10 @@ subroutine hor_visc_backscatter_h(G, CS, MEKE, VarMix, use_kh_struct, nkblock, k
   integer,               intent(in)    :: nkblock !< The k-block size used to size the following arrays [nondim]
   integer,               intent(in)    :: kstart  !< The first absolute k-layer of the current k-block
   integer,               intent(in)    :: kmax    !< The number of active k-layers in the current k-block
-  integer,               intent(in)    :: Isq, Ieq, Jsq, Jeq !< Loop ranges for the stress tensor at h-points
+  integer,               intent(in)    :: Isq !< Start i-loop index for the stress tensor at h-points
+  integer,               intent(in)    :: Ieq !< End i-loop index for the stress tensor at h-points
+  integer,               intent(in)    :: Jsq !< Start j-loop index for the stress tensor at h-points
+  integer,               intent(in)    :: Jeq !< End j-loop index for the stress tensor at h-points
   real, dimension(SZI_(G),SZJ_(G),SZK_(G)), &
                          intent(in)    :: visc_limit_h_flag !< determines whether backscatter is shut off [nondim]
   real, dimension(SZI_(G),SZJ_(G),nkblock), &
@@ -2446,8 +2451,10 @@ subroutine hor_visc_backscatter_q(G, GV, CS, MEKE, VarMix, use_kh_struct, nkbloc
   integer,                 intent(in)    :: nkblock !< The k-block size used to size the following arrays [nondim]
   integer,                 intent(in)    :: kstart  !< The first absolute k-layer of the current k-block
   integer,                 intent(in)    :: kmax    !< The number of active k-layers in the current k-block
-  integer,                 intent(in)    :: is, js  !< Loop start indices for the q-point stress tensor
-  integer,                 intent(in)    :: Ieq, Jeq !< Loop end indices for the q-point stress tensor
+  integer,                 intent(in)    :: is  !< Start i-loop index for the q-point stress tensor
+  integer,                 intent(in)    :: js  !< Start j-loop index for the q-point stress tensor
+  integer,                 intent(in)    :: Ieq !< End i-loop index for the q-point stress tensor
+  integer,                 intent(in)    :: Jeq !< End j-loop index for the q-point stress tensor
   real, dimension(SZIB_(G),SZJB_(G),SZK_(GV)), &
                            intent(in)    :: visc_limit_q_flag !< determines whether backscatter is shut off [nondim]
   real, dimension(SZIB_(G),SZJB_(G),nkblock), &
@@ -2512,8 +2519,10 @@ subroutine hor_visc_Leithy_Ah(G, GV, CS, nkblock, kstart, kmax, is_Kh, ie_Kh, js
   integer,                 intent(in)    :: nkblock !< The k-block size used to size the following arrays [nondim]
   integer,                 intent(in)    :: kstart  !< The first absolute k-layer of the current k-block
   integer,                 intent(in)    :: kmax    !< The number of active k-layers in the current k-block
-  integer,                 intent(in)    :: is_Kh, ie_Kh, js_Kh, je_Kh !< Loop ranges for the
-                                                 !! thickness point viscosities
+  integer,                 intent(in)    :: is_Kh !< Start i-loop index for the thickness point viscosities
+  integer,                 intent(in)    :: ie_Kh !< End i-loop index for the thickness point viscosities
+  integer,                 intent(in)    :: js_Kh !< Start j-loop index for the thickness point viscosities
+  integer,                 intent(in)    :: je_Kh !< End j-loop index for the thickness point viscosities
   real,                    intent(in)    :: inv_PI6 !< The inverse of pi to the sixth power [nondim]
   real, dimension(SZIB_(G),SZJB_(G),nkblock), &
                            intent(in)    :: Del2vort_q !< Laplacian of vorticity at q-points [L-2 T-1 ~> m-2 s-1]
