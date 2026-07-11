@@ -458,6 +458,7 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
   logical :: skeb_use_frict
   logical :: use_cont_huv
   logical :: use_kh_struct
+  logical :: use_Smag     ! True if a Smagorinsky viscosity is enabled
   integer :: is_vort, ie_vort, js_vort, je_vort  ! Loop ranges for vorticity terms
   integer :: is_Kh, ie_Kh, js_Kh, je_Kh  ! Loop ranges for thickness point viscosities
   integer :: is, ie, js, je, Isq, Ieq, Jsq, Jeq, nz
@@ -573,6 +574,13 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
                              dudx_bt, dvdy_bt, dvdx_bt, dudy_bt, sh_xx_bt, sh_xy_bt, &
                              GME_effic_h, GME_effic_q, KH_u_GME, KH_v_GME, &
                              GME_coeff_h, GME_coeff_q, str_xx_GME, str_xy_GME)
+    ! sh_xx_bt, sh_xy_bt, GME_effic_h, GME_effic_q, KH_u_GME, KH_v_GME are computed on the host above
+    ! and are only ever read (not written) on the device; dudx_bt, dvdy_bt, dvdx_bt, dudy_bt are only
+    ! used on the host (post_data diagnostics), so they are not mapped at all.
+    !$omp target enter data map(to: sh_xx_bt, sh_xy_bt, GME_effic_h, GME_effic_q, KH_u_GME, KH_v_GME)
+    ! GME_coeff_h, GME_coeff_q, str_xx_GME, str_xy_GME are written and read entirely on the device
+    ! (aside from the smooth_GME host round-trip below), so a bare alloc is enough on entry.
+    !$omp target enter data map(alloc: GME_coeff_h, GME_coeff_q, str_xx_GME, str_xy_GME)
   endif
 
   if (CS%use_Leithy) then
@@ -614,44 +622,48 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
     endif
   endif
 
-  !$OMP parallel do default(none) if (.not. CS%smooth_AH) &
-  !$OMP shared( &
-  !$OMP   CS, G, GV, US, OBC, VarMix, MEKE, u, v, h, uh, vh, &
-  !$OMP   is, ie, js, je, Isq, Ieq, Jsq, Jeq, nz, &
-  !$OMP   is_vort, ie_vort, js_vort, je_vort, &
-  !$OMP   is_Kh, ie_Kh, js_Kh, je_Kh, &
-  !$OMP   apply_OBC, apply_OBC_strain, rescale_Kh, find_FrictWork, use_kh_struct, skeb_use_frict, &
-  !$OMP   use_MEKE_Ku, use_MEKE_Au, u_smooth, v_smooth, use_cont_huv, slope_x, slope_y, dz, &
-  !$OMP   backscat_subround, GME_effic_h, GME_effic_q, &
-  !$OMP   h_neglect, h_neglect3, inv_PI3, inv_PI6, &
-  !$OMP   diffu, diffv, Kh_h, Kh_q, Ah_h, Ah_q, FrictWork, FrictWork_bh, FrictWork_GME, &
-  !$OMP   div_xx_h, sh_xx_h, vort_xy_q, sh_xy_q, GME_coeff_h, GME_coeff_q, &
-  !$OMP   KH_u_GME, KH_v_GME, grid_Re_Kh, grid_Re_Ah, NoSt, ShSt, hu_cont, hv_cont, STOCH &
-  !$OMP ) &
-  !$OMP private( &
-  !$OMP   i, j, k, n, tmp, &
-  !$OMP   dudx, dudy, dvdx, dvdy, sh_xx, sh_xy, h_u, h_v, &
-  !$OMP   Del2u, Del2v, DY_dxBu, DX_dyBu, sh_xx_bt, sh_xy_bt, &
-  !$OMP   str_xx, str_xy, bhstr_xx, bhstr_xy, str_xx_GME, str_xy_GME, &
-  !$OMP   vort_xy, vort_xy_dx, vort_xy_dy, div_xx, div_xx_dx, div_xx_dy, &
-  !$OMP   grad_div_mag_h, grad_div_mag_q, grad_vort_mag_h, grad_vort_mag_q, &
-  !$OMP   grad_vort, grad_vort_qg, grad_vort_mag_h_2d, grad_vort_mag_q_2d, &
-  !$OMP   sh_xx_sq, sh_xy_sq, meke_res_fn, Shear_mag, Shear_mag_bc, vert_vort_mag, &
-  !$OMP   h_min, hrat_min, visc_bound_rem, Kh_max_here, &
-  !$OMP   grid_Ah, grid_Kh, d_Del2u, d_Del2v, d_str, &
-  !$OMP   Kh, Ah, AhSm, AhLth, local_strain, Sh_F_pow, &
-  !$OMP   dDel2vdx, dDel2udy, Del2vort_q, Del2vort_h, KE, &
-  !$OMP   h2uq, h2vq, hu, hv, hq, FatH, RoScl, GME_coeff, &
-  !$OMP   dudx_smooth, dudy_smooth, dvdx_smooth, dvdy_smooth, &
-  !$OMP   vort_xy_smooth, vort_xy_dx_smooth, vort_xy_dy_smooth, &
-  !$OMP   sh_xx_smooth, sh_xy_smooth, &
-  !$OMP   vert_vort_mag_smooth, m_leithy, Ah_sq, AhLthy, &
-  !$OMP   Kh_BS, str_xx_bs, str_xy_bs, bs_coeff_h, bs_coeff_q &
-  !$OMP ) &
-  !$OMP firstprivate( &
-  !$OMP   visc_limit_h, visc_limit_h_frac, visc_limit_h_flag, &
-  !$OMP   visc_limit_q, visc_limit_q_frac, visc_limit_q_flag &
-  !$OMP )
+  use_Smag = CS%Smagorinsky_Kh .or. CS%Smagorinsky_Ah
+
+  !$omp target enter data map(alloc: dudx, dudy, dvdx, dvdy, sh_xx, sh_xy)
+  !$omp target enter data map(alloc: h_u, h_v, hq)
+  !$omp target enter data map(alloc: str_xx, str_xy)
+  !$omp target enter data map(alloc: Del2u, Del2v) if (CS%biharmonic)
+  !$omp target enter data map(alloc: dDel2vdx, dDel2udy) if (CS%biharmonic)
+  !$omp target enter data map(alloc: Shear_mag) if (use_Smag)
+  !$omp target enter data map(alloc: Kh) if (CS%Laplacian)
+  !$omp target enter data map(alloc: Ah) if (CS%biharmonic)
+  ! TODO: Only needed if FrictWork_bh is true, and currently only used on CPU,
+  !   but I do not yet see any benefit to breaking up the calculation.
+  !$omp target enter data map(alloc: bhstr_xx, bhstr_xy) if (CS%biharmonic)
+
+  !$omp target enter data map(alloc: hrat_min) &
+  !$omp   if (CS%bound_Kh .or. CS%bound_Ah)
+  !$omp target enter data map(alloc: visc_bound_rem) &
+  !$omp   if (CS%bound_Kh .or. CS%bound_Ah)
+  !$omp target enter data map(alloc: sh_xy_q) &
+  !$omp   if (CS%id_sh_xy_q > 0)
+
+  !$omp target enter data map(alloc: Kh_BS, str_xx_BS, str_xy_BS, BS_coeff_h, BS_coeff_q) &
+  !$omp   if (CS%EY24_EBT_BS)
+  !$omp target enter data map(alloc: vert_vort_mag, vert_vort_mag_smooth) &
+  !$omp   if ((CS%Leith_Kh) .or. (CS%Leith_Ah) .or. (CS%use_Leithy) .or. (CS%id_vort_xy_q>0) .or. CS%use_ZB2020)
+  !$omp target enter data map(alloc: m_leithy, Ah_sq) if (CS%use_Leithy)
+  !$omp target enter data map(alloc: dudx_smooth, dvdy_smooth, sh_xx_smooth, &
+  !$omp                              dvdx_smooth, dudy_smooth, sh_xy_smooth) if (CS%use_Leithy)
+  !$omp target enter data map(alloc: vort_xy, vort_xy_smooth) &
+  !$omp   if ((CS%Leith_Kh) .or. (CS%Leith_Ah) .or. (CS%use_Leithy) .or. (CS%id_vort_xy_q>0) .or. CS%use_ZB2020)
+  !$omp target enter data map(alloc: vort_xy_dx, vort_xy_dy, vort_xy_dx_smooth, vort_xy_dy_smooth, &
+  !$omp                              div_xx_dx, div_xx_dy) if (CS%use_QG_Leith_visc)
+  !$omp target enter data map(alloc: grad_vort_mag_h, grad_vort_mag_h_2d, grad_div_mag_h, &
+  !$omp                              grad_vort_mag_q, grad_vort_mag_q_2d, grad_div_mag_q, Del2vort_q) &
+  !$omp   if ((CS%Leith_Kh) .or. (CS%Leith_Ah))
+  !$omp target enter data map(alloc: div_xx) if (CS%Laplacian .or. CS%biharmonic)
+  !$omp target enter data map(alloc: slope_x, slope_y) &
+  !$omp   if (CS%use_QG_Leith_visc .and. ((CS%Leith_Kh) .or. (CS%Leith_Ah)))
+  !$omp target enter data map(alloc: dz) &
+  !$omp   if (CS%use_QG_Leith_visc .and. ((CS%Leith_Kh) .or. (CS%Leith_Ah)))
+  !$omp target enter data map(alloc: u_smooth, v_smooth) if (CS%use_Leithy)
+
   do kstart=1,nz,nkblock
     kend = min(kstart+nkblock-1,nz)
     kmax = kend-kstart+1
@@ -1895,10 +1907,14 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
       enddo
 
       ! Applying GME diagonal term.  This is linear and the arguments can be rescaled.
+      ! smooth_GME is an impure host routine, so str_xx_GME/str_xy_GME must be brought back
+      ! from the device before this loop and pushed back afterward.
+      !$omp target update from(str_xx_GME, str_xy_GME)
       do kk=1,kmax
         call smooth_GME(CS, G, GME_flux_h=str_xx_GME(:,:,kk))
         call smooth_GME(CS, G, GME_flux_q=str_xy_GME(:,:,kk))
       enddo
+      !$omp target update to(str_xx_GME, str_xy_GME)
 
       ! This changes the units of str_xx from [L2 T-2 ~> m2 s-2] to [H L2 T-2 ~> m3 s-2 or kg s-2].
       do concurrent (kk=1:kmax, j=Jsq:Jeq+1, i=Isq:Ieq+1)
@@ -2243,6 +2259,48 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
     endif ! find_FrictWork and associated(mom_src)
   enddo ! end of k loop
 
+  !$omp target exit data map(delete: dudx, dudy, dvdx, dvdy, sh_xx, sh_xy)
+  !$omp target exit data map(delete: h_u, h_v, hq)
+  !$omp target exit data map(delete: str_xx, str_xy)
+  !$omp target exit data map(delete: Del2u, Del2v) if (CS%biharmonic)
+  !$omp target exit data map(delete: dDel2vdx, dDel2udy) if (CS%biharmonic)
+  !$omp target exit data map(delete: Shear_mag) if (use_Smag)
+  !$omp target exit data map(delete: Kh) if (CS%Laplacian)
+  !$omp target exit data map(delete: Ah) if (CS%biharmonic)
+  !$omp target exit data map(delete: bhstr_xx, bhstr_xy) if (CS%biharmonic)
+
+  !$omp target exit data map(delete: hrat_min) &
+  !$omp   if (CS%bound_Kh .or. CS%bound_Ah)
+  !$omp target exit data map(delete: visc_bound_rem) &
+  !$omp   if (CS%bound_Kh .or. CS%bound_Ah)
+
+  !$omp target exit data map(delete: Kh_BS, str_xx_BS, str_xy_BS, BS_coeff_h, BS_coeff_q) &
+  !$omp   if (CS%EY24_EBT_BS)
+  !$omp target exit data map(delete: vert_vort_mag, vert_vort_mag_smooth) &
+  !$omp   if ((CS%Leith_Kh) .or. (CS%Leith_Ah) .or. (CS%use_Leithy) .or. (CS%id_vort_xy_q>0) .or. CS%use_ZB2020)
+  !$omp target exit data map(delete: m_leithy, Ah_sq) if (CS%use_Leithy)
+  !$omp target exit data map(delete: dudx_smooth, dvdy_smooth, sh_xx_smooth, &
+  !$omp                              dvdx_smooth, dudy_smooth, sh_xy_smooth) if (CS%use_Leithy)
+  !$omp target exit data map(delete: vort_xy, vort_xy_smooth) &
+  !$omp   if ((CS%Leith_Kh) .or. (CS%Leith_Ah) .or. (CS%use_Leithy) .or. (CS%id_vort_xy_q>0) .or. CS%use_ZB2020)
+  !$omp target exit data map(delete: vort_xy_dx, vort_xy_dy, vort_xy_dx_smooth, vort_xy_dy_smooth, &
+  !$omp                              div_xx_dx, div_xx_dy) if (CS%use_QG_Leith_visc)
+  !$omp target exit data map(delete: grad_vort_mag_h, grad_vort_mag_h_2d, grad_div_mag_h, &
+  !$omp                              grad_vort_mag_q, grad_vort_mag_q_2d, grad_div_mag_q, Del2vort_q) &
+  !$omp   if ((CS%Leith_Kh) .or. (CS%Leith_Ah))
+  !$omp target exit data map(delete: div_xx) if (CS%Laplacian .or. CS%biharmonic)
+  !$omp target exit data map(delete: slope_x, slope_y) &
+  !$omp   if (CS%use_QG_Leith_visc .and. ((CS%Leith_Kh) .or. (CS%Leith_Ah)))
+  !$omp target exit data map(delete: dz) &
+  !$omp   if (CS%use_QG_Leith_visc .and. ((CS%Leith_Kh) .or. (CS%Leith_Ah)))
+  !$omp target exit data map(delete: u_smooth, v_smooth) if (CS%use_Leithy)
+
+  !$omp target exit data map(delete: sh_xx_bt, sh_xy_bt, GME_effic_h, GME_effic_q, KH_u_GME, KH_v_GME) &
+  !$omp   if (CS%use_GME)
+  !$omp target exit data map(delete: str_xx_GME, str_xy_GME) if (CS%use_GME)
+  ! GME_coeff_h/q are only diagnostic outputs beyond this point, so bring them back to the host.
+  !$omp target exit data map(from: GME_coeff_h, GME_coeff_q) if (CS%use_GME)
+
   ! Offer fields for diagnostic averaging.
   if (CS%id_normstress > 0) call post_data(CS%id_normstress, NoSt, CS%diag)
   if (CS%id_shearstress > 0) call post_data(CS%id_shearstress, ShSt, CS%diag)
@@ -2290,6 +2348,9 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
       call Bchksum(Ah_q, "Ah_q", G%HI, haloshift=0, symmetric=.true., unscale=US%L_to_m**4*US%s_to_T)
     endif
   endif
+
+  !$omp target exit data map(delete: sh_xy_q) &
+  !$omp   if (CS%id_sh_xy_q > 0)
 
   if (CS%id_FrictWorkIntz > 0) then
     do j=js,je
