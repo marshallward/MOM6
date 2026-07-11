@@ -338,8 +338,7 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
     GME_effic_h   ! The filtered efficiency of the GME terms at h points [nondim]
   real, dimension(SZI_(G),SZJ_(G),nkblock) :: &
     m_leithy, &   ! Kh=m_leithy*Ah in Leith+E parameterization [L-2 ~> m-2]
-    Ah_sq, &      ! The square of the biharmonic viscosity [L8 T-2 ~> m8 s-2]
-    str_xx_BS      ! The diagonal term in the stress tensor due to backscatter [H L2 T-2 ~> m3 s-2 or kg s-2]
+    Ah_sq         ! The square of the biharmonic viscosity [L8 T-2 ~> m8 s-2]
   real :: Del2vort_h ! Laplacian of vorticity at h-points [L-2 T-1 ~> m-2 s-1]
 
   real, dimension(SZIB_(G),SZJB_(G),nkblock) :: &
@@ -368,8 +367,6 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
                    ! This form guarantees that hq/hu < 4.
   real, dimension(SZIB_(G),SZJB_(G)) :: &
     GME_effic_q   ! The filtered efficiency of the GME terms at q points [nondim]
-  real, dimension(SZIB_(G),SZJB_(G),nkblock) :: &
-    str_xy_BS      ! The cross term in the stress tensor due to backscatter [H L2 T-2 ~> m3 s-2 or kg s-2]
 
   real, dimension(SZIB_(G),SZJB_(G),SZK_(GV)) :: &
     Ah_q, &      ! biharmonic viscosity at corner points [L4 T-1 ~> m4 s-1]
@@ -470,7 +467,6 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
   real, dimension(SZIB_(G),SZJB_(G),nkblock) :: &
     Ah, &           ! biharmonic viscosity (h or q) [L4 T-1 ~> m4 s-1]
     Kh, &           ! Laplacian  viscosity (h or q) [L2 T-1 ~> m2 s-1]
-    Kh_BS, &        ! Laplacian  antiviscosity [L2 T-1 ~> m2 s-1]
     Shear_mag, &    ! magnitude of the shear (h or q) [T-1 ~> s-1]
     vert_vort_mag, &  ! magnitude of the vertical vorticity gradient (h or q) [L-1 T-1 ~> m-1 s-1]
     vert_vort_mag_smooth, &  ! magnitude of gradient of smoothed vertical vorticity (h or q) [L-1 T-1 ~> m-1 s-1]
@@ -638,7 +634,7 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
   !$omp target enter data map(alloc: sh_xy_q) &
   !$omp   if (CS%id_sh_xy_q > 0)
 
-  !$omp target enter data map(alloc: Kh_BS, str_xx_BS, str_xy_BS, BS_coeff_h, BS_coeff_q) &
+  !$omp target enter data map(alloc: BS_coeff_h, BS_coeff_q) &
   !$omp   if (CS%EY24_EBT_BS)
   !$omp target enter data map(alloc: vert_vort_mag, vert_vort_mag_smooth) &
   !$omp   if ((CS%Leith_Kh) .or. (CS%Leith_Ah) .or. (CS%use_Leithy) .or. (CS%id_vort_xy_q>0) .or. CS%use_ZB2020)
@@ -1352,33 +1348,8 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
 
     ! Backscatter using MEKE
     if (CS%EY24_EBT_BS) then
-      do concurrent (kk=1:kmax, j=Jsq:Jeq+1, i=Isq:Ieq+1) DO_LOCALITY(local(k))
-        k = kstart + kk - 1
-        if (visc_limit_h_flag(i,j,k) > 0) then
-          Kh_BS(i,j,kk) = 0.
-        else
-          if (use_kh_struct) then
-            Kh_BS(i,j,kk) = MEKE%Ku(i,j) * VarMix%BS_struct(i,j,k)
-          else
-            Kh_BS(i,j,kk) = MEKE%Ku(i,j)
-          endif
-        endif
-      enddo
-
-      do concurrent (kk=1:kmax, j=Jsq:Jeq+1, i=Isq:Ieq+1)
-        str_xx_BS(i,j,kk) = -Kh_BS(i,j,kk) * sh_xx(i,j,kk)
-      enddo
-
-      if (CS%id_BS_coeff_h>0) then
-        do concurrent (kk=1:kmax, j=Jsq:Jeq+1, i=Isq:Ieq+1) DO_LOCALITY(local(k))
-          k = kstart + kk - 1
-          BS_coeff_h(i,j,k) = Kh_BS(i,j,kk)
-        enddo
-      endif
-
-      do concurrent (kk=1:kmax, j=Jsq:Jeq+1, i=Isq:Ieq+1)
-        str_xx(i,j,kk) = str_xx(i,j,kk) + str_xx_BS(i,j,kk)
-      enddo
+      call hor_visc_backscatter_h(G, CS, MEKE, VarMix, use_kh_struct, nkblock, kstart, kmax, &
+                                   Isq, Ieq, Jsq, Jeq, visc_limit_h_flag, sh_xx, str_xx, BS_coeff_h)
     endif ! Backscatter
 
     if (CS%biharmonic) then
@@ -1731,37 +1702,8 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
 
     ! Backscatter using MEKE
     if (CS%EY24_EBT_BS) then
-      do concurrent (kk=1:kmax, J=js-1:Jeq, I=is-1:Ieq) DO_LOCALITY(local(k))
-        k = kstart + kk - 1
-        if (visc_limit_q_flag(I,J,k) > 0) then
-          Kh_BS(I,J,kk) = 0.
-        else
-          if (use_kh_struct) then
-            Kh_BS(I,J,kk) = 0.25*( ((MEKE%Ku(i,j)*VarMix%BS_struct(i,j,k)) + &
-                                 (MEKE%Ku(i+1,j+1)*VarMix%BS_struct(i+1,j+1,k))) + &
-                                ((MEKE%Ku(i+1,j)*VarMix%BS_struct(i+1,j,k)) + &
-                                 (MEKE%Ku(i,j+1)*VarMix%BS_struct(i,j+1,k))) )
-          else
-            Kh_BS(I,J,kk) = 0.25*( (MEKE%Ku(i,j) + MEKE%Ku(i+1,j+1)) + &
-                                (MEKE%Ku(i+1,j) + MEKE%Ku(i,j+1)) )
-          endif
-        endif
-      enddo
-
-      do concurrent (kk=1:kmax, J=js-1:Jeq, I=is-1:Ieq)
-        str_xy_BS(I,J,kk) = -Kh_BS(I,J,kk) * (sh_xy(I,J,kk))
-      enddo
-
-      if (CS%id_BS_coeff_q>0) then
-        do concurrent (kk=1:kmax, J=js-1:Jeq, I=is-1:Ieq) DO_LOCALITY(local(k))
-          k = kstart + kk - 1
-          BS_coeff_q(I,J,k) = Kh_BS(I,J,kk)
-        enddo
-      endif
-
-      do concurrent (kk=1:kmax, J=js-1:Jeq, I=is-1:Ieq)
-        str_xy(I,J,kk) = str_xy(I,J,kk) + str_xy_BS(I,J,kk)
-      enddo
+      call hor_visc_backscatter_q(G, GV, CS, MEKE, VarMix, use_kh_struct, nkblock, kstart, kmax, &
+                                   is, js, Ieq, Jeq, visc_limit_q_flag, sh_xy, str_xy, BS_coeff_q)
     endif ! Backscatter
 
     if (CS%use_GME) then
@@ -2155,7 +2097,7 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
   !$omp target exit data map(delete: visc_bound_rem) &
   !$omp   if (CS%bound_Kh .or. CS%bound_Ah)
 
-  !$omp target exit data map(delete: Kh_BS, str_xx_BS, str_xy_BS, BS_coeff_h, BS_coeff_q) &
+  !$omp target exit data map(delete: BS_coeff_h, BS_coeff_q) &
   !$omp   if (CS%EY24_EBT_BS)
   !$omp target exit data map(delete: vert_vort_mag, vert_vort_mag_smooth) &
   !$omp   if ((CS%Leith_Kh) .or. (CS%Leith_Ah) .or. (CS%use_Leithy) .or. (CS%id_vort_xy_q>0) .or. CS%use_ZB2020)
@@ -2488,6 +2430,136 @@ subroutine hor_visc_Leith_grad(G, GV, US, CS, VarMix, nkblock, kstart, kmax, &
   endif ! Leithy
 
 end subroutine hor_visc_Leith_grad
+
+!> Adds the MEKE-based (EY24_EBT_BS) backscatter contribution to the diagonal term of
+!! the stress tensor at h-points. The caller must only invoke this routine when
+!! CS%EY24_EBT_BS is true.
+subroutine hor_visc_backscatter_h(G, CS, MEKE, VarMix, use_kh_struct, nkblock, kstart, kmax, &
+                                   Isq, Ieq, Jsq, Jeq, visc_limit_h_flag, sh_xx, str_xx, BS_coeff_h)
+  type(ocean_grid_type), intent(in)    :: G   !< The ocean's grid structure.
+  type(hor_visc_CS),     intent(in)    :: CS  !< Horizontal viscosity control structure
+  type(MEKE_type),       intent(in)    :: MEKE !< MEKE fields related to Mesoscale Eddy Kinetic Energy.
+  type(VarMix_CS),       intent(in)    :: VarMix !< Variable mixing control structure
+  logical,               intent(in)    :: use_kh_struct !< If true, shape the backscatter coefficient
+                                                 !! with VarMix%BS_struct
+  integer,               intent(in)    :: nkblock !< The k-block size used to size the following arrays [nondim]
+  integer,               intent(in)    :: kstart  !< The first absolute k-layer of the current k-block
+  integer,               intent(in)    :: kmax    !< The number of active k-layers in the current k-block
+  integer,               intent(in)    :: Isq, Ieq, Jsq, Jeq !< Loop ranges for the stress tensor at h-points
+  real, dimension(SZI_(G),SZJ_(G),SZK_(G)), &
+                         intent(in)    :: visc_limit_h_flag !< determines whether backscatter is shut off [nondim]
+  real, dimension(SZI_(G),SZJ_(G),nkblock), &
+                         intent(in)    :: sh_xx !< horizontal tension (du/dx - dv/dy) including
+                                                 !! metric terms [T-1 ~> s-1]
+  real, dimension(SZI_(G),SZJ_(G),nkblock), &
+                         intent(inout) :: str_xx !< The diagonal term in the stress tensor
+                                                 !! [H L2 T-2 ~> m3 s-2 or kg s-2]
+  real, dimension(SZI_(G),SZJ_(G),SZK_(G)), &
+                         intent(inout) :: BS_coeff_h !< A diagnostic array of the backscatter
+                                                 !! coefficient [L2 T-1 ~> m2 s-1]
+  ! Local variables
+  real, dimension(SZI_(G),SZJ_(G),nkblock) :: &
+    Kh_BS, &     ! Laplacian antiviscosity [L2 T-1 ~> m2 s-1]
+    str_xx_BS    ! The diagonal term in the stress tensor due to backscatter [H L2 T-2 ~> m3 s-2 or kg s-2]
+  integer :: i, j, k, kk
+
+  do concurrent (kk=1:kmax, j=Jsq:Jeq+1, i=Isq:Ieq+1) DO_LOCALITY(local(k))
+    k = kstart + kk - 1
+    if (visc_limit_h_flag(i,j,k) > 0) then
+      Kh_BS(i,j,kk) = 0.
+    else
+      if (use_kh_struct) then
+        Kh_BS(i,j,kk) = MEKE%Ku(i,j) * VarMix%BS_struct(i,j,k)
+      else
+        Kh_BS(i,j,kk) = MEKE%Ku(i,j)
+      endif
+    endif
+  enddo
+
+  do concurrent (kk=1:kmax, j=Jsq:Jeq+1, i=Isq:Ieq+1)
+    str_xx_BS(i,j,kk) = -Kh_BS(i,j,kk) * sh_xx(i,j,kk)
+  enddo
+
+  if (CS%id_BS_coeff_h>0) then
+    do concurrent (kk=1:kmax, j=Jsq:Jeq+1, i=Isq:Ieq+1) DO_LOCALITY(local(k))
+      k = kstart + kk - 1
+      BS_coeff_h(i,j,k) = Kh_BS(i,j,kk)
+    enddo
+  endif
+
+  do concurrent (kk=1:kmax, j=Jsq:Jeq+1, i=Isq:Ieq+1)
+    str_xx(i,j,kk) = str_xx(i,j,kk) + str_xx_BS(i,j,kk)
+  enddo
+
+end subroutine hor_visc_backscatter_h
+
+!> Adds the MEKE-based (EY24_EBT_BS) backscatter contribution to the cross term of
+!! the stress tensor at q-points. The caller must only invoke this routine when
+!! CS%EY24_EBT_BS is true.
+subroutine hor_visc_backscatter_q(G, GV, CS, MEKE, VarMix, use_kh_struct, nkblock, kstart, kmax, &
+                                   is, js, Ieq, Jeq, visc_limit_q_flag, sh_xy, str_xy, BS_coeff_q)
+  type(ocean_grid_type),   intent(in)    :: G   !< The ocean's grid structure.
+  type(verticalGrid_type), intent(in)    :: GV  !< The ocean's vertical grid structure.
+  type(hor_visc_CS),       intent(in)    :: CS  !< Horizontal viscosity control structure
+  type(MEKE_type),         intent(in)    :: MEKE !< MEKE fields related to Mesoscale Eddy Kinetic Energy.
+  type(VarMix_CS),         intent(in)    :: VarMix !< Variable mixing control structure
+  logical,                 intent(in)    :: use_kh_struct !< If true, shape the backscatter coefficient
+                                                 !! with VarMix%BS_struct
+  integer,                 intent(in)    :: nkblock !< The k-block size used to size the following arrays [nondim]
+  integer,                 intent(in)    :: kstart  !< The first absolute k-layer of the current k-block
+  integer,                 intent(in)    :: kmax    !< The number of active k-layers in the current k-block
+  integer,                 intent(in)    :: is, js  !< Loop start indices for the q-point stress tensor
+  integer,                 intent(in)    :: Ieq, Jeq !< Loop end indices for the q-point stress tensor
+  real, dimension(SZIB_(G),SZJB_(G),SZK_(GV)), &
+                           intent(in)    :: visc_limit_q_flag !< determines whether backscatter is shut off [nondim]
+  real, dimension(SZIB_(G),SZJB_(G),nkblock), &
+                           intent(in)    :: sh_xy !< horizontal shearing strain (du/dy + dv/dx) including
+                                                 !! metric terms [T-1 ~> s-1]
+  real, dimension(SZIB_(G),SZJB_(G),nkblock), &
+                           intent(inout) :: str_xy !< The cross term in the stress tensor
+                                                 !! [H L2 T-2 ~> m3 s-2 or kg s-2]
+  real, dimension(SZIB_(G),SZJB_(G),SZK_(GV)), &
+                           intent(inout) :: BS_coeff_q !< A diagnostic array of the backscatter
+                                                 !! coefficient [L2 T-1 ~> m2 s-1]
+  ! Local variables
+  real, dimension(SZIB_(G),SZJB_(G),nkblock) :: &
+    Kh_BS, &     ! Laplacian antiviscosity [L2 T-1 ~> m2 s-1]
+    str_xy_BS    ! The cross term in the stress tensor due to backscatter [H L2 T-2 ~> m3 s-2 or kg s-2]
+  integer :: i, j, k, kk
+
+  do concurrent (kk=1:kmax, J=js-1:Jeq, I=is-1:Ieq) DO_LOCALITY(local(k))
+    k = kstart + kk - 1
+    if (visc_limit_q_flag(I,J,k) > 0) then
+      Kh_BS(I,J,kk) = 0.
+    else
+      if (use_kh_struct) then
+        Kh_BS(I,J,kk) = 0.25*( ((MEKE%Ku(i,j)*VarMix%BS_struct(i,j,k)) + &
+                             (MEKE%Ku(i+1,j+1)*VarMix%BS_struct(i+1,j+1,k))) + &
+                            ((MEKE%Ku(i+1,j)*VarMix%BS_struct(i+1,j,k)) + &
+                             (MEKE%Ku(i,j+1)*VarMix%BS_struct(i,j+1,k))) )
+      else
+        Kh_BS(I,J,kk) = 0.25*( (MEKE%Ku(i,j) + MEKE%Ku(i+1,j+1)) + &
+                            (MEKE%Ku(i+1,j) + MEKE%Ku(i,j+1)) )
+      endif
+    endif
+  enddo
+
+  do concurrent (kk=1:kmax, J=js-1:Jeq, I=is-1:Ieq)
+    str_xy_BS(I,J,kk) = -Kh_BS(I,J,kk) * (sh_xy(I,J,kk))
+  enddo
+
+  if (CS%id_BS_coeff_q>0) then
+    do concurrent (kk=1:kmax, J=js-1:Jeq, I=is-1:Ieq) DO_LOCALITY(local(k))
+      k = kstart + kk - 1
+      BS_coeff_q(I,J,k) = Kh_BS(I,J,kk)
+    enddo
+  endif
+
+  do concurrent (kk=1:kmax, J=js-1:Jeq, I=is-1:Ieq)
+    str_xy(I,J,kk) = str_xy(I,J,kk) + str_xy_BS(I,J,kk)
+  enddo
+
+end subroutine hor_visc_backscatter_q
 
 !> Returns the effective k-block size for horizontal_viscosity calls.
 integer function hor_visc_nkblock(CS, GV)
