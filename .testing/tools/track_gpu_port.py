@@ -584,16 +584,16 @@ table.src td { padding: 0 6px; white-space: pre; vertical-align: top; }
 table.src td.ln { color: #888; text-align: right; user-select: none; }
 table.src td.cnt { color: #888; text-align: right; min-width: 2.5em; user-select: none; }
 .ported { background: #d9f2d9; }
-.portable { background: #ffe6a8; }
-.executed { background: #eaeaea; }
-.nothit { background: #fad2d2; }
+.portable { background: #fad2d2; }
+.executed { background: #cfe2ff; }
+.nothit { background: #eaeaea; }
 tr.nodata { background: transparent; }
 @media (prefers-color-scheme: dark) {
   body { background: #1e1e1e; color: #ddd; }
   .ported { background: #234d23; }
-  .portable { background: #5c4a13; }
-  .executed { background: #333333; }
-  .nothit { background: #5c2323; }
+  .portable { background: #5c2323; }
+  .executed { background: #1f3a5c; }
+  .nothit { background: #333333; }
 }
 """
 
