@@ -1,0 +1,76 @@
+# This file is part of MOM6, the Modular Ocean Model version 6.
+# See the LICENSE file for licensing information.
+# SPDX-License-Identifier: Apache-2.0
+
+name: GPU port coverage report
+
+on: [push, pull_request]
+
+jobs:
+  gpu-port-report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout this MOM6 revision
+        uses: actions/checkout@v4
+        with:
+          path: mom6-src
+
+      - uses: ./mom6-src/.github/actions/ubuntu-setup/
+
+      - name: Clone MOM6-gpu/MOM6-examples
+        run: git clone https://github.com/MOM6-gpu/MOM6-examples.git MOM6-examples
+
+      - name: Fetch only the submodules needed for the ocean_only build
+        working-directory: MOM6-examples
+        run: git submodule update --init src/FMS2_gpu shared/tools/f90nml
+
+      - name: Swap in this revision's MOM6 source
+        run: |
+          rm -rf MOM6-examples/src/MOM6
+          cp -a mom6-src MOM6-examples/src/MOM6
+
+      - name: Build MOM6 with gcov instrumentation
+        working-directory: MOM6-examples/ocean_only
+        env:
+          FCFLAGS: --coverage
+          LDFLAGS: --coverage
+          PYTHON: python3
+        run: make -j
+
+      - name: Shorten benchmark_ALE to a single short run
+        run: echo '#override DAYMAX = 0.5' >> MOM6-examples/ocean_only/benchmark_ALE/MOM_override
+
+      - name: Run benchmark_ALE
+        working-directory: MOM6-examples/ocean_only
+        env:
+          PYTHON: python3
+        run: make run.benchmark_ALE
+
+      - name: Generate gcov reports
+        working-directory: MOM6-examples/ocean_only/build
+        run: gcov -b *.gcda
+
+      - name: Generate GPU port coverage report
+        run: |
+          python3 MOM6-examples/src/MOM6/.testing/tools/track_gpu_port.py \
+            --src-root MOM6-examples/src/MOM6 \
+            --gcov-dir MOM6-examples/ocean_only/build \
+            --out-md gpu_port_report.md \
+            --github-annotations
+
+      - name: Publish report to job summary
+        if: always()
+        run: |
+          if [ -f gpu_port_report.md ]; then
+            cat gpu_port_report.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpu-port-report
+          path: gpu_port_report.md
+          retention-days: 14
+          if-no-files-found: ignore
