@@ -618,6 +618,70 @@ jobs:
         env:
           CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 
+  gpu-port-report:
+    runs-on: ubuntu-latest
+    needs: build-coverage
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ./.github/actions/ubuntu-setup
+
+      - name: Download coverage-instrumented MOM6
+        uses: actions/download-artifact@v4
+        with:
+          name: mom6-coverage-artifact
+
+      - name: Unpack artifact
+        run: |
+          tar -xpvf mom6-coverage.tar
+          find .testing/build/cov -name "*.gcno" -exec touch {} \;
+
+      # Only the benchmark_ALE inputs and the f90nml submodule (needed by
+      # get_nprocs.py) are required here — no MOM6/FMS build, since the
+      # coverage-instrumented binary from build-coverage is reused as-is.
+      - name: Clone MOM6-gpu/MOM6-examples for the benchmark_ALE case
+        run: |
+          git clone --depth 1 https://github.com/MOM6-gpu/MOM6-examples.git MOM6-examples
+          cd MOM6-examples
+          git submodule update --init shared/tools/f90nml
+
+      - name: Shorten benchmark_ALE to a single short run
+        run: echo '#override DAYMAX = 0.5' >> MOM6-examples/ocean_only/benchmark_ALE/MOM_override
+
+      - name: Run benchmark_ALE with the coverage-instrumented binary
+        working-directory: MOM6-examples/ocean_only/benchmark_ALE
+        run: |
+          NPROCS=$(python3 ../../shared/tools/get_nprocs.py .)
+          mpirun -np "$NPROCS" "$GITHUB_WORKSPACE/.testing/build/cov/MOM6"
+
+      - name: Generate gcov reports
+        working-directory: .testing/build/cov
+        run: gcov -b *.gcda
+
+      - name: Generate GPU port coverage report
+        run: |
+          python3 .testing/tools/track_gpu_port.py \
+            --src-root . \
+            --gcov-dir .testing/build/cov \
+            --out-md gpu_port_report.md \
+            --github-annotations
+
+      - name: Publish report to job summary
+        if: always()
+        run: |
+          if [ -f gpu_port_report.md ]; then
+            cat gpu_port_report.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpu-port-report
+          path: gpu_port_report.md
+          retention-days: 14
+          if-no-files-found: ignore
+
   # These are most likely nonsense on a GitHub node, but someday it could work.
   run-timings:
     if: github.event_name != 'pull_request'
@@ -735,6 +799,7 @@ jobs:
       #- test-openmp
       - test-repro
       - run-coverage
+      - gpu-port-report
 
     steps:
       - uses: geekyeggo/delete-artifact@v5
