@@ -588,6 +588,16 @@ def main():
                      help='Emit GitHub Actions ::notice file=...,line=...,endLine=...:: workflow '
                           'commands for each executed, portable, not-yet-ported line range — shows '
                           'up natively on the PR "Files changed" diff, no HTML artifact needed')
+    ap.add_argument('--baseline-json', help='A prior --out-json snapshot (e.g. from the PR base '
+                     'branch) to diff the current totals against, reported as "since baseline" '
+                     'in --out-comment')
+    ap.add_argument('--changed-files', help='File with one src-root-relative source path per '
+                     'line (e.g. from `git diff --name-only`) — scopes an additional "this PR\'s '
+                     'files" subset of the totals in --out-comment')
+    ap.add_argument('--out-comment', help='Write a short PR-comment-sized markdown summary here: '
+                     'overall %% ported, delta vs --baseline-json, and the --changed-files subset '
+                     'if given. Intended to be posted/updated on the PR itself; --out-md remains '
+                     'the full per-file/per-routine report for the job summary.')
     args = ap.parse_args()
 
     src_root = Path(args.src_root).resolve()
@@ -730,6 +740,34 @@ def main():
     overall_pct_portable = 100.0 * total_ported / total_portable if total_portable else 0.0
     overall_pct_executed = 100.0 * total_ported / total_executed if total_executed else 0.0
 
+    baseline = None
+    if args.baseline_json:
+        try:
+            baseline = json.loads(Path(args.baseline_json).read_text())
+        except (OSError, json.JSONDecodeError) as e:
+            all_warnings.append(
+                f'--baseline-json {args.baseline_json}: could not load ({e}); skipping delta')
+
+    delta = None
+    if baseline is not None:
+        b = baseline.get('overall', {})
+        delta = {
+            'ported_lines': total_ported - b.get('ported_lines', 0),
+            'pct_of_portable': round(overall_pct_portable - b.get('pct_of_portable', 0.0), 1),
+        }
+
+    changed_files = None
+    pr_rows = []
+    pr_ported = pr_portable_total = 0
+    pr_pct = None
+    if args.changed_files:
+        changed_files = {line.strip() for line in Path(args.changed_files).read_text().splitlines()
+                          if line.strip()}
+        pr_rows = [r for r in per_file if r['file'] in changed_files]
+        pr_ported = sum(r['ported_lines'] for r in pr_rows)
+        pr_portable_total = pr_ported + sum(r['portable_remaining_lines'] for r in pr_rows)
+        pr_pct = 100.0 * pr_ported / pr_portable_total if pr_portable_total else None
+
     lines_out = []
     lines_out.append('# GPU Port Coverage Report\n')
     lines_out.append(f'**Of portable code: {total_ported} / {total_portable} executed lines '
@@ -795,6 +833,31 @@ def main():
             'errors': errors,
             'unresolved_gcov_sources': unresolved,
         }, indent=2))
+
+    if args.out_comment:
+        c = []
+        c.append('### GPU Port Coverage\n')
+        c.append(f'**Overall: {total_ported} / {total_portable} portable executed lines ported '
+                  f'({overall_pct_portable:.1f}%)**')
+        if delta is not None:
+            sign = '+' if delta['ported_lines'] >= 0 else ''
+            psign = '+' if delta['pct_of_portable'] >= 0 else ''
+            c.append(f"Since base branch: {sign}{delta['ported_lines']} ported lines "
+                      f"({psign}{delta['pct_of_portable']:.1f} pp)")
+        if changed_files is not None:
+            c.append('')
+            if pr_rows:
+                pct_s = f'{pr_pct:.1f}%' if pr_pct is not None else '—'
+                c.append(f'**Files touched by this PR: {pr_ported} / {pr_portable_total} '
+                          f'portable executed lines ported ({pct_s})**')
+            else:
+                c.append('_No executed, GPU-portable lines in the files touched by this PR '
+                          '(nothing in the diff was exercised by the coverage run, or none of '
+                          "it is GPU-portable)._")
+        c.append('')
+        c.append('<sub>Full per-file / per-routine breakdown: see the "gpu-port-report" job '
+                  'summary and artifact.</sub>')
+        Path(args.out_comment).write_text('\n'.join(c) + '\n')
 
     if args.github_annotations:
         for r in per_file:

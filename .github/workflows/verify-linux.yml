@@ -621,6 +621,13 @@ jobs:
   gpu-port-report:
     runs-on: ubuntu-latest
     needs: build-coverage
+    # Read-only: this job checks out and runs a PR's (possibly untrusted, fork-authored)
+    # code, so it must never hold write access. Posting the PR comment itself happens in
+    # the separate gpu-port-comment.yml workflow, triggered by workflow_run, which runs
+    # with the base repo's permissions and does not check out PR code.
+    permissions:
+      contents: read
+      actions: read
 
     steps:
       - uses: actions/checkout@v4
@@ -661,13 +668,63 @@ jobs:
         working-directory: .testing/build/cov
         run: gcov -b *.gcda
 
+      # List the .F90/.f90 files this PR actually touches, so the comment can report a
+      # "this PR's files" subset in addition to the repo-wide total. Paths are left
+      # repo-root-relative to match track_gpu_port.py's --src-root . output.
+      - name: List source files changed by this PR
+        if: github.event_name == 'pull_request'
+        run: |
+          git fetch --no-tags --depth=1 origin \
+            "${{ github.event.pull_request.base.sha }}" \
+            "${{ github.event.pull_request.head.sha }}"
+          git diff --name-only \
+            "${{ github.event.pull_request.base.sha }}" \
+            "${{ github.event.pull_request.head.sha }}" \
+            -- '*.F90' '*.f90' > changed_files.txt
+
+      # Baseline for the "since base branch" delta: the GPU port JSON snapshot uploaded
+      # by the most recent successful run of this workflow on the PR's base branch. This
+      # is an approximation of the merge-base (not an exact rebuild of it), traded off
+      # deliberately against not doubling CI cost with a second coverage build per PR.
+      - name: Find latest GPU port snapshot on the base branch
+        if: github.event_name == 'pull_request'
+        id: baseline
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          RUN_ID=$(gh run list --repo "${{ github.repository }}" \
+            --workflow verify-linux.yml \
+            --branch "${{ github.event.pull_request.base.ref }}" \
+            --status success --limit 1 \
+            --json databaseId --jq '.[0].databaseId')
+          echo "run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
+
+      - name: Download baseline GPU port snapshot
+        if: github.event_name == 'pull_request' && steps.baseline.outputs.run_id != ''
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: gpu-port-json
+          run-id: ${{ steps.baseline.outputs.run_id }}
+          github-token: ${{ github.token }}
+          path: baseline
+
       - name: Generate GPU port coverage report
         run: |
+          EXTRA_ARGS=()
+          if [ -f baseline/gpu_port_report.json ]; then
+            EXTRA_ARGS+=(--baseline-json baseline/gpu_port_report.json)
+          fi
+          if [ -f changed_files.txt ]; then
+            EXTRA_ARGS+=(--changed-files changed_files.txt --out-comment gpu_port_comment.md)
+          fi
           python3 .testing/tools/track_gpu_port.py \
             --src-root . \
             --gcov-dir .testing/build/cov \
             --out-md gpu_port_report.md \
-            --github-annotations
+            --out-json gpu_port_report.json \
+            --github-annotations \
+            "${EXTRA_ARGS[@]}"
 
       - name: Publish report to job summary
         if: always()
@@ -682,6 +739,33 @@ jobs:
           name: gpu-port-report
           path: gpu_port_report.md
           retention-days: 14
+          if-no-files-found: ignore
+
+      # Becomes the baseline snapshot the *next* PR against this branch diffs against —
+      # uploaded on every run (push or PR) so pushes to the base branch keep it current.
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gpu-port-json
+          path: gpu_port_report.json
+          retention-days: 30
+          if-no-files-found: ignore
+
+      # gpu_port_comment.md is picked up and posted/updated on the PR itself by
+      # gpu-port-comment.yml, which runs via workflow_run so it has write access even
+      # for PRs from forks (this job intentionally does not — see permissions: above).
+      - name: Save PR number for the comment workflow
+        if: always() && github.event_name == 'pull_request'
+        run: echo "${{ github.event.pull_request.number }}" > pr_number.txt
+
+      - uses: actions/upload-artifact@v4
+        if: always() && github.event_name == 'pull_request'
+        with:
+          name: gpu-port-pr-comment
+          path: |
+            gpu_port_comment.md
+            pr_number.txt
+          retention-days: 1
           if-no-files-found: ignore
 
   # These are most likely nonsense on a GitHub node, but someday it could work.
