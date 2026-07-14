@@ -724,6 +724,7 @@ jobs:
             --out-md gpu_port_report.md \
             --out-json gpu_port_report.json \
             --github-annotations \
+            --verbose \
             "${EXTRA_ARGS[@]}"
 
       - name: Publish report to job summary

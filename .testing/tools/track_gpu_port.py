@@ -598,6 +598,10 @@ def main():
                      'overall %% ported, delta vs --baseline-json, and the --changed-files subset '
                      'if given. Intended to be posted/updated on the PR itself; --out-md remains '
                      'the full per-file/per-routine report for the job summary.')
+    ap.add_argument('--verbose', action='store_true',
+                     help='List every routine with executed, portable, not-yet-ported code (and '
+                          'its exact line ranges) in --out-md, instead of just the top 25 by '
+                          'portable-remaining lines')
     args = ap.parse_args()
 
     src_root = Path(args.src_root).resolve()
@@ -787,19 +791,24 @@ def main():
         lines_out.append(f"| {r['file']} | {r['executed_lines']} | {r['ported_lines']} | "
                           f"{r['portable_remaining_lines']} | {r['not_portable_lines']} | {pct} |")
 
-    lines_out.append('\n## Top porting opportunities (by executed portable-remaining lines)\n')
+    shown_routines = routine_rows if args.verbose else routine_rows[:25]
+    heading = 'All routines with portable-remaining lines' if args.verbose \
+        else 'Top porting opportunities (by executed portable-remaining lines)'
+    lines_out.append(f'\n## {heading}\n')
     lines_out.append('| Routine | File | Executed | Ported | Portable remaining | % of portable |')
     lines_out.append('|---|---|---:|---:|---:|---:|')
-    for r in routine_rows[:25]:
+    for r in shown_routines:
         pct = f"{r['pct_of_portable']:.1f}%" if r['pct_of_portable'] is not None else '—'
         lines_out.append(f"| {r['routine']} | {r['file']} | {r['executed_lines']} | "
                           f"{r['ported_lines']} | {r['portable_remaining_lines']} | {pct} |")
 
-    lines_out.append('\n## Line ranges for top porting opportunities\n')
+    range_heading = 'Line ranges for all porting opportunities' if args.verbose \
+        else 'Line ranges for top porting opportunities'
+    lines_out.append(f'\n## {range_heading}\n')
     lines_out.append('Exact executed, portable, not-yet-ported line ranges — this is the '
                       'authoritative "which lines" answer; any HTML/CI visualization is '
                       'derived from these same ranges, not the other way around.\n')
-    for r in routine_rows[:25]:
+    for r in shown_routines:
         if not r['portable_remaining_ranges']:
             continue
         lines_out.append(f"- **{r['routine']}** (`{r['file']}`): lines "
