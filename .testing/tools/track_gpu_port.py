@@ -86,6 +86,7 @@ routine — this is the authoritative "which lines" answer.
 """
 
 import argparse
+import html
 import json
 import re
 import sys
@@ -567,6 +568,108 @@ def format_ranges(ranges):
     return ', '.join(str(lo) if lo == hi else f'{lo}-{hi}' for lo, hi in ranges)
 
 
+HTML_STYLE = """
+:root { color-scheme: light dark; }
+body { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+       margin: 0; padding: 1rem 1.5rem; }
+h1 { font-size: 1rem; font-weight: 600; }
+a { color: #2b6cb0; }
+p.back { margin-top: 0; }
+p.legend span { display: inline-block; padding: 1px 8px; margin-right: 4px; border-radius: 3px; }
+table.summary { border-collapse: collapse; width: 100%; }
+table.summary th, table.summary td { padding: 4px 10px; border-bottom: 1px solid #8883; text-align: left; }
+table.summary td.num, table.summary th.num { text-align: right; }
+table.src { border-collapse: collapse; font-size: 12.5px; width: 100%; }
+table.src td { padding: 0 6px; white-space: pre; vertical-align: top; }
+table.src td.ln { color: #888; text-align: right; user-select: none; }
+table.src td.cnt { color: #888; text-align: right; min-width: 2.5em; user-select: none; }
+.ported { background: #d9f2d9; }
+.portable { background: #ffe6a8; }
+.executed { background: #eaeaea; }
+.nothit { background: #fad2d2; }
+tr.nodata { background: transparent; }
+@media (prefers-color-scheme: dark) {
+  body { background: #1e1e1e; color: #ddd; }
+  .ported { background: #234d23; }
+  .portable { background: #5c4a13; }
+  .executed { background: #333333; }
+  .nothit { background: #5c2323; }
+}
+"""
+
+LEGEND_HTML = (
+    '<p class="legend">'
+    '<span class="ported">ported</span>'
+    '<span class="portable">portable, not yet ported</span>'
+    '<span class="executed">executed, not portable</span>'
+    '<span class="nothit">executable, not hit by this run</span>'
+    '</p>'
+)
+
+
+def html_slug(rel_path):
+    """Turn a src-root-relative path into a flat, collision-safe .html filename."""
+    return re.sub(r'[^A-Za-z0-9_.-]', '_', str(rel_path).replace('/', '__')) + '.html'
+
+
+def render_file_html(rel_path, resolved, counts, fr):
+    """Render one source file as an lcov-style line-by-line coverage/port-status page."""
+    try:
+        lines = resolved.read_text(errors='replace').splitlines()
+    except OSError:
+        lines = []
+    ported_all = fr.ported | fr.manual
+    portable = fr.portable
+    rows = []
+    for lineno, text in enumerate(lines, start=1):
+        count = counts.get(lineno)
+        if count is None:
+            cls, marker = 'nodata', ''
+        elif count == 0:
+            cls, marker = 'nothit', '0'
+        elif lineno in ported_all:
+            cls, marker = 'ported', str(count)
+        elif lineno in portable:
+            cls, marker = 'portable', str(count)
+        else:
+            cls, marker = 'executed', str(count)
+        rows.append(f'<tr class="{cls}"><td class="ln">{lineno}</td><td class="cnt">{marker}</td>'
+                     f'<td class="src">{html.escape(text)}</td></tr>')
+    title = html.escape(str(rel_path))
+    return (f'<!doctype html><html><head><meta charset="utf-8"><title>{title}</title>'
+            f'<style>{HTML_STYLE}</style></head><body>'
+            f'<p class="back"><a href="index.html">&larr; back to index</a></p>'
+            f'<h1>{title}</h1>{LEGEND_HTML}'
+            f'<table class="src">{"".join(rows)}</table></body></html>')
+
+
+def render_index_html(per_file, total_ported, total_portable, total_executed,
+                       total_not_portable, overall_pct_portable, overall_pct_executed):
+    rows = []
+    for r in per_file:
+        pct = f"{r['pct_of_portable']:.1f}%" if r['pct_of_portable'] is not None else '—'
+        link = r.get('html_file')
+        file_cell = f'<a href="{link}">{html.escape(r["file"])}</a>' if link else html.escape(r['file'])
+        rows.append(f'<tr><td>{file_cell}</td><td class="num">{r["executed_lines"]}</td>'
+                     f'<td class="num">{r["ported_lines"]}</td>'
+                     f'<td class="num">{r["portable_remaining_lines"]}</td>'
+                     f'<td class="num">{r["not_portable_lines"]}</td>'
+                     f'<td class="num">{pct}</td></tr>')
+    return (f'<!doctype html><html><head><meta charset="utf-8"><title>GPU Port Coverage Report</title>'
+            f'<style>{HTML_STYLE}</style></head><body>'
+            f'<h1>GPU Port Coverage Report</h1>'
+            f'<p><strong>Of portable code: {total_ported} / {total_portable} executed lines ported '
+            f'({overall_pct_portable:.1f}%)</strong><br>'
+            f'({total_ported} / {total_executed} of all executed lines, {overall_pct_executed:.1f}% '
+            f'&mdash; {total_not_portable} executed lines are allocate/I/O/scalar setup code with no '
+            f'porting target and are excluded from the portable metric above)</p>'
+            f'{LEGEND_HTML}'
+            f'<table class="summary"><tr><th>File</th><th class="num">Executed</th>'
+            f'<th class="num">Ported</th><th class="num">Portable remaining</th>'
+            f'<th class="num">Not portable</th><th class="num">% of portable</th></tr>'
+            f'{"".join(rows)}</table></body></html>')
+
+
 def build_index(src_root):
     index = {}
     for p in Path(src_root).rglob('*.F90'):
@@ -602,6 +705,10 @@ def main():
                      help='List every routine with executed, portable, not-yet-ported code (and '
                           'its exact line ranges) in --out-md, instead of just the top 25 by '
                           'portable-remaining lines')
+    ap.add_argument('--out-html', help='Write a self-contained, lcov-style line-by-line HTML '
+                     'report (index.html plus one page per executed file, colored by ported / '
+                     'portable-remaining / executed-not-portable / not-hit) into this directory '
+                     '— e.g. for publishing to GitHub Pages')
     args = ap.parse_args()
 
     src_root = Path(args.src_root).resolve()
@@ -683,6 +790,11 @@ def main():
         executed_not_portable = executed - executed_ported - executed_portable_remaining
         return executed_ported, executed_portable_remaining, executed_not_portable
 
+    html_dir = None
+    if args.out_html:
+        html_dir = Path(args.out_html)
+        html_dir.mkdir(parents=True, exist_ok=True)
+
     per_file = []
     total_executed = 0
     total_ported = 0
@@ -713,6 +825,10 @@ def main():
             'portable_remaining_ranges': ranges_from_lines(executed_portable),
             'ported_ranges': ranges_from_lines(executed_ported),
         })
+        if html_dir is not None:
+            html_name = html_slug(rel)
+            (html_dir / html_name).write_text(render_file_html(rel, resolved, counts, fr))
+            per_file[-1]['html_file'] = html_name
         total_executed += len(executed)
         total_ported += len(executed_ported)
         total_portable_remaining += len(executed_portable)
@@ -842,6 +958,11 @@ def main():
             'errors': errors,
             'unresolved_gcov_sources': unresolved,
         }, indent=2))
+
+    if html_dir is not None:
+        (html_dir / 'index.html').write_text(render_index_html(
+            per_file, total_ported, total_portable, total_executed,
+            total_not_portable, overall_pct_portable, overall_pct_executed))
 
     if args.out_comment:
         c = []

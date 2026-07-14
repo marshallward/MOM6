@@ -723,6 +723,7 @@ jobs:
             --gcov-dir .testing/build/cov \
             --out-md gpu_port_report.md \
             --out-json gpu_port_report.json \
+            --out-html gpu_port_html \
             --github-annotations \
             --verbose \
             "${EXTRA_ARGS[@]}"
@@ -765,6 +766,19 @@ jobs:
           name: gpu-port-pr-comment
           path: |
             gpu_port_comment.md
+            pr_number.txt
+          retention-days: 1
+          if-no-files-found: ignore
+
+      # Picked up by gpu-port-comment.yml (via workflow_run, so it has write access) and
+      # published to the gh-pages branch under pr-<number>/, then linked from the PR
+      # comment above.
+      - uses: actions/upload-artifact@v4
+        if: always() && github.event_name == 'pull_request'
+        with:
+          name: gpu-port-html
+          path: |
+            gpu_port_html
             pr_number.txt
           retention-days: 1
           if-no-files-found: ignore

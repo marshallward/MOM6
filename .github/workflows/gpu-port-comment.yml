@@ -2,11 +2,13 @@
 # See the LICENSE file for licensing information.
 # SPDX-License-Identifier: Apache-2.0
 
-# Posts/updates a PR comment summarizing GPU-port coverage progress. Split out from
+# Posts/updates a PR comment summarizing GPU-port coverage progress, and publishes the
+# line-by-line HTML report to GitHub Pages under pr-<number>/. Split out from
 # verify-linux.yml's gpu-port-report job on purpose: that job checks out and runs a PR's
-# code (which may come from a fork) and so must stay read-only, while commenting needs
-# write access. workflow_run always executes with the base repository's permissions and
-# never checks out the triggering PR's code, so it's the safe place to do the write.
+# code (which may come from a fork) and so must stay read-only, while commenting and
+# pushing to gh-pages needs write access. workflow_run always executes with the base
+# repository's permissions and never checks out the triggering PR's code, so it's the
+# safe place to do those writes.
 
 name: GPU port PR comment
 
@@ -15,13 +17,83 @@ on:
     workflows: ["Linux verification"]
     types: [completed]
 
-permissions:
-  pull-requests: write
+permissions: {}
 
 jobs:
-  comment:
+  publish-pages:
     if: github.event.workflow_run.event == 'pull_request'
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      url: ${{ steps.publish.outputs.url }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download HTML report artifact
+        id: download
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: gpu-port-html
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ github.token }}
+          path: report
+
+      - name: Publish report to gh-pages
+        id: publish
+        if: steps.download.outcome == 'success'
+        run: |
+          if [ ! -f report/pr_number.txt ] || [ ! -d report/gpu_port_html ]; then
+            echo 'Report artifact incomplete; nothing to publish.'
+            exit 0
+          fi
+          PR_NUMBER=$(cat report/pr_number.txt)
+
+          git config user.name 'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+
+          if git fetch origin gh-pages --depth=1 2>/dev/null; then
+            git checkout -B gh-pages FETCH_HEAD
+          else
+            git checkout --orphan gh-pages
+            git rm -rf . -q
+          fi
+
+          rm -rf "pr-$PR_NUMBER"
+          mkdir -p "pr-$PR_NUMBER"
+          cp -r report/gpu_port_html/. "pr-$PR_NUMBER/"
+
+          {
+            echo '<!doctype html><html><head><meta charset="utf-8">'
+            echo '<title>GPU port coverage previews</title></head><body>'
+            echo '<h1>GPU port coverage previews</h1><ul>'
+            for d in pr-*/; do
+              n="${d%/}"
+              echo "<li><a href=\"$n/index.html\">$n</a></li>"
+            done
+            echo '</ul></body></html>'
+          } > index.html
+
+          git add -A
+          if git diff --cached --quiet; then
+            echo 'No changes to publish.'
+          else
+            git commit -q -m "Publish GPU port report for PR #$PR_NUMBER"
+            git push origin HEAD:gh-pages
+          fi
+
+          OWNER="${GITHUB_REPOSITORY%%/*}"
+          REPO="${GITHUB_REPOSITORY#*/}"
+          echo "url=https://${OWNER}.github.io/${REPO}/pr-$PR_NUMBER/" >> "$GITHUB_OUTPUT"
+
+  comment:
+    if: github.event.workflow_run.event == 'pull_request'
+    needs: publish-pages
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
 
     steps:
       - name: Download PR comment artifact
@@ -36,6 +108,8 @@ jobs:
       - name: Post or update PR comment
         if: steps.download.outcome == 'success'
         uses: actions/github-script@v7
+        env:
+          PAGES_URL: ${{ needs.publish-pages.outputs.url }}
         with:
           script: |
             const fs = require('fs');
@@ -44,7 +118,11 @@ jobs:
               return;
             }
             const prNumber = parseInt(fs.readFileSync('pr_number.txt', 'utf8').trim(), 10);
-            const body = fs.readFileSync('gpu_port_comment.md', 'utf8');
+            let body = fs.readFileSync('gpu_port_comment.md', 'utf8');
+            const pagesUrl = process.env.PAGES_URL;
+            if (pagesUrl) {
+              body += `\n[Full line-by-line coverage report](${pagesUrl})\n`;
+            }
             const marker = '<!-- gpu-port-report -->';
             const fullBody = `${marker}\n${body}`;
 

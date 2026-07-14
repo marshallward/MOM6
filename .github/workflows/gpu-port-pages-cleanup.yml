@@ -1,0 +1,61 @@
+# This file is part of MOM6, the Modular Ocean Model version 6.
+# See the LICENSE file for licensing information.
+# SPDX-License-Identifier: Apache-2.0
+
+# Removes a closed PR's GPU port coverage preview (pr-<number>/) from the gh-pages
+# branch published by gpu-port-comment.yml. Uses pull_request_target (not
+# pull_request) so this has write access even when the PR came from a fork — safe here
+# because the job never checks out or executes any PR-supplied code, it only deletes a
+# directory named after the PR number.
+
+name: GPU port pages cleanup
+
+on:
+  pull_request_target:
+    types: [closed]
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Remove PR preview from gh-pages
+        run: |
+          PR_NUMBER="${{ github.event.pull_request.number }}"
+
+          if ! git fetch origin gh-pages --depth=1 2>/dev/null; then
+            echo 'gh-pages branch does not exist yet; nothing to clean up.'
+            exit 0
+          fi
+          git checkout -B gh-pages FETCH_HEAD
+
+          if [ ! -d "pr-$PR_NUMBER" ]; then
+            echo "No preview for PR #$PR_NUMBER; nothing to clean up."
+            exit 0
+          fi
+
+          git config user.name 'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+
+          git rm -rf -q "pr-$PR_NUMBER"
+
+          {
+            echo '<!doctype html><html><head><meta charset="utf-8">'
+            echo '<title>GPU port coverage previews</title></head><body>'
+            echo '<h1>GPU port coverage previews</h1><ul>'
+            for d in pr-*/; do
+              [ -d "$d" ] || continue
+              n="${d%/}"
+              echo "<li><a href=\"$n/index.html\">$n</a></li>"
+            done
+            echo '</ul></body></html>'
+          } > index.html
+          git add index.html
+
+          git commit -q -m "Remove GPU port preview for closed PR #$PR_NUMBER"
+          git push origin HEAD:gh-pages
