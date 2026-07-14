@@ -42,17 +42,23 @@ jobs:
           name: gpu-port-html
           run-id: ${{ github.event.workflow_run.id }}
           github-token: ${{ github.token }}
-          path: report
+          # Outside the checked-out repo on purpose: this directory must survive
+          # switching the working tree to gh-pages below, which a path inside the repo
+          # (e.g. "report/") would not — an untracked "report/" would collide with a
+          # same-named tracked path if one ever existed on gh-pages, aborting the checkout.
+          path: ${{ runner.temp }}/gpu-port-report
 
       - name: Publish report to gh-pages
         id: publish
         if: steps.download.outcome == 'success'
+        env:
+          REPORT_DIR: ${{ runner.temp }}/gpu-port-report
         run: |
-          if [ ! -f report/gpu_port_publish_path.txt ] || [ ! -d report/gpu_port_html ]; then
+          if [ ! -f "$REPORT_DIR/gpu_port_publish_path.txt" ] || [ ! -d "$REPORT_DIR/gpu_port_html" ]; then
             echo 'Report artifact incomplete; nothing to publish.'
             exit 0
           fi
-          PUBLISH_PATH=$(cat report/gpu_port_publish_path.txt)
+          PUBLISH_PATH=$(cat "$REPORT_DIR/gpu_port_publish_path.txt")
 
           git config user.name 'github-actions[bot]'
           git config user.email 'github-actions[bot]@users.noreply.github.com'
@@ -66,7 +72,7 @@ jobs:
 
           rm -rf "$PUBLISH_PATH"
           mkdir -p "$PUBLISH_PATH"
-          cp -r report/gpu_port_html/. "$PUBLISH_PATH/"
+          cp -r "$REPORT_DIR/gpu_port_html/." "$PUBLISH_PATH/"
 
           {
             echo '<!doctype html><html><head><meta charset="utf-8">'
@@ -84,7 +90,10 @@ jobs:
             echo '</ul></body></html>'
           } > index.html
 
-          git add -A
+          # Scoped on purpose (not "git add -A"): the working tree may contain other
+          # untracked leftovers from earlier steps, and this must only ever commit the
+          # publish path plus the regenerated index.
+          git add -- "$PUBLISH_PATH" index.html
           if git diff --cached --quiet; then
             echo 'No changes to publish.'
           else
