@@ -771,15 +771,24 @@ jobs:
           if-no-files-found: ignore
 
       # Picked up by gpu-port-comment.yml (via workflow_run, so it has write access) and
-      # published to the gh-pages branch under pr-<number>/, then linked from the PR
-      # comment above.
+      # published to the gh-pages branch: under pr-<number>/ for a PR, or under
+      # porting_progress/ for a push to dev/gpu (i.e. once a PR merges).
+      - name: Determine gh-pages publish path
+        if: always() && (github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/dev/gpu'))
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "pr-${{ github.event.pull_request.number }}" > gpu_port_publish_path.txt
+          else
+            echo "porting_progress" > gpu_port_publish_path.txt
+          fi
+
       - uses: actions/upload-artifact@v4
-        if: always() && github.event_name == 'pull_request'
+        if: always() && (github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/dev/gpu'))
         with:
           name: gpu-port-html
           path: |
             gpu_port_html
-            pr_number.txt
+            gpu_port_publish_path.txt
           retention-days: 1
           if-no-files-found: ignore
 

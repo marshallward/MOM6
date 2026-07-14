@@ -47,7 +47,11 @@ jobs:
           {
             echo '<!doctype html><html><head><meta charset="utf-8">'
             echo '<title>GPU port coverage previews</title></head><body>'
-            echo '<h1>GPU port coverage previews</h1><ul>'
+            echo '<h1>GPU port coverage previews</h1>'
+            if [ -d porting_progress ]; then
+              echo '<p><a href="porting_progress/index.html">Latest on dev/gpu</a></p>'
+            fi
+            echo '<ul>'
             for d in pr-*/; do
               [ -d "$d" ] || continue
               n="${d%/}"

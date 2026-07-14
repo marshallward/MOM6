@@ -3,7 +3,8 @@
 # SPDX-License-Identifier: Apache-2.0
 
 # Posts/updates a PR comment summarizing GPU-port coverage progress, and publishes the
-# line-by-line HTML report to GitHub Pages under pr-<number>/. Split out from
+# line-by-line HTML report to GitHub Pages: under pr-<number>/ for a PR, or under
+# porting_progress/ for a push to dev/gpu (i.e. once a PR merges). Split out from
 # verify-linux.yml's gpu-port-report job on purpose: that job checks out and runs a PR's
 # code (which may come from a fork) and so must stay read-only, while commenting and
 # pushing to gh-pages needs write access. workflow_run always executes with the base
@@ -21,7 +22,9 @@ permissions: {}
 
 jobs:
   publish-pages:
-    if: github.event.workflow_run.event == 'pull_request'
+    if: >-
+      github.event.workflow_run.event == 'pull_request' ||
+      (github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'dev/gpu')
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -45,11 +48,11 @@ jobs:
         id: publish
         if: steps.download.outcome == 'success'
         run: |
-          if [ ! -f report/pr_number.txt ] || [ ! -d report/gpu_port_html ]; then
+          if [ ! -f report/gpu_port_publish_path.txt ] || [ ! -d report/gpu_port_html ]; then
             echo 'Report artifact incomplete; nothing to publish.'
             exit 0
           fi
-          PR_NUMBER=$(cat report/pr_number.txt)
+          PUBLISH_PATH=$(cat report/gpu_port_publish_path.txt)
 
           git config user.name 'github-actions[bot]'
           git config user.email 'github-actions[bot]@users.noreply.github.com'
@@ -61,15 +64,20 @@ jobs:
             git rm -rf . -q
           fi
 
-          rm -rf "pr-$PR_NUMBER"
-          mkdir -p "pr-$PR_NUMBER"
-          cp -r report/gpu_port_html/. "pr-$PR_NUMBER/"
+          rm -rf "$PUBLISH_PATH"
+          mkdir -p "$PUBLISH_PATH"
+          cp -r report/gpu_port_html/. "$PUBLISH_PATH/"
 
           {
             echo '<!doctype html><html><head><meta charset="utf-8">'
             echo '<title>GPU port coverage previews</title></head><body>'
-            echo '<h1>GPU port coverage previews</h1><ul>'
+            echo '<h1>GPU port coverage previews</h1>'
+            if [ -d porting_progress ]; then
+              echo '<p><a href="porting_progress/index.html">Latest on dev/gpu</a></p>'
+            fi
+            echo '<ul>'
             for d in pr-*/; do
+              [ -d "$d" ] || continue
               n="${d%/}"
               echo "<li><a href=\"$n/index.html\">$n</a></li>"
             done
@@ -80,13 +88,13 @@ jobs:
           if git diff --cached --quiet; then
             echo 'No changes to publish.'
           else
-            git commit -q -m "Publish GPU port report for PR #$PR_NUMBER"
+            git commit -q -m "Publish GPU port report for $PUBLISH_PATH"
             git push origin HEAD:gh-pages
           fi
 
           OWNER="${GITHUB_REPOSITORY%%/*}"
           REPO="${GITHUB_REPOSITORY#*/}"
-          echo "url=https://${OWNER}.github.io/${REPO}/pr-$PR_NUMBER/" >> "$GITHUB_OUTPUT"
+          echo "url=https://${OWNER}.github.io/${REPO}/$PUBLISH_PATH/" >> "$GITHUB_OUTPUT"
 
   comment:
     if: github.event.workflow_run.event == 'pull_request'
