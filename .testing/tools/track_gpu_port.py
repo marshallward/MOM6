@@ -597,6 +597,13 @@ def main():
 
     src_files = sorted(set(src_root.rglob('*.F90')) | set(src_root.rglob('*.f90')))
     for f in src_files:
+        if not f.is_file():
+            # Broken symlink — typically an uninitialized git submodule
+            # (e.g. src/equation_of_state/TEOS10 -> pkg/GSW-Fortran). Nothing
+            # to scan; not a parse error.
+            all_warnings.append(f'{f}: skipped (target does not exist, likely '
+                                 f'an uninitialized submodule)')
+            continue
         try:
             fr = parse_ported_regions(f)
         except StructuralError as e:
