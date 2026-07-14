@@ -637,23 +637,25 @@ jobs:
           tar -xpvf mom6-coverage.tar
           find .testing/build/cov -name "*.gcno" -exec touch {} \;
 
-      # Only the benchmark_ALE inputs and the f90nml submodule (needed by
-      # get_nprocs.py) are required here — no MOM6/FMS build, since the
-      # coverage-instrumented binary from build-coverage is reused as-is.
+      # Only the benchmark_ALE inputs are needed here — no MOM6/FMS build,
+      # since the coverage-instrumented binary from build-coverage is reused
+      # as-is.
       - name: Clone MOM6-gpu/MOM6-examples for the benchmark_ALE case
-        run: |
-          git clone --depth 1 https://github.com/MOM6-gpu/MOM6-examples.git MOM6-examples
-          cd MOM6-examples
-          git submodule update --init shared/tools/f90nml
+        run: git clone --depth 1 https://github.com/MOM6-gpu/MOM6-examples.git MOM6-examples
 
-      - name: Shorten benchmark_ALE to a single short run
-        run: echo '#override DAYMAX = 0.5' >> MOM6-examples/ocean_only/benchmark_ALE/MOM_override
+      # Force a single-rank layout and a short run: this is a coverage smoke
+      # run, not a scaling test, and the runner may have far fewer cores
+      # than whatever layout benchmark_ALE happens to be checked in with.
+      - name: Shorten benchmark_ALE to a single-rank, single short run
+        run: |
+          {
+            echo '#override DAYMAX = 0.5'
+            echo '#override LAYOUT = 1,1'
+          } >> MOM6-examples/ocean_only/benchmark_ALE/MOM_override
 
       - name: Run benchmark_ALE with the coverage-instrumented binary
         working-directory: MOM6-examples/ocean_only/benchmark_ALE
-        run: |
-          NPROCS=$(python3 ../../shared/tools/get_nprocs.py .)
-          mpirun -np "$NPROCS" "$GITHUB_WORKSPACE/.testing/build/cov/MOM6"
+        run: mpirun -np 1 "$GITHUB_WORKSPACE/.testing/build/cov/MOM6"
 
       - name: Generate gcov reports
         working-directory: .testing/build/cov
