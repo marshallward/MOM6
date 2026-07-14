@@ -158,6 +158,8 @@ end type OBC_segment_data_type
 !> Tracer on OBC segment data structure, for putting into a segment tracer registry.
 type, public :: OBC_segment_tracer_type
   logical           :: is_initialized       !< Reservoir values have been set when True
+  real              :: OBC_inflow_conc = 0. !< tracer concentration for generic inflows in rescaled units,
+                                            !! like [S ~> ppt] for salinity.
   character(len=32) :: name                 !< Tracer name used for error messages
   integer           :: ntr_index = -1       !< Index of segment tracer in the global tracer registry
   real, allocatable :: t(:,:,:)             !< External tracer concentration array in rescaled
@@ -199,6 +201,8 @@ end type OBC_segment_tracer_type
 !> Thickness on OBC segment data structure, with a reservoir
 type, public :: OBC_segment_thickness_type
   logical                    :: is_initialized        !< Reservoir values have been set when True
+  real                       :: OBC_inflow_conc = 0.  !< layer thickness for generic inflows in rescaled units,
+                                                      !! [Z ~> m].
   character(len=32)          :: name                  !< Thickness name used for error messages
   real, allocatable          :: h(:,:,:)              !< Layer thickness array in rescaled units, [Z ~> m].
   real, allocatable          :: h_res(:,:,:)          !< Thickness reservoir array in rescaled units,
