@@ -81,7 +81,7 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
   real, dimension(SZI_(G), SZJ_(G),SZK_(GV)+1) :: &
     pres          ! The pressure at an interface [R L2 T-2 ~> Pa].
 
-  ! Tiled work arrays.
+  ! Blocked work arrays.
   real, dimension(niblock, njblock, nkblock) :: &
     drho_dT, &      ! The derivative of density with temperature [R C-1 ~> kg m-3 degC-1].
     drho_dS, &      ! The derivative of density with salinity [R S-1 ~> kg m-3 ppt-1].
@@ -120,22 +120,22 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
   logical :: local_open_u_BC, local_open_v_BC ! True if u- or v-face OBCs exist anywhere in the global domain.
   logical :: OBC_friendly  ! If true, open boundary conditions are in use and only interior data should
                         ! be used to calculate N2 at OBC faces.
-  integer, dimension(3,2) :: EOSdom_block    !< 1-based EOS domain for the current tile [nondim].
+  integer, dimension(3,2) :: EOSdom_block    !< 1-based EOS domain for the current block [nondim].
   integer, dimension(2)   :: EOSdom_block_h1 !< 1-based EOS domain for h-point fills (one extra column) [nondim].
   integer :: is, ie, js, je, nz, IsdB
   integer :: i, j, k
-  integer :: istart, iend !< First and last global i (or I) indices of the current tile.
-  integer :: jstart, jend !< First and last global j (or J) indices of the current tile.
-  integer :: kstart, kend !< First and last global K (or K) indices of the current tile.
-  integer :: ii, jj, kk   !< Tile-local 1-based i, j, and k indices.
+  integer :: istart, iend !< First and last global i (or I) indices of the current block.
+  integer :: jstart, jend !< First and last global j (or J) indices of the current block.
+  integer :: kstart, kend !< First and last global K (or K) indices of the current block.
+  integer :: ii, jj, kk   !< Block-local 1-based i, j, and k indices.
   integer :: delta_i, delta_j
-  integer :: ie_read, je_read        !< Read-only extent of the h-point tile used to supply the
+  integer :: ie_read, je_read        !< Read-only extent of the h-point block used to supply the
                                      !! ii+1 (or jj+1) access needed by the Stanley stencil; equal
                                      !! to ie (or je) plus one column/row when use_stanley is true,
                                      !! and otherwise equal to ie (or je).
-  integer :: iend_stanley, jend_stanley    !< Last i (or j) index filled into the Stanley h-point tile,
+  integer :: iend_stanley, jend_stanley    !< Last i (or j) index filled into the Stanley h-point block,
                                      !! as opposed to iend/jend, which bound what is actually written
-                                     !! to the output arrays this tile.
+                                     !! to the output arrays this block.
 
   ! Allocate locals on device
   !$omp target enter data map(alloc: T, S, pres, T_uvh, S_uvh, pres_uvh, GxSpV_uvh, &
@@ -248,6 +248,7 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
   ! Stanley param needs access to h-point element ii+1, so when using stanley param,
   ! iterate in chunks of size block - 1 but read chunks of size block to ensure blocks
   ! always included needed elements. Allow access to element ie+1 so element ie is filled
+  ! Block sizes are validated to be > 0 and not equal to 1 if use_stanley at initialization
   if (use_stanley) then
     delta_i = niblock - 1
     ie_read = ie + 1
@@ -267,9 +268,10 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
     EOSdom_block(3,1) = 1 ; EOSdom_block(3,2) = kend - kstart + 1
 
     if (use_EOS) then
-      ! Fill tile T_uvh/S_uvh/pres_uvh at u-points
-      do concurrent(kk=1:kend-kstart+1, jj=1:jend-jstart+1, II=1:iend-istart+1)
-        I = istart + II - 1
+      ! Fill block T_uvh/S_uvh/pres_uvh at u-points
+      do concurrent(kk=1:kend-kstart+1, jj=1:jend-jstart+1, ii=1:iend-istart+1) &
+          DO_LOCALITY(local(i,j,k))
+        i = istart + ii - 1
         j = jstart + jj - 1
         k = kstart + kk - 1
         pres_uvh(ii,jj,kk) = 0.5*(pres(i,j,K) + pres(i+1,j,K))
@@ -340,7 +342,8 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
         ! This loop fills all niblock elements of the _uvh arrays and can access index ie+1 of T
         ! and S to ensure there always exists an ii+1 element for the compute loop below.
         EOSdom_block_h1(1) = 1 ; EOSdom_block_h1(2) = iend_stanley - istart + 1
-        do concurrent(kk=1:kend-kstart+1, jj=1:jend-jstart+1, ii=1:iend_stanley-istart+1)
+        do concurrent(kk=1:kend-kstart+1, jj=1:jend-jstart+1, ii=1:iend_stanley-istart+1) &
+            DO_LOCALITY(local(i,j,k))
           i = istart + ii - 1
           j = jstart + jj - 1
           k = kstart + kk - 1
@@ -359,9 +362,9 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
         enddo ; enddo
       endif ! end use_stanley
 
-    endif ! end use_EOS for zonal tile
+    endif ! end use_EOS for zonal block
 
-    ! Zonal slope compute over the tile
+    ! Zonal slope compute over the block
     do concurrent(kk=1:kend-kstart+1, jj=1:jend-jstart+1, II=1:iend-istart+1) &
         DO_LOCALITY(local(drdkL, drdkR, drdiA, drdiB, I, j))
       I = istart + II - 1
@@ -470,8 +473,8 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
         dzSxN(I,j,K) = sqrt( GxSpV_uvh(ii,jj,kk) * max(0., (wtL * ( dzaL * drdkL )) &
                                                 + (wtR * ( dzaR * drdkR ))) / (wtL + wtR) ) &
                         * abs(slope) * G%mask2dCu(I,j)
-    enddo ! end zonal tile do concurrent
-  enddo ; enddo ; enddo ! end zonal outer tile loops
+    enddo ! end zonal block do concurrent
+  enddo ; enddo ; enddo ! end zonal outer block loops
 
   if (use_stanley) then
     delta_j = njblock - 1
@@ -481,7 +484,7 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
     je_read = je
   endif
 
-  ! Tiled meridional loop
+  ! Blocked meridional loop
   do kstart=2,nz, nkblock ; do jstart=js-1,je,delta_j ; do istart=is,ie,niblock
     iend = min(istart + niblock - 1, ie)
     jend = min(jstart + delta_j - 1, je)
@@ -492,8 +495,9 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
     EOSdom_block(3,1) = 1 ; EOSdom_block(3,2) = kend - kstart + 1
 
     if (use_EOS) then
-      ! Fill tile T_uvh/S_uvh/pres_uvh at v-points
-      do concurrent(kk=1:kend-kstart+1, jj=1:jend-jstart+1, ii=1:iend-istart+1)
+      ! Fill block T_uvh/S_uvh/pres_uvh at v-points
+      do concurrent(kk=1:kend-kstart+1, jj=1:jend-jstart+1, ii=1:iend-istart+1) &
+          DO_LOCALITY(local(i,j,k))
         i = istart + ii - 1
         j = jstart + jj - 1
         k = kstart + kk - 1
@@ -561,7 +565,8 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
       if (use_stanley) then
         ! Reset at h-points for Stanley second derivatives.
         EOSdom_block_h1(1) = 1 ; EOSdom_block_h1(2) = iend - istart + 1
-        do concurrent(kk=1:kend-kstart+1, jj=1:jend_stanley-jstart+1, ii=1:iend-istart+1)
+        do concurrent(kk=1:kend-kstart+1, jj=1:jend_stanley-jstart+1, ii=1:iend-istart+1) &
+            DO_LOCALITY(local(i,j,k))
           i = istart + ii - 1
           j = jstart + jj - 1
           k = kstart + kk - 1
@@ -580,9 +585,9 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
         enddo ; enddo
       endif ! end use_stanley
 
-    endif ! end use_EOS for meridional tile
+    endif ! end use_EOS for meridional block
 
-    ! Meridional slope compute over the tile
+    ! Meridional slope compute over the block
     do concurrent(kk=1:kend-kstart+1, jj=1:jend-jstart+1, ii=1:iend-istart+1) &
         DO_LOCALITY(local(drdkL, drdkR, drdjA, drdjB, i, J))
       i = istart + ii - 1
@@ -690,10 +695,10 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
         dzSyN(i,J,K) = sqrt( GxSpV_uvh(ii,jj,kk) * max(0., (wtL * ( dzaL * drdkL )) &
                                                 + (wtR * ( dzaR * drdkR ))) / (wtL + wtR) ) &
                         * abs(slope) * G%mask2dCv(i,J)
-    enddo ! end meridional tile do concurrent
-  enddo ; enddo ; enddo! end meridional outer tile loops
+    enddo ! end meridional block do concurrent
+  enddo ; enddo ; enddo ! end meridional outer block loops
 
-  ! Delete all tile and field arrays from device
+  ! Delete all block and field arrays from device
   !$omp target exit data map(delete: T, S, pres, T_uvh, S_uvh, pres_uvh, GxSpV_uvh, &
   !$omp   scrap, drho_dT, drho_dS, drho_dT_dT_h)
 

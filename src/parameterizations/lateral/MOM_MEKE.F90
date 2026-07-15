@@ -1841,19 +1841,32 @@ subroutine ML_MEKE_init(diag, G, US, Time, param_file, dbcomms_CS, CS)
   ! Isoneutral blocking parameters
   call get_param(param_file, mdl, "ISOPYCNAL_NIBLOCK", CS%niblock, &
                  "The i-direction block size used to calculate isopycnal slopes. "//&
-                 "If 0, defaults to 64, except when "//&
-                 "running with OpenMP offload, in which case the full computational "//&
-                 "domain width is used.", default=default_niblock, layoutParam=.true.)
+                 "If 0, or when running with OpenMP offload, "//&
+                 "the full computational domain width is used. "//&
+                 "If USE_STANLEY_ISO is true, ISOPYCNAL_NIBLOCK cannot equal 1.", &
+                 default=default_niblock, layoutParam=.true.)
   call get_param(param_file, mdl, "ISOPYCNAL_NJBLOCK", CS%njblock, &
-                 "The j-direction block size used in the continuity solver. "//&
+                 "The j-direction block size used to calculate isopycnal slopes. "//&
+                 "If 0, defaults to 1, except when running with OpenMP offload, "//&
+                 "in which case the full computational domain height is used. " //&
+                 "If USE_STANLEY_ISO is true, ISOPYCNAL_NJBLOCK cannot equal 1.", &
+                 default=default_njblock, layoutParam=.true.)
+  call get_param(param_file, mdl, "ISOPYCNAL_NKBLOCK", CS%nkblock, &
+                 "The k-direction block size used to calculate isopycnal slopes. "//&
                  "If 0, defaults to 1, except when "//&
                  "running with OpenMP offload, in which case the full computational "//&
-                 "domain height is used.", default=default_njblock, layoutParam=.true.)
-  call get_param(param_file, mdl, "ISOPYCNAL_NKBLOCK", CS%nkblock, &
-                 "The j-direction block size used in the continuity solver. "//&
-                 "If 0, defaults to 1 , except when "//&
-                 "running with OpenMP offload, in which case the full computational "//&
-                 "domain height is used.", default=default_nkblock, layoutParam=.true.)
+                 "domain depth is used.", default=default_nkblock, layoutParam=.true.)
+
+  if (CS%niblock < 0) &
+    call MOM_error(FATAL, "ISOPYCNAL_NIBLOCK must be nonnegative; "//&
+                          "use 0 to select the default block size.")
+  if (CS%njblock < 0) &
+    call MOM_error(FATAL, "ISOPYCNAL_NJBLOCK must be nonnegative; "//&
+                          "use 0 to select the default block size.")
+  if (CS%nkblock < 0) &
+    call MOM_error(FATAL, "ISOPYCNAL_NKBLOCK must be nonnegative; "//&
+                          "use 0 to select the default block size.")
+
 
 end subroutine ML_MEKE_init
 
@@ -1920,12 +1933,13 @@ subroutine ML_MEKE_calculate_features(G, GV, US, CS, Rd_dx_h, u, v, tv, h, dt, f
   call find_eta(h, tv, G, GV, US, e, halo_size=2)
   ! Note the hard-coded dimenisional constant in the following line.
   ! UMW: Below is untested
-  !$omp target enter data map(to: tv, tv%T, tv%S, slope_x, slope_y, e)
+  !$omp target enter data map(to: tv, tv%T, tv%S, slope_x, slope_y)
   !$omp target enter data map(to: tv%SpV_avg) if (allocated(tv%SpV_avg))
   !$omp target enter data map(to: tv%p_surf) if (associated(tv%p_surf))
   call calc_isoneutral_slopes(G, GV, US, h, e, tv, dt*1.e-7*GV%m2_s_to_HZ_T, .false., slope_x, slope_y, &
                               niblock, njblock, nkblock )
-  !$omp target exit data map(release: tv, tv%T, tv%S, e)
+  !$omp target exit data map(release: tv, tv%T, tv%S)
+  !$omp target exit data map(delete: e)
   !$omp target exit data map(release: tv%SpV_avg) if (allocated(tv%SpV_avg))
   !$omp target exit data map(release: tv%p_surf) if (associated(tv%p_surf))
   !$omp target exit data map(from: slope_x, slope_y)
