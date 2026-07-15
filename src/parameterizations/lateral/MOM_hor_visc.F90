@@ -563,12 +563,14 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
                              dudx_bt, dvdy_bt, dvdx_bt, dudy_bt, sh_xx_bt, sh_xy_bt, &
                              GME_effic_h, GME_effic_q, KH_u_GME, KH_v_GME, &
                              GME_coeff_h, GME_coeff_q, str_xx_GME, str_xy_GME)
-    ! sh_xx_bt, sh_xy_bt, GME_effic_h, GME_effic_q, KH_u_GME, KH_v_GME are computed on the host above
-    ! and are only ever read (not written) on the device; dudx_bt, dvdy_bt, dvdx_bt, dudy_bt are only
-    ! used on the host (post_data diagnostics), so they are not mapped at all.
+    ! NOTE: sh_xx_bt, sh_xy_bt, GME_effic_h, GME_effic_q, KH_u_GME and KH_v_GME
+    !   are computed on the host above and are only read (never written) on the
+    !   device.  dudx_bt, dvdy_bt, dvdx_bt and dudy_bt are only used on the
+    !   host (post_data diagnostics), so they are not mapped at all.
     !$omp target enter data map(to: sh_xx_bt, sh_xy_bt, GME_effic_h, GME_effic_q, KH_u_GME, KH_v_GME)
-    ! GME_coeff_h, GME_coeff_q, str_xx_GME, str_xy_GME are written and read entirely on the device
-    ! (aside from the smooth_GME host round-trip below), so a bare alloc is enough on entry.
+    ! NOTE: GME_coeff_h, GME_coeff_q, str_xx_GME and str_xy_GME are written and
+    !   read entirely on the device (aside from the smooth_GME host round-trip
+    !   below), so a bare alloc is enough on entry.
     !$omp target enter data map(alloc: GME_coeff_h, GME_coeff_q, str_xx_GME, str_xy_GME)
   endif
 
@@ -3205,6 +3207,9 @@ subroutine hor_visc_init(Time, G, GV, US, param_file, diag, CS, ADp)
       "LAPLACIAN or BIHARMONIC viscosity.")
     return ! We are not using either Laplacian or Bi-harmonic lateral viscosity
   endif
+
+  !$omp target update to(CS)
+
   deg2rad = atan(1.0) / 45.
   ALLOC_(CS%dx2h(isd:ied,jsd:jed))        ; CS%dx2h(:,:)    = 0.0
   ALLOC_(CS%dy2h(isd:ied,jsd:jed))        ; CS%dy2h(:,:)    = 0.0
@@ -3214,6 +3219,9 @@ subroutine hor_visc_init(Time, G, GV, US, param_file, diag, CS, ADp)
   ALLOC_(CS%dy_dxT(isd:ied,jsd:jed))      ; CS%dy_dxT(:,:)  = 0.0
   ALLOC_(CS%dx_dyBu(IsdB:IedB,JsdB:JedB)) ; CS%dx_dyBu(:,:) = 0.0
   ALLOC_(CS%dy_dxBu(IsdB:IedB,JsdB:JedB)) ; CS%dy_dxBu(:,:) = 0.0
+  !$omp target enter data map(alloc: CS%dx2h, CS%dy2h, CS%dx2q, CS%dy2q)
+  !$omp target enter data map(alloc: CS%dx_dyT, CS%dy_dxT, CS%dx_dyBu, CS%dy_dxBu)
+
   if (CS%Laplacian) then
     ALLOC_(CS%grid_sp_h2(isd:ied,jsd:jed))   ; CS%grid_sp_h2(:,:) = 0.0
     ALLOC_(CS%Kh_bg_xx(isd:ied,jsd:jed))     ; CS%Kh_bg_xx(:,:) = 0.0
@@ -3305,31 +3313,37 @@ subroutine hor_visc_init(Time, G, GV, US, param_file, diag, CS, ADp)
       allocate(CS%Re_Ah_const_xy(IsdB:IedB,JsdB:JedB), source=0.0)
     endif
   endif
-  do J=js-2,Jeq+1 ; do I=is-2,Ieq+1
+
+  do concurrent (J=js-2:Jeq+1, I=is-2:Ieq+1)
     CS%dx2q(I,J) = G%dxBu(I,J)*G%dxBu(I,J) ; CS%dy2q(I,J) = G%dyBu(I,J)*G%dyBu(I,J)
-  enddo ; enddo
+  enddo
 
   if (((CS%Leith_Kh) .or. (CS%Leith_Ah) .or. (CS%use_Leithy)) .and. &
       ((G%isc-G%isd < 3) .or. (G%isc-G%isd < 3))) call MOM_error(FATAL, &
           "The minimum halo size is 3 when a Leith viscosity is being used.")
   if (CS%use_Leithy) then
-    do J=js-3,Jeq+2 ; do I=is-3,Ieq+2
+    do concurrent (J=js-3:Jeq+2, I=is-3:Ieq+2)
       CS%DX_dyBu(I,J) = G%dxBu(I,J)*G%IdyBu(I,J) ; CS%DY_dxBu(I,J) = G%dyBu(I,J)*G%IdxBu(I,J)
-    enddo ; enddo
+    enddo
   elseif ((CS%Leith_Kh) .or. (CS%Leith_Ah)) then
-    do J=Jsq-2,Jeq+2 ; do I=Isq-2,Ieq+2
+    do concurrent (J=Jsq-2:Jeq+2, I=Isq-2:Ieq+2)
       CS%DX_dyBu(I,J) = G%dxBu(I,J)*G%IdyBu(I,J) ; CS%DY_dxBu(I,J) = G%dyBu(I,J)*G%IdxBu(I,J)
-    enddo ; enddo
+    enddo
   else
-    do J=js-2,Jeq+1 ; do I=is-2,Ieq+1
+    do concurrent (J=js-2:Jeq+1, I=is-2:Ieq+1)
       CS%DX_dyBu(I,J) = G%dxBu(I,J)*G%IdyBu(I,J) ; CS%DY_dxBu(I,J) = G%dyBu(I,J)*G%IdxBu(I,J)
-    enddo ; enddo
+    enddo
   endif
 
-  do j=js-2,Jeq+2 ; do i=is-2,Ieq+2
+  do concurrent (j=js-2:Jeq+2, i=is-2:Ieq+2)
     CS%dx2h(i,j) = G%dxT(i,j)*G%dxT(i,j) ; CS%dy2h(i,j) = G%dyT(i,j)*G%dyT(i,j)
     CS%DX_dyT(i,j) = G%dxT(i,j)*G%IdyT(i,j) ; CS%DY_dxT(i,j) = G%dyT(i,j)*G%IdxT(i,j)
-  enddo ; enddo
+  enddo
+
+  ! TODO: Remove this after every instance has been moved to GPU
+  !$omp target update from(CS%dx2q, CS%dy2q, CS%dx_dyBu, CS%dy_dxBu)
+  !$omp target update from(CS%dx2h, CS%dy2h, CS%dx_dyT, CS%dy_dxT)
+
   do j=Jsq,Jeq+1 ; do i=Isq,Ieq+1
     CS%reduction_xx(i,j) = 1.0
     if ((G%dy_Cu(I,j) > 0.0) .and. (G%dy_Cu(I,j) < G%dyCu(I,j)) .and. &
@@ -3345,6 +3359,7 @@ subroutine hor_visc_init(Time, G, GV, US, param_file, diag, CS, ADp)
         (G%dx_Cv(i,J-1) < G%dxCv(i,J-1) * CS%reduction_xx(i,j))) &
       CS%reduction_xx(i,j) = G%dx_Cv(i,J-1) / (G%dxCv(i,J-1))
   enddo ; enddo
+
   do J=js-1,Jeq ; do I=is-1,Ieq
     CS%reduction_xy(I,J) = 1.0
     if ((G%dy_Cu(I,j) > 0.0) .and. (G%dy_Cu(I,j) < G%dyCu(I,j)) .and. &
@@ -3755,6 +3770,30 @@ subroutine hor_visc_init(Time, G, GV, US, param_file, diag, CS, ADp)
       'Depth integrated work done by the biharmonic lateral friction', &
       'W m-2', conversion=US%RZ3_T3_to_W_m2*US%L_to_Z**2)
 
+
+  ! TODO: Position these after their respective loops (and run loops on device)
+  !$omp target enter data map(to: CS%Idxdy2u, CS%Idxdy2v) if (CS%biharmonic)
+  !$omp target enter data map(to: CS%Idx2dyCu, CS%Idx2dyCv) if (CS%biharmonic)
+
+  !$omp target enter data map(to: CS%Kh_bg_xx, CS%Kh_bg_xy) if (CS%Laplacian)
+  !$omp target enter data map(to: CS%Kh_max_xx) if (CS%Laplacian)
+  !$omp target enter data map(to: CS%Kh_max_xy) &
+  !$omp   if (CS%Laplacian .and. CS%bound_Kh)
+  !$omp target enter data map(to: CS%Laplac2_const_xx) if (CS%Laplacian)
+  !$omp target enter data map(to: CS%Laplac3_const_xx) if (CS%Laplacian)
+  !$omp target enter data map(to: CS%Laplac2_const_xy) if (CS%Smagorinsky_Kh)
+
+  !$omp target enter data map(to: CS%Ah_bg_xx, CS%Ah_bg_xy) if (CS%biharmonic)
+  !$omp target enter data map(to: CS%reduction_xx, CS%reduction_xy)
+  !$omp target enter data map(to: CS%Biharm_const_xx, CS%Biharm_const2_xx) &
+  !$omp   if (CS%Smagorinsky_Ah .or. CS%Leith_Ah .or. CS%use_Leithy)
+  !$omp target enter data map(to: CS%Biharm_const_xy) &
+  !$omp   if (CS%Smagorinsky_Ah .or. CS%Leith_Ah)
+  !$omp target enter data map(to: CS%Biharm_const2_xy) &
+  !$omp   if (CS%bound_Coriolis .and. (CS%Smagorinsky_Ah .or. CS%Leith_Ah))
+  !$omp target enter data map(to: CS%Ah_max_xx) if (CS%bound_Ah)
+  !$omp target enter data map(to: CS%Ah_max_xy) if (CS%bound_Ah)
+
 end subroutine hor_visc_init
 
 !> hor_visc_vel_stencil returns the horizontal viscosity input velocity stencil size
@@ -3970,6 +4009,34 @@ end subroutine smooth_x9_uv
 !> Deallocates any variables allocated in hor_visc_init.
 subroutine hor_visc_end(CS)
   type(hor_visc_CS), intent(inout) :: CS !< Horizontal viscosity control structure
+
+  !$omp target exit data map(delete: CS%DX_dyT, CS%DY_dxT)
+  !$omp target exit data map(delete: CS%Dx_dyBu, CS%DY_dxBu)
+
+  !$omp target exit data map(delete: CS%Idxdy2u, CS%Idxdy2v) if (CS%biharmonic)
+  !$omp target exit data map(delete: CS%Idx2dyCu, CS%Idx2dyCv) if (CS%biharmonic)
+  !$omp target exit data map(delete: CS%dx2q, CS%dy2q)
+  !$omp target exit data map(delete: CS%dx2h, CS%dy2h)
+
+  !$omp target exit data map(delete: CS%Kh_bg_xx, CS%Kh_bg_xy) if (CS%Laplacian)
+  !$omp target exit data map(delete: CS%Kh_Max_xx) if (CS%Laplacian)
+  !$omp target exit data map(delete: CS%Kh_max_xy) &
+  !$omp   if (CS%Laplacian .and. CS%bound_Kh)
+  !$omp target exit data map(delete: CS%Laplac2_const_xx) if (CS%Laplacian)
+  !$omp target exit data map(delete: CS%Laplac3_const_xx) if (CS%Laplacian)
+  !$omp target exit data map(delete: CS%Laplac2_const_xy) if (CS%Smagorinsky_Kh)
+
+  !$omp target exit data map(delete: CS%Ah_bg_xx, CS%Ah_bg_xy) if (CS%biharmonic)
+  !$omp target exit data map(delete: CS%reduction_xx, CS%reduction_xy)
+  !$omp target exit data map(delete: CS%Biharm_const_xx, CS%Biharm_const2_xx) &
+  !$omp   if (CS%Smagorinsky_Ah .or. CS%Leith_Ah .or. CS%use_Leithy)
+  !$omp target exit data map(delete: CS%Biharm_const_xy) &
+  !$omp   if (CS%Smagorinsky_Ah .or. CS%Leith_Ah)
+  !$omp target exit data map(delete: CS%Biharm_const2_xy) &
+  !$omp   if (CS%bound_Coriolis .and. (CS%Smagorinsky_Ah .or. CS%Leith_Ah))
+  !$omp target exit data map(delete: CS%Ah_max_xx) if (CS%bound_Ah)
+  !$omp target exit data map(delete: CS%Ah_max_xy) if (CS%bound_Ah)
+
   if (CS%Laplacian .or. CS%biharmonic) then
     DEALLOC_(CS%dx2h) ; DEALLOC_(CS%dx2q) ; DEALLOC_(CS%dy2h) ; DEALLOC_(CS%dy2q)
     DEALLOC_(CS%dx_dyT) ; DEALLOC_(CS%dy_dxT) ; DEALLOC_(CS%dx_dyBu) ; DEALLOC_(CS%dy_dxBu)
