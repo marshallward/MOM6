@@ -1043,9 +1043,11 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
       ! All viscosity contributions above are subject to resolution scaling
 
       if (rescale_Kh) then
-        do concurrent (kk=1:kmax, j=js_Kh:je_Kh, i=is_Kh:ie_Kh)
+        !$omp target update from(Kh)
+        do kk=1,kmax ; do j=js_Kh,je_Kh ; do i=is_Kh,ie_Kh
           Kh(i,j,kk) = VarMix%Res_fn_h(i,j) * Kh(i,j,kk)
-        enddo
+        enddo ; enddo ; enddo
+        !$omp target update to(Kh)
       endif
 
       ! Place a floor on the viscosity, if desired.
@@ -1054,30 +1056,32 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
       enddo
 
       if (use_MEKE_Ku .and. .not. CS%EY24_EBT_BS) then
+        !$omp target update from(Kh)
         ! *Add* the MEKE contribution (which might be negative)
         if (use_kh_struct) then
           if (CS%res_scale_MEKE) then
-            do concurrent (kk=1:kmax, j=js_Kh:je_Kh, i=is_Kh:ie_Kh) DO_LOCALITY(local(k))
+            do kk=1,kmax ; do j=js_Kh,je_Kh ; do i=is_Kh,ie_Kh
               k = kstart + kk - 1
               Kh(i,j,kk) = Kh(i,j,kk) + MEKE%Ku(i,j) * VarMix%Res_fn_h(i,j) * VarMix%BS_struct(i,j,k)
-            enddo
+            enddo ; enddo ; enddo
           else
-            do concurrent (kk=1:kmax, j=js_Kh:je_Kh, i=is_Kh:ie_Kh) DO_LOCALITY(local(k))
+            do kk=1,kmax ; do j=js_Kh,je_Kh ; do i=is_Kh,ie_Kh
               k = kstart + kk - 1
               Kh(i,j,kk) = Kh(i,j,kk) + MEKE%Ku(i,j) * VarMix%BS_struct(i,j,k)
-            enddo
+            enddo ; enddo ; enddo
           endif
         else
           if (CS%res_scale_MEKE) then
-            do concurrent (kk=1:kmax, j=js_Kh:je_Kh, i=is_Kh:ie_Kh)
+            do kk=1,kmax ; do j=js_Kh,je_Kh ; do i=is_Kh,ie_Kh
               Kh(i,j,kk) = Kh(i,j,kk) + MEKE%Ku(i,j) * VarMix%Res_fn_h(i,j)
-            enddo
+            enddo ; enddo ; enddo
           else
-            do concurrent (kk=1:kmax, j=js_Kh:je_Kh, i=is_Kh:ie_Kh)
+            do kk=1,kmax ; do j=js_Kh,je_Kh ; do i=is_Kh,ie_Kh
               Kh(i,j,kk) = Kh(i,j,kk) + MEKE%Ku(i,j)
-            enddo
+            enddo ; enddo ; enddo
           endif
         endif
+        !$omp target update to(Kh)
       endif
 
       if (CS%anisotropic) then
@@ -1428,9 +1432,11 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
       ! All viscosity contributions above are subject to resolution scaling
 
       if (rescale_Kh) then
-        do concurrent (kk=1:kmax, J=js-1:Jeq, I=is-1:Ieq)
+        !$omp target update from(Kh)
+        do kk=1,kmax ; do J=js-1,Jeq ; do I=is-1,Ieq
           Kh(I,J,kk) = VarMix%Res_fn_q(I,J) * Kh(I,J,kk)
-        enddo
+        enddo ; enddo ; enddo
+        !$omp target update to(Kh)
       endif
 
       do concurrent (kk=1:kmax, J=js-1:Jeq, I=is-1:Ieq)
@@ -1438,8 +1444,9 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
       enddo
 
       if (use_MEKE_Ku .and. .not. CS%EY24_EBT_BS) then
+        !$omp target update from(Kh)
         if (use_kh_struct) then
-          do concurrent (kk=1:kmax, J=js-1:Jeq, I=is-1:Ieq) DO_LOCALITY(local(k, meke_res_fn))
+          do kk=1,kmax ; do J=js-1,Jeq ; do I=is-1,Ieq
             k = kstart + kk - 1
             meke_res_fn = 1.
             if (CS%res_scale_MEKE) meke_res_fn = VarMix%Res_fn_q(I,J)
@@ -1448,9 +1455,9 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
                                        (MEKE%Ku(i+1,j+1)*VarMix%BS_struct(i+1,j+1,k))) + &
                                        ((MEKE%Ku(i+1,j)*VarMix%BS_struct(i+1,j,k)) + &
                                        (MEKE%Ku(i,j+1)*VarMix%BS_struct(i,j+1,k))) ) * meke_res_fn
-          enddo
+          enddo ; enddo ; enddo
         else
-          do concurrent (kk=1:kmax, J=js-1:Jeq, I=is-1:Ieq) DO_LOCALITY(local(meke_res_fn))
+          do kk=1,kmax ; do J=js-1,Jeq ; do I=is-1,Ieq
             meke_res_fn = 1.
             if (CS%res_scale_MEKE) meke_res_fn = VarMix%Res_fn_q(I,J)
 
@@ -1458,8 +1465,9 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
                 (MEKE%Ku(i,j) + MEKE%Ku(i+1,j+1)) + &
                                        (MEKE%Ku(i+1,j) + &
                                         MEKE%Ku(i,j+1)) ) * meke_res_fn
-          enddo
+          enddo ; enddo ; enddo
         endif
+        !$omp target update to(Kh)
       endif
 
       if (CS%anisotropic) then
