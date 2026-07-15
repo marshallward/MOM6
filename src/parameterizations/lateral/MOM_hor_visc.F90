@@ -1151,12 +1151,12 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
     endif ! Get Kh at h points and get Laplacian component of str_xx
 
     if (CS%anisotropic) then
-      do j=Jsq,Jeq+1 ; do i=Isq,Ieq+1
+      do concurrent (kk=1:kmax, j=Jsq:Jeq+1, i=Isq:Ieq+1) DO_LOCALITY(local(local_strain))
         ! Shearing-strain averaged to h-points
-        local_strain = 0.25 * ( (sh_xy(I,J,1) + sh_xy(I-1,J-1,1)) + (sh_xy(I-1,J,1) + sh_xy(I,J-1,1)) )
+        local_strain = 0.25 * ( (sh_xy(I,J,kk) + sh_xy(I-1,J-1,kk)) + (sh_xy(I-1,J,kk) + sh_xy(I,J-1,kk)) )
         ! *Add* the shear-strain contribution to the xx-component of stress
-        str_xx(i,j,1) = str_xx(i,j,1) - CS%Kh_aniso * CS%n1n2_h(i,j) * CS%n1n1_m_n2n2_h(i,j) * local_strain
-      enddo ; enddo
+        str_xx(i,j,kk) = str_xx(i,j,kk) - CS%Kh_aniso * CS%n1n2_h(i,j) * CS%n1n1_m_n2n2_h(i,j) * local_strain
+      enddo
     endif
 
     if (CS%biharmonic) then
@@ -2014,7 +2014,7 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
       endif ! MEKE%backscatter_Ro_c
 
     endif ! find_FrictWork and associated(mom_src)
-  enddo ! end of k loop
+  enddo ! end of kstart block loop
 
   !$omp target exit data map(delete: dudx, dudy, dvdx, dvdy, sh_xx, sh_xy)
   !$omp target exit data map(delete: h_u, h_v, hq)
