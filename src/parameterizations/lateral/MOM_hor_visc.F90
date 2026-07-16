@@ -448,6 +448,8 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
   logical :: skeb_use_frict
   logical :: use_cont_huv
   logical :: use_kh_struct
+  logical :: use_Leith    ! True if any Leith parameterizations are enabled
+  logical :: use_vort_xy  ! True if vort_xy must be computed
   logical :: use_Smag     ! True if a Smagorinsky viscosity is enabled
   integer :: is_vort, ie_vort, js_vort, je_vort  ! Loop ranges for vorticity terms
   integer :: is_Kh, ie_Kh, js_Kh, je_Kh  ! Loop ranges for thickness point viscosities
@@ -613,6 +615,8 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
     endif
   endif
 
+  use_Leith = CS%Leith_Kh .or. CS%Leith_Ah .or. CS%use_Leithy
+  use_vort_xy = use_Leith .or. CS%id_vort_xy_q > 0 .or. CS%use_ZB2020
   use_Smag = CS%Smagorinsky_Kh .or. CS%Smagorinsky_Ah
 
   !$omp target enter data map(alloc: dudx, dudy, dvdx, dvdy, sh_xx, sh_xy)
@@ -937,7 +941,7 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
     endif
 
     ! Vorticity
-    if ((CS%Leith_Kh) .or. (CS%Leith_Ah) .or. (CS%use_Leithy) .or. (CS%id_vort_xy_q>0) .or. CS%use_ZB2020) then
+    if (use_vort_xy) then
       if (CS%no_slip) then
         do concurrent (kk=1:kmax, J=js_vort:je_vort, I=is_vort:ie_vort)
           vort_xy(I,J,kk) = (2.0-G%mask2dBu(I,J)) * ( dvdx(I,J,kk) - dudy(I,J,kk) )
@@ -972,7 +976,7 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
     endif
 
 
-    if ((CS%Leith_Kh) .or. (CS%Leith_Ah) .or. (CS%use_Leithy)) then
+    if (use_Leith) then
       call hor_visc_Leith_grad(G, GV, US, CS, VarMix, nkblock, kstart, kmax, &
                                 is, ie, js, je, is_Kh, ie_Kh, js_Kh, je_Kh, Ieq, Jeq, &
                                 h, dz, slope_x, slope_y, dudx, dvdy, vort_xy, vort_xy_smooth, &
@@ -1206,17 +1210,21 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
 
       if (use_MEKE_Au) then
         ! *Add* the MEKE contribution
-        do concurrent (kk=1:kmax, j=js_Kh:je_Kh, i=is_Kh:ie_Kh)
+        !$omp target update from(Ah)
+        do kk=1,kmax ; do j=js_Kh,je_Kh ; do i=is_Kh,ie_Kh
           Ah(i,j,kk) = Ah(i,j,kk) + MEKE%Au(i,j)
-        enddo
+        enddo ; enddo ; enddo
+        !$omp target update to(Ah)
       endif
 
       if (CS%Re_Ah > 0.0) then
-        do concurrent (kk=1:kmax, j=js_Kh:je_Kh, i=is_Kh:ie_Kh) DO_LOCALITY(local(k, KE))
+        !$omp target update from(Ah)
+        do kk=1,kmax ; do j=js_Kh,je_Kh ; do i=is_Kh,ie_Kh
           k = kstart + kk - 1
           KE = 0.125*(((u(I,j,k)+u(I-1,j,k))**2) + ((v(i,J,k)+v(i,J-1,k))**2))
           Ah(i,j,kk) = sqrt(KE) * CS%Re_Ah_const_xx(i,j)
-        enddo
+        enddo ; enddo ; enddo
+        !$omp target update to(Ah)
       endif
 
       if (CS%bound_Ah) then
@@ -1578,10 +1586,12 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
 
       if (use_MEKE_Au) then
         ! *Add* the MEKE contribution
-        do concurrent (kk=1:kmax, J=js-1:Jeq, I=is-1:Ieq)
+        !$omp target update from(Ah)
+        do kk=1,kmax ; do J=js-1,Jeq ; do I=is-1,Ieq
           Ah(I,J,kk) = Ah(I,J,kk) + 0.25 * ( &
               (MEKE%Au(i,j) + MEKE%Au(i+1,j+1)) + (MEKE%Au(i+1,j) + MEKE%Au(i,j+1)) )
-        enddo
+        enddo ; enddo ; enddo
+        !$omp target update to(Ah)
       endif
 
       if (CS%Re_Ah > 0.0) then
@@ -1941,14 +1951,11 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
                                     - (vh(i,J-1,k)*G%IareaCv(i,J-1)/(h_v(i,J-1,kk)+h_neglect)))) )) ) )) )
       enddo ; endif
       if (find_FrictWork .and. allocated(MEKE%mom_src) .and. allocated(MEKE%GME_snk)) then
-        do concurrent (j=js:je)
-          do kk=1,kmax
-            do concurrent (i=is:ie) DO_LOCALITY(local(k))
-              k = kstart+kk-1
-              MEKE%GME_snk(i,j) = MEKE%GME_snk(i,j) + FrictWork_GME(i,j,k)
-            enddo
-          enddo
-        enddo
+        !$omp target update from(FrictWork_GME)
+        do kk=1,kmax ; do j=js,je ; do i=is,ie
+          k = kstart+kk-1
+          MEKE%GME_snk(i,j) = MEKE%GME_snk(i,j) + FrictWork_GME(i,j,k)
+        enddo ; enddo ; enddo
       endif
     endif
 
@@ -1964,60 +1971,51 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
     ! energy loss seen as a reduction in the (biharmonic) frictional source term.
     if (find_FrictWork .and. allocated(MEKE%mom_src)) then
       if (MEKE%backscatter_Ro_c /= 0.) then
-        do concurrent (j=js:je)
-          do kk=1,kmax
-            do concurrent (i=is:ie) DO_LOCALITY(local(k, FatH, Shear_mag_bc, RoScl, Sh_F_pow))
-              k = kstart + kk - 1
-              FatH = 0.25*( (abs(G%CoriolisBu(I-1,J-1)) + abs(G%CoriolisBu(I,J))) + &
-                            (abs(G%CoriolisBu(I-1,J)) + abs(G%CoriolisBu(I,J-1))) )
-              Shear_mag_bc = sqrt(sh_xx(i,j,kk) * sh_xx(i,j,kk) + &
-                0.25*(((sh_xy(I-1,J-1,kk)*sh_xy(I-1,J-1,kk)) + (sh_xy(I,J,kk)*sh_xy(I,J,kk))) + &
-                      ((sh_xy(I-1,J,kk)*sh_xy(I-1,J,kk)) + (sh_xy(I,J-1,kk)*sh_xy(I,J-1,kk)))))
-              if ((CS%answer_date > 20190101) .and. (CS%answer_date < 20241201)) then
-                FatH = (US%s_to_T*FatH)**MEKE%backscatter_Ro_pow ! f^n
-                ! Note the hard-coded dimensional constant in the following line that can not
-                ! be rescaled for dimensional consistency.
-                Shear_mag_bc = (((US%s_to_T * Shear_mag_bc)**MEKE%backscatter_Ro_pow) + 1.e-30) &
-                            * MEKE%backscatter_Ro_c ! c * D^n
-                ! The Rossby number function is g(Ro) = 1/(1+c.Ro^n)
-                ! RoScl = 1 - g(Ro)
-                RoScl = Shear_mag_bc / (FatH + Shear_mag_bc) ! = 1 - f^n/(f^n+c*D^n)
-              else
-                if (FatH <= backscat_subround*Shear_mag_bc) then
-                  RoScl = 1.0
-                else
-                  Sh_F_pow = MEKE%backscatter_Ro_c * (Shear_mag_bc / FatH)**MEKE%backscatter_Ro_pow
-                  RoScl = Sh_F_pow / (1.0 + Sh_F_pow) ! = 1 - f^n/(f^n+c*D^n)
-                endif
-              endif
+        !$omp target update from(FrictWork, FrictWork_bh, sh_xx, sh_xy)
+        do kk=1,kmax ; do j=js,je ; do i=is,ie
+          k = kstart + kk - 1
+          FatH = 0.25*( (abs(G%CoriolisBu(I-1,J-1)) + abs(G%CoriolisBu(I,J))) + &
+                        (abs(G%CoriolisBu(I-1,J)) + abs(G%CoriolisBu(I,J-1))) )
+          Shear_mag_bc = sqrt(sh_xx(i,j,kk) * sh_xx(i,j,kk) + &
+            0.25*(((sh_xy(I-1,J-1,kk)*sh_xy(I-1,J-1,kk)) + (sh_xy(I,J,kk)*sh_xy(I,J,kk))) + &
+                  ((sh_xy(I-1,J,kk)*sh_xy(I-1,J,kk)) + (sh_xy(I,J-1,kk)*sh_xy(I,J-1,kk)))))
+          if ((CS%answer_date > 20190101) .and. (CS%answer_date < 20241201)) then
+            FatH = (US%s_to_T*FatH)**MEKE%backscatter_Ro_pow ! f^n
+            ! Note the hard-coded dimensional constant in the following line that can not
+            ! be rescaled for dimensional consistency.
+            Shear_mag_bc = (((US%s_to_T * Shear_mag_bc)**MEKE%backscatter_Ro_pow) + 1.e-30) &
+                        * MEKE%backscatter_Ro_c ! c * D^n
+            ! The Rossby number function is g(Ro) = 1/(1+c.Ro^n)
+            ! RoScl = 1 - g(Ro)
+            RoScl = Shear_mag_bc / (FatH + Shear_mag_bc) ! = 1 - f^n/(f^n+c*D^n)
+          else
+            if (FatH <= backscat_subround*Shear_mag_bc) then
+              RoScl = 1.0
+            else
+              Sh_F_pow = MEKE%backscatter_Ro_c * (Shear_mag_bc / FatH)**MEKE%backscatter_Ro_pow
+              RoScl = Sh_F_pow / (1.0 + Sh_F_pow) ! = 1 - f^n/(f^n+c*D^n)
+            endif
+          endif
 
-              MEKE%mom_src(i,j) = MEKE%mom_src(i,j) + (FrictWork(i,j,k) - RoScl*FrictWork_bh(i,j,k))
+          MEKE%mom_src(i,j) = MEKE%mom_src(i,j) + (FrictWork(i,j,k) - RoScl*FrictWork_bh(i,j,k))
 
-              if (allocated(MEKE%mom_src_bh)) &
-                MEKE%mom_src_bh(i,j) = MEKE%mom_src_bh(i,j) &
-                    + (FrictWork_bh(i,j,k) - RoScl * FrictWork_bh(i,j,k))
-            enddo
-          enddo
-        enddo
+          if (allocated(MEKE%mom_src_bh)) &
+            MEKE%mom_src_bh(i,j) = MEKE%mom_src_bh(i,j) &
+                + (FrictWork_bh(i,j,k) - RoScl * FrictWork_bh(i,j,k))
+        enddo ; enddo ; enddo
       else
-        do concurrent (j=js:je)
-          do kk=1,kmax
-            do concurrent (i=is:ie) DO_LOCALITY(local(k))
-              k = kstart + kk - 1
-              MEKE%mom_src(i,j) = MEKE%mom_src(i,j) + FrictWork(i,j,k)
-            enddo
-          enddo
-        enddo
+        !$omp target update from(FrictWork)
+        do kk=1,kmax ; do j=js,je ; do i=is,ie
+          k = kstart + kk - 1
+          MEKE%mom_src(i,j) = MEKE%mom_src(i,j) + FrictWork(i,j,k)
+        enddo ; enddo ; enddo
 
         if (allocated(MEKE%mom_src_bh)) then
-          do concurrent (j=js:je)
-            do kk=1,kmax
-              do concurrent (i=is:ie) DO_LOCALITY(local(k))
-                k = kstart + kk - 1
-                MEKE%mom_src_bh(i,j) = MEKE%mom_src_bh(i,j) + FrictWork_bh(i,j,k)
-              enddo
-            enddo
-          enddo
+          !$omp target update from(FrictWork_bh)
+          do kk=1,kmax ; do j=js,je ; do i=is,ie
+            k = kstart + kk - 1
+            MEKE%mom_src_bh(i,j) = MEKE%mom_src_bh(i,j) + FrictWork_bh(i,j,k)
+          enddo ; enddo ; enddo
         endif
       endif ! MEKE%backscatter_Ro_c
 
@@ -2413,7 +2411,7 @@ subroutine hor_visc_backscatter_h(G, CS, MEKE, VarMix, use_kh_struct, nkblock, k
     str_xx_BS    ! The diagonal term in the stress tensor due to backscatter [H L2 T-2 ~> m3 s-2 or kg s-2]
   integer :: i, j, k, kk
 
-  do concurrent (kk=1:kmax, j=Jsq:Jeq+1, i=Isq:Ieq+1) DO_LOCALITY(local(k))
+  do kk=1,kmax ; do j=Jsq,Jeq+1 ; do i=Isq,Ieq+1
     k = kstart + kk - 1
     if (visc_limit_h_flag(i,j,k) > 0) then
       Kh_BS(i,j,kk) = 0.
@@ -2424,7 +2422,7 @@ subroutine hor_visc_backscatter_h(G, CS, MEKE, VarMix, use_kh_struct, nkblock, k
         Kh_BS(i,j,kk) = MEKE%Ku(i,j)
       endif
     endif
-  enddo
+  enddo ; enddo ; enddo
 
   do concurrent (kk=1:kmax, j=Jsq:Jeq+1, i=Isq:Ieq+1)
     str_xx_BS(i,j,kk) = -Kh_BS(i,j,kk) * sh_xx(i,j,kk)
@@ -2479,7 +2477,7 @@ subroutine hor_visc_backscatter_q(G, GV, CS, MEKE, VarMix, use_kh_struct, nkbloc
     str_xy_BS    ! The cross term in the stress tensor due to backscatter [H L2 T-2 ~> m3 s-2 or kg s-2]
   integer :: i, j, k, kk
 
-  do concurrent (kk=1:kmax, J=js-1:Jeq, I=is-1:Ieq) DO_LOCALITY(local(k))
+  do kk=1,kmax ; do J=js-1,Jeq ; do I=is-1,Ieq
     k = kstart + kk - 1
     if (visc_limit_q_flag(I,J,k) > 0) then
       Kh_BS(I,J,kk) = 0.
@@ -2494,7 +2492,7 @@ subroutine hor_visc_backscatter_q(G, GV, CS, MEKE, VarMix, use_kh_struct, nkbloc
                             (MEKE%Ku(i+1,j) + MEKE%Ku(i,j+1)) )
       endif
     endif
-  enddo
+  enddo ; enddo ; enddo
 
   do concurrent (kk=1:kmax, J=js-1:Jeq, I=is-1:Ieq)
     str_xy_BS(I,J,kk) = -Kh_BS(I,J,kk) * (sh_xy(I,J,kk))
