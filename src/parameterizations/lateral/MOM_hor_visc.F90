@@ -625,7 +625,7 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
   !$omp target enter data map(alloc: Del2u, Del2v) if (CS%biharmonic)
   !$omp target enter data map(alloc: dDel2vdx, dDel2udy) if (CS%biharmonic)
   !$omp target enter data map(alloc: Shear_mag) if (use_Smag)
-  !$omp target enter data map(alloc: Kh) if (CS%Laplacian)
+  !$omp target enter data map(alloc: Kh) if (CS%Laplacian .or. CS%biharmonic)
   !$omp target enter data map(alloc: Ah) if (CS%biharmonic)
   ! TODO: Only needed if FrictWork_bh is true, and currently only used on CPU,
   !   but I do not yet see any benefit to breaking up the calculation.
@@ -638,21 +638,9 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
   !$omp target enter data map(alloc: sh_xy_q) &
   !$omp   if (CS%id_sh_xy_q > 0)
 
-  !$omp target enter data map(alloc: BS_coeff_h, BS_coeff_q) &
-  !$omp   if (CS%EY24_EBT_BS)
-  !$omp target enter data map(alloc: vert_vort_mag, vert_vort_mag_smooth)
-  !$omp target enter data map(alloc: m_leithy)
-  !$omp target enter data map(alloc: dudx_smooth, dvdy_smooth, sh_xx_smooth, &
-  !$omp                              dvdx_smooth, dudy_smooth, sh_xy_smooth)
-  !$omp target enter data map(alloc: vort_xy, vort_xy_smooth)
-  !$omp target enter data map(alloc: grad_vort_mag_h, grad_vort_mag_h_2d, grad_div_mag_h, &
-  !$omp                              grad_vort_mag_q, grad_vort_mag_q_2d, grad_div_mag_q, Del2vort_q) &
-  !$omp   if ((CS%Leith_Kh) .or. (CS%Leith_Ah))
-  !$omp target enter data map(alloc: slope_x, slope_y) &
-  !$omp   if (CS%use_QG_Leith_visc .and. ((CS%Leith_Kh) .or. (CS%Leith_Ah)))
-  !$omp target enter data map(alloc: dz) &
-  !$omp   if (CS%use_QG_Leith_visc .and. ((CS%Leith_Kh) .or. (CS%Leith_Ah)))
-  !$omp target enter data map(alloc: u_smooth, v_smooth) if (CS%use_Leithy)
+  !$omp target enter data map(alloc: vert_vort_mag)
+  !$omp target enter data map(alloc: sh_xx_smooth) if (CS%use_Leithy .or. CS%biharmonic)
+  !!$omp target enter data map(alloc: CS%use_Leithy)
 
   do kstart=1,nz,nkblock
     kend = min(kstart+nkblock-1,nz)
@@ -2028,7 +2016,7 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
   !$omp target exit data map(delete: Del2u, Del2v) if (CS%biharmonic)
   !$omp target exit data map(delete: dDel2vdx, dDel2udy) if (CS%biharmonic)
   !$omp target exit data map(delete: Shear_mag) if (use_Smag)
-  !$omp target exit data map(delete: Kh) if (CS%Laplacian)
+  !$omp target exit data map(delete: Kh) if (CS%Laplacian .or. CS%biharmonic)
   !$omp target exit data map(delete: Ah) if (CS%biharmonic)
   !$omp target exit data map(delete: bhstr_xx, bhstr_xy) if (CS%biharmonic)
 
@@ -2037,27 +2025,8 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
   !$omp target exit data map(delete: visc_bound_rem) &
   !$omp   if (CS%bound_Kh .or. CS%bound_Ah)
 
-  !$omp target exit data map(delete: BS_coeff_h, BS_coeff_q) &
-  !$omp   if (CS%EY24_EBT_BS)
-  !$omp target exit data map(delete: vert_vort_mag, vert_vort_mag_smooth)
-  !$omp target exit data map(delete: m_leithy)
-  !$omp target exit data map(delete: dudx_smooth, dvdy_smooth, sh_xx_smooth, &
-  !$omp                              dvdx_smooth, dudy_smooth, sh_xy_smooth)
-  !$omp target exit data map(delete: vort_xy, vort_xy_smooth)
-  !$omp target exit data map(delete: grad_vort_mag_h, grad_vort_mag_h_2d, grad_div_mag_h, &
-  !$omp                              grad_vort_mag_q, grad_vort_mag_q_2d, grad_div_mag_q, Del2vort_q) &
-  !$omp   if ((CS%Leith_Kh) .or. (CS%Leith_Ah))
-  !$omp target exit data map(delete: slope_x, slope_y) &
-  !$omp   if (CS%use_QG_Leith_visc .and. ((CS%Leith_Kh) .or. (CS%Leith_Ah)))
-  !$omp target exit data map(delete: dz) &
-  !$omp   if (CS%use_QG_Leith_visc .and. ((CS%Leith_Kh) .or. (CS%Leith_Ah)))
-  !$omp target exit data map(delete: u_smooth, v_smooth) if (CS%use_Leithy)
-
-  !$omp target exit data map(delete: sh_xx_bt, sh_xy_bt, GME_effic_h, GME_effic_q, KH_u_GME, KH_v_GME) &
-  !$omp   if (CS%use_GME)
-  !$omp target exit data map(delete: str_xx_GME, str_xy_GME) if (CS%use_GME)
-  ! GME_coeff_h/q are only diagnostic outputs beyond this point, so bring them back to the host.
-  !$omp target exit data map(from: GME_coeff_h, GME_coeff_q) if (CS%use_GME)
+  !$omp target exit data map(delete: vert_vort_mag)
+  !$omp target exit data map(delete: sh_xx_smooth) if (CS%use_Leithy .or. CS%biharmonic)
 
   ! Offer fields for diagnostic averaging.
   if (CS%id_normstress > 0) call post_data(CS%id_normstress, NoSt, CS%diag)
