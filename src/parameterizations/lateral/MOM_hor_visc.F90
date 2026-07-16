@@ -561,7 +561,7 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
   endif
 
   if (CS%use_GME) then
-    call hor_visc_GME_setup(G, GV, US, CS, h, BT, TD, &
+    call hor_visc_GME_setup(G, GV, US, CS, h, BT, TD, nkblock, &
                              dudx_bt, dvdy_bt, dvdx_bt, dudy_bt, sh_xx_bt, sh_xy_bt, &
                              GME_effic_h, GME_effic_q, KH_u_GME, KH_v_GME, &
                              GME_coeff_h, GME_coeff_q, str_xx_GME, str_xy_GME)
@@ -2600,7 +2600,7 @@ end function hor_visc_nkblock
 !! efficiency and isopycnal height diffusivity fields that are used within
 !! horizontal_viscosity when GME (CS%use_GME) is active. The caller must
 !! only invoke this routine when CS%use_GME is true.
-subroutine hor_visc_GME_setup(G, GV, US, CS, h, BT, TD, &
+subroutine hor_visc_GME_setup(G, GV, US, CS, h, BT, TD, nkblock, &
                                dudx_bt, dvdy_bt, dvdx_bt, dudy_bt, sh_xx_bt, sh_xy_bt, &
                                GME_effic_h, GME_effic_q, KH_u_GME, KH_v_GME, &
                                GME_coeff_h, GME_coeff_q, str_xx_GME, str_xy_GME)
@@ -2612,6 +2612,7 @@ subroutine hor_visc_GME_setup(G, GV, US, CS, h, BT, TD, &
                                   intent(inout) :: h      !< Layer thicknesses [H ~> m or kg m-2].
   type(barotropic_CS),           optional, intent(in) :: BT !< Barotropic control structure
   type(thickness_diffuse_CS),    optional, intent(in) :: TD !< Thickness diffusion control structure
+  integer,                       intent(in)    :: nkblock !< The k-block size used to size the following arrays [nondim]
   real, dimension(SZI_(G),SZJB_(G)), &
                                   intent(out)   :: dudx_bt !< x-component in the barotropic
                                                        !! horizontal tension [T-1 ~> s-1]
@@ -2647,10 +2648,10 @@ subroutine hor_visc_GME_setup(G, GV, US, CS, h, BT, TD, &
                                                        !! [L2 T-1 ~> m2 s-1]
   real, dimension(SZIB_(G),SZJB_(G),SZK_(GV)), &
                                   intent(out)   :: GME_coeff_q !< GME coeff. at q-points [L2 T-1 ~> m2 s-1]
-  real, dimension(SZI_(G),SZJ_(G),merge(GV%ke,CS%nkblock,CS%nkblock==0)), &
+  real, dimension(SZI_(G),SZJ_(G),nkblock), &
                                   intent(out)   :: str_xx_GME !< Smoothed diagonal term in the
                                                        !! stress tensor from GME [L2 T-2 ~> m2 s-2]
-  real, dimension(SZIB_(G),SZJB_(G),merge(GV%ke,CS%nkblock,CS%nkblock==0)), &
+  real, dimension(SZIB_(G),SZJB_(G),nkblock), &
                                   intent(out)   :: str_xy_GME !< Smoothed cross term in the
                                                        !! stress tensor from GME [L2 T-2 ~> m2 s-2]
   ! Local variables
