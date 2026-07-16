@@ -617,7 +617,7 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
 
   !$omp target enter data map(alloc: dudx, dudy, dvdx, dvdy, sh_xx, sh_xy)
   !$omp target enter data map(alloc: h_u, h_v, hq)
-  !$omp target enter data map(alloc: str_xx, str_xy)
+  !$omp target enter data map(alloc: str_xx, str_xy, ShSt)
   !$omp target enter data map(alloc: Del2u, Del2v) if (CS%biharmonic)
   !$omp target enter data map(alloc: dDel2vdx, dDel2udy) if (CS%biharmonic)
   !$omp target enter data map(alloc: Shear_mag) if (use_Smag)
@@ -636,13 +636,11 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
 
   !$omp target enter data map(alloc: BS_coeff_h, BS_coeff_q) &
   !$omp   if (CS%EY24_EBT_BS)
-  !$omp target enter data map(alloc: vert_vort_mag, vert_vort_mag_smooth) &
-  !$omp   if ((CS%Leith_Kh) .or. (CS%Leith_Ah) .or. (CS%use_Leithy) .or. (CS%id_vort_xy_q>0) .or. CS%use_ZB2020)
-  !$omp target enter data map(alloc: m_leithy) if (CS%use_Leithy)
+  !$omp target enter data map(alloc: vert_vort_mag, vert_vort_mag_smooth)
+  !$omp target enter data map(alloc: m_leithy)
   !$omp target enter data map(alloc: dudx_smooth, dvdy_smooth, sh_xx_smooth, &
-  !$omp                              dvdx_smooth, dudy_smooth, sh_xy_smooth) if (CS%use_Leithy)
-  !$omp target enter data map(alloc: vort_xy, vort_xy_smooth) &
-  !$omp   if ((CS%Leith_Kh) .or. (CS%Leith_Ah) .or. (CS%use_Leithy) .or. (CS%id_vort_xy_q>0) .or. CS%use_ZB2020)
+  !$omp                              dvdx_smooth, dudy_smooth, sh_xy_smooth)
+  !$omp target enter data map(alloc: vort_xy, vort_xy_smooth)
   !$omp target enter data map(alloc: grad_vort_mag_h, grad_vort_mag_h_2d, grad_div_mag_h, &
   !$omp                              grad_vort_mag_q, grad_vort_mag_q_2d, grad_div_mag_q, Del2vort_q) &
   !$omp   if ((CS%Leith_Kh) .or. (CS%Leith_Ah))
@@ -2028,7 +2026,7 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
 
   !$omp target exit data map(delete: dudx, dudy, dvdx, dvdy, sh_xx, sh_xy)
   !$omp target exit data map(delete: h_u, h_v, hq)
-  !$omp target exit data map(delete: str_xx, str_xy)
+  !$omp target exit data map(delete: str_xx, str_xy, ShSt)
   !$omp target exit data map(delete: Del2u, Del2v) if (CS%biharmonic)
   !$omp target exit data map(delete: dDel2vdx, dDel2udy) if (CS%biharmonic)
   !$omp target exit data map(delete: Shear_mag) if (use_Smag)
@@ -2043,13 +2041,11 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
 
   !$omp target exit data map(delete: BS_coeff_h, BS_coeff_q) &
   !$omp   if (CS%EY24_EBT_BS)
-  !$omp target exit data map(delete: vert_vort_mag, vert_vort_mag_smooth) &
-  !$omp   if ((CS%Leith_Kh) .or. (CS%Leith_Ah) .or. (CS%use_Leithy) .or. (CS%id_vort_xy_q>0) .or. CS%use_ZB2020)
-  !$omp target exit data map(delete: m_leithy) if (CS%use_Leithy)
+  !$omp target exit data map(delete: vert_vort_mag, vert_vort_mag_smooth)
+  !$omp target exit data map(delete: m_leithy)
   !$omp target exit data map(delete: dudx_smooth, dvdy_smooth, sh_xx_smooth, &
-  !$omp                              dvdx_smooth, dudy_smooth, sh_xy_smooth) if (CS%use_Leithy)
-  !$omp target exit data map(delete: vort_xy, vort_xy_smooth) &
-  !$omp   if ((CS%Leith_Kh) .or. (CS%Leith_Ah) .or. (CS%use_Leithy) .or. (CS%id_vort_xy_q>0) .or. CS%use_ZB2020)
+  !$omp                              dvdx_smooth, dudy_smooth, sh_xy_smooth)
+  !$omp target exit data map(delete: vort_xy, vort_xy_smooth)
   !$omp target exit data map(delete: grad_vort_mag_h, grad_vort_mag_h_2d, grad_div_mag_h, &
   !$omp                              grad_vort_mag_q, grad_vort_mag_q_2d, grad_div_mag_q, Del2vort_q) &
   !$omp   if ((CS%Leith_Kh) .or. (CS%Leith_Ah))
@@ -2067,6 +2063,7 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
 
   ! Offer fields for diagnostic averaging.
   if (CS%id_normstress > 0) call post_data(CS%id_normstress, NoSt, CS%diag)
+  !$omp target update from(ShSt) if (CS%id_shearstress > 0)
   if (CS%id_shearstress > 0) call post_data(CS%id_shearstress, ShSt, CS%diag)
   if (CS%id_diffu>0)     call post_data(CS%id_diffu, diffu, CS%diag)
   if (CS%id_diffv>0)     call post_data(CS%id_diffv, diffv, CS%diag)
