@@ -848,7 +848,11 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV
 
   if (use_EOS) then
     halo = 1 ! Default halo to fill is 1
+    !$omp target enter data map(to: h, tv%T, tv%S)
+    !$omp target enter data map(alloc: T, S)
     call vert_fill_TS(h, tv%T, tv%S, CS%kappa_smooth*dt, T, S, G, GV, US, halo, larger_h_denom=.true.)
+    !$omp target exit data map(from: T, S)
+    !$omp target exit data map(release: h, tv%T, tv%S)
   endif
 
   ! Rescale the thicknesses, perhaps using the specific volume.

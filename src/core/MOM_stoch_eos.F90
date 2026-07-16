@@ -224,7 +224,11 @@ subroutine MOM_calc_varT(G, GV, US, h, tv, CS, dt)
   ! extreme gradients along layers which are vanished against topography. It is
   ! still a poor approximation in the interior when coordinates are strongly tilted.
   if (.not. associated(tv%varT)) allocate(tv%varT(G%isd:G%ied, G%jsd:G%jed, GV%ke), source=0.0)
+  !$omp target enter data map(to: h, tv%T, tv%S)
+  !$omp target enter data map(alloc: T, S)
   call vert_fill_TS(h, tv%T, tv%S, CS%kappa_smooth*dt, T, S, G, GV, US, halo_here=1, larger_h_denom=.true.)
+  !$omp target exit data map(from: T, S)
+  !$omp target exit data map(release: h, tv%T, tv%S)
 
   do k=1,G%ke
     do j=G%jsc,G%jec

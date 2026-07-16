@@ -18,6 +18,7 @@ use MOM_open_boundary, only : OBC_DIRECTION_E, OBC_DIRECTION_W, OBC_DIRECTION_N,
 implicit none ; private
 
 #include <MOM_memory.h>
+#include "do_concurrent_compat.h"
 
 public calc_isoneutral_slopes, vert_fill_TS
 
@@ -31,7 +32,11 @@ contains
 !> Calculate isopycnal slopes, and optionally return other stratification dependent functions such as N^2
 !! and dz*S^2*g-prime used, or calculable from factors used, during the calculation.
 subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stanley, slope_x, slope_y, &
-                                  N2_u, N2_v, dzu, dzv, dzSxN, dzSyN, halo, OBC, OBC_N2)
+                                  niblock, njblock, nkblock, N2_u, N2_v, dzu, dzv, dzSxN, dzSyN, halo, &
+                                  OBC, OBC_N2)
+  integer,                                     intent(in)    :: niblock !< Blocksize in i direction
+  integer,                                     intent(in)    :: njblock !< Blocksize in j direction
+  integer,                                     intent(in)    :: nkblock !< Blocksize in k direction
   type(ocean_grid_type),                       intent(in)    :: G    !< The ocean's grid structure
   type(verticalGrid_type),                     intent(in)    :: GV   !< The ocean's vertical grid structure
   type(unit_scale_type),                       intent(in)    :: US   !< A dimensional unit scaling type
@@ -75,37 +80,18 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
                   ! in massless layers filled vertically by diffusion.
   real, dimension(SZI_(G), SZJ_(G),SZK_(GV)+1) :: &
     pres          ! The pressure at an interface [R L2 T-2 ~> Pa].
-  real, dimension(SZI_(G)) :: scrap ! An array to pass to calculate_density_second_derivs() that is
-                  ! set there but will be ignored, it is used simultaneously with four different
-                  ! inconsistent units of [R S-1 C-1 ~> kg m-3 degC-1 ppt-1], [R S-2 ~> kg m-3 ppt-2],
-                  ! [T2 S-1 L-2 ~> kg m-3 ppt-1 Pa-1] and [T2 C-1 L-2 ~> kg m-3 degC-1 Pa-1].
-  real, dimension(SZIB_(G)) :: &
-    drho_dT_u, &  ! The derivative of density with temperature at u points [R C-1 ~> kg m-3 degC-1].
-    drho_dS_u     ! The derivative of density with salinity at u points [R S-1 ~> kg m-3 ppt-1].
-  real, dimension(SZI_(G)) :: &
-    drho_dT_v, &  ! The derivative of density with temperature at v points [R C-1 ~> kg m-3 degC-1].
-    drho_dS_v, &  ! The derivative of density with salinity at v points [R S-1 ~> kg m-3 ppt-1].
+
+  ! Blocked work arrays.
+  real, dimension(niblock, njblock, nkblock) :: &
+    drho_dT, &      ! The derivative of density with temperature [R C-1 ~> kg m-3 degC-1].
+    drho_dS, &      ! The derivative of density with salinity [R S-1 ~> kg m-3 ppt-1].
     drho_dT_dT_h, & ! The second derivative of density with temperature at h points [R C-2 ~> kg m-3 degC-2]
-    drho_dT_dT_hr ! The second derivative of density with temperature at h (+1) points [R C-2 ~> kg m-3 degC-2]
-  real, dimension(SZIB_(G)) :: &
-    T_u, &        ! Temperature on the interface at the u-point [C ~> degC].
-    S_u, &        ! Salinity on the interface at the u-point [S ~> ppt].
-    GxSpV_u, &    ! Gravitiational acceleration times the specific volume at an interface
-                  ! at the u-points [L2 Z-1 T-2 R-1 ~> m4 s-2 kg-1]
-    pres_u        ! Pressure on the interface at the u-point [R L2 T-2 ~> Pa].
-  real, dimension(SZI_(G)) :: &
-    T_v, &        ! Temperature on the interface at the v-point [C ~> degC].
-    S_v, &        ! Salinity on the interface at the v-point [S ~> ppt].
-    GxSpV_v, &    ! Gravitiational acceleration times the specific volume at an interface
-                  ! at the v-points [L2 Z-1 T-2 R-1 ~> m4 s-2 kg-1]
-    pres_v        ! Pressure on the interface at the v-point [R L2 T-2 ~> Pa].
-  real, dimension(SZI_(G)) :: &
-    T_h, &        ! Temperature on the interface at the h-point [C ~> degC].
-    S_h, &        ! Salinity on the interface at the h-point [S ~> ppt]
-    pres_h, &     ! Pressure on the interface at the h-point [R L2 T-2 ~> Pa].
-    T_hr, &       ! Temperature on the interface at the h (+1) point [C ~> degC].
-    S_hr, &       ! Salinity on the interface at the h (+1) point [S ~> ppt]
-    pres_hr       ! Pressure on the interface at the h (+1) point [R L2 T-2 ~> Pa].
+    T_uvh, &        ! Temperature at the u, v or h-points for derivative calculations [C ~> degC].
+    S_uvh, &        ! Salinity at the u, v or h-points for derivative calculations [S ~> ppt].
+    GxSpV_uvh, &    ! g * specific volume at u/v-point interfaces [L2 Z-1 T-2 R-1 ~> m4 s-2 kg-1]
+    pres_uvh        ! Pressure at the u, v or h-points [R L2 T-2 ~> Pa].
+  real, dimension(niblock) :: scrap ! Ignored output from calculate_density_second_derivs()
+
   real :: drdiA, drdiB  ! Along layer zonal potential density  gradients in the layers above (A)
                         ! and below (B) the interface times the grid spacing [R ~> kg m-3].
   real :: drdjA, drdjB  ! Along layer meridional potential density  gradients in the layers above (A)
@@ -134,27 +120,34 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
   logical :: local_open_u_BC, local_open_v_BC ! True if u- or v-face OBCs exist anywhere in the global domain.
   logical :: OBC_friendly  ! If true, open boundary conditions are in use and only interior data should
                         ! be used to calculate N2 at OBC faces.
-  integer, dimension(2) :: EOSdom_u  ! The shifted I-computational domain to use for equation of
-                                     ! state calculations at u-points.
-  integer, dimension(2) :: EOSdom_v  ! The shifted i-computational domain to use for equation of
-                                     ! state calculations at v-points.
-  integer, dimension(2) :: EOSdom_h1 ! The shifted i-computational domain to use for equation of
-                                     ! state calculations at h points with 1 extra halo point
+  integer, dimension(3,2) :: EOSdom_block    !< 1-based EOS domain for the current block [nondim].
+  integer, dimension(2)   :: EOSdom_block_h1 !< 1-based EOS domain for h-point fills (one extra column) [nondim].
   integer :: is, ie, js, je, nz, IsdB
   integer :: i, j, k
+  integer :: istart, iend !< First and last global i (or I) indices of the current block.
+  integer :: jstart, jend !< First and last global j (or J) indices of the current block.
+  integer :: kstart, kend !< First and last global K (or K) indices of the current block.
+  integer :: ii, jj, kk   !< Block-local 1-based i, j, and k indices.
+  integer :: delta_i, delta_j
+  integer :: ie_read, je_read        !< Read-only extent of the h-point block used to supply the
+                                     !! ii+1 (or jj+1) access needed by the Stanley stencil; equal
+                                     !! to ie (or je) plus one column/row when use_stanley is true,
+                                     !! and otherwise equal to ie (or je).
+  integer :: iend_stanley, jend_stanley    !< Last i (or j) index filled into the Stanley h-point block,
+                                     !! as opposed to iend/jend, which bound what is actually written
+                                     !! to the output arrays this block.
+
+  ! Allocate locals on device
+  !$omp target enter data map(alloc: T, S, pres, T_uvh, S_uvh, pres_uvh, GxSpV_uvh, &
+  !$omp & scrap, drho_dT, drho_dS, drho_dT_dT_h)
 
   if (present(halo)) then
     is = G%isc-halo ; ie = G%iec+halo ; js = G%jsc-halo ; je = G%jec+halo
-    EOSdom_h1(:) = EOS_domain(G%HI, halo=halo+1)
   else
     is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec
-    EOSdom_h1(:) = EOS_domain(G%HI, halo=1)
   endif
-  EOSdom_u(1) = is-1 - (G%IsdB-1) ; EOSdom_u(2) = ie - (G%IsdB-1)
-  EOSdom_v(:) = EOS_domain(G%HI, halo=halo)
 
   nz = GV%ke ; IsdB = G%IsdB
-
 
   h_neglect = GV%H_subroundoff ; h_neglect2 = h_neglect**2
   dz_neglect = GV%dZ_subroundoff
@@ -174,40 +167,40 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
   present_N2_v = PRESENT(N2_v)
   G_Rho0 = GV%g_Earth / GV%Rho0
   if (present_N2_u) then
-    do j=js,je ; do I=is-1,ie
+    do concurrent (j=js:je, I=is-1:ie)
       N2_u(I,j,1) = 0.
       N2_u(I,j,nz+1) = 0.
-    enddo ; enddo
+    enddo
   endif
   if (present_N2_v) then
-    do J=js-1,je ; do i=is,ie
+    do concurrent (J=js-1:je, i=is:ie)
       N2_v(i,J,1) = 0.
       N2_v(i,J,nz+1) = 0.
-    enddo ; enddo
+    enddo
   endif
   if (present(dzu)) then
-    do j=js,je ; do I=is-1,ie
+    do concurrent (j=js:je, I=is-1:ie)
       dzu(I,j,1) = 0.
       dzu(I,j,nz+1) = 0.
-    enddo ; enddo
+    enddo
   endif
   if (present(dzv)) then
-    do J=js-1,je ; do i=is,ie
+    do concurrent (J=js-1:je, i=is:ie)
       dzv(i,J,1) = 0.
       dzv(i,J,nz+1) = 0.
-    enddo ; enddo
+    enddo
   endif
   if (present(dzSxN)) then
-    do j=js,je ; do I=is-1,ie
+    do concurrent (j=js:je, I=is-1:ie)
       dzSxN(I,j,1) = 0.
       dzSxN(I,j,nz+1) = 0.
-    enddo ; enddo
+    enddo
   endif
   if (present(dzSyN)) then
-    do J=js-1,je ; do i=is,ie
+    do concurrent (J=js-1:je, i=is:ie)
       dzSyN(i,J,1) = 0.
       dzSyN(i,J,nz+1) = 0.
-    enddo ; enddo
+    enddo
   endif
 
   if (use_EOS) then
@@ -231,115 +224,176 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
 
   ! Find the maximum and minimum permitted streamfunction.
   if (associated(tv%p_surf)) then
-    !$OMP parallel do default(shared)
-    do j=js-1,je+1 ; do i=is-1,ie+1
+    do concurrent (j=js-1:je+1, i=is-1:ie+1)
       pres(i,j,1) = tv%p_surf(i,j)
-    enddo ; enddo
+    enddo
   else
-    !$OMP parallel do default(shared)
-    do j=js-1,je+1 ; do i=is-1,ie+1
+    do concurrent (j=js-1:je+1, i=is-1:ie+1)
       pres(i,j,1) = 0.0
-    enddo ; enddo
+    enddo
   endif
-  !$OMP parallel do default(shared)
-  do j=js-1,je+1
-    do k=1,nz ; do i=is-1,ie+1
-      pres(i,j,K+1) = pres(i,j,K) + GV%g_Earth * GV%H_to_RZ * h(i,j,k)
-    enddo ; enddo
+
+  do concurrent (j=js-1:je+1)
+    do k=1,nz
+      do concurrent (i=is-1:ie+1)
+        pres(i,j,K+1) = pres(i,j,K) + GV%g_Earth * GV%H_to_RZ * h(i,j,k)
+      enddo
+    enddo
   enddo
 
-  do I=is-1,ie
-    GxSpV_u(I) = G_Rho0  ! This will be changed if both use_EOS and allocated(tv%SpV_avg) are true
+  do concurrent(kk=1:nkblock, jj=1:njblock, ii=1:niblock)
+    GxSpV_uvh(ii,jj,kk) = G_Rho0 ! This will be changed if both use_EOS and allocated(tv%SpV_avg) are true
   enddo
-  !$OMP parallel do default(none) shared(nz,is,ie,js,je,IsdB,use_EOS,G,GV,US,pres,T,S,tv,h,e, &
-  !$OMP                                  h_neglect,dz_neglect,h_neglect2, &
-  !$OMP                                  present_N2_u,G_Rho0,N2_u,slope_x,dzSxN,EOSdom_u,EOSdom_h1, &
-  !$OMP                                  local_open_u_BC,dzu,OBC,use_stanley,OBC_friendly) &
-  !$OMP                          private(drdiA,drdiB,drdkL,drdkR,pres_u,T_u,S_u,      &
-  !$OMP                                  drho_dT_u,drho_dS_u,hg2A,hg2B,hg2L,hg2R,haA, &
-  !$OMP                                  drho_dT_dT_h,scrap,pres_h,T_h,S_h, &
-  !$OMP                                  haB,haL,haR,dzaL,dzaR,wtA,wtB,wtL,wtR,drdz,  &
-  !$OMP                                  drdx,mag_grad2,slope) &
-  !$OMP                          firstprivate(GxSpV_u)
-  do j=js,je ; do K=nz,2,-1
-    if (.not.(use_EOS)) then
-      drdiA = 0.0 ; drdiB = 0.0
-      drdkL = GV%Rlay(k)-GV%Rlay(k-1) ; drdkR = GV%Rlay(k)-GV%Rlay(k-1)
-    endif
 
-    ! Calculate the zonal isopycnal slope.
+  ! Stanley param needs access to h-point element ii+1, so when using stanley param,
+  ! iterate in chunks of size block - 1 but read chunks of size block to ensure blocks
+  ! always included needed elements. Allow access to element ie+1 so element ie is filled
+  ! Block sizes are validated to be > 0 and not equal to 1 if use_stanley at initialization
+  if (use_stanley) then
+    delta_i = niblock - 1
+    ie_read = ie + 1
+  else
+    delta_i = niblock
+    ie_read = ie
+  endif
+
+  ! Calculate the zonal isopycnal slope.
+  do kstart=2,nz,nkblock ; do jstart=js,je,njblock ; do istart=is-1,ie,delta_i
+    iend = min(istart + delta_i - 1, ie)
+    iend_stanley = min(istart + niblock - 1, ie_read)
+    jend = min(jstart + njblock - 1, je)
+    kend = min(kstart + nkblock - 1, nz)
+    EOSdom_block(1,1) = 1 ; EOSdom_block(1,2) = iend - istart + 1
+    EOSdom_block(2,1) = 1 ; EOSdom_block(2,2) = jend - jstart + 1
+    EOSdom_block(3,1) = 1 ; EOSdom_block(3,2) = kend - kstart + 1
+
     if (use_EOS) then
-      do I=is-1,ie
-        pres_u(I) = 0.5*(pres(i,j,K) + pres(i+1,j,K))
-        T_u(I) = 0.25*((T(i,j,k) + T(i+1,j,k)) + (T(i,j,k-1) + T(i+1,j,k-1)))
-        S_u(I) = 0.25*((S(i,j,k) + S(i+1,j,k)) + (S(i,j,k-1) + S(i+1,j,k-1)))
+      ! Fill block T_uvh/S_uvh/pres_uvh at u-points
+      do concurrent(kk=1:kend-kstart+1, jj=1:jend-jstart+1, ii=1:iend-istart+1) &
+          DO_LOCALITY(local(i,j,k))
+        i = istart + ii - 1
+        j = jstart + jj - 1
+        k = kstart + kk - 1
+        pres_uvh(ii,jj,kk) = 0.5*(pres(i,j,K) + pres(i+1,j,K))
+        T_uvh(ii,jj,kk) = 0.25*((T(i,j,k) + T(i+1,j,k)) + (T(i,j,k-1) + T(i+1,j,k-1)))
+        S_uvh(ii,jj,kk) = 0.25*((S(i,j,k) + S(i+1,j,k)) + (S(i,j,k-1) + S(i+1,j,k-1)))
       enddo
+
       if (OBC_friendly) then
-        if (OBC%u_E_OBCs_on_PE .and. (j>=OBC%js_u_E_obc) .and. (j<=OBC%je_u_E_obc)) then
-          do I = max(is-1, OBC%Is_u_E_obc), min(ie, OBC%Ie_u_E_obc)
-            if (OBC%segnum_u(I,j) > 0) then !  OBC_DIRECTION_E
-              pres_u(I) = pres(i,j,K)
-              T_u(I) = 0.5*(T(i,j,k) + T(i,j,k-1))
-              S_u(I) = 0.5*(S(i,j,k) + S(i,j,k-1))
-            endif
+        !$omp target update from(T_uvh, S_uvh, pres_uvh)
+
+        if (OBC%u_E_OBCs_on_PE) then
+          do k = kstart,kend
+            kk = k - kstart + 1
+            do j = max(jstart, OBC%js_u_E_obc), min(jend, OBC%je_u_E_obc)
+              jj = j - jstart + 1
+              do i = max(istart, OBC%Is_u_E_obc), min(iend, OBC%Ie_u_E_obc)
+                ii = i - istart + 1
+                if (OBC%segnum_u(i,j) > 0) then ! OBC_DIRECTION_E
+                  pres_uvh(ii,jj,kk) = pres(i,j,k)
+                  T_uvh(ii,jj,kk) = 0.5*(T(i,j,k) + T(i,j,k-1))
+                  S_uvh(ii,jj,kk) = 0.5*(S(i,j,k) + S(i,j,k-1))
+                endif
+              enddo
+            enddo
           enddo
         endif
-        if (OBC%u_W_OBCs_on_PE .and. (j>=OBC%js_u_W_obc) .and. (j<=OBC%je_u_W_obc)) then
-          do I = max(is-1, OBC%Is_u_W_obc), min(ie, OBC%Ie_u_W_obc)
-            if (OBC%segnum_u(I,j) < 0) then !  OBC_DIRECTION_W
-              pres_u(I) = pres(i+1,j,K)
-              T_u(I) = 0.5*(T(i+1,j,k) + T(i+1,j,k-1))
-              S_u(I) = 0.5*(S(i+1,j,k) + S(i+1,j,k-1))
-            endif
+        if (OBC%u_W_OBCs_on_PE) then
+          do k = kstart, kend
+            kk = k - kstart + 1
+            do j = max(jstart, OBC%js_u_W_obc), min(jend, OBC%je_u_W_obc)
+              jj = j - jstart + 1
+              do i = max(istart, OBC%Is_u_W_obc), min(iend, OBC%Ie_u_W_obc)
+                ii = i - istart + 1
+                if (OBC%segnum_u(i,j) < 0) then ! OBC_DIRECTION_W
+                  pres_uvh(ii,jj,kk) = pres(i+1,j,k)
+                  T_uvh(ii,jj,kk) = 0.5*(T(i+1,j,k) + T(i+1,j,k-1))
+                  S_uvh(ii,jj,kk) = 0.5*(S(i+1,j,k) + S(i+1,j,k-1))
+                endif
+              enddo
+            enddo
           enddo
         endif
+
+        !$omp target update to(T_uvh, S_uvh, pres_uvh)
       endif
-      call calculate_density_derivs(T_u, S_u, pres_u, drho_dT_u, drho_dS_u, &
-                                    tv%eqn_of_state, EOSdom_u)
-      if (present_N2_u .or. (present(dzSxN))) then
+
+      ! Pre-fill GxSpV at u-points: four-cell SpV average over the u-face and the two
+      ! adjacent layers. Individual OBC faces may override this inside the slope loop.
+      if (present_N2_u .or. present(dzSxN)) then
         if (allocated(tv%SpV_avg)) then
-          do I=is-1,ie
-            GxSpV_u(I) = GV%g_Earth *  0.25* ((tv%SpV_avg(i,j,k) + tv%SpV_avg(i+1,j,k)) + &
-                                              (tv%SpV_avg(i,j,k-1) + tv%SpV_avg(i+1,j,k-1)))
+          do concurrent(kk=1:kend-kstart+1, jj=1:jend-jstart+1, II=1:iend-istart+1) &
+              DO_LOCALITY(local(I,j,k))
+            I = istart + II - 1
+            j = jstart + jj - 1
+            k = kstart + kk - 1
+            GxSpV_uvh(II,jj,kk) = GV%g_Earth * 0.25 * ((tv%SpV_avg(I,j,k) + tv%SpV_avg(I+1,j,k)) + &
+                                                        (tv%SpV_avg(I,j,k-1) + tv%SpV_avg(I+1,j,k-1)))
           enddo
         endif
       endif
-    endif
 
-    if (use_stanley) then
-      do i=is-1,ie+1
-        pres_h(i) = pres(i,j,K)
-        T_h(i) = 0.5*(T(i,j,k) + T(i,j,k-1))
-        S_h(i) = 0.5*(S(i,j,k) + S(i,j,k-1))
-      enddo
-      ! The second line below would correspond to arguments
-      !            drho_dS_dS, drho_dS_dT, drho_dT_dT, drho_dS_dP, drho_dT_dP, &
-      call calculate_density_second_derivs(T_h, S_h, pres_h, &
-                   scrap, scrap, drho_dT_dT_h, scrap, scrap, &
-                   tv%eqn_of_state, dom=EOSdom_h1)
-    endif
+      call calculate_density_derivs(T_uvh, S_uvh, pres_uvh, &
+                                    drho_dT, drho_dS, &
+                                    tv%eqn_of_state, EOSdom_block)
 
-    do I=is-1,ie
+      if (use_stanley) then
+        ! Reset T_uvh/S_uvh/pres_uvh at h-points for the Stanley second-derivative calculation.
+        ! This loop fills all niblock elements of the _uvh arrays and can access index ie+1 of T
+        ! and S to ensure there always exists an ii+1 element for the compute loop below.
+        EOSdom_block_h1(1) = 1 ; EOSdom_block_h1(2) = iend_stanley - istart + 1
+        do concurrent(kk=1:kend-kstart+1, jj=1:jend-jstart+1, ii=1:iend_stanley-istart+1) &
+            DO_LOCALITY(local(i,j,k))
+          i = istart + ii - 1
+          j = jstart + jj - 1
+          k = kstart + kk - 1
+          pres_uvh(ii,jj,KK) = pres(i,j,K)
+          T_uvh(ii,jj,kk) = 0.5*(T(i,j,k) + T(i,j,k-1))
+          S_uvh(ii,jj,kk) = 0.5*(S(i,j,k) + S(i,j,k-1))
+        enddo
+
+        ! TODO: Make 3D version of this
+        do kk=1,kend-kstart+1 ; do jj=1,jend-jstart+1
+          ! The second line below would correspond to arguments
+          !            drho_dS_dS, drho_dS_dT, drho_dT_dT, drho_dS_dP, drho_dT_dP, &
+          call calculate_density_second_derivs(T_uvh(:,jj,kk), S_uvh(:,jj,kk), pres_uvh(:,jj,kk), &
+                     scrap, scrap, drho_dT_dT_h(:,jj,kk), scrap, scrap, &
+                     tv%eqn_of_state, dom=EOSdom_block_h1)
+        enddo ; enddo
+      endif ! end use_stanley
+
+    endif ! end use_EOS for zonal block
+
+    ! Zonal slope compute over the block
+    do concurrent(kk=1:kend-kstart+1, jj=1:jend-jstart+1, II=1:iend-istart+1) &
+        DO_LOCALITY(local(drdkL, drdkR, drdiA, drdiB, I, j))
+      I = istart + II - 1
+      j = jstart + jj - 1
+      k = kstart + kk - 1
+
       if (use_EOS) then
         ! Estimate the horizontal density gradients along layers.
-        drdiA = drho_dT_u(I) * (T(i+1,j,k-1)-T(i,j,k-1)) + &
-                drho_dS_u(I) * (S(i+1,j,k-1)-S(i,j,k-1))
-        drdiB = drho_dT_u(I) * (T(i+1,j,k)-T(i,j,k)) + &
-                drho_dS_u(I) * (S(i+1,j,k)-S(i,j,k))
+        drdiA = drho_dT(ii,jj,kk) * (T(i+1,j,k-1)-T(i,j,k-1)) + &
+                drho_dS(ii,jj,kk) * (S(i+1,j,k-1)-S(i,j,k-1))
+        drdiB = drho_dT(ii,jj,kk) * (T(i+1,j,k)-T(i,j,k)) + &
+                drho_dS(ii,jj,kk) * (S(i+1,j,k)-S(i,j,k))
 
         ! Estimate the vertical density gradients times the grid spacing.
-        drdkL = (drho_dT_u(I) * (T(i,j,k)-T(i,j,k-1)) + &
-                 drho_dS_u(I) * (S(i,j,k)-S(i,j,k-1)))
-        drdkR = (drho_dT_u(I) * (T(i+1,j,k)-T(i+1,j,k-1)) + &
-                 drho_dS_u(I) * (S(i+1,j,k)-S(i+1,j,k-1)))
-      endif
-      if (use_stanley) then
-        ! Correction to the horizontal density gradient due to nonlinearity in
-        ! the EOS rectifying SGS temperature anomalies
-        drdiA = drdiA + 0.5 * ((drho_dT_dT_h(i+1) * tv%varT(i+1,j,k-1)) - &
-                              (drho_dT_dT_h(i) * tv%varT(i,j,k-1)) )
-        drdiB = drdiB + 0.5 * ((drho_dT_dT_h(i+1) * tv%varT(i+1,j,k)) - &
-                              (drho_dT_dT_h(i) * tv%varT(i,j,k)) )
+        drdkL = (drho_dT(ii,jj,kk) * (T(i,j,k)-T(i,j,k-1)) + &
+                  drho_dS(ii,jj,kk) * (S(i,j,k)-S(i,j,k-1)))
+        drdkR = (drho_dT(ii,jj,kk) * (T(i+1,j,k)-T(i+1,j,k-1)) + &
+                  drho_dS(ii,jj,kk) * (S(i+1,j,k)-S(i+1,j,k-1)))
+        if (use_stanley) then
+          ! Correction to the horizontal density gradient due to nonlinearity in
+          ! the EOS rectifying SGS temperature anomalies
+          drdiA = drdiA + 0.5 * ((drho_dT_dT_h(ii+1,jj,kk) * tv%varT(i+1,j,K-1)) - &
+                                (drho_dT_dT_h(ii,jj,kk) * tv%varT(i,j,K-1)) )
+          drdiB = drdiB + 0.5 * ((drho_dT_dT_h(ii+1,jj,kk) * tv%varT(i+1,j,K)) - &
+                                (drho_dT_dT_h(ii,jj,kk) * tv%varT(i,j,K)) )
+        endif
+      else
+        drdiA = 0.0 ; drdiB = 0.0
+        drdkL = GV%Rlay(K)-GV%Rlay(K-1) ; drdkR = drdkL
       endif
 
       hg2A = h(i,j,k-1)*h(i+1,j,k-1) + h_neglect2
@@ -370,17 +424,16 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
       if (present_N2_u) then
         if (OBC_friendly) then ; if (OBC%segnum_u(I,j) /= 0) then
           if (OBC%segnum_u(I,j) > 0) then !  OBC_DIRECTION_E
-            drdz = drdkL / dzaL  ! Note that drdz is not used for slopes at OBC faces.
+            drdz = drdkL / dzaL ! Note that drdz is not used for slopes at OBC faces.
             if (use_EOS .and. allocated(tv%SpV_avg)) &
-              GxSpV_u(I) = GV%g_Earth * 0.5 * (tv%SpV_avg(i,j,k) + tv%SpV_avg(i,j,k-1))
+              GxSpV_uvh(ii,jj,kk) = GV%g_Earth * 0.5 * (tv%SpV_avg(i,j,k) + tv%SpV_avg(i,j,k-1))
           elseif (OBC%segnum_u(I,j) < 0) then !  OBC_DIRECTION_W
             drdz = drdkR / dzaR
             if (use_EOS .and. allocated(tv%SpV_avg)) &
-              GxSpV_u(I) = GV%g_Earth * 0.5 * (tv%SpV_avg(i+1,j,k) + tv%SpV_avg(i+1,j,k-1))
+              GxSpV_uvh(ii,jj,kk) = GV%g_Earth * 0.5 * (tv%SpV_avg(i+1,j,k) + tv%SpV_avg(i+1,j,k-1))
           endif
         endif ; endif
-
-        N2_u(I,j,K) = GxSpV_u(I) * drdz * G%mask2dCu(I,j) ! Square of buoyancy freq. [L2 Z-2 T-2 ~> s-2]
+        N2_u(I,j,k) = GxSpV_uvh(ii,jj,kk) * drdz * G%mask2dCu(I,j) ! Square of buoyancy freq. [L2 Z-2 T-2 ~> s-2]
       endif
 
       if (use_EOS) then
@@ -417,113 +470,153 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
 
       slope_x(I,j,K) = slope
       if (present(dzSxN)) &
-        dzSxN(I,j,K) = sqrt( GxSpV_u(I) * max(0., (wtL * ( dzaL * drdkL )) &
-                                                + (wtR * ( dzaR * drdkR ))) / (wtL + wtR) ) & ! dz * N
-                       * abs(slope) * G%mask2dCu(I,j) ! x-direction contribution to S^2
+        dzSxN(I,j,K) = sqrt( GxSpV_uvh(ii,jj,kk) * max(0., (wtL * ( dzaL * drdkL )) &
+                                                + (wtR * ( dzaR * drdkR ))) / (wtL + wtR) ) &
+                        * abs(slope) * G%mask2dCu(I,j)
+    enddo ! end zonal block do concurrent
+  enddo ; enddo ; enddo ! end zonal outer block loops
 
-    enddo ! I
-  enddo ; enddo ! end of j-loop
+  if (use_stanley) then
+    delta_j = njblock - 1
+    je_read = je + 1
+  else
+    delta_j = njblock
+    je_read = je
+  endif
 
-  do i=is,ie
-    GxSpV_v(i) = G_Rho0  !This will be changed if both use_EOS and allocated(tv%SpV_avg) are true
-  enddo
-  ! Calculate the meridional isopycnal slope.
-  !$OMP parallel do default(none) shared(nz,is,ie,js,je,IsdB,use_EOS,G,GV,US,pres,T,S,tv, &
-  !$OMP                                  h,h_neglect,e,dz_neglect, &
-  !$OMP                                  h_neglect2,present_N2_v,G_Rho0,N2_v,slope_y,dzSyN,EOSdom_v, &
-  !$OMP                                  dzv,local_open_v_BC,OBC,use_stanley,OBC_friendly) &
-  !$OMP                          private(drdjA,drdjB,drdkL,drdkR,pres_v,T_v,S_v,      &
-  !$OMP                                  drho_dT_v,drho_dS_v,hg2A,hg2B,hg2L,hg2R,haA, &
-  !$OMP                                  drho_dT_dT_h,scrap,pres_h,T_h,S_h, &
-  !$OMP                                  drho_dT_dT_hr,pres_hr,T_hr,S_hr,             &
-  !$OMP                                  haB,haL,haR,dzaL,dzaR,wtA,wtB,wtL,wtR,drdz,  &
-  !$OMP                                  drdy,mag_grad2,slope) &
-  !$OMP                          firstprivate(GxSpV_v)
-  do J=js-1,je ; do K=nz,2,-1
-    if (.not.(use_EOS)) then
-      drdjA = 0.0 ; drdjB = 0.0
-      drdkL = GV%Rlay(k)-GV%Rlay(k-1) ; drdkR = GV%Rlay(k)-GV%Rlay(k-1)
-    endif
+  ! Blocked meridional loop
+  do kstart=2,nz, nkblock ; do jstart=js-1,je,delta_j ; do istart=is,ie,niblock
+    iend = min(istart + niblock - 1, ie)
+    jend = min(jstart + delta_j - 1, je)
+    jend_stanley = min(jstart + njblock - 1, je_read)
+    kend = min(kstart + nkblock - 1, nz)
+    EOSdom_block(1,1) = 1 ; EOSdom_block(1,2) = iend - istart + 1
+    EOSdom_block(2,1) = 1 ; EOSdom_block(2,2) = jend - jstart + 1
+    EOSdom_block(3,1) = 1 ; EOSdom_block(3,2) = kend - kstart + 1
 
     if (use_EOS) then
-      do i=is,ie
-        pres_v(i) = 0.5*(pres(i,j,K) + pres(i,j+1,K))
-        T_v(i) = 0.25*((T(i,j,k) + T(i,j+1,k)) + (T(i,j,k-1) + T(i,j+1,k-1)))
-        S_v(i) = 0.25*((S(i,j,k) + S(i,j+1,k)) + (S(i,j,k-1) + S(i,j+1,k-1)))
+      ! Fill block T_uvh/S_uvh/pres_uvh at v-points
+      do concurrent(kk=1:kend-kstart+1, jj=1:jend-jstart+1, ii=1:iend-istart+1) &
+          DO_LOCALITY(local(i,j,k))
+        i = istart + ii - 1
+        j = jstart + jj - 1
+        k = kstart + kk - 1
+        pres_uvh(ii,jj,kk) = 0.5*(pres(i,j,K) + pres(i,j+1,K))
+        T_uvh(ii,jj,kk) = 0.25*((T(i,j,K) + T(i,j+1,K)) + (T(i,j,K-1) + T(i,j+1,K-1)))
+        S_uvh(ii,jj,kk) = 0.25*((S(i,j,K) + S(i,j+1,K)) + (S(i,j,K-1) + S(i,j+1,K-1)))
       enddo
+
       if (OBC_friendly) then
-        if (OBC%v_N_OBCs_on_PE .and. (J>=OBC%Js_v_N_obc) .and. (J<=OBC%Je_v_N_obc)) then
-          do i = max(is, OBC%is_v_N_obc), min(ie, OBC%ie_v_N_obc)
-            if (OBC%segnum_v(i,J) > 0) then !  OBC_DIRECTION_N
-              pres_v(i) = pres(i,j,K)
-              T_v(i) = 0.5*(T(i,j,k) + T(i,j,k-1))
-              S_v(i) = 0.5*(S(i,j,k) + S(i,j,k-1))
-            endif
-          enddo
-        endif
-        if (OBC%v_S_OBCs_on_PE .and. (J>=OBC%Js_v_S_obc) .and. (J<=OBC%Je_v_S_obc)) then
-          do i = max(is, OBC%is_v_S_obc), min(ie, OBC%ie_v_S_obc)
-            if (OBC%segnum_v(i,J) < 0) then !  OBC_DIRECTION_S
-              pres_v(i) = pres(i,j+1,K)
-              T_v(i) = 0.5*(T(i,j+1,k) + T(i,j+1,k-1))
-              S_v(i) = 0.5*(S(i,j+1,k) + S(i,j+1,k-1))
-            endif
-          enddo
-        endif
-      endif
-      call calculate_density_derivs(T_v, S_v, pres_v, drho_dT_v, drho_dS_v, &
-                                    tv%eqn_of_state, EOSdom_v)
+        !$omp target update from(T_uvh, S_uvh, pres_uvh)
 
-      if ((present_N2_v) .or. (present(dzSyN))) then
+        if (OBC%v_N_OBCs_on_PE) then
+          do k = kstart, kend
+              kk = k - kstart + 1
+            do j = max(jstart, OBC%Js_v_N_obc), min(jend, OBC%Je_v_N_obc)
+              jj = j - jstart + 1
+              do i = max(istart, OBC%is_v_N_obc), min(iend, OBC%ie_v_N_obc)
+                ii = i - istart + 1
+                if (OBC%segnum_v(i,j) > 0) then ! OBC_DIRECTION_N
+                  pres_uvh(ii,jj,kk) = pres(i,j,K)
+                  T_uvh(ii,jj,kk) = 0.5*(T(i,j,K) + T(i,j,K-1))
+                  S_uvh(ii,jj,kk) = 0.5*(S(i,j,K) + S(i,j,K-1))
+                endif
+              enddo
+            enddo
+          enddo
+        endif
+        if (OBC%v_S_OBCs_on_PE) then
+          do k = kstart, kend
+            kk = k - kstart + 1
+            do j = max(jstart, OBC%Js_v_S_obc), min(jend, OBC%Je_v_S_obc)
+              jj = j - jstart + 1
+              do i = max(istart, OBC%is_v_S_obc), min(iend, OBC%ie_v_S_obc)
+                ii = i - istart + 1
+                if (OBC%segnum_v(i,j) < 0) then ! OBC_DIRECTION_S
+                  pres_uvh(ii,jj,kk) = pres(i,j+1,K)
+                  T_uvh(ii,jj,kk) = 0.5*(T(i,j+1,K) + T(i,j+1,K-1))
+                  S_uvh(ii,jj,kk) = 0.5*(S(i,j+1,K) + S(i,j+1,K-1))
+                endif
+              enddo
+            enddo
+          enddo
+        endif
+
+        !$omp target update to(T_uvh, S_uvh, pres_uvh)
+      endif
+
+      if (present_N2_v .or. present(dzSyN)) then
         if (allocated(tv%SpV_avg)) then
-          do i=is,ie
-            GxSpV_v(i) = GV%g_Earth *  0.25* ((tv%SpV_avg(i,j,k) + tv%SpV_avg(i,j+1,k)) + &
-                                              (tv%SpV_avg(i,j,k-1) + tv%SpV_avg(i,j+1,k-1)))
+          do concurrent(kk=1:kend-kstart+1, jj=1:jend-jstart+1, ii=1:iend-istart+1) &
+             DO_LOCALITY(local(i,j,k))
+            i = istart + ii - 1
+            j = jstart + jj - 1
+            k = kstart + kk - 1
+            GxSpV_uvh(ii,jj,kk) = GV%g_Earth * 0.25 * ((tv%SpV_avg(i,j,K) + tv%SpV_avg(i,j+1,K)) + &
+                                                        (tv%SpV_avg(i,j,K-1) + tv%SpV_avg(i,j+1,K-1)))
           enddo
         endif
       endif
-    endif
 
-    if (use_stanley) then
-      do i=is,ie
-        pres_h(i) = pres(i,j,K)
-        T_h(i) = 0.5*(T(i,j,k) + T(i,j,k-1))
-        S_h(i) = 0.5*(S(i,j,k) + S(i,j,k-1))
+      call calculate_density_derivs(T_uvh, S_uvh, pres_uvh, &
+                                    drho_dT, drho_dS, &
+                                    tv%eqn_of_state, EOSdom_block)
 
-        pres_hr(i) = pres(i,j+1,K)
-        T_hr(i) = 0.5*(T(i,j+1,k) + T(i,j+1,k-1))
-        S_hr(i) = 0.5*(S(i,j+1,k) + S(i,j+1,k-1))
-      enddo
-      ! The second line below would correspond to arguments
-      !            drho_dS_dS, drho_dS_dT, drho_dT_dT, drho_dS_dP, drho_dT_dP, &
-      call calculate_density_second_derivs(T_h, S_h, pres_h, &
-                   scrap, scrap, drho_dT_dT_h, scrap, scrap, &
-                   tv%eqn_of_state, dom=EOSdom_v)
-      call calculate_density_second_derivs(T_hr, S_hr, pres_hr, &
-                   scrap, scrap, drho_dT_dT_hr, scrap, scrap, &
-                   tv%eqn_of_state, dom=EOSdom_v)
-    endif
-    do i=is,ie
+      if (use_stanley) then
+        ! Reset at h-points for Stanley second derivatives.
+        EOSdom_block_h1(1) = 1 ; EOSdom_block_h1(2) = iend - istart + 1
+        do concurrent(kk=1:kend-kstart+1, jj=1:jend_stanley-jstart+1, ii=1:iend-istart+1) &
+            DO_LOCALITY(local(i,j,k))
+          i = istart + ii - 1
+          j = jstart + jj - 1
+          k = kstart + kk - 1
+          pres_uvh(ii,jj,kk) = pres(i,j,K)
+          T_uvh(ii,jj,kk) = 0.5*(T(i,j,K) + T(i,j,K-1))
+          S_uvh(ii,jj,kk) = 0.5*(S(i,j,K) + S(i,j,K-1))
+        enddo
+
+        ! TODO: Make 3D version of this
+        do kk=1,kend-kstart+1 ; do jj=1,jend_stanley-jstart+1
+          ! The second line below would correspond to arguments
+          !            drho_dS_dS, drho_dS_dT, drho_dT_dT, drho_dS_dP, drho_dT_dP, &
+          call calculate_density_second_derivs(T_uvh(:,jj,kk), S_uvh(:,jj,kk), pres_uvh(:,jj,kk), &
+                     scrap, scrap, drho_dT_dT_h(:,jj,kk), scrap, scrap, &
+                     tv%eqn_of_state, dom=EOSdom_block_h1)
+        enddo ; enddo
+      endif ! end use_stanley
+
+    endif ! end use_EOS for meridional block
+
+    ! Meridional slope compute over the block
+    do concurrent(kk=1:kend-kstart+1, jj=1:jend-jstart+1, ii=1:iend-istart+1) &
+        DO_LOCALITY(local(drdkL, drdkR, drdjA, drdjB, i, J))
+      i = istart + ii - 1
+      J = jstart + jj - 1
+      K = kstart + kk - 1
+
       if (use_EOS) then
         ! Estimate the horizontal density gradients along layers.
-        drdjA = drho_dT_v(i) * (T(i,j+1,k-1)-T(i,j,k-1)) + &
-                drho_dS_v(i) * (S(i,j+1,k-1)-S(i,j,k-1))
-        drdjB = drho_dT_v(i) * (T(i,j+1,k)-T(i,j,k)) + &
-                drho_dS_v(i) * (S(i,j+1,k)-S(i,j,k))
+        drdjA = drho_dT(ii,jj,kk) * (T(i,j+1,k-1)-T(i,j,k-1)) + &
+                drho_dS(ii,jj,kk) * (S(i,j+1,k-1)-S(i,j,k-1))
+        drdjB = drho_dT(ii,jj,kk) * (T(i,j+1,k)-T(i,j,k)) + &
+                drho_dS(ii,jj,kk) * (S(i,j+1,k)-S(i,j,k))
 
         ! Estimate the vertical density gradients times the grid spacing.
-        drdkL = (drho_dT_v(i) * (T(i,j,k)-T(i,j,k-1)) + &
-                 drho_dS_v(i) * (S(i,j,k)-S(i,j,k-1)))
-        drdkR = (drho_dT_v(i) * (T(i,j+1,k)-T(i,j+1,k-1)) + &
-                 drho_dS_v(i) * (S(i,j+1,k)-S(i,j+1,k-1)))
-      endif
-      if (use_stanley) then
-        ! Correction to the horizontal density gradient due to nonlinearity in
-        ! the EOS rectifying SGS temperature anomalies
-        drdjA = drdjA + 0.5 * ((drho_dT_dT_hr(i) * tv%varT(i,j+1,k-1)) - &
-                              (drho_dT_dT_h(i) * tv%varT(i,j,k-1)) )
-        drdjB = drdjB + 0.5 * ((drho_dT_dT_hr(i) * tv%varT(i,j+1,k)) - &
-                              (drho_dT_dT_h(i) * tv%varT(i,j,k)) )
+        drdkL = (drho_dT(ii,jj,kk) * (T(i,j,K)-T(i,j,K-1)) + &
+                  drho_dS(ii,jj,kk) * (S(i,j,K)-S(i,j,K-1)))
+        drdkR = (drho_dT(ii,jj,kk) * (T(i,j+1,K)-T(i,j+1,K-1)) + &
+                  drho_dS(ii,jj,kk) * (S(i,j+1,K)-S(i,j+1,K-1)))
+        if (use_stanley) then
+          ! Correction to the horizontal density gradient due to nonlinearity in
+          ! the EOS rectifying SGS temperature anomalies
+          drdjA = drdjA + 0.5 * ((drho_dT_dT_h(ii,jj+1,kk) * tv%varT(i,j+1,K-1)) - &
+                                (drho_dT_dT_h(ii,jj,kk) * tv%varT(i,j,K-1)) )
+          drdjB = drdjB + 0.5 * ((drho_dT_dT_h(ii,jj+1,kk) * tv%varT(i,j+1,K)) - &
+                                (drho_dT_dT_h(ii,jj,kk) * tv%varT(i,j,K)) )
+        endif
+      else
+        drdjA = 0.0 ; drdjB = 0.0
+        drdkL = GV%Rlay(K)-GV%Rlay(K-1) ; drdkR = drdkL
       endif
 
       hg2A = h(i,j,k-1)*h(i,j+1,k-1) + h_neglect2
@@ -556,15 +649,14 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
           if (OBC%segnum_v(i,J) > 0) then !  OBC_DIRECTION_N
             drdz = drdkL / dzaL  ! Note that drdz is not used for slopes at OBC faces.
             if (use_EOS .and. allocated(tv%SpV_avg)) &
-              GxSpV_v(i) = GV%g_Earth * 0.5 * (tv%SpV_avg(i,j,k) + tv%SpV_avg(i,j,k-1))
+              GxSpV_uvh(ii,jj,kk) = GV%g_Earth * 0.5 * (tv%SpV_avg(i,j,k) + tv%SpV_avg(i,j,k-1))
           elseif (OBC%segnum_v(i,J) < 0) then !  OBC_DIRECTION_S
             drdz = drdkL / dzaL
             if (use_EOS .and. allocated(tv%SpV_avg)) &
-              GxSpV_v(i) = GV%g_Earth * 0.5 * (tv%SpV_avg(i,j+1,k) + tv%SpV_avg(i,j+1,k-1))
+              GxSpV_uvh(ii,jj,kk) = GV%g_Earth * 0.5 * (tv%SpV_avg(i,j+1,k) + tv%SpV_avg(i,j+1,k-1))
           endif
         endif ; endif
-
-        N2_v(i,J,K) = GxSpV_v(i) * drdz * G%mask2dCv(i,J) ! Square of buoyancy freq. [L2 Z-2 T-2 ~> s-2]
+        N2_v(i,J,K) = GxSpV_uvh(ii,jj,kk) * drdz * G%mask2dCv(i,J) ! Square of buoyancy freq. [L2 Z-2 T-2 ~> s-2]
       endif
 
       if (use_EOS) then
@@ -600,12 +692,15 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
       endif
       slope_y(i,J,K) = slope
       if (present(dzSyN)) &
-        dzSyN(i,J,K) = sqrt( GxSpV_v(i) * max(0., (wtL * ( dzaL * drdkL )) &
-                                                + (wtR * ( dzaR * drdkR ))) / (wtL + wtR) ) & ! dz * N
-                        * abs(slope) * G%mask2dCv(i,J) ! x-direction contribution to S^2
+        dzSyN(i,J,K) = sqrt( GxSpV_uvh(ii,jj,kk) * max(0., (wtL * ( dzaL * drdkL )) &
+                                                + (wtR * ( dzaR * drdkR ))) / (wtL + wtR) ) &
+                        * abs(slope) * G%mask2dCv(i,J)
+    enddo ! end meridional block do concurrent
+  enddo ; enddo ; enddo ! end meridional outer block loops
 
-    enddo ! i
-  enddo ; enddo ! end of j-loop
+  ! Delete all block and field arrays from device
+  !$omp target exit data map(delete: T, S, pres, T_uvh, S_uvh, pres_uvh, GxSpV_uvh, &
+  !$omp   scrap, drho_dT, drho_dS, drho_dT_dT_h)
 
 end subroutine calc_isoneutral_slopes
 
@@ -660,15 +755,16 @@ subroutine vert_fill_TS(h, T_in, S_in, kappa_dt, T_f, S_f, G, GV, US, halo_here,
     if (larger_h_denom) h0 = 1.0e-16*sqrt(0.5*kap_dt_x2)
   endif
 
+  !$omp target enter data map(alloc: ent, b1, d1, c1)
+
   if (kap_dt_x2 <= 0.0) then
-    !$OMP parallel do default(shared)
-    do k=1,nz ; do j=js,je ; do i=is,ie
+    do concurrent (k=1:nz , j=js:je , i=is:ie)
       T_f(i,j,k) = T_in(i,j,k) ; S_f(i,j,k) = S_in(i,j,k)
-    enddo ; enddo ; enddo
+    enddo
   else
-    !$OMP parallel do default(shared) private(ent,b1,d1,c1,h_tr)
+    !$omp target teams loop private( ent, b1, d1, c1, h_tr )
     do j=js,je
-      do i=is,ie
+      do concurrent( i=is:ie )
         ent(i,2) = kap_dt_x2 / ((h(i,j,1)+h(i,j,2)) + h0)
         h_tr = h(i,j,1) + h_neglect
         b1(i) = 1.0 / (h_tr + ent(i,2))
@@ -676,7 +772,7 @@ subroutine vert_fill_TS(h, T_in, S_in, kappa_dt, T_f, S_f, G, GV, US, halo_here,
         T_f(i,j,1) = (b1(i)*h_tr)*T_in(i,j,1)
         S_f(i,j,1) = (b1(i)*h_tr)*S_in(i,j,1)
       enddo
-      do k=2,nz-1 ; do i=is,ie
+      do k=2,nz-1 ; do concurrent( i=is:ie )
         ent(i,K+1) = kap_dt_x2 / ((h(i,j,k)+h(i,j,k+1)) + h0)
         h_tr = h(i,j,k) + h_neglect
         c1(i,k) = ent(i,K) * b1(i)
@@ -685,19 +781,21 @@ subroutine vert_fill_TS(h, T_in, S_in, kappa_dt, T_f, S_f, G, GV, US, halo_here,
         T_f(i,j,k) = b1(i) * (h_tr*T_in(i,j,k) + ent(i,K)*T_f(i,j,k-1))
         S_f(i,j,k) = b1(i) * (h_tr*S_in(i,j,k) + ent(i,K)*S_f(i,j,k-1))
       enddo ; enddo
-      do i=is,ie
+      do concurrent( i=is:ie )
         c1(i,nz) = ent(i,nz) * b1(i)
         h_tr = h(i,j,nz) + h_neglect
         b1(i) = 1.0 / (h_tr + d1(i)*ent(i,nz))
         T_f(i,j,nz) = b1(i) * (h_tr*T_in(i,j,nz) + ent(i,nz)*T_f(i,j,nz-1))
         S_f(i,j,nz) = b1(i) * (h_tr*S_in(i,j,nz) + ent(i,nz)*S_f(i,j,nz-1))
       enddo
-      do k=nz-1,1,-1 ; do i=is,ie
+      do k=nz-1,1,-1 ; do concurrent( i=is:ie )
         T_f(i,j,k) = T_f(i,j,k) + c1(i,k+1)*T_f(i,j,k+1)
         S_f(i,j,k) = S_f(i,j,k) + c1(i,k+1)*S_f(i,j,k+1)
       enddo ; enddo
     enddo
   endif
+
+  !$omp target exit data map(delete: ent, b1, d1, c1)
 
 end subroutine vert_fill_TS
 
