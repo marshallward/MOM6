@@ -79,7 +79,7 @@ use MOM_CoriolisAdv, only : CorAdCalc, CoriolisAdv_init, CoriolisAdv_CS, Corioli
 use MOM_debugging, only : check_redundant
 use MOM_grid, only : ocean_grid_type
 use MOM_hor_index, only : hor_index_type
-use MOM_hor_visc, only : horizontal_viscosity, hor_visc_init, hor_visc_CS
+use MOM_hor_visc, only : horizontal_viscosity, hor_visc_nkblock, hor_visc_init, hor_visc_CS
 use MOM_interface_heights, only : thickness_to_dz
 use MOM_lateral_mixing_coeffs, only : VarMix_CS
 use MOM_MEKE_types, only : MEKE_type
@@ -282,7 +282,7 @@ subroutine step_MOM_dyn_unsplit_RK2(u_in, v_in, h_in, tv, visc, Time_local, dt, 
   call enable_averages(dt,Time_local, CS%diag)
   call cpu_clock_begin(id_clock_horvisc)
   call horizontal_viscosity(u_in, v_in, h_in, uh, vh, CS%diffu, CS%diffv, MEKE, VarMix, &
-                            G, GV, US, CS%hor_visc, tv, dt, STOCH=STOCH)
+                            G, GV, US, CS%hor_visc, hor_visc_nkblock(CS%hor_visc, GV), tv, dt, STOCH=STOCH)
   call cpu_clock_end(id_clock_horvisc)
   call disable_averaging(CS%diag)
   call pass_vector(CS%diffu, CS%diffv, G%Domain, clock=id_clock_pass)

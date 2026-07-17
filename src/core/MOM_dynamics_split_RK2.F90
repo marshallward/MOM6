@@ -54,7 +54,7 @@ use MOM_energetic_PBL,         only : energetic_PBL_get_MLD, energetic_PBL_CS
 use MOM_grid,                  only : ocean_grid_type
 use MOM_harmonic_analysis,     only : HA_init, harmonic_analysis_CS
 use MOM_hor_index,             only : hor_index_type
-use MOM_hor_visc,              only : horizontal_viscosity, hor_visc_CS, hor_visc_vel_stencil
+use MOM_hor_visc,              only : horizontal_viscosity, hor_visc_nkblock, hor_visc_CS, hor_visc_vel_stencil
 use MOM_hor_visc,              only : hor_visc_init, hor_visc_end
 use MOM_interface_heights,     only : thickness_to_dz, find_col_avg_SpV
 use MOM_lateral_mixing_coeffs, only : VarMix_CS
@@ -960,7 +960,7 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
 ! diffu = horizontal viscosity terms (u_av)
   call cpu_clock_begin(id_clock_horvisc)
   call horizontal_viscosity(u_av, v_av, h_av, uh, vh, CS%diffu, CS%diffv, &
-                            MEKE, Varmix, G, GV, US, CS%hor_visc, tv, dt, &
+                            MEKE, Varmix, G, GV, US, CS%hor_visc, hor_visc_nkblock(CS%hor_visc, GV), tv, dt, &
                             OBC=CS%OBC, BT=CS%barotropic_CSp, TD=thickness_diffuse_CSp, &
                             ADp=CS%ADp, hu_cont=CS%BT_cont%h_u, hv_cont=CS%BT_cont%h_v, STOCH=STOCH)
 
@@ -1750,8 +1750,8 @@ subroutine initialize_dyn_split_RK2(u, v, h, tv, uh, vh, eta, Time, G, GV, US, p
       .not. query_initialized(CS%diffv, "diffv", restart_CS)) then
     !$omp target update to(u, v, h, uh, vh)
     call horizontal_viscosity(u, v, h, uh, vh, CS%diffu, CS%diffv, MEKE, VarMix, G, GV, US, CS%hor_visc, &
-                              tv, dt, OBC=CS%OBC, BT=CS%barotropic_CSp, TD=thickness_diffuse_CSp, &
-                              hu_cont=CS%BT_cont%h_u, hv_cont=CS%BT_cont%h_v)
+                              hor_visc_nkblock(CS%hor_visc, GV), tv, dt, OBC=CS%OBC, BT=CS%barotropic_CSp, &
+                              TD=thickness_diffuse_CSp, hu_cont=CS%BT_cont%h_u, hv_cont=CS%BT_cont%h_v)
     !$omp target update from(CS%diffu, CS%diffv)
     call set_initialized(CS%diffu, "diffu", restart_CS)
     call set_initialized(CS%diffv, "diffv", restart_CS)
