@@ -421,7 +421,6 @@ subroutine int_density_dz_generic_pcm(T, S, z_t, z_b, rho_ref, rho_0, G_e, HI, &
 end subroutine int_density_dz_generic_pcm
 
 
-!> Calls the appropriate subroutine to calculate analyti
 !> Compute pressure gradient force integrals by quadrature for the case where
 !! T and S are linear profiles.
 subroutine int_density_dz_generic_plm(kstart, kend, tv, T_t, T_b, S_t, S_b, e, rho_ref, &
@@ -650,6 +649,13 @@ subroutine generic_plm_update_dpa(niblock, njblock, kstart, kend, tv, T_t, T_b, 
 
   !$omp target enter data map(alloc: T5, S5, T25, TS5, S25, p5, r5, u5)
 
+  ! initialize to 0.0 to ensure garbage isn't read in calculate_density
+  do concurrent (k=kstart:kend, jj=1:njblock, ii=1:5*niblock)
+    T25(ii,jj,k) = 0.0
+    TS5(ii,jj,k) = 0.0
+    S25(ii,jj,k) = 0.0
+  enddo
+
   do jstart=Jsq,Jeq+1,njblock ; do istart=Isq,Ieq+1,niblock
     jend = min(Jeq+1, jstart+njblock-1)
     iend = min(Ieq+1, istart+niblock-1)
@@ -818,6 +824,12 @@ subroutine generic_plm_update_intx_dpa(niblock, njblock, kstart, kend, tv, T_t, 
   Isq = HI%IscB ; Ieq = HI%IecB ; Jsq = HI%JscB ; Jeq = HI%JecB
 
   !$omp target enter data map(alloc: T15, S15, T215, TS15, S215, p15, r15, dz_x)
+
+  do concurrent (k=kstart:kend, jj=1:njblock, ii=1:15*niblock)
+    T215(ii,jj,k) = 0.0
+    TS15(ii,jj,k) = 0.0
+    S215(ii,jj,k) = 0.0
+  enddo
 
   do jstart=HI%jsc,HI%jec,njblock ; do istart=Isq,Ieq,niblock
     jend = min(HI%jec, jstart+njblock-1) ; iend = min(Ieq, istart+niblock-1)
@@ -1042,6 +1054,12 @@ subroutine generic_plm_update_inty_dpa(niblock, njblock, kstart, kend, tv, T_t, 
   Isq = HI%IscB ; Ieq = HI%IecB ; Jsq = HI%JscB ; Jeq = HI%JecB
 
   !$omp target enter data map(alloc: T15, S15, T215, TS15, S215, p15, r15, dz_y)
+
+  do concurrent (k=kstart:kend, jj=1:njblock, ii=1:15*niblock)
+    T215(ii,jj,k) = 0.0
+    TS15(ii,jj,k) = 0.0
+    S215(ii,jj,k) = 0.0
+  enddo
 
   do jstart=Jsq,Jeq,njblock ; do istart=HI%isc,HI%iec,niblock
     jend = min(Jeq, jstart+njblock-1) ; iend = min(HI%iec, istart+niblock-1)
