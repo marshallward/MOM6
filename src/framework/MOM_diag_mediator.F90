@@ -4992,12 +4992,10 @@ subroutine copy_2d_into_3d(field_2d, field_3d)
   real, intent(in)    :: field_2d(:,:)
   real, intent(inout) :: field_3d(:,:,:)
   integer :: i, j, k
-  integer :: nk, nj, ni
-  nk = size(field_3d, 3)
-  nj = size(field_3d, 2)
-  ni = size(field_3d, 1)
 
-  do concurrent(k=1:nk, j=1:nj, i=1:ni)
+  do concurrent(k=lbound(field_3d,3):ubound(field_3d,3), &
+                j=lbound(field_3d,2):ubound(field_3d,2), &
+                i=lbound(field_3d,1):ubound(field_3d,1))
     field_3d(i,j,k) = field_2d(i,j)
   end do
 end subroutine copy_2d_into_3d
