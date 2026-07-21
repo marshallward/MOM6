@@ -1565,7 +1565,10 @@ subroutine ALE_PLM_edge_values( CS, G, GV, h, Q, bdry_extrap, Q_t, Q_b )
     h_neglect = GV%kg_m2_to_H*1.0e-30
   endif
 
-  !$OMP parallel do default(shared) private(slp,mslp)
+  ! This gets run with team sizes of 1 because the functions aren't visible at compile time.
+  ! It is therefore slow. Can be sped up by either inline (-Minline), or adding
+  ! bind(parallel,teams) (an nvhpc extension, but unsupported by other compilers).
+  !$omp target teams loop collapse(2) private(slp, mslp, k)
   do j = G%jsc-1,G%jec+1 ; do i = G%isc-1,G%iec+1
     slp(1) = 0.
     do k = 2, GV%ke-1

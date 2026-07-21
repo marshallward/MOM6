@@ -575,7 +575,7 @@ subroutine PressureForce_Mont_Bouss(h, tv, PFu, PFv, G, GV, US, CS, p_atm, pbce,
   endif ! use_EOS
 
   if (present(pbce)) then
-    call Set_pbce_Bouss(e, tv_tmp, G, GV, US, CS%Rho0, CS%GFS_scale, pbce, rho_star)
+    call Set_pbce_Bouss(e, tv_tmp, G, GV, US, CS%Rho0, CS%GFS_scale, pbce, rho_star, 1)
   endif
 
 !    Calculate the pressure force. On a Cartesian grid,
@@ -648,7 +648,7 @@ end subroutine PressureForce_Mont_Bouss
 
 !> Determines the partial derivative of the acceleration due
 !! to pressure forces with the free surface height.
-subroutine Set_pbce_Bouss(e, tv, G, GV, US, Rho0, GFS_scale, pbce, rho_star)
+subroutine Set_pbce_Bouss(e, tv, G, GV, US, Rho0, GFS_scale, pbce, rho_star, nkblock)
   type(ocean_grid_type),                intent(in)  :: G    !< Ocean grid structure
   type(verticalGrid_type),              intent(in)  :: GV   !< Vertical grid structure
   real, dimension(SZI_(G),SZJ_(G),SZK_(GV)+1), intent(in) :: e !< Interface height [Z ~> m].
@@ -665,13 +665,15 @@ subroutine Set_pbce_Bouss(e, tv, G, GV, US, Rho0, GFS_scale, pbce, rho_star)
   real, dimension(SZI_(G),SZJ_(G),SZK_(GV)), &
                               optional, intent(in)  :: rho_star !< The layer densities (maybe compressibility
                                                             !! compensated), times g/rho_0 [L2 Z-1 T-2 ~> m s-2].
-
+  integer, intent(in) :: nkblock !< The number of vertical levels in each block for the variable density
+                                 !! near-surface layer.  This is needed to determine whether rho_star is
+                                 !! compressibility compensated or not.
   real :: Ihtot(SZI_(G),SZJ_(G))  ! The inverse of the sum of the layer thicknesses [H-1 ~> m-1 or m2 kg-1].
-  real :: press(SZI_(G),SZJ_(G))  ! Interface pressure [R L2 T-2 ~> Pa].
-  real :: T_int(SZI_(G),SZJ_(G))  ! Interface temperature [C ~> degC]
-  real :: S_int(SZI_(G),SZJ_(G))  ! Interface salinity [S ~> ppt]
-  real :: dR_dT(SZI_(G),SZJ_(G))  ! Partial derivative of density with temperature [R C-1 ~> kg m-3 degC-1]
-  real :: dR_dS(SZI_(G),SZJ_(G))  ! Partial derivative of density with salinity [R S-1 ~> kg m-3 ppt-1].
+  real :: press(SZI_(G),SZJ_(G),nkblock)  ! Interface pressure [R L2 T-2 ~> Pa].
+  real :: T_int(SZI_(G),SZJ_(G),nkblock)  ! Interface temperature [C ~> degC]
+  real :: S_int(SZI_(G),SZJ_(G),nkblock)  ! Interface salinity [S ~> ppt]
+  real :: dR_dT(SZI_(G),SZJ_(G),nkblock)  ! Partial derivative of density with temperature [R C-1 ~> kg m-3 degC-1]
+  real :: dR_dS(SZI_(G),SZJ_(G),nkblock)  ! Partial derivative of density with salinity [R S-1 ~> kg m-3 ppt-1].
   real :: rho_in_situ(SZI_(G),SZJ_(G))  ! In-situ density at the top of a layer [R ~> kg m-3].
   real :: G_Rho0             ! A scaled version of g_Earth / Rho0 [L2 Z-1 T-2 R-1 ~> m4 s-2 kg-1]
   real :: Rho0xG             ! g_Earth * Rho0 [R L2 Z-1 T-2 ~> kg s-2 m-2]
@@ -679,8 +681,8 @@ subroutine Set_pbce_Bouss(e, tv, G, GV, US, Rho0, GFS_scale, pbce, rho_star)
                              ! an equation of state.
   real :: dz_neglect         ! A vertical distance that is so small it is usually lost
                              ! in roundoff and can be neglected [Z ~> m].
-  integer :: EOSdom(2,2)     ! The computational domain for the equation of state
-  integer :: Isq, Ieq, Jsq, Jeq, nz, i, j, k
+  integer :: EOSdom(3,2)     ! The computational domain for the equation of state
+  integer :: Isq, Ieq, Jsq, Jeq, nz, i, j, k, kstart, kend, kk
 
   !$omp target data map(alloc: Ihtot)
   Isq = G%IscB ; Ieq = G%IecB ; Jsq = G%JscB ; Jeq = G%JecB ; nz = GV%ke
@@ -713,34 +715,39 @@ subroutine Set_pbce_Bouss(e, tv, G, GV, US, Rho0, GFS_scale, pbce, rho_star)
 
       EOSdom(1,:) = [Isq - (G%isd-1), G%iec+1 - (G%isd-1)]
       EOSdom(2,:) = [Jsq - (G%jsd-1), G%jec+1 - (G%jsd-1)]
-
       do concurrent (j=Jsq:Jeq+1, i=Isq:Ieq+1)
         Ihtot(i,j) = GV%H_to_Z / ((e(i,j,1) - e(i,j,nz+1)) + dz_neglect)
-        press(i,j) = -Rho0xG * (e(i,j,1) - G%meanSL(i,j))
+        press(i,j,1) = -Rho0xG * (e(i,j,1) - G%meanSL(i,j))
       enddo
 
-      call calculate_density(tv%T(:,:,1), tv%S(:,:,1), press, rho_in_situ, &
-                             tv%eqn_of_state, EOSdom)
+      call calculate_density(tv%T(:,:,1), tv%S(:,:,1), press(:,:,1), rho_in_situ, &
+                             tv%eqn_of_state, EOSdom(1:2,:))
 
       do concurrent (j=Jsq:Jeq+1, i=Isq:Ieq+1)
         pbce(i,j,1) = G_Rho0 * (GFS_scale * rho_in_situ(i,j)) * GV%H_to_Z
       enddo
 
-      do k=2,nz
-        do concurrent (j=Jsq:Jeq+1, i=Isq:Ieq+1)
-          press(i,j) = -Rho0xG * (e(i,j,K) - G%meanSL(i,j))
-          T_int(i,j) = 0.5 * (tv%T(i,j,k-1) + tv%T(i,j,k))
-          S_int(i,j) = 0.5 * (tv%S(i,j,k-1) + tv%S(i,j,k))
+      EOSdom(3,1) = 1
+      do kstart=2,nz,nkblock
+        kend = min(kstart+nkblock-1, nz)
+        do concurrent (k=kstart:kend, j=Jsq:Jeq+1, i=Isq:Ieq+1)
+          kk=k-kstart+1
+          press(i,j,kk) = -Rho0xG * (e(i,j,K) - G%meanSL(i,j))
+          T_int(i,j,kk) = 0.5 * (tv%T(i,j,k-1) + tv%T(i,j,k))
+          S_int(i,j,kk) = 0.5 * (tv%S(i,j,k-1) + tv%S(i,j,k))
         enddo
-
+        EOSdom(3,2) = kend-kstart+1
         call calculate_density_derivs(T_int, S_int, press, dR_dT, dR_dS, &
                                       tv%eqn_of_state, EOSdom)
 
-        do concurrent (j=Jsq:Jeq+1, i=Isq:Ieq+1)
+        do concurrent(j=Jsq:Jeq+1)
+          do k=kstart,kend ; do concurrent (i=Isq:Ieq+1)
+          kk=k-kstart+1
           pbce(i,j,k) = pbce(i,j,k-1) + G_Rho0 * &
              ((e(i,j,K) - e(i,j,nz+1)) * Ihtot(i,j)) * &
-             (dR_dT(i,j) * (tv%T(i,j,k) - tv%T(i,j,k-1)) + &
-              dR_dS(i,j) * (tv%S(i,j,k) - tv%S(i,j,k-1)))
+             (dR_dT(i,j,kk) * (tv%T(i,j,k) - tv%T(i,j,k-1)) + &
+              dR_dS(i,j,kk) * (tv%S(i,j,k) - tv%S(i,j,k-1)))
+          enddo ; enddo
         enddo
       enddo
       !$omp end target data

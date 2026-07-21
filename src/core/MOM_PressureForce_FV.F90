@@ -38,6 +38,15 @@ public PressureForce_FV_Bouss, PressureForce_FV_nonBouss
 ! their mks counterparts with notation like "a velocity [Z T-1 ~> m s-1]".  If the units
 ! vary with the Boussinesq approximation, the Boussinesq variant is given first.
 
+#ifdef __NVCOMPILER_OPENMP_GPU
+integer, parameter :: default_nkblock = 0  !< Default k block size for PLM density integrals [nondim]
+integer, parameter :: default_njblock_plm = 0 !< Default j block size for PLM density integrals [nondim]
+#else
+integer, parameter :: default_nkblock = 1  !< Default k block size for PLM density integrals [nondim]
+integer, parameter :: default_njblock_plm = 1 !< Default j block size for PLM density integrals [nondim]
+#endif
+integer, parameter :: default_niblock_plm = 0 !< Default i block size for PLM density integrals [nondim]
+
 !> Finite volume pressure gradient control structure
 type, public :: PressureForce_FV_CS ; private
   logical :: initialized = .false. !< True if this control structure has been initialized.
@@ -104,6 +113,9 @@ type, public :: PressureForce_FV_CS ; private
   integer :: id_sal_v = -1 !< Diagnostic identifier
   integer :: id_tides_u = -1 !< Diagnostic identifier
   integer :: id_tides_v = -1 !< Diagnostic identifier
+  integer :: nkblock      !< Vertical block size for PLM density integrals [nondim]
+  integer :: niblock_plm  !< i-tile size for PLM density integrals, 0 = full domain [nondim]
+  integer :: njblock_plm  !< j-tile size for PLM density integrals, 0 = full domain [nondim]
   type(SAL_CS), pointer :: SAL_CSp => NULL() !< SAL control structure
   type(tidal_forcing_CS), pointer :: tides_CSp => NULL() !< Tides control structure
 end type PressureForce_FV_CS
@@ -1102,9 +1114,11 @@ subroutine PressureForce_FV_Bouss(h, tv, PFu, PFv, G, GV, US, CS, ALE_CSp, ADp, 
   integer, dimension(2) :: EOSdom_v ! The i-computational domain for the equation of state at v-velocity points
   integer :: EOSdom2d(2,2)  ! The 2D compute domain for the equation of state
   integer :: is, ie, js, je, Isq, Ieq, Jsq, Jeq, nz, nkmb
-  integer :: i, j, k, m
+  integer :: i, j, k, m, kstart, kend
+  integer :: nkblock
 
   is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec ; nz = GV%ke
+  nkblock = CS%nkblock ; if (nkblock <= 0) nkblock = nz
   nkmb=GV%nk_rho_varies
   Isq = G%IscB ; Ieq = G%IecB ; Jsq = G%JscB ; Jeq = G%JecB
   EOSdom(1) = Isq - (G%isd-1) ;  EOSdom(2) = G%iec+1 - (G%isd-1)
@@ -1148,7 +1162,7 @@ subroutine PressureForce_FV_Bouss(h, tv, PFu, PFv, G, GV, US, CS, ALE_CSp, ADp, 
     MassWt_u(:,:,:) = 0.0 ; MassWt_v(:,:,:) = 0.0
   endif
 
-  !$omp target enter data map(alloc: e)
+  !$omp target enter data map(alloc: e, T_t, T_b, S_t, S_b)
 
   do concurrent (j=Jsq:Jeq+1, i=Isq:Ieq+1)
     e(i,j,nz+1) = -G%bathyT(i,j)
@@ -1207,9 +1221,11 @@ subroutine PressureForce_FV_Bouss(h, tv, PFu, PFv, G, GV, US, CS, ALE_CSp, ADp, 
     !$omp target update to(e(:,:,nz+1))
   endif
 
-  do k=nz,1,-1
-    do concurrent (j=Jsq:Jeq+1, i=Isq:Ieq+1)
-      e(i,j,K) = e(i,j,K+1) + h(i,j,k)*GV%H_to_Z
+  do concurrent(j=Jsq:Jeq+1)
+    do k=nz,1,-1
+      do concurrent (i=Isq:Ieq+1)
+        e(i,j,K) = e(i,j,K+1) + h(i,j,k)*GV%H_to_Z
+      enddo
     enddo
   enddo
 
@@ -1242,6 +1258,7 @@ subroutine PressureForce_FV_Bouss(h, tv, PFu, PFv, G, GV, US, CS, ALE_CSp, ADp, 
       tv_tmp%T => tv%T ; tv_tmp%S => tv%S
       tv_tmp%eqn_of_state => tv%eqn_of_state
     endif
+    !$omp target enter data map(to: tv_tmp, tv_tmp%T, tv_tmp%S)
   endif
 
   ! If regridding is activated, do a linear reconstruction of salinity
@@ -1290,7 +1307,8 @@ subroutine PressureForce_FV_Bouss(h, tv, PFu, PFv, G, GV, US, CS, ALE_CSp, ADp, 
         Z_0p(i,j) = G%meanSL(i,j)
       enddo
     endif
-    !$omp target update from(Z_0p)
+    !$omp target update from(Z_0p) &
+    !$omp   if((use_ALE .and. CS%Recon_Scheme == 2) .or. CS%reset_intxpa_integral .or. CS%correction_intxpa)
   endif
 
   ! Calculate 4 integrals through the layer that are required in the
@@ -1298,56 +1316,60 @@ subroutine PressureForce_FV_Bouss(h, tv, PFu, PFv, G, GV, US, CS, ALE_CSp, ADp, 
   !$omp target enter data map(alloc: dpa, intx_dpa, inty_dpa, intz_dpa)
 
   if (use_EOS) then
-    !$omp target update from(e) if( (use_ALE .and. CS%Recon_Scheme > 0) .or. &
+    !$omp target update from(e) if( (use_ALE .and. CS%Recon_Scheme == 2) .or. &
     !$omp                           (CS%id_MassWt_u > 0) .or. (CS%id_MassWt_v > 0))
-    ! transfer tv_tmp%* only if int_density_dz is called
-    !$omp target enter data map(to: tv_tmp, tv_tmp%T, tv_tmp%S) &
-    !$omp   if(.not.(use_ALE .and. CS%Recon_Scheme > 0))
 
     ! The following routine computes the integrals that are needed to
     ! calculate the pressure gradient force. Linear profiles for T and S are
     ! assumed when regridding is activated. Otherwise, the previous version
     ! is used, whereby densities within each layer are constant no matter
     ! where the layers are located.
-    do k=1,nz
+    !$omp target enter data map(to: tv)
+    do kstart=1,nz,nkblock
+      kend = min(kstart+nkblock-1, nz)
       if ( use_ALE .and. CS%Recon_Scheme > 0 ) then
         if ( CS%Recon_Scheme == 1 .or. CS%Recon_Scheme == 3 ) then
-          call int_density_dz_generic_plm(k, tv, T_t, T_b, S_t, S_b, e, &
+          call int_density_dz_generic_plm(kstart, kend, tv, T_t, T_b, S_t, S_b, e, &
                     rho_ref, rho0_int_density, GV%g_Earth, dz_neglect, G%bathyT, &
-                    G%HI, GV, tv%eqn_of_state, US, CS%use_stanley_pgf, dpa(:,:,k), intz_dpa(:,:,k), &
-                    intx_dpa(:,:,k), inty_dpa(:,:,k), &
+                    G%HI, GV, tv%eqn_of_state, US, CS%use_stanley_pgf, dpa, intz_dpa, &
+                    intx_dpa, inty_dpa, &
                     MassWghtInterp=CS%MassWghtInterp, &
                     use_inaccurate_form=CS%use_inaccurate_pgf_rho_anom, Z_0p=Z_0p, &
-                    MassWghtInterpVanOnly=CS%MassWghtInterpVanOnly, h_nv=dz_nonvanished)
+                    MassWghtInterpVanOnly=CS%MassWghtInterpVanOnly, h_nv=dz_nonvanished, &
+                    niblock=CS%niblock_plm, njblock=CS%njblock_plm)
         elseif ( CS%Recon_Scheme == 2 ) then
+          do k=kstart,kend
           call int_density_dz_generic_ppm(k, tv, T_t, T_b, S_t, S_b, e, &
                     rho_ref, rho0_int_density, GV%g_Earth, dz_neglect, G%bathyT, &
                     G%HI, GV, tv%eqn_of_state, US, CS%use_stanley_pgf, dpa(:,:,k), intz_dpa(:,:,k), &
                     intx_dpa(:,:,k), inty_dpa(:,:,k), &
                     MassWghtInterp=CS%MassWghtInterp, Z_0p=Z_0p, &
                     MassWghtInterpVanOnly=CS%MassWghtInterpVanOnly, h_nv=dz_nonvanished)
+          enddo
         endif
-        ! defensive update - not sure if it works
-        !$omp target update to(dpa, intx_dpa, inty_dpa, intz_dpa)
       else
+        do k=kstart,kend
         call int_density_dz(tv_tmp%T(:,:,k), tv_tmp%S(:,:,k), e(:,:,K), e(:,:,K+1), &
                   rho_ref, rho0_int_density, GV%g_Earth, G%HI, tv%eqn_of_state, US, dpa(:,:,k), &
                   intz_dpa(:,:,k), intx_dpa(:,:,k), inty_dpa(:,:,k), G%bathyT, e(:,:,1), dz_neglect, &
                   CS%MassWghtInterp, Z_0p=Z_0p, &
                   MassWghtInterpVanOnly=CS%MassWghtInterpVanOnly, h_nv=dz_nonvanished)
+        enddo
       endif
       if (GV%Z_to_H /= 1.0) then
-        do concurrent (j=Jsq:Jeq+1, i=Isq:Ieq+1)
+        do concurrent (k=kstart:kend, j=Jsq:Jeq+1, i=Isq:Ieq+1)
           intz_dpa(i,j,k) = intz_dpa(i,j,k)*GV%Z_to_H
         enddo
       endif
-      if ((CS%id_MassWt_u > 0) .or. (CS%id_MassWt_v > 0)) &
+      if ((CS%id_MassWt_u > 0) .or. (CS%id_MassWt_v > 0)) then
+        do k=kstart,kend
         call diagnose_mass_weight_Z(e(:,:,K), e(:,:,K+1), G%bathyT, e(:,:,1), dz_neglect, CS%MassWghtInterp, &
                                     G%HI, MassWt_u(:,:,k), MassWt_v(:,:,k), &
                                     MassWghtInterpVanOnly=CS%MassWghtInterpVanOnly, h_nv=CS%h_nonvanished)
+        enddo
+      endif
     enddo
-    !$omp target exit data map(release: tv_tmp, tv_tmp%T, tv_tmp%S) &
-    !$omp   if(.not.(use_ALE .and. CS%Recon_Scheme > 0))
+    !$omp target exit data map(release: tv)
   else
     !$omp target data map(alloc: dz_geo)
     do k=1,nz
@@ -1427,7 +1449,6 @@ subroutine PressureForce_FV_Bouss(h, tv, PFu, PFv, G, GV, US, CS, ALE_CSp, ADp, 
   endif
 
   !$omp target enter data map(alloc: intx_pa, inty_pa)
-
   if (CS%correction_intxpa) then
     ! TODO needs to be moved to GPU
 
@@ -1581,14 +1602,18 @@ subroutine PressureForce_FV_Bouss(h, tv, PFu, PFv, G, GV, US, CS, ALE_CSp, ADp, 
     enddo
   endif
 
-  do k=1,nz
-    do concurrent (j=js:je, I=Isq:Ieq)
-      intx_pa(I,j,K+1) = intx_pa(I,j,K) + intx_dpa(I,j,k)
+  do concurrent (j=js:je)
+    do k=1,nz
+      do concurrent (I=Isq:Ieq)
+        intx_pa(I,j,K+1) = intx_pa(I,j,K) + intx_dpa(I,j,k)
+      enddo
     enddo
   enddo
-  do k=1,nz
-    do concurrent (J=Jsq:Jeq, i=is:ie)
-      inty_pa(i,J,K+1) = inty_pa(i,J,K) + inty_dpa(i,J,k)
+  do concurrent (J=Jsq:Jeq)
+    do k=1,nz
+      do concurrent (i=is:ie)
+        inty_pa(i,J,K+1) = inty_pa(i,J,K) + inty_dpa(i,J,k)
+      enddo
     enddo
   enddo
 
@@ -1836,7 +1861,7 @@ subroutine PressureForce_FV_Bouss(h, tv, PFu, PFv, G, GV, US, CS, ALE_CSp, ADp, 
   ! Eventually, they should be set up *outside* of the function.
 
   !$omp target enter data if(use_EOS) &
-  !$omp   map(to: tv_tmp, tv_tmp%T, tv_tmp%S, tv, EOSdom2d)
+  !$omp   map(to: tv, EOSdom2d)
 
   ! NOTE: e_sal condition could be sharpened, but this is close enough.
   !$omp target enter data map(to: e_tidal_eq, e_tidal_sal, e_sal_and_tide) if (CS%tides)
@@ -1941,7 +1966,7 @@ subroutine PressureForce_FV_Bouss(h, tv, PFu, PFv, G, GV, US, CS, ALE_CSp, ADp, 
   endif
 
   if (present(pbce)) then
-    call set_pbce_Bouss(e, tv_tmp, G, GV, US, rho0_set_pbce, CS%GFS_scale, pbce)
+    call set_pbce_Bouss(e, tv_tmp, G, GV, US, rho0_set_pbce, CS%GFS_scale, pbce, nkblock=nkblock)
   endif
 
   !$omp target exit data if (use_EOS) &
@@ -1979,7 +2004,7 @@ subroutine PressureForce_FV_Bouss(h, tv, PFu, PFv, G, GV, US, CS, ALE_CSp, ADp, 
     endif
   endif
 
-  !$omp target exit data map(delete: e)
+  !$omp target exit data map(delete: e, T_t, T_b, S_t, S_b)
   !$omp target exit data map(delete: e_tidal_eq, e_tidal_sal, e_sal_and_tide) if (CS%tides)
   !$omp target exit data map(delete: e_sal) if (CS%calculate_SAL)
 
@@ -2269,6 +2294,18 @@ subroutine PressureForce_FV_init(Time, G, GV, US, param_file, diag, CS, ADp, SAL
   call get_param(param_file, mdl, "USE_STANLEY_PGF", CS%use_stanley_pgf, &
                  "If true, turn on Stanley SGS T variance parameterization "// &
                  "in PGF code.", default=.false.)
+  call get_param(param_file, mdl, "PGF_PLM_NKBLOCK", CS%nkblock, &
+                 "Vertical block size for the PLM pressure gradient density integral. "//&
+                 "0 processes all layers in a single block.", &
+                 default=default_nkblock)
+  call get_param(param_file, mdl, "PGF_PLM_NIBLOCK", CS%niblock_plm, &
+                 "i-tile size for the PLM pressure gradient density integral. "//&
+                 "0 uses the full i compute domain.", &
+                 default=default_niblock_plm)
+  call get_param(param_file, mdl, "PGF_PLM_NJBLOCK", CS%njblock_plm, &
+                 "j-tile size for the PLM pressure gradient density integral. "//&
+                 "0 uses the full j compute domain.", &
+                 default=default_njblock_plm)
   if (CS%use_stanley_pgf) then
     call get_param(param_file, mdl, "STANLEY_COEFF", Stanley_coeff, &
                  "Coefficient correlating the temperature gradient and SGS T variance.", &
