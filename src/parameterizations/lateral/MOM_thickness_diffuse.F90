@@ -770,11 +770,11 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV
   real :: drdx, drdy    ! Zonal and meridional density gradients [R L-1 ~> kg m-4].
   real :: drdz          ! Vertical density gradient [R Z-1 ~> kg m-4].
   real :: dz_harm       ! Harmonic mean layer vertical extent [Z ~> m].
-  real :: c2_dz_u(SZIB_(G),SZJ_(G),SZK_(GV)+1) ! Wave speed squared divided by dz at u-points [L2 Z-1 T-2 ~> m s-2]
-  real :: c2_dz_v(SZI_(G),SZJB_(G),SZK_(GV)+1)  ! Wave speed squared divided by dz at v-points [L2 Z-1 T-2 ~> m s-2]
-  real :: dzN2_u(SZIB_(G),SZJ_(G),SZK_(GV)+1) ! Vertical extent times N2 at interfaces above u-points times
+  real :: c2_dz_u(SZIB_(G),njblock,SZK_(GV)+1) ! Wave speed squared divided by dz at u-points [L2 Z-1 T-2 ~> m s-2]
+  real :: c2_dz_v(SZI_(G),njblock,SZK_(GV)+1)  ! Wave speed squared divided by dz at v-points [L2 Z-1 T-2 ~> m s-2]
+  real :: dzN2_u(SZIB_(G),njblock,SZK_(GV)+1) ! Vertical extent times N2 at interfaces above u-points times
                         ! rescaling factors from vertical to horizontal distances [L2 Z-1 T-2 ~> m s-2]
-  real :: dzN2_v(SZI_(G),SZJB_(G),SZK_(GV)+1)  ! Vertical extent times N2 at interfaces above v-points times
+  real :: dzN2_v(SZI_(G),njblock,SZK_(GV)+1)  ! Vertical extent times N2 at interfaces above v-points times
                         ! rescaling factors from vertical to horizontal distances [L2 Z-1 T-2 ~> m s-2]
   real :: Sfn_est       ! A preliminary estimate (before limiting) of the overturning
                         ! streamfunction [H L2 T-1 ~> m3 s-1 or kg s-1].
@@ -930,7 +930,10 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV
 
   do jstart=js,je,njblock
     jend = min(jstart+njblock-1, je)
-    do concurrent (j=jstart:jend, i=is-1:ie) ; dzN2_u(i,j,1) = 0. ; dzN2_u(i,j,nz+1) = 0. ; enddo
+    do concurrent (j=jstart:jend, i=is-1:ie)
+      jj = j - jstart + 1
+      dzN2_u(i,jj,1) = 0. ; dzN2_u(i,jj,nz+1) = 0.
+    enddo
     do K=nz,2,-1
       if (find_work .and. .not.(use_EOS)) then
         drdiA = 0.0 ; drdiB = 0.0
@@ -1036,7 +1039,7 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV
               dzaA = 0.5*(dz(i,j,k-1) + dz(i+1,j,k-1)) + dz_neglect
               dzaB = 0.5*(dz(i,j,k) + dz(i+1,j,k)) + dz_neglect
               ! dzN2_u is used with the FGNV streamfunction formulation
-              dzN2_u(I,j,K) = (0.5 * ( dzg2A / dzaA + dzg2B / dzaB )) * max(N2_unlim, N2_floor)
+              dzN2_u(I,jj,K) = (0.5 * ( dzg2A / dzaA + dzg2B / dzaB )) * max(N2_unlim, N2_floor)
               if (find_work .and. CS%GM_src_alt) &
                 hN2_x_PE(I,j,k) = (0.5 * ( hg2A / haA + hg2B / haB )) * max(N2_unlim, N2_floor)
             endif
@@ -1114,7 +1117,7 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV
             endif
             if (CS%id_slope_x > 0) CS%diagSlopeX(I,j,k) = Slope
             Sfn_unlim_u(I,j,K) = -(KH_u(I,j,K)*G%dy_Cu(I,j))*Slope
-            dzN2_u(I,j,K) = GV%g_prime(K)
+            dzN2_u(I,jj,K) = GV%g_prime(K)
 
             if (CS%use_meso_sfn_ANN) then
               Sfn_unlim_u(I,j,K) = Sfn_unlim_u(I,j,K) + Sfn_unlim_u_3D(I,j,K)
@@ -1142,7 +1145,7 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV
 
           endif ! if (use_EOS)
         else ! if (k > nk_linear)
-          dzN2_u(I,j,K) = N2_floor * dz_neglect
+          dzN2_u(I,jj,K) = N2_floor * dz_neglect
           Sfn_unlim_u(I,j,K) = 0.
         endif ! if (k > nk_linear)
         if (CS%id_sfn_unlim_x>0) diag_sfn_unlim_x(I,j,K) = Sfn_unlim_u(I,j,K)
@@ -1151,19 +1154,21 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV
 
     if (CS%use_FGNV_streamfn) then
       do concurrent (k=1:nz, j=jstart:jend, i=is-1:ie, G%OBCmaskCu(i,j)>0.)
+        jj = j - jstart + 1
         dz_harm = max( dz_neglect, &
               2. * dz(i,j,k) * dz(i+1,j,k) / ( ( dz(i,j,k) + dz(i+1,j,k) ) + dz_neglect ) )
-        c2_dz_u(I,j,k) = CS%FGNV_scale * ( 0.5*( cg1(i,j) + cg1(i+1,j) ) )**2 / dz_harm
+        c2_dz_u(I,jj,k) = CS%FGNV_scale * ( 0.5*( cg1(i,j) + cg1(i+1,j) ) )**2 / dz_harm
       enddo
 
       ! Solve an elliptic equation for the streamfunction following Ferrari et al., 2010.
       do concurrent (j=jstart:jend, I=is-1:ie)
+        jj = j - jstart + 1
         if (G%OBCmaskCu(I,j)>0.) then
           do K=2,nz
             Sfn_unlim_u(I,j,K) = (1. + CS%FGNV_scale) * Sfn_unlim_u(I,j,K)
           enddo
           ! unsure if this works on GPU due to non-contiguous memory access
-          call streamfn_solver(nz, c2_dz_u(I,j,:), dzN2_u(I,j,:), Sfn_unlim_u(I,j,:))
+          call streamfn_solver(nz, c2_dz_u(I,jj,:), dzN2_u(I,jj,:), Sfn_unlim_u(I,j,:))
         else
           do K=2,nz
             Sfn_unlim_u(I,j,K) = 0.
@@ -1267,7 +1272,10 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV
 
   do jstart=js-1,je,njblock
     jend = min(jstart+njblock-1, je)
-    do concurrent (J=jstart:jend, i=is:ie) ; dzN2_v(i,J,1) = 0. ; dzN2_v(i,J,nz+1) = 0. ; enddo
+    do concurrent (J=jstart:jend, i=is:ie)
+      JJ = J - jstart + 1
+      dzN2_v(i,JJ,1) = 0. ; dzN2_v(i,JJ,nz+1) = 0.
+    enddo
     do K=nz,2,-1
       drdjA = 0.0 ; drdjB = 0.0
       if (find_work .and. .not.(use_EOS)) then
@@ -1385,7 +1393,7 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV
               dzaB = 0.5*(dz(i,j,k) + dz(i,j+1,k)) + dz_neglect
 
               ! dzN2_v is used with the FGNV streamfunction formulation
-              dzN2_v(i,J,K) = (0.5*( dzg2A / dzaA + dzg2B / dzaB )) * max(N2_unlim, N2_floor)
+              dzN2_v(i,JJ,K) = (0.5*( dzg2A / dzaA + dzg2B / dzaB )) * max(N2_unlim, N2_floor)
               if (find_work .and. CS%GM_src_alt) &
                 hN2_y_PE(i,J,k) = (0.5*( hg2A / haA + hg2B / haB )) * max(N2_unlim, N2_floor)
             endif
@@ -1461,7 +1469,7 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV
             endif
             if (CS%id_slope_y > 0) CS%diagSlopeY(I,j,k) = Slope
             Sfn_unlim_v(i,J,K) = -((KH_v(i,J,K)*G%dx_Cv(i,J))*Slope)
-            dzN2_v(i,J,K) = GV%g_prime(K)
+            dzN2_v(i,JJ,K) = GV%g_prime(K)
 
             if (CS%use_meso_sfn_ANN) then
               Sfn_unlim_v(i,J,K) = Sfn_unlim_v(i,J,K) + Sfn_unlim_v_3D(i,J,k)
@@ -1489,7 +1497,7 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV
 
           endif ! if (use_EOS)
         else ! if (k > nk_linear)
-          dzN2_v(i,J,K) = N2_floor * dz_neglect
+          dzN2_v(i,JJ,K) = N2_floor * dz_neglect
           Sfn_unlim_v(i,J,K) = 0.
         endif ! if (k > nk_linear)
         if (CS%id_sfn_unlim_y>0) diag_sfn_unlim_y(i,J,K) = Sfn_unlim_v(i,J,K)
@@ -1498,18 +1506,20 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV
 
     if (CS%use_FGNV_streamfn) then
       do concurrent (k=1:nz, J=jstart:jend, i=is:ie, G%OBCmaskCv(i,J)>0.)
+        JJ = J - jstart + 1
         dz_harm = max( dz_neglect, &
               2. * dz(i,j,k) * dz(i,j+1,k) / ( ( dz(i,j,k) + dz(i,j+1,k) ) + dz_neglect ) )
-        c2_dz_v(i,J,k) = CS%FGNV_scale * ( 0.5*( cg1(i,j) + cg1(i,j+1) ) )**2 / dz_harm
+        c2_dz_v(i,JJ,k) = CS%FGNV_scale * ( 0.5*( cg1(i,j) + cg1(i,j+1) ) )**2 / dz_harm
       enddo
 
       ! Solve an elliptic equation for the streamfunction following Ferrari et al., 2010.
       do concurrent (J=jstart:jend, i=is:ie)
+        JJ = J - jstart + 1
         if (G%OBCmaskCv(i,J)>0.) then
           do K=2,nz
             Sfn_unlim_v(i,J,K) = (1. + CS%FGNV_scale) * Sfn_unlim_v(i,J,K)
           enddo
-          call streamfn_solver(nz, c2_dz_v(i,J,:), dzN2_v(i,J,:), Sfn_unlim_v(i,J,:))
+          call streamfn_solver(nz, c2_dz_v(i,JJ,:), dzN2_v(i,JJ,:), Sfn_unlim_v(i,J,:))
         else
           do K=2,nz
             Sfn_unlim_v(i,J,K) = 0.
