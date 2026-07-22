@@ -938,6 +938,11 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV
       jj = j - jstart + 1 ; ii = i - istart + 1
       dzN2_u(ii,jj,1) = 0. ; dzN2_u(ii,jj,nz+1) = 0.
     enddo
+    ! below k loop is a performance bottleneck for GPU. However, cannot safely parallelize k
+    ! without possibly changing answers:
+    ! when calc_derivates changes from .true. to .false. (due to k < nk_linear), drdjA/B and drdkL/R
+    ! from a previous iteration may get consumed in one of the below loops.
+    ! cannot use jki loop pattern because of EOS call.
     do K=nz,2,-1
       if (find_work .and. .not.(use_EOS)) then
         drdiA = 0.0 ; drdiB = 0.0
@@ -973,7 +978,13 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV
                      tv%eqn_of_state, reshape([1, 1, iend - istart + 2, jend - jstart + 1], [2,2]) )
       endif
 
-      ! local variables needed nvfortran thinks the v-loop beneath needs them
+      ! possible bug?
+      ! when calc_derivatives is .true. and (find_work .and. .not.use_EOS) is .false., then
+      ! the meridional loop might consume the last iteration's drdiA/B, drdkL/R. Similarly,
+      ! when k < k_linear, but calc_derivatives was .true. in a previous k iteration, below
+      ! loop might consume/update drdiA/B and drdkL/R.
+      ! Adding variables to local_init and local enables parallelization, but may change
+      ! answers.
       do concurrent (j=jstart:jend, i=istart:iend) DO_LOCALITY(local_init(drdiA, drdiB, drdkL, drdkR) local(drdz,hg2A,hg2B,haA,haB))
         jj = j - jstart + 1 ; II = I - istart + 1
         if (calc_derivatives) then
@@ -1282,12 +1293,15 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV
       JJ = J - jstart + 1 ; ii = i - istart + 1
       dzN2_v(ii,JJ,1) = 0. ; dzN2_v(ii,JJ,nz+1) = 0.
     enddo
+    ! below k loop is a performance bottleneck for GPU. However, cannot safely parallelize k
+    ! without possibly changing answers:
+    ! when calc_derivates changes from .true. to .false. (due to k < nk_linear), drdjA/B and drdkL/R
+    ! from a previous iteration may get consumed in one of the below loops.
+    ! cannot use jki loop pattern because of EOS call.
     do K=nz,2,-1
-      drdjA = 0.0 ; drdjB = 0.0
       if (find_work .and. .not.(use_EOS)) then
+        drdjA = 0.0 ; drdjB = 0.0
         drdkL = GV%Rlay(k) - GV%Rlay(k-1) ; drdkR = drdkL
-      else
-        drdkL = 0.0 ; drdkR = 0.0
       endif
 
       calc_derivatives = use_EOS .and. (k >= nk_linear) .and. &
