@@ -778,10 +778,10 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV
                         ! rescaling factors from vertical to horizontal distances [L2 Z-1 T-2 ~> m s-2]
   real :: Sfn_est       ! A preliminary estimate (before limiting) of the overturning
                         ! streamfunction [H L2 T-1 ~> m3 s-1 or kg s-1].
-  real :: Sfn_unlim_u(SZIB_(G),SZJ_(G),SZK_(GV)+1) ! Volume streamfunction for u-points [Z L2 T-1 ~> m3 s-1]
-  real :: Sfn_unlim_v(SZI_(G),SZJB_(G),SZK_(GV)+1)  ! Volume streamfunction for v-points [Z L2 T-1 ~> m3 s-1]
-  real :: slope2_Ratio_u(SZIB_(G),SZJ_(G),SZK_(GV)+1) ! The ratio of the slope squared to slope_max squared [nondim]
-  real :: slope2_Ratio_v(SZI_(G),SZJB_(G),SZK_(GV)+1)  ! The ratio of the slope squared to slope_max squared [nondim]
+  real :: Sfn_unlim_u(SZIB_(G),njblock,SZK_(GV)+1) ! Volume streamfunction for u-points [Z L2 T-1 ~> m3 s-1]
+  real :: Sfn_unlim_v(SZI_(G),njblock,SZK_(GV)+1)  ! Volume streamfunction for v-points [Z L2 T-1 ~> m3 s-1]
+  real :: slope2_Ratio_u(SZIB_(G),njblock,SZK_(GV)+1) ! The ratio of the slope squared to slope_max squared [nondim]
+  real :: slope2_Ratio_v(SZI_(G),njblock,SZK_(GV)+1)  ! The ratio of the slope squared to slope_max squared [nondim]
   real :: Sfn_in_h      ! The overturning streamfunction [H L2 T-1 ~> m3 s-1 or kg s-1] (note that
                         ! the units are different from other Sfn vars).
   real :: Sfn_safe      ! The streamfunction that goes linearly back to 0 at the surface
@@ -1046,7 +1046,7 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV
 
             if (present_slope_x) then
               Slope = slope_x(I,j,k)
-              slope2_Ratio_u(I,j,K) = Slope**2 * I_slope_max2
+              slope2_Ratio_u(I,jj,K) = Slope**2 * I_slope_max2
             else
               ! Use the harmonic mean thicknesses to weight the horizontal gradients.
               ! These unnormalized weights have been rearranged to minimize divisions.
@@ -1060,10 +1060,10 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV
               mag_grad2 = (US%Z_to_L*drdx)**2 + drdz**2
               if (mag_grad2 > 0.0) then
                 Slope = drdx / sqrt(mag_grad2)
-                slope2_Ratio_u(I,j,K) = Slope**2 * I_slope_max2
+                slope2_Ratio_u(I,jj,K) = Slope**2 * I_slope_max2
               else ! Just in case mag_grad2 = 0 ever.
                 Slope = 0.0
-                slope2_Ratio_u(I,j,K) = 1.0e20  ! Force the use of the safe streamfunction.
+                slope2_Ratio_u(I,jj,K) = 1.0e20  ! Force the use of the safe streamfunction.
               endif
             endif
 
@@ -1071,7 +1071,7 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV
             ! that ignore density gradients along layers.
             Slope = (1.0 - int_slope_u(I,j,K)) * Slope + &
                     int_slope_u(I,j,K) * ((e(i+1,j,K)-e(i,j,K)) * G%IdxCu(I,j))
-            slope2_Ratio_u(I,j,K) = (1.0 - int_slope_u(I,j,K)) * slope2_Ratio_u(I,j,K)
+            slope2_Ratio_u(I,jj,K) = (1.0 - int_slope_u(I,j,K)) * slope2_Ratio_u(I,jj,K)
 
             if (CS%MEKE_src_slope_bug) then
               Slope_x_PE(I,j,k) = MIN(Slope, CS%slope_max)
@@ -1083,7 +1083,7 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV
             if (CS%id_slope_x > 0) CS%diagSlopeX(I,j,k) = Slope
 
             ! Estimate the streamfunction at each interface [H L2 T-1 ~> m3 s-1 or kg s-1].
-            Sfn_unlim_u(I,j,K) = -(KH_u(I,j,K)*G%dy_Cu(I,j))*Slope
+            Sfn_unlim_u(I,jj,K) = -(KH_u(I,j,K)*G%dy_Cu(I,j))*Slope
 
             if (CS%use_meso_sfn_ANN) then
               Sfn_unlim_u(I,j,K) = Sfn_unlim_u(I,j,K) + Sfn_unlim_u_3D(I,j,K)
@@ -1091,20 +1091,20 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV
 
             ! Avoid moving dense water upslope from below the level of
             ! the bottom on the receiving side.
-            if (Sfn_unlim_u(I,j,K) > 0.0) then ! The flow below this interface is positive.
+            if (Sfn_unlim_u(I,jj,K) > 0.0) then ! The flow below this interface is positive.
               if (e(i,j,K) < e(i+1,j,nz+1)) then
-                Sfn_unlim_u(I,j,K) = 0.0 ! This is not uhtot, because it may compensate for
+                Sfn_unlim_u(I,jj,K) = 0.0 ! This is not uhtot, because it may compensate for
                                 ! deeper flow in very unusual cases.
               elseif (e(i+1,j,nz+1) > e(i,j,K+1)) then
                 ! Scale the transport with the fraction of the donor layer above
                 ! the bottom on the receiving side.
-                Sfn_unlim_u(I,j,K) = Sfn_unlim_u(I,j,K) * ((e(i,j,K) - e(i+1,j,nz+1)) / &
+                Sfn_unlim_u(I,jj,K) = Sfn_unlim_u(I,jj,K) * ((e(i,j,K) - e(i+1,j,nz+1)) / &
                                          ((e(i,j,K) - e(i,j,K+1)) + dz_neglect))
               endif
             else
-              if (e(i+1,j,K) < e(i,j,nz+1)) then ; Sfn_unlim_u(I,j,K) = 0.0
+              if (e(i+1,j,K) < e(i,j,nz+1)) then ; Sfn_unlim_u(I,jj,K) = 0.0
               elseif (e(i,j,nz+1) > e(i+1,j,K+1)) then
-                Sfn_unlim_u(I,j,K) = Sfn_unlim_u(I,j,K) * ((e(i+1,j,K) - e(i,j,nz+1)) / &
+                Sfn_unlim_u(I,jj,K) = Sfn_unlim_u(I,jj,K) * ((e(i+1,j,K) - e(i,j,nz+1)) / &
                                        ((e(i+1,j,K) - e(i+1,j,K+1)) + dz_neglect))
               endif
             endif
@@ -1116,7 +1116,7 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV
               Slope = (e(i+1,j,K)-e(i,j,K)) * G%IdxCu_OBCmask(I,j)
             endif
             if (CS%id_slope_x > 0) CS%diagSlopeX(I,j,k) = Slope
-            Sfn_unlim_u(I,j,K) = -(KH_u(I,j,K)*G%dy_Cu(I,j))*Slope
+            Sfn_unlim_u(I,jj,K) = -(KH_u(I,j,K)*G%dy_Cu(I,j))*Slope
             dzN2_u(I,jj,K) = GV%g_prime(K)
 
             if (CS%use_meso_sfn_ANN) then
@@ -1146,9 +1146,9 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV
           endif ! if (use_EOS)
         else ! if (k > nk_linear)
           dzN2_u(I,jj,K) = N2_floor * dz_neglect
-          Sfn_unlim_u(I,j,K) = 0.
+          Sfn_unlim_u(I,jj,K) = 0.
         endif ! if (k > nk_linear)
-        if (CS%id_sfn_unlim_x>0) diag_sfn_unlim_x(I,j,K) = Sfn_unlim_u(I,j,K)
+        if (CS%id_sfn_unlim_x>0) diag_sfn_unlim_x(I,j,K) = Sfn_unlim_u(I,jj,K)
       enddo ! i-loop
     enddo ! k-loop
 
@@ -1165,13 +1165,13 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV
         jj = j - jstart + 1
         if (G%OBCmaskCu(I,j)>0.) then
           do K=2,nz
-            Sfn_unlim_u(I,j,K) = (1. + CS%FGNV_scale) * Sfn_unlim_u(I,j,K)
+            Sfn_unlim_u(I,jj,K) = (1. + CS%FGNV_scale) * Sfn_unlim_u(I,jj,K)
           enddo
           ! unsure if this works on GPU due to non-contiguous memory access
-          call streamfn_solver(nz, c2_dz_u(I,jj,:), dzN2_u(I,jj,:), Sfn_unlim_u(I,j,:))
+          call streamfn_solver(nz, c2_dz_u(I,jj,:), dzN2_u(I,jj,:), Sfn_unlim_u(I,jj,:))
         else
           do K=2,nz
-            Sfn_unlim_u(I,j,K) = 0.
+            Sfn_unlim_u(I,jj,K) = 0.
           enddo
         endif
       enddo
@@ -1202,9 +1202,9 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV
             endif
 
             ! Determine the actual streamfunction at each interface.
-            Sfn_est = (Z_to_H*Sfn_unlim_u(I,j,K) + slope2_Ratio_u(I,j,K)*Sfn_safe) / (1.0 + slope2_Ratio_u(I,j,K))
+            Sfn_est = (Z_to_H*Sfn_unlim_u(I,jj,K) + slope2_Ratio_u(I,jj,K)*Sfn_safe) / (1.0 + slope2_Ratio_u(I,jj,K))
           else  ! When use_EOS is false, the layers are constant density.
-            Sfn_est = Z_to_H*Sfn_unlim_u(I,j,K)
+            Sfn_est = Z_to_H*Sfn_unlim_u(I,jj,K)
           endif
 
           ! Make sure that there is enough mass above to allow the streamfunction
@@ -1399,7 +1399,7 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV
             endif
             if (present_slope_y) then
               Slope = slope_y(i,J,k)
-              slope2_Ratio_v(i,J,K) = Slope**2 * I_slope_max2
+              slope2_Ratio_v(i,JJ,K) = Slope**2 * I_slope_max2
             else
               ! Use the harmonic mean thicknesses to weight the horizontal gradients.
               ! These unnormalized weights have been rearranged to minimize divisions.
@@ -1413,10 +1413,10 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV
               mag_grad2 = (US%Z_to_L*drdy)**2 + drdz**2
               if (mag_grad2 > 0.0) then
                 Slope = drdy / sqrt(mag_grad2)
-                slope2_Ratio_v(i,J,K) = Slope**2 * I_slope_max2
+                slope2_Ratio_v(i,JJ,K) = Slope**2 * I_slope_max2
               else ! Just in case mag_grad2 = 0 ever.
                 Slope = 0.0
-                slope2_Ratio_v(i,J,K) = 1.0e20  ! Force the use of the safe streamfunction.
+                slope2_Ratio_v(i,JJ,K) = 1.0e20  ! Force the use of the safe streamfunction.
               endif
             endif
 
@@ -1424,7 +1424,7 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV
             ! that ignore density gradients along layers.
             Slope = (1.0 - int_slope_v(i,J,K)) * Slope + &
                     int_slope_v(i,J,K) * ((e(i,j+1,K)-e(i,j,K)) * G%IdyCv(i,J))
-            slope2_Ratio_v(i,J,K) = (1.0 - int_slope_v(i,J,K)) * slope2_Ratio_v(i,J,K)
+            slope2_Ratio_v(i,JJ,K) = (1.0 - int_slope_v(i,J,K)) * slope2_Ratio_v(i,JJ,K)
 
             if (CS%MEKE_src_slope_bug) then
               Slope_y_PE(i,J,k) = MIN(Slope, CS%slope_max)
@@ -1435,7 +1435,7 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV
             endif
             if (CS%id_slope_y > 0) CS%diagSlopeY(I,j,k) = Slope
 
-            Sfn_unlim_v(i,J,K) = -((KH_v(i,J,K)*G%dx_Cv(i,J))*Slope)
+            Sfn_unlim_v(i,JJ,K) = -((KH_v(i,J,K)*G%dx_Cv(i,J))*Slope)
 
             if (CS%use_meso_sfn_ANN) then
               Sfn_unlim_v(i,J,K) = Sfn_unlim_v(i,J,K) + Sfn_unlim_v_3D(i,J,k)
@@ -1443,20 +1443,20 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV
 
             ! Avoid moving dense water upslope from below the level of
             ! the bottom on the receiving side.
-            if (Sfn_unlim_v(i,J,K) > 0.0) then ! The flow below this interface is positive.
+            if (Sfn_unlim_v(i,JJ,K) > 0.0) then ! The flow below this interface is positive.
               if (e(i,j,K) < e(i,j+1,nz+1)) then
-                Sfn_unlim_v(i,J,K) = 0.0 ! This is not vhtot, because it may compensate for
+                Sfn_unlim_v(i,JJ,K) = 0.0 ! This is not vhtot, because it may compensate for
                                 ! deeper flow in very unusual cases.
               elseif (e(i,j+1,nz+1) > e(i,j,K+1)) then
                 ! Scale the transport with the fraction of the donor layer above
                 ! the bottom on the receiving side.
-                Sfn_unlim_v(i,J,K) = Sfn_unlim_v(i,J,K) * ((e(i,j,K) - e(i,j+1,nz+1)) / &
+                Sfn_unlim_v(i,JJ,K) = Sfn_unlim_v(i,JJ,K) * ((e(i,j,K) - e(i,j+1,nz+1)) / &
                                          ((e(i,j,K) - e(i,j,K+1)) + dz_neglect))
               endif
             else
-              if (e(i,j+1,K) < e(i,j,nz+1)) then ; Sfn_unlim_v(i,J,K) = 0.0
+              if (e(i,j+1,K) < e(i,j,nz+1)) then ; Sfn_unlim_v(i,JJ,K) = 0.0
               elseif (e(i,j,nz+1) > e(i,j+1,K+1)) then
-                Sfn_unlim_v(i,J,K) = Sfn_unlim_v(i,J,K) * ((e(i,j+1,K) - e(i,j,nz+1)) / &
+                Sfn_unlim_v(i,JJ,K) = Sfn_unlim_v(i,JJ,K) * ((e(i,j+1,K) - e(i,j,nz+1)) / &
                                        ((e(i,j+1,K) - e(i,j+1,K+1)) + dz_neglect))
               endif
             endif
@@ -1468,7 +1468,7 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV
               Slope = (e(i,j+1,K)-e(i,j,K)) * G%IdyCv_OBCmask(i,J)
             endif
             if (CS%id_slope_y > 0) CS%diagSlopeY(I,j,k) = Slope
-            Sfn_unlim_v(i,J,K) = -((KH_v(i,J,K)*G%dx_Cv(i,J))*Slope)
+            Sfn_unlim_v(i,JJ,K) = -((KH_v(i,J,K)*G%dx_Cv(i,J))*Slope)
             dzN2_v(i,JJ,K) = GV%g_prime(K)
 
             if (CS%use_meso_sfn_ANN) then
@@ -1498,9 +1498,9 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV
           endif ! if (use_EOS)
         else ! if (k > nk_linear)
           dzN2_v(i,JJ,K) = N2_floor * dz_neglect
-          Sfn_unlim_v(i,J,K) = 0.
+          Sfn_unlim_v(i,JJ,K) = 0.
         endif ! if (k > nk_linear)
-        if (CS%id_sfn_unlim_y>0) diag_sfn_unlim_y(i,J,K) = Sfn_unlim_v(i,J,K)
+        if (CS%id_sfn_unlim_y>0) diag_sfn_unlim_y(i,J,K) = Sfn_unlim_v(i,JJ,K)
       enddo ! (J,i) concurrent loop
     enddo ! k-loop
 
@@ -1517,18 +1517,19 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV
         JJ = J - jstart + 1
         if (G%OBCmaskCv(i,J)>0.) then
           do K=2,nz
-            Sfn_unlim_v(i,J,K) = (1. + CS%FGNV_scale) * Sfn_unlim_v(i,J,K)
+            Sfn_unlim_v(i,JJ,K) = (1. + CS%FGNV_scale) * Sfn_unlim_v(i,JJ,K)
           enddo
-          call streamfn_solver(nz, c2_dz_v(i,JJ,:), dzN2_v(i,JJ,:), Sfn_unlim_v(i,J,:))
+          call streamfn_solver(nz, c2_dz_v(i,JJ,:), dzN2_v(i,JJ,:), Sfn_unlim_v(i,JJ,:))
         else
           do K=2,nz
-            Sfn_unlim_v(i,J,K) = 0.
+            Sfn_unlim_v(i,JJ,K) = 0.
           enddo
         endif
       enddo
     endif
 
     do concurrent (J=jstart:jend)
+      JJ = J - jstart + 1
       do K=nz,2,-1 ; do concurrent (i=is:ie)
         if (allocated(tv%SpV_avg) .and. (find_work .or. (k > nk_linear)) ) then
           Rho_avg = ( ((h(i,j,k) + h(i,j,k-1)) + (h(i,j+1,k) + h(i,j+1,k-1))) + 4.0*hn_2 ) / &
@@ -1552,9 +1553,9 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV
             endif
 
             ! Find the actual streamfunction at each interface.
-            Sfn_est = (Z_to_H*Sfn_unlim_v(i,J,K) + slope2_Ratio_v(i,J,K)*Sfn_safe) / (1.0 + slope2_Ratio_v(i,J,K))
+            Sfn_est = (Z_to_H*Sfn_unlim_v(i,JJ,K) + slope2_Ratio_v(i,JJ,K)*Sfn_safe) / (1.0 + slope2_Ratio_v(i,JJ,K))
           else  ! When use_EOS is false, the layers are constant density.
-            Sfn_est = Z_to_H*Sfn_unlim_v(i,J,K)
+            Sfn_est = Z_to_H*Sfn_unlim_v(i,JJ,K)
           endif
 
           ! Make sure that there is enough mass above to allow the streamfunction
