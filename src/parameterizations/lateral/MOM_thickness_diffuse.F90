@@ -827,12 +827,12 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV
   real, allocatable :: skeb_ebt_norm2(:,:)              ! Used to normalize EBT for SKEB
 
   logical :: present_slope_x, present_slope_y, calc_derivatives
-  integer, dimension(2) :: EOSdom_u  ! The shifted I-computational domain to use for equation of
-                                     ! state calculations at u-points.
-  integer, dimension(2) :: EOSdom_v  ! The shifted i-computational domain to use for equation of
-                                     ! state calculations at v-points.
-  integer, dimension(2) :: EOSdom_h1 ! The shifted i-computational domain to use for equation of
-                                     ! state calculations at h points with 1 extra halo point
+  integer, dimension(2,2) :: EOSdom_u  ! The shifted I-computational domain to use for equation of
+                                       ! state calculations at u-points.
+  integer, dimension(2,2) :: EOSdom_v  ! The shifted i-computational domain to use for equation of
+                                       ! state calculations at v-points.
+  integer, dimension(2,2) :: EOSdom_h1 ! The shifted i-computational domain to use for equation of
+                                       ! state calculations at h points with 1 extra halo point
   logical :: use_stanley, skeb_use_gm
   integer :: is, ie, js, je, nz, IsdB, halo
   integer :: i, j, k, istart, iend, jstart, jend, ii, jj
@@ -927,13 +927,17 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV
   if (CS%id_sfn_unlim_x > 0) then ; diag_sfn_unlim_x(:,:,1) = 0.0 ; diag_sfn_unlim_x(:,:,nz+1) = 0.0 ; endif
   if (CS%id_sfn_unlim_y > 0) then ; diag_sfn_unlim_y(:,:,1) = 0.0 ; diag_sfn_unlim_y(:,:,nz+1) = 0.0 ; endif
 
-  EOSdom_u(1) = (is-1) - (G%IsdB-1) ; EOSdom_u(2) = ie - (G%IsdB-1)
-  EOSdom_v(:) = EOS_domain(G%HI)
-  EOSdom_h1(:) = EOS_domain(G%HI, halo=1)
+  EOSdom_u(:,1) = 1
+  EOSdom_v(:,1) = 1
+  EOSdom_h1(:,1) = 1
 
   do jstart=js,je,njblock ; do istart=is-1,ie,niblock
     iend = min(istart+niblock-1, ie)
     jend = min(jstart+njblock-1, je)
+    EOSdom_u(1,2) = iend-istart+1
+    EOSdom_u(2,2) = jend-jstart+1
+    EOSdom_h1(1,2) = iend-istart+2
+    EOSdom_h1(1,2) = jend-jstart+1
     do concurrent (j=jstart:jend, i=istart:iend)
       jj = j - jstart + 1 ; ii = i - istart + 1
       dzN2_u(ii,jj,1) = 0. ; dzN2_u(ii,jj,nz+1) = 0.
@@ -961,7 +965,7 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV
           S_u(ii,jj) = 0.25*((S(i,j,k) + S(i+1,j,k)) + (S(i,j,k-1) + S(i+1,j,k-1)))
         enddo
         call calculate_density_derivs(T_u, S_u, pres_u, drho_dT_u, drho_dS_u, &
-                                      tv%eqn_of_state, reshape([1, 1, iend - istart + 1, jend - jstart + 1], [2,2]) )
+                                      tv%eqn_of_state, EOSdom_u)
       endif
       if (use_stanley) then
         do concurrent (j=jstart:jend, i=istart:iend+1)
@@ -975,7 +979,7 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV
         !            drho_dS_dS, drho_dS_dT, drho_dT_dT, drho_dS_dP, drho_dT_dP, &
         call calculate_density_second_derivs(T_h, S_h, pres_h, &
                      scrap, scrap, drho_dT_dT_h, scrap, scrap, &
-                     tv%eqn_of_state, reshape([1, 1, iend - istart + 2, jend - jstart + 1], [2,2]) )
+                     tv%eqn_of_state, EOSdom_h1)
       endif
 
       ! possible bug?
@@ -985,7 +989,8 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV
       ! loop might consume/update drdiA/B and drdkL/R.
       ! Adding variables to local_init and local enables parallelization, but may change
       ! answers.
-      do concurrent (j=jstart:jend, i=istart:iend) DO_LOCALITY(local_init(drdiA, drdiB, drdkL, drdkR) local(drdz,hg2A,hg2B,haA,haB))
+      do concurrent (j=jstart:jend, i=istart:iend) &
+        DO_LOCALITY(local_init(drdiA,drdiB,drdkL,drdkR) local(drdz,hg2A,hg2B,haA,haB))
         jj = j - jstart + 1 ; II = I - istart + 1
         if (calc_derivatives) then
           ! Estimate the horizontal density gradients along layers.
@@ -1289,6 +1294,8 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV
   do jstart=js-1,je,njblock ; do istart=is,ie,niblock
     iend = min(istart+niblock-1, ie)
     jend = min(jstart+njblock-1, je)
+    EOSdom_v(1,2) = iend-istart+1
+    EOSdom_v(2,2) = jend-jstart+1
     do concurrent (J=jstart:jend, i=istart:iend)
       JJ = J - jstart + 1 ; ii = i - istart + 1
       dzN2_v(ii,JJ,1) = 0. ; dzN2_v(ii,JJ,nz+1) = 0.
@@ -1315,8 +1322,7 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV
           S_v(ii,JJ) = 0.25*((S(i,j,k) + S(i,j+1,k)) + (S(i,j,k-1) + S(i,j+1,k-1)))
         enddo
         call calculate_density_derivs(T_v, S_v, pres_v, drho_dT_v, drho_dS_v, &
-                                      tv%eqn_of_state, reshape([1, 1, &
-                                          iend - istart + 1, jend - jstart + 1], [2,2]))
+                                      tv%eqn_of_state, EOSdom_v)
       endif
       if (use_stanley) then
         do concurrent (J=jstart:jend, i=istart:iend)
@@ -1334,14 +1340,12 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV
         !            drho_dS_dS, drho_dS_dT, drho_dT_dT, drho_dS_dP, drho_dT_dP, &
         call calculate_density_second_derivs(T_h, S_h, pres_h, &
                      scrap, scrap, drho_dT_dT_h, scrap, scrap, &
-                     tv%eqn_of_state, reshape([1, 1, &
-                         iend - istart + 1, jend - jstart + 1], [2,2]))
+                     tv%eqn_of_state, EOSdom_v)
         call calculate_density_second_derivs(T_hr, S_hr, pres_hr, &
                      scrap, scrap, drho_dT_dT_hr, scrap, scrap, &
-                     tv%eqn_of_state, reshape([1, 1, &
-                         iend - istart + 1, jend - jstart + 1], [2,2]))
+                     tv%eqn_of_state, EOSdom_v)
       endif
-      do concurrent (J=jstart:jend, i=istart:iend) DO_LOCALITY(local_init(drdjA, drdjB, drdkL, drdkR))
+      do concurrent (J=jstart:jend, i=istart:iend) DO_LOCALITY(local_init(drdjA,drdjB,drdkL,drdkR))
         jj = j - jstart + 1 ; ii = i - istart + 1
         if (calc_derivatives) then
           ! Estimate the horizontal density gradients along layers.
