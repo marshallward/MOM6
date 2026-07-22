@@ -107,6 +107,12 @@ type, public :: thickness_diffuse_CS ; private
   logical :: read_khth           !< If true, read a file containing the spatially varying horizontal
                                  !! isopycnal height diffusivity
   logical :: use_stanley_gm      !< If true, also use the Stanley parameterization in MOM_thickness_diffuse
+  integer :: niblock             !< The i-direction block size used in array calculations in
+                                 !! thickness_diffuse_full [nondim]. A value of 0 is dynamic and
+                                 !! fits the full computational i-domain length.
+  integer :: njblock             !< The j-direction block size used in array calculations in
+                                 !! thickness_diffuse_full [nondim]. A value of 0 is dynamic and
+                                 !! fits the full computational j-domain length.
 
   logical :: use_meso_sfn_ANN  !< If true, use the meso-scale streamfunction ANN parameterization
   type(MESO_SFN_ANN_CS) :: meso_sfn_ANN_CS !< Control structure for the meso-scale streamfunction ANN parameterization
@@ -201,6 +207,8 @@ subroutine thickness_diffuse(h, uhtr, vhtr, tv, dt, G, GV, US, MEKE, VarMix, CDp
   logical :: use_VarMix, Resoln_scaled, Depth_scaled, use_stored_slopes, khth_use_vert_struct, use_Visbeck
   logical :: use_QG_Leith
   integer :: i, j, k, is, ie, js, je, nz
+  integer :: niblock !< i block size for array calculations in thickness_diffuse_full [nondim].
+  integer :: njblock !< j block size for array calculations in thickness_diffuse_full [nondim].
 
   if (.not. CS%initialized) call MOM_error(FATAL, "MOM_thickness_diffuse: "//&
          "Module must be initialized before it is used.")
@@ -211,6 +219,10 @@ subroutine thickness_diffuse(h, uhtr, vhtr, tv, dt, G, GV, US, MEKE, VarMix, CDp
 
   is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec ; nz = GV%ke
   h_neglect = GV%H_subroundoff
+
+  niblock = CS%niblock ; njblock = CS%njblock
+  if (niblock == 0) niblock = ie-is+2
+  if (njblock == 0) njblock = je-js+2
 
   !$omp target enter data map(to: MEKE) if(allocated(MEKE%GM_src) .or. allocated(MEKE%Kh))
   !$omp target enter data map(alloc: MEKE%GM_src) if(allocated(MEKE%GM_src))
@@ -238,7 +250,8 @@ subroutine thickness_diffuse(h, uhtr, vhtr, tv, dt, G, GV, US, MEKE, VarMix, CDp
   endif
 
   !$omp target update to(CS, MEKE)
-  !$omp target enter data map(alloc: KH_u_CFL, KH_v_CFL, Khth_Loc_u, Khth_Loc_v, int_slope_u, int_slope_v, e, KH_u, KH_v, uhD, vhD) map(to: VarMix, VarMix%res_fn_u, VarMix%res_fn_v)
+  !$omp target enter data map(alloc: KH_u_CFL, KH_v_CFL, Khth_Loc_u, Khth_Loc_v, int_slope_u, int_slope_v, &
+  !$omp                     e, KH_u, KH_v, uhD, vhD) map(to: VarMix, VarMix%res_fn_u, VarMix%res_fn_v)
 
   do concurrent (j=js:je, I=is-1:ie)
     KH_u_CFL(I,j) = (0.25*CS%max_Khth_CFL) /  &
@@ -471,7 +484,8 @@ subroutine thickness_diffuse(h, uhtr, vhtr, tv, dt, G, GV, US, MEKE, VarMix, CDp
   do concurrent (K=1:nz+1, j=js:je, I=is-1:ie) ; int_slope_u(I,j,K) = 0.0 ; enddo
   do concurrent (K=1:nz+1, J=js-1:je, i=is:ie) ; int_slope_v(i,J,K) = 0.0 ; enddo
 
-  !$omp target update from(e, Kh_u, Kh_v, Kh_u_CFL, Kh_v_CFL, int_slope_u, int_slope_v) if (CS%detangle_interfaces .or. (CS%Kh_eta_bg > 0.0) .or. (CS%Kh_eta_vel > 0.0) .or. CS%debug)
+  !$omp target update from(e, Kh_u, Kh_v, Kh_u_CFL, Kh_v_CFL, int_slope_u, int_slope_v) &
+  !$omp                if (CS%detangle_interfaces .or. (CS%Kh_eta_bg > 0.0) .or. (CS%Kh_eta_vel > 0.0) .or. CS%debug)
 
   if (CS%detangle_interfaces) then
     call add_detangling_Kh(h, e, Kh_u, Kh_v, KH_u_CFL, KH_v_CFL, tv, dt, G, GV, US, &
@@ -487,7 +501,8 @@ subroutine thickness_diffuse(h, uhtr, vhtr, tv, dt, G, GV, US, MEKE, VarMix, CDp
                               CS%meso_sfn_ANN_CS, dt, u, v)
   endif
 
-  !$omp target update to(Kh_u, Kh_v, int_slope_u, int_slope_v) if (CS%detangle_interfaces .or. (CS%Kh_eta_bg > 0.0) .or. (CS%Kh_eta_vel > 0.0))
+  !$omp target update to(Kh_u, Kh_v, int_slope_u, int_slope_v) &
+  !$omp              if (CS%detangle_interfaces .or. (CS%Kh_eta_bg > 0.0) .or. (CS%Kh_eta_vel > 0.0))
 
   if (CS%debug) then
     call uvchksum("Kh_[uv]", Kh_u, Kh_v, G%HI, haloshift=0, &
@@ -520,22 +535,26 @@ subroutine thickness_diffuse(h, uhtr, vhtr, tv, dt, G, GV, US, MEKE, VarMix, CDp
       call thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV, US, MEKE, CS, &
                                   int_slope_u, int_slope_v, VarMix%slope_x, VarMix%slope_y, &
                                   STOCH=STOCH, VarMix=VarMix, &
-                                  Sfn_unlim_u_3D=Sfn_unlim_u_3D, Sfn_unlim_v_3D=Sfn_unlim_v_3D, niblock=ie-is+2, njblock=je-js+2)
+                                  Sfn_unlim_u_3D=Sfn_unlim_u_3D, Sfn_unlim_v_3D=Sfn_unlim_v_3D, &
+                                  niblock=niblock, njblock=njblock)
     else
       call thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV, US, MEKE, CS, &
                                   int_slope_u, int_slope_v, STOCH=STOCH, VarMix=VarMix, &
-                                  Sfn_unlim_u_3D=Sfn_unlim_u_3D, Sfn_unlim_v_3D=Sfn_unlim_v_3D, niblock=ie-is+2, njblock=je-js+2)
+                                  Sfn_unlim_u_3D=Sfn_unlim_u_3D, Sfn_unlim_v_3D=Sfn_unlim_v_3D, &
+                                  niblock=niblock, njblock=njblock)
     endif
   else
     if (use_stored_slopes) then
       !$omp target update from(VarMix%slope_x, VarMix%slope_y)
       call thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV, US, MEKE, CS, &
                                   int_slope_u, int_slope_v, VarMix%slope_x, VarMix%slope_y, &
-                                  Sfn_unlim_u_3D=Sfn_unlim_u_3D, Sfn_unlim_v_3D=Sfn_unlim_v_3D, niblock=ie-is+2, njblock=je-js+2)
+                                  Sfn_unlim_u_3D=Sfn_unlim_u_3D, Sfn_unlim_v_3D=Sfn_unlim_v_3D, &
+                                  niblock=niblock, njblock=njblock)
     else
       call thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV, US, MEKE, CS, &
                                   int_slope_u, int_slope_v, &
-                                  Sfn_unlim_u_3D=Sfn_unlim_u_3D, Sfn_unlim_v_3D=Sfn_unlim_v_3D, niblock=ie-is+2, njblock=je-js+2)
+                                  Sfn_unlim_u_3D=Sfn_unlim_u_3D, Sfn_unlim_v_3D=Sfn_unlim_v_3D, &
+                                  niblock=niblock, njblock=njblock)
     endif
   endif
 
@@ -640,7 +659,8 @@ subroutine thickness_diffuse(h, uhtr, vhtr, tv, dt, G, GV, US, MEKE, VarMix, CDp
     call hchksum(h, "thickness_diffuse h", G%HI, haloshift=0, unscale=GV%H_to_m)
   endif
 
-  !$omp target exit data map(release: KH_u_CFL, KH_v_CFL, Khth_Loc_u, Khth_Loc_v, int_slope_u, int_slope_v, e, KH_u, KH_v, uhD, vhD, VarMix, VarMix%res_fn_u, VarMix%res_fn_v)
+  !$omp target exit data map(release: KH_u_CFL, KH_v_CFL, Khth_Loc_u, Khth_Loc_v, int_slope_u, int_slope_v, &
+  !$omp                    e, KH_u, KH_v, uhD, vhD, VarMix, VarMix%res_fn_u, VarMix%res_fn_v)
   !$omp target exit data map(from: MEKE%GM_src) if(allocated(MEKE%GM_src))
   !$omp target exit data map(from: MEKE%Kh) if(allocated(MEKE%Kh))
   !$omp target exit data map(release: MEKE) if(allocated(MEKE%GM_src) .or. allocated(MEKE%Kh))
@@ -687,8 +707,10 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV
                                                                       !! at v [Z L2 T-1 ~> m3 s-1]
   type(stochastic_CS),                       optional, intent(inout)  :: STOCH !< Stochastic control structure
   type(VarMix_CS), target,                      optional, intent(in)  :: VarMix !< Variable mixing coefficents
-  integer, intent(in) :: niblock
-  integer, intent(in) :: njblock
+  integer,                                       intent(in)  :: niblock !< i block size for array
+                                                                     !! calculations [nondim].
+  integer,                                       intent(in)  :: njblock !< j block size for array
+                                                                     !! calculations [nondim].
 
   ! Local variables
   real, dimension(SZI_(G),SZJ_(G),SZK_(GV)) :: &
@@ -1106,7 +1128,7 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV
             Sfn_unlim_u(II,jj,K) = -(KH_u(I,j,K)*G%dy_Cu(I,j))*Slope
 
             if (CS%use_meso_sfn_ANN) then
-              Sfn_unlim_u(I,jj,K) = Sfn_unlim_u(I,jj,K) + Sfn_unlim_u_3D(I,j,K)
+              Sfn_unlim_u(II,jj,K) = Sfn_unlim_u(II,jj,K) + Sfn_unlim_u_3D(I,j,K)
             endif
 
             ! Avoid moving dense water upslope from below the level of
@@ -1140,24 +1162,24 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV
             dzN2_u(II,jj,K) = GV%g_prime(K)
 
             if (CS%use_meso_sfn_ANN) then
-              Sfn_unlim_u(I,jj,K) = Sfn_unlim_u(I,jj,K) + Sfn_unlim_u_3D(I,j,K)
+              Sfn_unlim_u(II,jj,K) = Sfn_unlim_u(II,jj,K) + Sfn_unlim_u_3D(I,j,K)
 
               ! Avoid moving dense water upslope from below the level of
               ! the bottom on the receiving side.
-              if (Sfn_unlim_u(I,jj,K) > 0.0) then ! The flow below this interface is positive.
+              if (Sfn_unlim_u(II,jj,K) > 0.0) then ! The flow below this interface is positive.
                 if (e(i,j,K) < e(i+1,j,nz+1)) then
-                  Sfn_unlim_u(I,jj,K) = 0.0 ! This is not uhtot, because it may compensate for
+                  Sfn_unlim_u(II,jj,K) = 0.0 ! This is not uhtot, because it may compensate for
                                   ! deeper flow in very unusual cases.
                 elseif (e(i+1,j,nz+1) > e(i,j,K+1)) then
                   ! Scale the transport with the fraction of the donor layer above
                   ! the bottom on the receiving side.
-                  Sfn_unlim_u(I,jj,K) = Sfn_unlim_u(I,jj,K) * ((e(i,j,K) - e(i+1,j,nz+1)) / &
+                  Sfn_unlim_u(II,jj,K) = Sfn_unlim_u(II,jj,K) * ((e(i,j,K) - e(i+1,j,nz+1)) / &
                                            ((e(i,j,K) - e(i,j,K+1)) + dz_neglect))
                 endif
               else
-                if (e(i+1,j,K) < e(i,j,nz+1)) then ; Sfn_unlim_u(I,jj,K) = 0.0
+                if (e(i+1,j,K) < e(i,j,nz+1)) then ; Sfn_unlim_u(II,jj,K) = 0.0
                 elseif (e(i,j,nz+1) > e(i+1,j,K+1)) then
-                  Sfn_unlim_u(I,jj,K) = Sfn_unlim_u(I,jj,K) * ((e(i+1,j,K) - e(i,j,nz+1)) / &
+                  Sfn_unlim_u(II,jj,K) = Sfn_unlim_u(II,jj,K) * ((e(i+1,j,K) - e(i,j,nz+1)) / &
                                          ((e(i+1,j,K) - e(i+1,j,K+1)) + dz_neglect))
                 endif
               endif
@@ -1462,7 +1484,7 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV
             Sfn_unlim_v(ii,JJ,K) = -((KH_v(i,J,K)*G%dx_Cv(i,J))*Slope)
 
             if (CS%use_meso_sfn_ANN) then
-              Sfn_unlim_v(i,JJ,K) = Sfn_unlim_v(i,JJ,K) + Sfn_unlim_v_3D(i,J,k)
+              Sfn_unlim_v(ii,JJ,K) = Sfn_unlim_v(ii,JJ,K) + Sfn_unlim_v_3D(i,J,k)
             endif
 
             ! Avoid moving dense water upslope from below the level of
@@ -1496,24 +1518,24 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV
             dzN2_v(ii,JJ,K) = GV%g_prime(K)
 
             if (CS%use_meso_sfn_ANN) then
-              Sfn_unlim_v(i,JJ,K) = Sfn_unlim_v(i,JJ,K) + Sfn_unlim_v_3D(i,J,k)
+              Sfn_unlim_v(ii,JJ,K) = Sfn_unlim_v(ii,JJ,K) + Sfn_unlim_v_3D(i,J,k)
 
               ! Avoid moving dense water upslope from below the level of
               ! the bottom on the receiving side.
-              if (Sfn_unlim_v(i,JJ,K) > 0.0) then ! The flow below this interface is positive.
+              if (Sfn_unlim_v(ii,JJ,K) > 0.0) then ! The flow below this interface is positive.
                 if (e(i,j,K) < e(i,j+1,nz+1)) then
-                  Sfn_unlim_v(i,JJ,K) = 0.0 ! This is not vhtot, because it may compensate for
+                  Sfn_unlim_v(ii,JJ,K) = 0.0 ! This is not vhtot, because it may compensate for
                                   ! deeper flow in very unusual cases.
                 elseif (e(i,j+1,nz+1) > e(i,j,K+1)) then
                   ! Scale the transport with the fraction of the donor layer above
                   ! the bottom on the receiving side.
-                  Sfn_unlim_v(i,JJ,K) = Sfn_unlim_v(i,JJ,K) * ((e(i,j,K) - e(i,j+1,nz+1)) / &
+                  Sfn_unlim_v(ii,JJ,K) = Sfn_unlim_v(ii,JJ,K) * ((e(i,j,K) - e(i,j+1,nz+1)) / &
                                            ((e(i,j,K) - e(i,j,K+1)) + dz_neglect))
                 endif
               else
-                if (e(i,j+1,K) < e(i,j,nz+1)) then ; Sfn_unlim_v(i,JJ,K) = 0.0
+                if (e(i,j+1,K) < e(i,j,nz+1)) then ; Sfn_unlim_v(ii,JJ,K) = 0.0
                 elseif (e(i,j,nz+1) > e(i,j+1,K+1)) then
-                  Sfn_unlim_v(i,JJ,K) = Sfn_unlim_v(i,JJ,K) * ((e(i,j+1,K) - e(i,j,nz+1)) / &
+                  Sfn_unlim_v(ii,JJ,K) = Sfn_unlim_v(ii,JJ,K) * ((e(i,j+1,K) - e(i,j,nz+1)) / &
                                          ((e(i,j+1,K) - e(i,j+1,K+1)) + dz_neglect))
                 endif
               endif
@@ -2331,6 +2353,14 @@ subroutine thickness_diffuse_init(Time, G, GV, US, param_file, diag, CDp, CS)
   integer :: default_answer_date ! The default setting for the various ANSWER_DATE flags.
   logical :: stoch_eos           ! Can't use Stanley param here unless stoch_eos is true
   integer :: i, j
+#ifdef __NVCOMPILER_OPENMP_GPU
+  integer, parameter :: default_niblock = 0 !< Default i block size for array calculations [nondim].
+  integer, parameter :: default_njblock = 0 !< Default j block size for array calculations [nondim].
+#else
+  ! These were found to give best performance in limited tests.
+  integer, parameter :: default_niblock = 32 !< Default i block size for array calculations [nondim].
+  integer, parameter :: default_njblock = 4  !< Default j block size for array calculations [nondim].
+#endif
 
   CS%initialized = .true.
   CS%diag => diag
@@ -2539,6 +2569,21 @@ subroutine thickness_diffuse_init(Time, G, GV, US, param_file, diag, CDp, CS)
                  "If true, compute the top-layer work tendency on the u-grid "//&
                  "with the incorrect sign, for legacy reproducibility.", &
                  default=.false.)
+
+  call get_param(param_file, mdl, "THICKNESSDIFFUSE_NIBLOCK", CS%niblock, &
+                 "The i-direction block size used in the mass and volume flux calculations "//&
+                 "in thickness_diffuse_full. The default 0 setting is dynamic and fits the "//&
+                 "full computational i-domain length.", default=default_niblock, layoutParam=.true.)
+  call get_param(param_file, mdl, "THICKNESSDIFFUSE_NJBLOCK", CS%njblock, &
+                 "The j-direction block size used in the mass and volume flux calculations "//&
+                 "in thickness_diffuse_full. The default 0 setting is dynamic and fits the "//&
+                 "full computational j-domain length.", default=default_njblock, layoutParam=.true.)
+  if (CS%niblock < 0) &
+    call MOM_error(FATAL, "THICKNESSDIFFUSE_NIBLOCK must be nonnegative; "//&
+                          "use 0 to select the default block size.")
+  if (CS%njblock < 0) &
+    call MOM_error(FATAL, "THICKNESSDIFFUSE_NJBLOCK must be nonnegative; "//&
+                          "use 0 to select the default block size.")
 
   if (CS%use_GME_thickness_diffuse) then
     allocate(CS%KH_u_GME(G%IsdB:G%IedB, G%jsd:G%jed, GV%ke+1), source=0.)
