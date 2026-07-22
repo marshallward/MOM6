@@ -714,7 +714,7 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV
   real, dimension(SZI_(G),SZJ_(G),SZK_(GV)+1) :: &
     pres, &       ! The pressure at an interface [R L2 T-2 ~> Pa].
     h_avail_rsum  ! The running sum of h_avail above an interface [H L2 T-1 ~> m3 s-1 or kg s-1].
-  real, dimension(SZIB_(G),njblock) :: &
+  real, dimension(niblock,njblock) :: &
     drho_dT_u, &  ! The derivative of density with temperature at u points [R C-1 ~> kg m-3 degC-1]
     drho_dS_u     ! The derivative of density with salinity at u points [R S-1 ~> kg m-3 ppt-1].
   real, dimension(SZIB_(G),njblock) :: scrap ! An array to pass to calculate_density_second_derivs()
@@ -728,7 +728,7 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV
     drho_dT_dT_h  ! The second derivative of density with temperature at h points [R C-2 ~> kg m-3 degC-2]
   real :: uhtot(SZIB_(G),SZJ_(G))  ! The vertical sum of uhD [H L2 T-1 ~> m3 s-1 or kg s-1].
   real :: vhtot(SZI_(G),SZJB_(G))  ! The vertical sum of vhD [H L2 T-1 ~> m3 s-1 or kg s-1].
-  real, dimension(SZIB_(G),njblock) :: &
+  real, dimension(niblock,njblock) :: &
     T_u, &        ! Temperature on the interface at the u-point [C ~> degC].
     S_u, &        ! Salinity on the interface at the u-point [S ~> ppt].
     pres_u        ! Pressure on the interface at the u-point [R L2 T-2 ~> Pa].
@@ -948,13 +948,13 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV
       ! Calculate the zonal fluxes and gradients.
       if (calc_derivatives) then
         do concurrent (j=jstart:jend, i=istart:iend)
-          jj = j - jstart + 1
-          pres_u(i,jj) = 0.5*(pres(i,j,k) + pres(i+1,j,k))
-          T_u(i,jj) = 0.25*((T(i,j,k) + T(i+1,j,k)) + (T(i,j,k-1) + T(i+1,j,k-1)))
-          S_u(i,jj) = 0.25*((S(i,j,k) + S(i+1,j,k)) + (S(i,j,k-1) + S(i+1,j,k-1)))
+          jj = j - jstart + 1 ; ii = i - istart + 1
+          pres_u(ii,jj) = 0.5*(pres(i,j,k) + pres(i+1,j,k))
+          T_u(ii,jj) = 0.25*((T(i,j,k) + T(i+1,j,k)) + (T(i,j,k-1) + T(i+1,j,k-1)))
+          S_u(ii,jj) = 0.25*((S(i,j,k) + S(i+1,j,k)) + (S(i,j,k-1) + S(i+1,j,k-1)))
         enddo
         call calculate_density_derivs(T_u, S_u, pres_u, drho_dT_u, drho_dS_u, &
-                                      tv%eqn_of_state, reshape([(istart-1) - (G%IsdB-1), 1, iend - (G%IsdB-1), jend - jstart + 1], [2,2]) )
+                                      tv%eqn_of_state, reshape([1, 1, iend - istart + 1, jend - jstart + 1], [2,2]) )
       endif
       if (use_stanley) then
         do concurrent (j=jstart:jend, i=istart:iend+1)
@@ -973,19 +973,19 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV
 
       ! local variables needed nvfortran thinks the v-loop beneath needs them
       do concurrent (j=jstart:jend, i=istart:iend) DO_LOCALITY(local_init(drdiA, drdiB, drdkL, drdkR) local(drdz,hg2A,hg2B,haA,haB))
-        jj = j - jstart + 1
+        jj = j - jstart + 1 ; II = I - istart + 1
         if (calc_derivatives) then
           ! Estimate the horizontal density gradients along layers.
-          drdiA = drho_dT_u(I,jj) * (T(i+1,j,k-1)-T(i,j,k-1)) + &
-                  drho_dS_u(I,jj) * (S(i+1,j,k-1)-S(i,j,k-1))
-          drdiB = drho_dT_u(I,jj) * (T(i+1,j,k)-T(i,j,k)) + &
-                  drho_dS_u(I,jj) * (S(i+1,j,k)-S(i,j,k))
+          drdiA = drho_dT_u(II,jj) * (T(i+1,j,k-1)-T(i,j,k-1)) + &
+                  drho_dS_u(II,jj) * (S(i+1,j,k-1)-S(i,j,k-1))
+          drdiB = drho_dT_u(II,jj) * (T(i+1,j,k)-T(i,j,k)) + &
+                  drho_dS_u(II,jj) * (S(i+1,j,k)-S(i,j,k))
 
           ! Estimate the vertical density gradients times the grid spacing.
-          drdkL = (drho_dT_u(I,jj) * (T(i,j,k)-T(i,j,k-1)) + &
-                   drho_dS_u(I,jj) * (S(i,j,k)-S(i,j,k-1)))
-          drdkR = (drho_dT_u(I,jj) * (T(i+1,j,k)-T(i+1,j,k-1)) + &
-                   drho_dS_u(I,jj) * (S(i+1,j,k)-S(i+1,j,k-1)))
+          drdkL = (drho_dT_u(II,jj) * (T(i,j,k)-T(i,j,k-1)) + &
+                   drho_dS_u(II,jj) * (S(i,j,k)-S(i,j,k-1)))
+          drdkR = (drho_dT_u(II,jj) * (T(i+1,j,k)-T(i+1,j,k-1)) + &
+                   drho_dS_u(II,jj) * (S(i+1,j,k)-S(i+1,j,k-1)))
           drdkDe_u(I,jj,K) = (drdkR * e(i+1,j,K)) - (drdkL * e(i,j,K))
         elseif (find_work) then ! This is used in pure stacked SW mode
           drdkDe_u(I,jj,K) = (drdkR * e(i+1,j,K)) - (drdkL * e(i,j,K))
@@ -1629,24 +1629,24 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV
       iend = min(istart+niblock-1, ie)
       jend = min(jstart+njblock-1, je)
       if (use_EOS) then
-        do concurrent (j=jstart:jend, i=is-1:ie)
-          jj = j - jstart + 1
-          pres_u(i,jj) = 0.5*(pres(i,j,1) + pres(i+1,j,1))
-          T_u(i,jj) = 0.5*(T(i,j,1) + T(i+1,j,1))
-          S_u(i,jj) = 0.5*(S(i,j,1) + S(i+1,j,1))
+        do concurrent (j=jstart:jend, i=istart:iend)
+          jj = j - jstart + 1 ; ii = i - istart + 1
+          pres_u(ii,jj) = 0.5*(pres(i,j,1) + pres(i+1,j,1))
+          T_u(ii,jj) = 0.5*(T(i,j,1) + T(i+1,j,1))
+          S_u(ii,jj) = 0.5*(S(i,j,1) + S(i+1,j,1))
         enddo
         call calculate_density_derivs(T_u, S_u, pres_u, drho_dT_u, drho_dS_u, &
-                                      tv%eqn_of_state, reshape([(istart-1) - (G%IsdB-1), 1, &
-                                          iend - (G%IsdB-1), jend - jstart + 1], [2,2]))
+                                      tv%eqn_of_state, reshape([1, 1, &
+                                          iend - istart + 1, jend - jstart + 1], [2,2]))
       endif
-      do concurrent (j=jstart:jend, i=is-1:ie)
-        jj = j - jstart + 1
+      do concurrent (j=jstart:jend, i=istart:iend)
+        jj = j - jstart + 1 ; II = I - istart + 1
         uhD(I,j,1) = -uhtot(I,j)
 
         G_scale = GV%g_Earth * GV%H_to_Z
         if (use_EOS) then
-          drdiB = drho_dT_u(I,jj) * (T(i+1,j,1)-T(i,j,1)) + &
-                  drho_dS_u(I,jj) * (S(i+1,j,1)-S(i,j,1))
+          drdiB = drho_dT_u(II,jj) * (T(i+1,j,1)-T(i,j,1)) + &
+                  drho_dS_u(II,jj) * (S(i+1,j,1)-S(i,j,1))
           if (allocated(tv%SpV_avg)) then
             G_scale = GV%H_to_RZ * GV%g_Earth * &
                 ( ( ((h(i,j,1)+hn_2) * tv%SpV_avg(i,j,1)) + ((h(i+1,j,1)+hn_2) * tv%SpV_avg(i+1,j,1)) ) / &
