@@ -1553,6 +1553,7 @@ subroutine ALE_PLM_edge_values( CS, G, GV, h, Q, bdry_extrap, Q_t, Q_b )
                            intent(inout) :: Q_b  !< Scalar at the bottom edge of each layer [A]
   ! Local variables
   integer :: i, j, k
+  ! thasnk Claude for the verbose comment:
   ! A rolling window of the three PLM slopes (at k-1, k, k+1) needed to monotonize each interior
   ! interface, kept as scalars rather than a per-column array. The private automatic array used
   ! before overflowed the device private pool at team size 1 (see
