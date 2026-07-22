@@ -716,13 +716,14 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV
   real, dimension(SZIB_(G),njblock) :: &
     drho_dT_u, &  ! The derivative of density with temperature at u points [R C-1 ~> kg m-3 degC-1]
     drho_dS_u     ! The derivative of density with salinity at u points [R S-1 ~> kg m-3 ppt-1].
-  real, dimension(SZIB_(G),SZJ_(G)) :: scrap ! An array to pass to calculate_density_second_derivs()
+  real, dimension(SZIB_(G),njblock) :: scrap ! An array to pass to calculate_density_second_derivs()
                   ! with various units that will be ignored [various]
   real, dimension(SZI_(G),SZJB_(G)) :: &
     drho_dT_v, &  ! The derivative of density with temperature at v points [R C-1 ~> kg m-3 degC-1]
-    drho_dS_v, &  ! The derivative of density with salinity at v points [R S-1 ~> kg m-3 ppt-1].
+    drho_dS_v  ! The derivative of density with salinity at v points [R S-1 ~> kg m-3 ppt-1].
+  real, dimension(SZI_(G),njblock) :: &
     drho_dT_dT_hr ! The second derivative of density with temperature at h (+1) points [R C-2 ~> kg m-3 degC-2]
-  real, dimension(SZI_(G),SZJ_(G)) :: &
+  real, dimension(SZI_(G),njblock) :: &
     drho_dT_dT_h  ! The second derivative of density with temperature at h points [R C-2 ~> kg m-3 degC-2]
   real :: uhtot(SZIB_(G),SZJ_(G))  ! The vertical sum of uhD [H L2 T-1 ~> m3 s-1 or kg s-1].
   real :: vhtot(SZI_(G),SZJB_(G))  ! The vertical sum of vhD [H L2 T-1 ~> m3 s-1 or kg s-1].
@@ -734,13 +735,12 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV
     T_v, &        ! Temperature on the interface at the v-point [C ~> degC].
     S_v, &        ! Salinity on the interface at the v-point [S ~> ppt].
     pres_v, &     ! Pressure on the interface at the v-point [R L2 T-2 ~> Pa].
+    T_h, &        ! Temperature on the interface at the h-point [C ~> degC].
+    S_h, &        ! Salinity on the interface at the h-point [S ~> ppt].
+    pres_h, &     ! Pressure on the interface at the h-point [R L2 T-2 ~> Pa].
     T_hr, &       ! Temperature on the interface at the h (+1) point [C ~> degC].
     S_hr, &       ! Salinity on the interface at the h (+1) point [S ~> ppt].
     pres_hr       ! Pressure on the interface at the h (+1) point [R L2 T-2 ~> Pa].
-  real, dimension(SZI_(G),SZJ_(G)) :: &
-    T_h, &        ! Temperature on the interface at the h-point [C ~> degC].
-    S_h, &        ! Salinity on the interface at the h-point [S ~> ppt].
-    pres_h        ! Pressure on the interface at the h-point [R L2 T-2 ~> Pa].
   real :: Work_u(SZIB_(G),SZJ_(G)) ! The work done by the isopycnal height diffusion
                                    ! integrated over u-point water columns [R Z L4 T-3 ~> W]
   real :: Work_v(SZI_(G),SZJB_(G)) ! The work done by the isopycnal height diffusion
@@ -953,16 +953,17 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV
       endif
       if (use_stanley) then
         do concurrent (j=jstart:jend, i=is-1:ie+1)
-          pres_h(i,j) = pres(i,j,K)
-          T_h(i,j) = 0.5*(T(i,j,k) + T(i,j,k-1))
-          S_h(i,j) = 0.5*(S(i,j,k) + S(i,j,k-1))
+          jj = j - jstart + 1
+          pres_h(i,jj) = pres(i,j,K)
+          T_h(i,jj) = 0.5*(T(i,j,k) + T(i,j,k-1))
+          S_h(i,jj) = 0.5*(S(i,j,k) + S(i,j,k-1))
         enddo
 
         ! The second line below would correspond to arguments
         !            drho_dS_dS, drho_dS_dT, drho_dT_dT, drho_dS_dP, drho_dT_dP, &
         call calculate_density_second_derivs(T_h, S_h, pres_h, &
                      scrap, scrap, drho_dT_dT_h, scrap, scrap, &
-                     tv%eqn_of_state, reshape([EOSdom_h1(1), jstart - (G%jsd-1), EOSdom_h1(2), jend - (G%jsd-1)], [2,2]) )
+                     tv%eqn_of_state, reshape([EOSdom_h1(1), 1, EOSdom_h1(2), jend - jstart + 1], [2,2]) )
       endif
 
       ! local variables needed nvfortran thinks the v-loop beneath needs them
@@ -987,10 +988,10 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV
         if (use_stanley) then
           ! Correction to the horizontal density gradient due to nonlinearity in
           ! the EOS rectifying SGS temperature anomalies
-          drdiA = drdiA + 0.5 * ((drho_dT_dT_h(i+1,j) * tv%varT(i+1,j,k-1)) - &
-                                (drho_dT_dT_h(i,j) * tv%varT(i,j,k-1)) )
-          drdiB = drdiB + 0.5 * ((drho_dT_dT_h(i+1,j) * tv%varT(i+1,j,k)) - &
-                                (drho_dT_dT_h(i,j) * tv%varT(i,j,k)) )
+          drdiA = drdiA + 0.5 * ((drho_dT_dT_h(i+1,jj) * tv%varT(i+1,j,k-1)) - &
+                                (drho_dT_dT_h(i,jj) * tv%varT(i,j,k-1)) )
+          drdiB = drdiB + 0.5 * ((drho_dT_dT_h(i+1,jj) * tv%varT(i+1,j,k)) - &
+                                (drho_dT_dT_h(i,jj) * tv%varT(i,j,k)) )
         endif
         if (find_work) drdi_u(I,j,k) = drdiB
 
@@ -1289,27 +1290,29 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV
       endif
       if (use_stanley) then
         do concurrent (J=jstart:jend, i=is:ie)
-          pres_h(i,J) = pres(i,j,K)
-          T_h(i,J) = 0.5*(T(i,j,k) + T(i,j,k-1))
-          S_h(i,J) = 0.5*(S(i,j,k) + S(i,j,k-1))
+          jj = j - jstart + 1
+          pres_h(i,JJ) = pres(i,j,K)
+          T_h(i,JJ) = 0.5*(T(i,j,k) + T(i,j,k-1))
+          S_h(i,JJ) = 0.5*(S(i,j,k) + S(i,j,k-1))
 
-          pres_hr(i,J) = pres(i,j+1,K)
-          T_hr(i,J) = 0.5*(T(i,j+1,k) + T(i,j+1,k-1))
-          S_hr(i,J) = 0.5*(S(i,j+1,k) + S(i,j+1,k-1))
+          pres_hr(i,JJ) = pres(i,j+1,K)
+          T_hr(i,JJ) = 0.5*(T(i,j+1,k) + T(i,j+1,k-1))
+          S_hr(i,JJ) = 0.5*(S(i,j+1,k) + S(i,j+1,k-1))
         enddo
 
         ! The second line below would correspond to arguments
         !            drho_dS_dS, drho_dS_dT, drho_dT_dT, drho_dS_dP, drho_dT_dP, &
         call calculate_density_second_derivs(T_h, S_h, pres_h, &
                      scrap, scrap, drho_dT_dT_h, scrap, scrap, &
-                     tv%eqn_of_state, reshape([is - (G%isd-1), jstart - (G%jsd-1), &
-                         ie - (G%isd-1), jend - (G%jsd-1)], [2,2]))
+                     tv%eqn_of_state, reshape([is - (G%isd-1), 1, &
+                         ie - (G%isd-1), jend - jstart + 1], [2,2]))
         call calculate_density_second_derivs(T_hr, S_hr, pres_hr, &
                      scrap, scrap, drho_dT_dT_hr, scrap, scrap, &
-                     tv%eqn_of_state, reshape([is - (G%isd-1), jstart - (G%jsdB-1), &
-                         ie - (G%isd-1), jend - (G%jsdB-1)], [2,2]))
+                     tv%eqn_of_state, reshape([is - (G%isd-1), 1, &
+                         ie - (G%isd-1), jend - jstart + 1], [2,2]))
       endif
       do concurrent (J=jstart:jend, i=is:ie) DO_LOCALITY(local_init(drdjA, drdjB, drdkL, drdkR))
+        jj = j - jstart + 1
         if (calc_derivatives) then
           ! Estimate the horizontal density gradients along layers.
           drdjA = drho_dT_v(i,J) * (T(i,j+1,k-1)-T(i,j,k-1)) + &
@@ -1329,10 +1332,10 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV
         if (use_stanley) then
           ! Correction to the horizontal density gradient due to nonlinearity in
           ! the EOS rectifying SGS temperature anomalies
-          drdjA = drdjA + 0.5 * ((drho_dT_dT_hr(i,J) * tv%varT(i,j+1,k-1)) - &
-                                (drho_dT_dT_h(i,J) * tv%varT(i,j,k-1)) )
-          drdjB = drdjB + 0.5 * ((drho_dT_dT_hr(i,J) * tv%varT(i,j+1,k)) - &
-                                (drho_dT_dT_h(i,J) * tv%varT(i,j,k)) )
+          drdjA = drdjA + 0.5 * ((drho_dT_dT_hr(i,JJ) * tv%varT(i,j+1,k-1)) - &
+                                (drho_dT_dT_h(i,JJ) * tv%varT(i,j,k-1)) )
+          drdjB = drdjB + 0.5 * ((drho_dT_dT_hr(i,JJ) * tv%varT(i,j+1,k)) - &
+                                (drho_dT_dT_h(i,JJ) * tv%varT(i,j,k)) )
         endif
 
         if (find_work) drdj_v(i,J,k) = drdjB
