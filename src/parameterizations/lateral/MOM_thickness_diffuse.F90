@@ -754,11 +754,11 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV
   real :: drdjA, drdjB  ! Along layer meridional potential density  gradients in the layers above (A)
                         ! and below (B) the interface times the grid spacing [R ~> kg m-3].
   real :: drdkL, drdkR  ! Vertical density differences across an interface [R ~> kg m-3].
-  real :: drdi_u(SZIB_(G),SZJ_(G),SZK_(GV)) ! Copy of drdi at u-points [R ~> kg m-3].
-  real :: drdj_v(SZI_(G),SZJB_(G),SZK_(GV)) ! Copy of drdj at v-points [R ~> kg m-3].
-  real :: drdkDe_u(SZIB_(G),SZJ_(G),SZK_(GV)+1) ! Lateral difference of product of drdk and e at u-points
+  real :: drdi_u(SZIB_(G),njblock,SZK_(GV)) ! Copy of drdi at u-points [R ~> kg m-3].
+  real :: drdj_v(SZI_(G),njblock,SZK_(GV)) ! Copy of drdj at v-points [R ~> kg m-3].
+  real :: drdkDe_u(SZIB_(G),njblock,SZK_(GV)+1) ! Lateral difference of product of drdk and e at u-points
                                         ! [Z R ~> kg m-2].
-  real :: drdkDe_v(SZI_(G),SZJB_(G),SZK_(GV)+1)  ! Lateral difference of product of drdk and e at v-points
+  real :: drdkDe_v(SZI_(G),njblock,SZK_(GV)+1)  ! Lateral difference of product of drdk and e at v-points
                                         ! [Z R ~> kg m-2].
   real :: hg2A, hg2B, hg2L, hg2R ! Squares of geometric mean thicknesses [H2 ~> m2 or kg2 m-4].
   real :: haA, haB, haL, haR     ! Arithmetic mean thicknesses [H ~> m or kg m-2].
@@ -981,9 +981,9 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV
                    drho_dS_u(I,jj) * (S(i,j,k)-S(i,j,k-1)))
           drdkR = (drho_dT_u(I,jj) * (T(i+1,j,k)-T(i+1,j,k-1)) + &
                    drho_dS_u(I,jj) * (S(i+1,j,k)-S(i+1,j,k-1)))
-          drdkDe_u(I,j,K) = (drdkR * e(i+1,j,K)) - (drdkL * e(i,j,K))
+          drdkDe_u(I,jj,K) = (drdkR * e(i+1,j,K)) - (drdkL * e(i,j,K))
         elseif (find_work) then ! This is used in pure stacked SW mode
-          drdkDe_u(I,j,K) = (drdkR * e(i+1,j,K)) - (drdkL * e(i,j,K))
+          drdkDe_u(I,jj,K) = (drdkR * e(i+1,j,K)) - (drdkL * e(i,j,K))
         endif
         if (use_stanley) then
           ! Correction to the horizontal density gradient due to nonlinearity in
@@ -993,7 +993,7 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV
           drdiB = drdiB + 0.5 * ((drho_dT_dT_h(i+1,jj) * tv%varT(i+1,j,k)) - &
                                 (drho_dT_dT_h(i,jj) * tv%varT(i,j,k)) )
         endif
-        if (find_work) drdi_u(I,j,k) = drdiB
+        if (find_work) drdi_u(I,jj,k) = drdiB
 
         if (k > nk_linear) then
           if (use_EOS) then
@@ -1172,6 +1172,7 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV
       enddo
     endif
     do concurrent (j=jstart:jend)
+      jj = j - jstart + 1
       do K=nz,2,-1 ; do concurrent (I=is-1:ie)
 
         if (allocated(tv%SpV_avg) .and. (find_work .or. (k > nk_linear)) ) then
@@ -1253,8 +1254,8 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV
           endif
 
           Work_u(I,j) = Work_u(I,j) + G_scale * &
-            ( uhtot(I,j) * drdkDe_u(I,j,K) - &
-              (uhD(I,j,k) * drdi_u(I,j,k)) * 0.25 * &
+            ( uhtot(I,j) * drdkDe_u(I,jj,K) - &
+              (uhD(I,j,k) * drdi_u(I,jj,k)) * 0.25 * &
               ((e(i,j,K) + e(i,j,K+1)) + (e(i+1,j,K) + e(i+1,j,K+1))) )
         endif
 
@@ -1326,9 +1327,9 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV
                    drho_dS_v(i,JJ) * (S(i,j,k)-S(i,j,k-1)))
           drdkR = (drho_dT_v(i,JJ) * (T(i,j+1,k)-T(i,j+1,k-1)) + &
                    drho_dS_v(i,JJ) * (S(i,j+1,k)-S(i,j+1,k-1)))
-          drdkDe_v(i,J,K) =  (drdkR * e(i,j+1,K)) - (drdkL * e(i,j,K))
+          drdkDe_v(i,JJ,K) =  (drdkR * e(i,j+1,K)) - (drdkL * e(i,j,K))
         elseif (find_work) then ! This is used in pure stacked SW mode
-          drdkDe_v(i,J,K) =  (drdkR * e(i,j+1,K)) - (drdkL * e(i,j,K))
+          drdkDe_v(i,JJ,K) =  (drdkR * e(i,j+1,K)) - (drdkL * e(i,j,K))
         endif
         if (use_stanley) then
           ! Correction to the horizontal density gradient due to nonlinearity in
@@ -1339,7 +1340,7 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV
                                 (drho_dT_dT_h(i,JJ) * tv%varT(i,j,k)) )
         endif
 
-        if (find_work) drdj_v(i,J,k) = drdjB
+        if (find_work) drdj_v(i,JJ,k) = drdjB
 
         if (k > nk_linear) then
           if (use_EOS) then
@@ -1596,8 +1597,8 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV
           endif
 
           Work_v(i,J) = Work_v(i,J) + G_scale * &
-            ( vhtot(i,J) * drdkDe_v(i,J,K) - &
-             (vhD(i,J,k) * drdj_v(i,J,k)) * 0.25 * &
+            ( vhtot(i,J) * drdkDe_v(i,JJ,K) - &
+             (vhD(i,J,k) * drdj_v(i,JJ,k)) * 0.25 * &
              ((e(i,j,K) + e(i,j,K+1)) + (e(i,j+1,K) + e(i,j+1,K+1))) )
         endif
 
