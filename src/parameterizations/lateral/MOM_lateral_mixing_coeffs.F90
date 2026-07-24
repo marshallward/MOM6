@@ -550,10 +550,6 @@ subroutine calc_resoln_function(h, tv, G, GV, US, CS, MEKE, OBC, dt)
         dx_term = CS%f2_dx2_v(i,J) + cg1_v(i,J) * CS%beta_dx2_v(i,J)
         CS%Res_fn_v(i,J) = dx_term / (dx_term + (CS%Res_coef_khth * cg1_v(i,J))**2)
       enddo
-      do concurrent( J=js-1:Jeq, i=is:ie ) DO_LOCALITY(local(dx_term))
-        dx_term = CS%f2_dx2_v(i,J) + cg1_v(i,J) * CS%beta_dx2_v(i,J)
-        CS%Res_fn_v(i,J) = dx_term / (dx_term + (CS%Res_coef_khth * cg1_v(i,J))**2)
-      enddo
     elseif (mod(CS%Res_fn_power_khth, 2) == 0) then
       power_2 = CS%Res_fn_power_khth / 2
       do j=js,je ; do I=is-1,Ieq
@@ -600,6 +596,7 @@ subroutine calc_resoln_function(h, tv, G, GV, US, CS, MEKE, OBC, dt)
     call uvchksum("Res_fn_[uv]", CS%Res_fn_u, CS%Res_fn_v, G%HI, haloshift=0, &
                   unscale=1.0, scalar_pair=.true.)
   endif
+
   !$omp target exit data map(delete: cg1_q, cg1_u, cg1_v, dx_term)
 end subroutine calc_resoln_function
 
@@ -817,7 +814,6 @@ subroutine calc_slope_functions(h, tv, dt, G, GV, US, CS, OBC)
                                   CS%slope_x, CS%slope_y, niblock, njblock, nkblock, N2_u=N2_u, &
                                   N2_v=N2_v, dzu=dzu, dzv=dzv, dzSxN=dzSxN, dzSyN=dzSyN, halo=1, &
                                   OBC=OBC, OBC_N2=CS%OBC_friendly)
-      !$omp target update from(e, dzu, dzv, dzSxN, dzSyN)
       call calc_Eady_growth_rate_2D(CS, G, GV, US, h, e, dzu, dzv, dzSxN, dzSyN, CS%SN_u, CS%SN_v)
       !$omp target exit data map(release: tv%SpV_avg) if (allocated(tv%SpV_avg))
       !$omp target exit data map(release: tv%p_surf) if (associated(tv%p_surf))
@@ -831,13 +827,11 @@ subroutine calc_slope_functions(h, tv, dt, G, GV, US, CS, OBC)
       call calc_isoneutral_slopes(G, GV, US, h, e, tv, dt*CS%kappa_smooth, CS%use_stanley_iso, &
                                   CS%slope_x, CS%slope_y, niblock, njblock, nkblock, N2_u=N2_u, &
                                   N2_v=N2_v, halo=1, OBC=OBC, OBC_N2=CS%OBC_friendly)
-      !$omp target exit data map(from: CS%slope_x, CS%slope_y, N2_u, N2_v)
       call calc_Visbeck_coeffs_old(h, CS%slope_x, CS%slope_y, N2_u, N2_v, G, GV, US, CS, OBC)
       !$omp target exit data map(release: tv%T, tv%S, tv, CS%slope_x, CS%slope_y)
       !$omp target exit data map(release: tv%p_surf) if (associated(tv%p_surf))
       !$omp target exit data map(delete: N2_u, N2_v )
     else
-      !$omp target update from(e)
       call calc_slope_functions_using_just_e(h, G, GV, US, CS, e)
     endif
     !$omp target exit data map(delete: e)
@@ -904,7 +898,7 @@ subroutine calc_Visbeck_coeffs_old(h, slope_x, slope_y, N2_u, N2_v, G, GV, US, C
   integer :: i, j, k, is, ie, js, je, nz
 
   !$omp target enter data map(alloc: h4_u, h4_v,S2_u,S2_v,H_u, H_v)
-  !$omp target enter data map(to: CS%SN_u, CS%SN_v)
+  ! !$omp target enter data map(to: CS%SN_u, CS%SN_v)
 
   if (.not. CS%initialized) call MOM_error(FATAL, "calc_Visbeck_coeffs_old: "// &
          "Module must be initialized before it is used.")
@@ -1083,7 +1077,7 @@ subroutine calc_Visbeck_coeffs_old(h, slope_x, slope_y, N2_u, N2_v, G, GV, US, C
   endif
 
   !$omp target exit data map(delete: h4_u, h4_v,S2_u,S2_v,H_u, H_v)
-  !$omp target exit data map(from: CS%SN_u, CS%SN_v)
+  ! !$omp target exit data map(from: CS%SN_u, CS%SN_v)
 
 end subroutine calc_Visbeck_coeffs_old
 
@@ -1285,14 +1279,10 @@ subroutine calc_slope_functions_using_just_e(h, G, GV, US, CS, e)
   is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec ; nz = GV%ke
 
   !$omp target enter data map(alloc: E_x, E_y, S2N2_u_local, S2N2_v_local)
-  !$omp target update to(CS%h_min_N2, CS%VarMix_Ktop)
-  !$omp target enter data map(to: CS, CS%SN_u, CS%SN_v)
 
   h_neglect = GV%H_subroundoff
   H_cutoff = real(2*nz) * (GV%Angstrom_H + h_neglect)
   dZ_cutoff = real(2*nz) * (GV%Angstrom_Z + GV%dz_subroundoff)
-
-  !$omp target enter data map(to:dZ_cutoff)
 
   use_dztot = CS%full_depth_Eady_growth_rate ! .or. .not.(GV%Boussinesq or GV%semi_Boussinesq)
 
@@ -1355,32 +1345,24 @@ subroutine calc_slope_functions_using_just_e(h, G, GV, US, CS, e)
 
   enddo ! k
 
-  !UMW NOTE: For some reason, do concurrents in the following loops change answers
-  ! or segfault.
-
-  !$omp target teams
   do j=js,je
-    !$omp loop
-    do I=is-1,ie
+    do concurrent( I=is-1:ie )
       CS%SN_u(I,j) = 0.0
     enddo
     do k=nz,CS%VarMix_Ktop,-1
-      !$omp loop
-      do I=is-1,ie
+      do concurrent( I=is-1:ie )
         CS%SN_u(I,j) = CS%SN_u(I,j) + S2N2_u_local(I,j,k)
       enddo
     enddo
     ! SN above contains S^2*N^2*H, convert to vertical average of S*N
 
     if (use_dztot) then
-      !$omp loop
       do I=is-1,ie
         CS%SN_u(I,j) = G%OBCmaskCu(I,j) * sqrt( CS%SN_u(I,j) / &
                                                 max(dz_tot(i,j), dz_tot(i+1,j), GV%dz_subroundoff) )
       enddo
     else
-      !$omp loop private(h1,h2)
-      do I=is-1,ie
+      do concurrent( I=is-1:ie ) DO_LOCALITY(local(h1, h2))
         h1 = max(G%meanSL(i,j) + G%bathyT(i,j), 0.0)
         h2 = max(G%meanSL(i+1,j) + G%bathyT(i+1,j), 0.0)
         if ( min(h1, h2) > dZ_cutoff ) then
@@ -1391,29 +1373,23 @@ subroutine calc_slope_functions_using_just_e(h, G, GV, US, CS, e)
       enddo
     endif
   enddo
-  !$omp end target teams
 
-  !$omp target teams
   do J=js-1,je
-    !$omp loop
-    do i=is,ie
+    do concurrent( i=is:ie )
       CS%SN_v(i,J) = 0.0
     enddo
     do k=nz,CS%VarMix_Ktop,-1
-      !$omp loop
-      do i=is,ie
+      do concurrent( i=is:ie )
         CS%SN_v(i,J) = CS%SN_v(i,J) + S2N2_v_local(i,J,k)
       enddo
     enddo
     if (use_dztot) then
-      !$omp loop
       do i=is,ie
         CS%SN_v(i,J) = G%OBCmaskCv(i,J) * sqrt( CS%SN_v(i,J) / &
                                                 max(dz_tot(i,j), dz_tot(i,j+1), GV%dz_subroundoff) )
       enddo
     else
-      !$omp loop private(h1,h2)
-      do i=is,ie
+      do concurrent( i=is:ie ) DO_LOCALITY(local(h1, h2))
         ! There is a primordial horizontal indexing bug on the following line from the previous
         ! versions of the code.  This comment should be deleted by the end of 2024.
         ! if ( min(G%bathyT(i,j), G%bathyT(i+1,j)) + G%Z_ref > dZ_cutoff ) then
@@ -1427,10 +1403,8 @@ subroutine calc_slope_functions_using_just_e(h, G, GV, US, CS, e)
       enddo
     endif
   enddo
-  !$omp end target teams
 
-  !$omp target exit data map(delete: E_x, E_y, S2N2_u_local, S2N2_v_local, dZ_cutoff)
-  !$omp target exit data map(from: CS%SN_u, CS%SN_v)
+  !$omp target exit data map(delete: E_x, E_y, S2N2_u_local, S2N2_v_local )
 
 end subroutine calc_slope_functions_using_just_e
 
@@ -2132,11 +2106,8 @@ subroutine VarMix_init(Time, G, GV, US, param_file, diag, CS)
       oneOrTwo = 2.0
     endif
 
-    !$omp target enter data map(alloc: CS%f2_dx2_q, CS%beta_dx2_q, &
-    !$omp&                             CS%f2_dx2_u, CS%beta_dx2_u, &
-    !$omp&                             CS%f2_dx2_v, CS%beta_dx2_v)
 
-    do concurrent( J=js-1:Jeq, I=is-1:Ieq )
+    do J=js-1,Jeq ; do I=is-1,Ieq
       CS%f2_dx2_q(I,J) = ((G%dxBu(I,J)**2) + (G%dyBu(I,J)**2)) * &
                          max(G%Coriolis2Bu(I,J), absurdly_small_freq**2)
       CS%beta_dx2_q(I,J) = oneOrTwo * ((G%dxBu(I,J)**2) + (G%dyBu(I,J)**2)) * (sqrt(0.5 * &
@@ -2144,9 +2115,9 @@ subroutine VarMix_init(Time, G, GV, US, param_file, diag, CS)
              (((G%CoriolisBu(I+1,J)-G%CoriolisBu(I,J)) * G%IdxCv(i+1,J))**2)) + &
             ((((G%CoriolisBu(I,J)-G%CoriolisBu(I,J-1)) * G%IdyCu(I,j))**2) + &
              (((G%CoriolisBu(I,J+1)-G%CoriolisBu(I,J)) * G%IdyCu(I,j+1))**2)) ) ))
-    enddo
+    enddo ; enddo
 
-    do concurrent( j=js:je, I=is-1:Ieq )
+    do j=js,je ; do I=is-1,Ieq
       CS%f2_dx2_u(I,j) = ((G%dxCu(I,j)**2) + (G%dyCu(I,j)**2)) * &
           max(0.5* (G%Coriolis2Bu(I,J)+G%Coriolis2Bu(I,J-1)), absurdly_small_freq**2)
       CS%beta_dx2_u(I,j) = oneOrTwo * ((G%dxCu(I,j)**2) + (G%dyCu(I,j)**2)) * (sqrt( &
@@ -2155,9 +2126,9 @@ subroutine VarMix_init(Time, G, GV, US, param_file, diag, CS)
                   (((G%CoriolisBu(I+1,J)-G%CoriolisBu(I,J)) * G%IdxCv(i+1,J))**2)) + &
                  ((((G%CoriolisBu(I+1,J-1)-G%CoriolisBu(I,J-1)) * G%IdxCv(i+1,J-1))**2) + &
                   (((G%CoriolisBu(I,J)-G%CoriolisBu(I-1,J)) * G%IdxCv(i,J))**2)) ) ))
-    enddo
+    enddo ; enddo
 
-    do concurrent( J=js-1:Jeq, i=is:ie )
+    do J=js-1,Jeq ; do i=is,ie
       CS%f2_dx2_v(i,J) = ((G%dxCv(i,J)**2) + (G%dyCv(i,J)**2)) * &
           max(0.5*(G%Coriolis2Bu(I,J)+G%Coriolis2Bu(I-1,J)), absurdly_small_freq**2)
       CS%beta_dx2_v(i,J) = oneOrTwo * ((G%dxCv(i,J)**2) + (G%dyCv(i,J)**2)) * (sqrt( &
@@ -2166,7 +2137,7 @@ subroutine VarMix_init(Time, G, GV, US, param_file, diag, CS)
                   (((G%CoriolisBu(I-1,J+1)-G%CoriolisBu(I-1,J)) * G%IdyCu(I-1,j+1))**2)) + &
                  ((((G%CoriolisBu(I,J+1)-G%CoriolisBu(I,J)) * G%IdyCu(I,j+1))**2) + &
                   (((G%CoriolisBu(I-1,J)-G%CoriolisBu(I-1,J-1)) * G%IdyCu(I-1,j))**2)) ) ))
-    enddo
+    enddo ; enddo
 
   endif
 
@@ -2193,9 +2164,7 @@ subroutine VarMix_init(Time, G, GV, US, param_file, diag, CS)
     allocate(CS%beta_dx2_h(isd:ied,jsd:jed), source=0.0)
     allocate(CS%f2_dx2_h(isd:ied,jsd:jed), source=0.0)
 
-    !$omp target enter data map(alloc: CS%f2_dx2_h, CS%beta_dx2_h)
-
-    do concurrent(j=js-1:je+1, i=is-1:ie+1)
+    do j=js-1,je+1 ; do i=is-1,ie+1
       CS%f2_dx2_h(i,j) = ((G%dxT(i,j)**2) + (G%dyT(i,j)**2)) * &
           max(0.25 * ((G%Coriolis2Bu(I,J) + G%Coriolis2Bu(I-1,J-1)) + &
                       (G%Coriolis2Bu(I-1,J) + G%Coriolis2Bu(I,J-1))), &
@@ -2205,7 +2174,7 @@ subroutine VarMix_init(Time, G, GV, US, param_file, diag, CS)
              (((G%CoriolisBu(I,J-1)-G%CoriolisBu(I-1,J-1)) * G%IdxCv(i,J-1))**2)) + &
             ((((G%CoriolisBu(I,J)-G%CoriolisBu(I,J-1)) * G%IdyCu(I,j))**2) + &
              (((G%CoriolisBu(I-1,J)-G%CoriolisBu(I-1,J-1)) * G%IdyCu(I-1,j))**2)) ) ))
-    enddo
+    enddo ; enddo
   endif
 
   if (CS%calculate_cg1) then
@@ -2290,19 +2259,48 @@ subroutine VarMix_init(Time, G, GV, US, param_file, diag, CS)
   ! Re-enable variable mixing if one of the schemes was enabled
   CS%use_variable_mixing = in_use .or. CS%use_variable_mixing
 
+  ! Map CS to device at initialization.
+  !$omp target enter data map(to: CS)
+
+  ! Zero intialized arrays that will be filled in later
+  !$omp target enter data map(alloc: CS%cg1)
+  !$omp target enter data map(alloc: CS%Rd_dx_h)
+  !$omp target enter data map(alloc: CS%Depth_fn_u, CS%Depth_fn_v)
+  !$omp target enter data map(alloc: CS%Res_fn_h, CS%Res_fn_q, CS%Res_fn_u, CS%Res_fn_v)
+  !$omp target enter data map(alloc: CS%SN_u, CS%SN_v)
+
+  ! Arrays that will be filled in during initialization
+  !$omp target enter data map(to: CS%f2_dx2_h, CS%beta_dx2_h, &
+  !$omp&                          CS%f2_dx2_q, CS%beta_dx2_q, &
+  !$omp&                          CS%f2_dx2_u, CS%beta_dx2_u, &
+  !$omp&                          CS%f2_dx2_v, CS%beta_dx2_v)
+
+  ! These are used in hor_diff and thickness diffuse. Allocate once at initialization
+  !$omp target enter data map(to: CS%L2u, CS%L2v)
+
 end subroutine VarMix_init
 
 !> Destructor for VarMix control structure
 subroutine VarMix_end(CS)
   type(VarMix_CS), intent(inout) :: CS
 
-  ! Remove component arrays from device before host deallocation;
-  !$omp target exit data map(delete: CS%Res_fn_h, CS%Res_fn_q, CS%Res_fn_u, CS%Res_fn_v, &
-  !$omp&                             CS%f2_dx2_q, CS%beta_dx2_q, CS%f2_dx2_u, CS%beta_dx2_u, &
-  !$omp&                             CS%f2_dx2_v, CS%beta_dx2_v)
-  !$omp target exit data map(delete: CS%Rd_dx_h, CS%f2_dx2_h, CS%beta_dx2_h)
-  !$omp target exit data map(delete: CS%Depth_fn_u, CS%Depth_fn_v)
+  ! Remove component arrays from device before host deallocation
   !$omp target exit data map(delete: CS%cg1)
+  !$omp target exit data map(delete: CS%Rd_dx_h)
+  !$omp target exit data map(delete: CS%Depth_fn_u, CS%Depth_fn_v)
+  !$omp target exit data map(delete: CS%Res_fn_h, CS%Res_fn_q, CS%Res_fn_u, CS%Res_fn_v)
+  !$omp target exit data map(delete: CS%SN_u, CS%SN_v)
+
+  !$omp target exit data map(delete: CS%f2_dx2_h, CS%beta_dx2_h, &
+  !$omp&                             CS%f2_dx2_q, CS%beta_dx2_q, &
+  !$omp&                             CS%f2_dx2_u, CS%beta_dx2_u, &
+  !$omp&                             CS%f2_dx2_v, CS%beta_dx2_v)
+
+  ! These are used in MOM_tracer_hor_diff and thickness diffuse.
+  !$omp target exit data map(delete: CS%L2u, CS%L2v)
+
+  ! Delete control structure from device
+  !$omp target exit data map(delete: CS)
 
   if (allocated(CS%ebt_struct))  deallocate(CS%ebt_struct)
   if (allocated(CS%sqg_struct))  deallocate(CS%sqg_struct)
@@ -2344,8 +2342,6 @@ subroutine VarMix_end(CS)
   if (allocated(CS%Laplac3_const_v)) deallocate(CS%Laplac3_const_v)
   if (allocated(CS%KH_u_QG)) deallocate(CS%KH_u_QG)
   if (allocated(CS%KH_v_QG)) deallocate(CS%KH_v_QG)
-  ! Delete control structure from device
-  !$omp target exit data map(delete: CS)
 
 end subroutine VarMix_end
 
