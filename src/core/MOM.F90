@@ -3703,7 +3703,6 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, &
                          restart_CSp, CS%MEKE_in_dynamics)
 
   allocate(CS%VarMix)
-  !$omp target enter data map(alloc: CS%VarMix)
   call VarMix_init(Time, G, GV, US, param_file, diag, CS%VarMix)
 
   allocate(CS%set_visc_CSp)

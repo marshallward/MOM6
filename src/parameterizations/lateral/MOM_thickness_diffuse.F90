@@ -256,6 +256,7 @@ subroutine thickness_diffuse(h, uhtr, vhtr, tv, dt, G, GV, US, MEKE, VarMix, CDp
 
   if (use_VarMix) then
     if (use_Visbeck) then
+      !$omp target update from( VarMix%SN_u)
       !$OMP do
       do j=js,je ; do I=is-1,ie
         Khth_loc_u(I,j) = Khth_loc_u(I,j) + &
@@ -266,6 +267,7 @@ subroutine thickness_diffuse(h, uhtr, vhtr, tv, dt, G, GV, US, MEKE, VarMix, CDp
 
   if (allocated(MEKE%Kh)) then
     if (CS%MEKE_GEOMETRIC) then
+      !$omp target update from( VarMix%SN_u)
       !$OMP do
       do j=js,je ; do I=is-1,ie
         Khth_loc_u(I,j) = Khth_loc_u(I,j) + G%OBCmaskCu(I,j) * CS%MEKE_GEOMETRIC_alpha * &
@@ -280,6 +282,7 @@ subroutine thickness_diffuse(h, uhtr, vhtr, tv, dt, G, GV, US, MEKE, VarMix, CDp
   endif
 
   if (Resoln_scaled) then
+    !$omp target update from( VarMix%Res_fn_u )
     !$OMP do
     do j=js,je ; do I=is-1,ie
       Khth_loc_u(I,j) = Khth_loc_u(I,j) * VarMix%Res_fn_u(I,j)
@@ -287,6 +290,7 @@ subroutine thickness_diffuse(h, uhtr, vhtr, tv, dt, G, GV, US, MEKE, VarMix, CDp
   endif
 
   if (Depth_scaled) then
+    !$omp target update from( VarMix%Depth_fn_u )
     !$OMP do
     do j=js,je ; do I=is-1,ie
       Khth_loc_u(I,j) = Khth_loc_u(I,j) * VarMix%Depth_fn_u(I,j)
@@ -359,6 +363,7 @@ subroutine thickness_diffuse(h, uhtr, vhtr, tv, dt, G, GV, US, MEKE, VarMix, CDp
 
   if (use_VarMix) then
     if (use_Visbeck) then
+      !$omp target update from( VarMix%SN_v )
       !$OMP do
       do J=js-1,je ; do i=is,ie
         Khth_loc_v(i,J) = Khth_loc_v(i,J) + CS%KHTH_Slope_Cff*VarMix%L2v(i,J)*VarMix%SN_v(i,J)
@@ -367,6 +372,7 @@ subroutine thickness_diffuse(h, uhtr, vhtr, tv, dt, G, GV, US, MEKE, VarMix, CDp
   endif
   if (allocated(MEKE%Kh)) then
     if (CS%MEKE_GEOMETRIC) then
+      !$omp target update from( VarMix%SN_v )
       !$OMP do
       do J=js-1,je ; do i=is,ie
         Khth_loc_v(i,J) = Khth_loc_v(i,J) + G%OBCmaskCv(i,J) * CS%MEKE_GEOMETRIC_alpha * &
@@ -381,6 +387,7 @@ subroutine thickness_diffuse(h, uhtr, vhtr, tv, dt, G, GV, US, MEKE, VarMix, CDp
   endif
 
   if (Resoln_scaled) then
+    !$omp target update from( VarMix%Res_fn_v )
     !$OMP do
     do J=js-1,je ; do i=is,ie
       Khth_loc_v(i,J) = Khth_loc_v(i,J) * VarMix%Res_fn_v(i,J)
@@ -388,6 +395,7 @@ subroutine thickness_diffuse(h, uhtr, vhtr, tv, dt, G, GV, US, MEKE, VarMix, CDp
   endif
 
   if (Depth_scaled) then
+    !$omp target update from( VarMix%Depth_fn_v )
     !$OMP do
     do J=js-1,je ; do i=is,ie
       Khth_loc_v(i,J) = Khth_loc_v(i,J) * VarMix%Depth_fn_v(i,J)
@@ -451,6 +459,7 @@ subroutine thickness_diffuse(h, uhtr, vhtr, tv, dt, G, GV, US, MEKE, VarMix, CDp
 
   if (allocated(MEKE%Kh)) then
     if (CS%MEKE_GEOMETRIC) then
+      !$omp target update from( VarMix%SN_u, VarMix%SN_v )
       if (CS%MEKE_GEOM_answer_date < 20190101) then
         !$OMP do
         do j=js,je ; do i=is,ie
@@ -501,6 +510,7 @@ subroutine thickness_diffuse(h, uhtr, vhtr, tv, dt, G, GV, US, MEKE, VarMix, CDp
     call hchksum(h, "thickness_diffuse_1 h", G%HI, haloshift=1, unscale=GV%H_to_m)
     call hchksum(e, "thickness_diffuse_1 e", G%HI, haloshift=1, unscale=US%Z_to_m)
     if (use_stored_slopes) then
+      !$omp target update from(VarMix%slope_x, VarMix%slope_y)
       call uvchksum("VarMix%slope_[xy]", VarMix%slope_x, VarMix%slope_y, &
                     G%HI, haloshift=0, unscale=US%Z_to_L)
     endif
@@ -511,6 +521,7 @@ subroutine thickness_diffuse(h, uhtr, vhtr, tv, dt, G, GV, US, MEKE, VarMix, CDp
   endif
 
   ! Calculate uhD, vhD from h, e, KH_u, KH_v, tv%T/S
+  !$omp target update from(VarMix%slope_x, VarMix%slope_y)
   if (STOCH%skeb_use_gm) then
     if (use_stored_slopes) then
       call thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV, US, MEKE, CS, &
