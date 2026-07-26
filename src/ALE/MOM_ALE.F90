@@ -1568,6 +1568,10 @@ subroutine ALE_PLM_edge_values( CS, G, GV, h, Q, bdry_extrap, Q_t, Q_b )
 #ifdef __NVCOMPILER_OPENMP_GPU
   ! saw a bug on V100s running into illegal memory accesses, bind(parallel, teams) is used here
   ! as a solution to this bug due to a compiler bug, REVISIT
+  !
+  ! This gets run with team sizes of 1 because the functions aren't visible at compile time.
+  ! It is therefore slow. Can be sped up by either inline (-Minline), or adding
+  ! bind(parallel,teams) (an nvhpc extension, but unsupported by other compilers).
   !$omp target teams loop collapse(2) private(slp, mslp, k) bind(parallel,teams)
 #else
   !$omp target teams loop collapse(2) private(slp, mslp, k)
