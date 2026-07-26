@@ -30,7 +30,7 @@ use MOM_EOS,           only : calculate_density, calculate_spec_vol, EOS_domain
 implicit none ; private
 
 #include <MOM_memory.h>
-#include <do_concurrent_compat.h>
+#include "do_concurrent_compat.h"
 
 public mixedlayer_restrat
 public mixedlayer_restrat_init
@@ -1079,7 +1079,6 @@ subroutine mixedlayer_restrat_Bodner(CS, G, GV, US, h, uhtr, vhtr, tv, forces, d
       buoy_av(i,j) = -( g_Rho0 * Rml_i ) / (htot_i + h_neglect)
     enddo
   else
-    ! Host fallback (Stanley SGS variance or non-Boussinesq specific-volume path): unchanged.
     do j=js-1,je+1
       rho_ml(:) = 0.0 ; SpV_ml(:) = 0.0
       do i=is-1,ie+1
@@ -1124,7 +1123,6 @@ subroutine mixedlayer_restrat_Bodner(CS, G, GV, US, h, uhtr, vhtr, tv, forces, d
         enddo
       endif
     enddo
-    ! Host fallback produced these on the host; push them to the device for the U/V components.
     !$omp target update to(htot, buoy_av, vol_dt_avail)
   endif
 
@@ -1279,7 +1277,7 @@ end subroutine mixedlayer_restrat_Bodner
 !! Note that if \f$ tau=0 \f$, then the running mean equals the signal. Thus,
 !! rmean2ts with tau_growing=0 recovers the "resetting running mean" used in OM4.
 real elemental function rmean2ts(signal, filtered, tau_growing, tau_decaying, dt)
-!$omp declare target
+  !$omp declare target
   ! Arguments
   real, intent(in) :: signal       ! Unfiltered signal in arbitrary units [A]
   real, intent(in) :: filtered     ! Current value of running mean in the same arbitrary units [A]
