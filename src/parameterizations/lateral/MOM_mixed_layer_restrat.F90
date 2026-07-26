@@ -884,7 +884,6 @@ subroutine mixedlayer_restrat_Bodner(CS, G, GV, US, h, uhtr, vhtr, tv, forces, d
 
   if (associated(bflux)) &
     call pass_var(bflux, G%domain, halo=1)
-  !!$omp target enter data map(alloc: little_h, big_H, mld, htot, buoy_av)
 
   ! Extract the friction velocity from the forcing type.
   call find_ustar(forces, tv, U_star_2d, G, GV, US, halo=1)
