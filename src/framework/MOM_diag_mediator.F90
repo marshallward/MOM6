@@ -832,7 +832,7 @@ subroutine set_masks_for_axes(G, diag_cs)
       !$omp target enter data map(alloc: mCuL)
       do concurrent(k=1:nk, j=G%jsc:G%jec, I=G%isc-1:G%iec, (h_mask(i,j,k) + h_mask(i+1,j,k) > 0.))
         mCuL(I,j,k) = 1.
-      end do
+      enddo
 
       ! Level/layer v-points in diagnostic coordinate
       axes => diag_cs%remap_axesCvL(c)
@@ -843,7 +843,7 @@ subroutine set_masks_for_axes(G, diag_cs)
       !$omp target enter data map(alloc: mCvL)
       do concurrent(k=1:nk, J=G%jsc-1:G%jec, i=G%isc:G%iec, (h_mask(i,j,k) + h_mask(i,j+1,k) > 0.))
         mCvL(i,J,k) = 1.
-      end do
+      enddo
 
       ! Level/layer q-points in diagnostic coordinate
       axes => diag_cs%remap_axesBL(c)
@@ -856,7 +856,7 @@ subroutine set_masks_for_axes(G, diag_cs)
           (h_mask(i,j,k) + h_mask(i+1,j+1,k) + &
            h_mask(i+1,j,k) + h_mask(i,j+1,k) > 0.))
         mBL(I,J,k) = 1.
-      end do
+      enddo
 
       ! Interface h-points in diagnostic coordinate (w-point)
       axes => diag_cs%remap_axesTi(c)
@@ -870,9 +870,9 @@ subroutine set_masks_for_axes(G, diag_cs)
         if(h_mask(i,j,1) > 0.) mTi(i,j,1) = 1.
         do k = 2, nk
           if (h_mask(i,j,k-1) + h_mask(i,j,k) > 0.) mTi(i,j,k) = 1.
-        end do
+        enddo
         if(h_mask(i,j,nk) > 0.) mTi(i,j,nk+1) = 1.
-      end do
+      enddo
 
       h_axes => diag_cs%remap_axesTi(c) ! Use the w-point masks to generate the u-, v- and q- masks
       h_mask => h_axes%mask3d
@@ -886,7 +886,7 @@ subroutine set_masks_for_axes(G, diag_cs)
       !$omp target enter data map(alloc: mCui)
       do concurrent(k=1:nk+1, j=G%jsc:G%jec, I=G%isc-1:G%iec, (h_mask(i,j,k) + h_mask(i+1,j,k) > 0.))
         mCui(I,j,k) = 1.
-      end do
+      enddo
 
       ! Interface v-points in diagnostic coordinate
       axes => diag_cs%remap_axesCvi(c)
@@ -897,7 +897,7 @@ subroutine set_masks_for_axes(G, diag_cs)
       !$omp target enter data map(alloc: mCvi)
       do concurrent(k=1:nk+1, J=G%jsc-1:G%jec, i=G%isc:G%iec, (h_mask(i,j,k) + h_mask(i,j+1,k) > 0.))
         mCvi(i,J,k) = 1.
-      end do
+      enddo
 
       ! Interface q-points in diagnostic coordinate
       axes => diag_cs%remap_axesBi(c)
@@ -910,7 +910,7 @@ subroutine set_masks_for_axes(G, diag_cs)
           (h_mask(i,j,k) + h_mask(i+1,j+1,k) + &
            h_mask(i+1,j,k) + h_mask(i,j+1,k) > 0.))
         mBi(I,J,k) = 1.
-      end do
+      enddo
 
       ! Copy all 8 masks back to host for use by set_masks_for_axes_dsamp
       !$omp target exit data map(from: mTL, mCuL, mCvL, mBL, mTi, mCui, mCvi, mBi)
@@ -1632,8 +1632,10 @@ subroutine post_data_2d_low(diag, field, diag_cs, is_static, mask)
       endif
     endif
   endif
-  if ((diag%conversion_factor /= 0.) .and. (diag%conversion_factor /= 1.) .and. dl<2) &
+  if ((diag%conversion_factor /= 0.) .and. (diag%conversion_factor /= 1.) .and. dl<2) then
+    !$omp target exit data map(delete: locfield)
     deallocate( locfield )
+  endif
 end subroutine post_data_2d_low
 
 !> Make a real 3-d array diagnostic available for averaging or output.
@@ -1980,8 +1982,10 @@ subroutine post_data_3d_low(diag, field, diag_cs, is_static, mask)
     call post_xy_average(diag_cs, diag, locfield)
   endif
 
-  if ((diag%conversion_factor /= 0.) .and. (diag%conversion_factor /= 1.) .and. dl<2) &
+  if ((diag%conversion_factor /= 0.) .and. (diag%conversion_factor /= 1.) .and. dl<2) then
+    !$omp target exit data map(delete: locfield)
     deallocate( locfield )
+  endif
 
 end subroutine post_data_3d_low
 
@@ -4987,7 +4991,6 @@ subroutine MOM_diag_send_complete()
 end subroutine MOM_diag_send_complete
 
 !> Broadcast a 2D array into every k-level of a 3D array on the GPU.
-!! Both arrays must already be device-mapped before calling.
 subroutine copy_2d_into_3d(field_2d, field_3d)
   real, intent(in)    :: field_2d(:,:)
   real, intent(inout) :: field_3d(:,:,:)
@@ -4999,7 +5002,7 @@ subroutine copy_2d_into_3d(field_2d, field_3d)
 
   do concurrent(k=1:nk, j=1:nj, i=1:ni)
     field_3d(i,j,k) = field_2d(i,j)
-  end do
+  enddo
 end subroutine copy_2d_into_3d
 
 end module MOM_diag_mediator
