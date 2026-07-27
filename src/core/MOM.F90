@@ -3703,6 +3703,7 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, &
                          restart_CSp, CS%MEKE_in_dynamics)
 
   allocate(CS%VarMix)
+  !$omp target enter data map(alloc: CS%VarMix)
   call VarMix_init(Time, G, GV, US, param_file, diag, CS%VarMix)
 
   allocate(CS%set_visc_CSp)
@@ -4744,6 +4745,7 @@ subroutine MOM_end(CS)
   call thickness_diffuse_end(CS%thickness_diffuse_CSp, CS%CDp)
   if (CS%interface_filter) call interface_filter_end(CS%interface_filter_CSp, CS%CDp)
   call VarMix_end(CS%VarMix)
+  !$omp target exit data map(delete: CS%VarMix)
 
   call set_visc_end(CS%visc, CS%set_visc_CSp)
   !$omp target exit data map(delete: CS%visc, CS%set_visc_CSp)

@@ -1245,9 +1245,9 @@ subroutine calc_slope_functions_using_just_e(h, G, GV, US, CS, e)
   real, dimension(SZI_(G),SZJ_(G),SZK_(GV)+1), intent(in)    :: e  !< Interface position [Z ~> m]
   ! type(thermo_var_ptrs),                     intent(in)    :: tv !< Thermodynamic variables
   ! Local variables
-  real :: E_x(SZIB_(G),SZJ_(G), merge(GV%ke, CS%nkblock, CS%nkblock==0) )  ! X-slope of interface at u 
+  real :: E_x(SZIB_(G),SZJ_(G), merge(GV%ke, CS%nkblock, CS%nkblock==0) )  ! X-slope of interface at u
                                                                            ! points [Z L-1 ~> nondim] (for diagnostics)
-  real :: E_y(SZI_(G),SZJB_(G), merge(GV%ke, CS%nkblock, CS%nkblock==0) )  ! Y-slope of interface at v 
+  real :: E_y(SZI_(G),SZJB_(G), merge(GV%ke, CS%nkblock, CS%nkblock==0) )  ! Y-slope of interface at v
                                                                            ! points [Z L-1 ~> nondim] (for diagnostics)
   real :: dz_tot(SZI_(G),SZJ_(G)) ! The total thickness of the water columns [Z ~> m]
   ! real :: dz(SZI_(G),SZJ_(G),SZK_(GV)) ! The vertical distance across each layer [Z ~> m]
@@ -1327,7 +1327,7 @@ subroutine calc_slope_functions_using_just_e(h, G, GV, US, CS, e)
       ! Mask slopes where interface intersects topography
       if (min(h(i,j,k),h(i,j+1,k)) < H_cutoff) E_y(i,J,kk) = 0.
     enddo
-  
+
     ! Calculate N*S*h from this layer and add to the sum
     do concurrent( kk=1:kmax, j=js:je, i=is-1:ie ) DO_LOCALITY(local( S2, Hdn, Hup, H_geom, k ))
       k = kk + k_start - 1
@@ -1373,7 +1373,7 @@ subroutine calc_slope_functions_using_just_e(h, G, GV, US, CS, e)
                                                 max(dz_tot(i,j), dz_tot(i+1,j), GV%dz_subroundoff) )
       enddo
     else
-      !$omp loop
+      !$omp loop private( h1, h2 )
       do I=is-1,ie
         h1 = max(G%meanSL(i,j) + G%bathyT(i,j), 0.0)
         h2 = max(G%meanSL(i+1,j) + G%bathyT(i+1,j), 0.0)
@@ -1404,7 +1404,7 @@ subroutine calc_slope_functions_using_just_e(h, G, GV, US, CS, e)
                                                 max(dz_tot(i,j), dz_tot(i,j+1), GV%dz_subroundoff) )
       enddo
     else
-      !$omp loop
+      !$omp loop private( h1, h2 )
       do i=is,ie
         ! There is a primordial horizontal indexing bug on the following line from the previous
         ! versions of the code.  This comment should be deleted by the end of 2024.
@@ -1861,7 +1861,6 @@ subroutine VarMix_init(Time, G, GV, US, param_file, diag, CS)
                  "artifacts from altering the equivalent barotropic mode structure.  "//&
                  "This monotonzization is disabled if this parameter is negative.", &
                  units="m", default=-1.0, scale=GV%m_to_H)
-    allocate(CS%ebt_struct(isd:ied,jsd:jed,GV%ke), source=0.0)
   endif
 
   use_SQG = CS%BS_use_sqg_struct .or. CS%khth_use_sqg_struct .or. CS%khtr_use_sqg_struct .or. &
@@ -1889,22 +1888,6 @@ subroutine VarMix_init(Time, G, GV, US, param_file, diag, CS)
   if (CS%kdgl90_use_ebt_struct .and. CS%kdgl90_use_sqg_struct) call MOM_error(FATAL, &
     "calc_resoln_function: Only one of KD_GL90_USE_EBT_STRUCT and KD_GL90_USE_SQG_STRUCT can be true")
 
-  if (CS%BS_EBT_power>0. .or. CS%BS_use_sqg_struct) then
-    allocate(CS%BS_struct(isd:ied,jsd:jed,GV%ke), source=0.0)
-  endif
-
-  if (CS%khth_use_ebt_struct .or. CS%khth_use_sqg_struct) then
-    allocate(CS%khth_struct(isd:ied, jsd:jed, gv%ke), source=0.0)
-  endif
-
-  if (CS%khtr_use_ebt_struct .or. CS%khtr_use_sqg_struct) then
-    allocate(CS%khtr_struct(isd:ied, jsd:jed, gv%ke), source=0.0)
-  endif
-
-  if (CS%kdgl90_use_ebt_struct .or. CS%kdgl90_use_sqg_struct) then
-    allocate(CS%kdgl90_struct(isd:ied, jsd:jed, gv%ke), source=0.0)
-  endif
-
   if (CS%use_stored_slopes) then
     if (KhTr_Slope_Cff>0. .or. KhTh_Slope_Cff>0.) then
       call get_param(param_file, mdl, "VISBECK_MAX_SLOPE", CS%Visbeck_S_max, &
@@ -1920,8 +1903,6 @@ subroutine VarMix_init(Time, G, GV, US, param_file, diag, CS)
   if (CS%use_stored_slopes .or. (CS%interpolated_sqg_struct .and. (CS%sqg_expo>0.0))) then
     ! CS%calculate_Eady_growth_rate=.true.
     in_use = .true.
-    allocate(CS%slope_x(IsdB:IedB,jsd:jed,GV%ke+1), source=0.0)
-    allocate(CS%slope_y(isd:ied,JsdB:JedB,GV%ke+1), source=0.0)
     call get_param(param_file, mdl, "KD_SMOOTH", CS%kappa_smooth, &
                  "A diapycnal diffusivity that is used to interpolate "//&
                  "more sensible values of T & S into thin layers.", &
@@ -1930,12 +1911,6 @@ subroutine VarMix_init(Time, G, GV, US, param_file, diag, CS)
 
   if (CS%calculate_Eady_growth_rate) then
     in_use = .true.
-    allocate(CS%SN_u(IsdB:IedB,jsd:jed), source=0.0)
-    allocate(CS%SN_v(isd:ied,JsdB:JedB), source=0.0)
-    CS%id_SN_u = register_diag_field('ocean_model', 'SN_u', diag%axesCu1, Time, &
-       'Inverse eddy time-scale, S*N, at u-points', 's-1', conversion=US%s_to_T)
-    CS%id_SN_v = register_diag_field('ocean_model', 'SN_v', diag%axesCv1, Time, &
-       'Inverse eddy time-scale, S*N, at v-points', 's-1', conversion=US%s_to_T)
     call get_param(param_file, mdl, "USE_SIMPLER_EADY_GROWTH_RATE", CS%use_simpler_Eady_growth_rate, &
                    "If true, use a simpler method to calculate the Eady growth rate "//&
                    "that avoids division by layer thickness. Recommended.", default=.false.)
@@ -1977,51 +1952,6 @@ subroutine VarMix_init(Time, G, GV, US, param_file, diag, CS)
                  "The fixed length scale in the Visbeck formula, or if negative a nondimensional "//&
                  "scaling factor relating this length scale squared to the cell areas.", &
                  units="m or nondim", default=0.0, scale=US%m_to_L)
-    allocate(CS%L2u(IsdB:IedB,jsd:jed), source=0.0)
-    allocate(CS%L2v(isd:ied,JsdB:JedB), source=0.0)
-    if (CS%Visbeck_L_scale<0) then
-      ! Undo the rescaling of CS%Visbeck_L_scale.
-      do j=js,je ; do I=is-1,Ieq
-        CS%L2u(I,j) = (US%L_to_m*CS%Visbeck_L_scale)**2 * G%areaCu(I,j)
-      enddo ; enddo
-      do J=js-1,Jeq ; do i=is,ie
-        CS%L2v(i,J) = (US%L_to_m*CS%Visbeck_L_scale)**2 * G%areaCv(i,J)
-      enddo ; enddo
-    else
-      CS%L2u(:,:) = CS%Visbeck_L_scale**2
-      CS%L2v(:,:) = CS%Visbeck_L_scale**2
-    endif
-
-    CS%id_L2u = register_diag_field('ocean_model', 'L2u', diag%axesCu1, Time, &
-       'Length scale squared for mixing coefficient, at u-points', &
-       'm2', conversion=US%L_to_m**2)
-    CS%id_L2v = register_diag_field('ocean_model', 'L2v', diag%axesCv1, Time, &
-       'Length scale squared for mixing coefficient, at v-points', &
-       'm2', conversion=US%L_to_m**2)
-  endif
-
-  CS%id_sqg_struct = register_diag_field('ocean_model', 'sqg_struct', diag%axesTl, Time, &
-            'Vertical structure of SQG mode', 'nondim')
-  if (CS%BS_use_sqg_struct .or. CS%khth_use_sqg_struct .or. CS%khtr_use_sqg_struct &
-      .or. CS%kdgl90_use_sqg_struct .or. CS%id_sqg_struct>0) then
-    allocate(CS%sqg_struct(isd:ied,jsd:jed,GV%ke), source=0.0)
-  endif
-
-  if (CS%BS_EBT_power>0. .or. CS%BS_use_sqg_struct) then
-    CS%id_BS_struct = register_diag_field('ocean_model', 'BS_struct', diag%axesTl, Time, &
-              'Vertical structure of backscatter', 'nondim')
-  endif
-  if (CS%khth_use_ebt_struct .or. CS%khth_use_sqg_struct) then
-    CS%id_khth_struct = register_diag_field('ocean_model', 'khth_struct', diag%axesTl, Time, &
-            'Vertical structure of thickness diffusivity', 'nondim')
-  endif
-  if (CS%khtr_use_ebt_struct .or. CS%khtr_use_sqg_struct) then
-    CS%id_khtr_struct = register_diag_field('ocean_model', 'khtr_struct', diag%axesTl, Time, &
-            'Vertical structure of tracer diffusivity', 'nondim')
-  endif
-  if (CS%kdgl90_use_ebt_struct .or. CS%kdgl90_use_sqg_struct) then
-    CS%id_kdgl90_struct = register_diag_field('ocean_model', 'kdgl90_struct', diag%axesTl, Time, &
-            'Vertical structure of GL90 diffusivity', 'nondim')
   endif
 
   if ((CS%calculate_Eady_growth_rate .and. CS%use_stored_slopes) ) then
@@ -2061,20 +1991,6 @@ subroutine VarMix_init(Time, G, GV, US, param_file, diag, CS)
   if (CS%Resoln_scaling_used) then
     CS%calculate_Rd_dx = .true.
     CS%calculate_res_fns = .true.
-    allocate(CS%Res_fn_h(isd:ied,jsd:jed), source=0.0)
-    allocate(CS%Res_fn_q(IsdB:IedB,JsdB:JedB), source=0.0)
-    allocate(CS%Res_fn_u(IsdB:IedB,jsd:jed), source=0.0)
-    allocate(CS%Res_fn_v(isd:ied,JsdB:JedB), source=0.0)
-    allocate(CS%beta_dx2_q(IsdB:IedB,JsdB:JedB), source=0.0)
-    allocate(CS%beta_dx2_u(IsdB:IedB,jsd:jed), source=0.0)
-    allocate(CS%beta_dx2_v(isd:ied,JsdB:JedB), source=0.0)
-    allocate(CS%f2_dx2_q(IsdB:IedB,JsdB:JedB), source=0.0)
-    allocate(CS%f2_dx2_u(IsdB:IedB,jsd:jed), source=0.0)
-    allocate(CS%f2_dx2_v(isd:ied,JsdB:JedB), source=0.0)
-
-    CS%id_Res_fn = register_diag_field('ocean_model', 'Res_fn', diag%axesT1, Time, &
-       'Resolution function for scaling diffusivities', 'nondim')
-
     call get_param(param_file, mdl, "KH_RES_SCALE_COEF", CS%Res_coef_khth, &
                  "A coefficient that determines how KhTh is scaled away if "//&
                  "RESOLN_SCALED_... is true, as "//&
@@ -2121,46 +2037,10 @@ subroutine VarMix_init(Time, G, GV, US, param_file, diag, CS)
     if (Gill_equatorial_Ld) then
       oneOrTwo = 2.0
     endif
-
-
-    do J=js-1,Jeq ; do I=is-1,Ieq
-      CS%f2_dx2_q(I,J) = ((G%dxBu(I,J)**2) + (G%dyBu(I,J)**2)) * &
-                         max(G%Coriolis2Bu(I,J), absurdly_small_freq**2)
-      CS%beta_dx2_q(I,J) = oneOrTwo * ((G%dxBu(I,J)**2) + (G%dyBu(I,J)**2)) * (sqrt(0.5 * &
-          ( ((((G%CoriolisBu(I,J)-G%CoriolisBu(I-1,J)) * G%IdxCv(i,J))**2) + &
-             (((G%CoriolisBu(I+1,J)-G%CoriolisBu(I,J)) * G%IdxCv(i+1,J))**2)) + &
-            ((((G%CoriolisBu(I,J)-G%CoriolisBu(I,J-1)) * G%IdyCu(I,j))**2) + &
-             (((G%CoriolisBu(I,J+1)-G%CoriolisBu(I,J)) * G%IdyCu(I,j+1))**2)) ) ))
-    enddo ; enddo
-
-    do j=js,je ; do I=is-1,Ieq
-      CS%f2_dx2_u(I,j) = ((G%dxCu(I,j)**2) + (G%dyCu(I,j)**2)) * &
-          max(0.5* (G%Coriolis2Bu(I,J)+G%Coriolis2Bu(I,J-1)), absurdly_small_freq**2)
-      CS%beta_dx2_u(I,j) = oneOrTwo * ((G%dxCu(I,j)**2) + (G%dyCu(I,j)**2)) * (sqrt( &
-          ((G%CoriolisBu(I,J)-G%CoriolisBu(I,J-1)) * G%IdyCu(I,j))**2 + &
-          0.25*( ((((G%CoriolisBu(I,J-1)-G%CoriolisBu(I-1,J-1)) * G%IdxCv(i,J-1))**2) + &
-                  (((G%CoriolisBu(I+1,J)-G%CoriolisBu(I,J)) * G%IdxCv(i+1,J))**2)) + &
-                 ((((G%CoriolisBu(I+1,J-1)-G%CoriolisBu(I,J-1)) * G%IdxCv(i+1,J-1))**2) + &
-                  (((G%CoriolisBu(I,J)-G%CoriolisBu(I-1,J)) * G%IdxCv(i,J))**2)) ) ))
-    enddo ; enddo
-
-    do J=js-1,Jeq ; do i=is,ie
-      CS%f2_dx2_v(i,J) = ((G%dxCv(i,J)**2) + (G%dyCv(i,J)**2)) * &
-          max(0.5*(G%Coriolis2Bu(I,J)+G%Coriolis2Bu(I-1,J)), absurdly_small_freq**2)
-      CS%beta_dx2_v(i,J) = oneOrTwo * ((G%dxCv(i,J)**2) + (G%dyCv(i,J)**2)) * (sqrt( &
-          ((G%CoriolisBu(I,J)-G%CoriolisBu(I-1,J)) * G%IdxCv(i,J))**2 + &
-          0.25*( ((((G%CoriolisBu(I,J)-G%CoriolisBu(I,J-1)) * G%IdyCu(I,j))**2) + &
-                  (((G%CoriolisBu(I-1,J+1)-G%CoriolisBu(I-1,J)) * G%IdyCu(I-1,j+1))**2)) + &
-                 ((((G%CoriolisBu(I,J+1)-G%CoriolisBu(I,J)) * G%IdyCu(I,j+1))**2) + &
-                  (((G%CoriolisBu(I-1,J)-G%CoriolisBu(I-1,J-1)) * G%IdyCu(I-1,j))**2)) ) ))
-    enddo ; enddo
-
   endif
 
   if (CS%Depth_scaled_KhTh) then
     CS%calculate_depth_fns = .true.
-    allocate(CS%Depth_fn_u(IsdB:IedB,jsd:jed), source=0.0)
-    allocate(CS%Depth_fn_v(isd:ied,JsdB:JedB), source=0.0)
     call get_param(param_file, mdl, "DEPTH_SCALED_KHTH_H0", CS%depth_scaled_khth_h0, &
                    "The depth above which KHTH is scaled away.", &
                    units="m", scale=US%m_to_Z, default=1000.)
@@ -2174,28 +2054,10 @@ subroutine VarMix_init(Time, G, GV, US, param_file, diag, CS)
        'Ratio between deformation radius and grid spacing', 'm m-1')
   CS%calculate_Rd_dx = CS%calculate_Rd_dx .or. (CS%id_Rd_dx>0)
 
-  if (CS%calculate_Rd_dx) then
-    CS%calculate_cg1 = .true. ! We will need %cg1
-    allocate(CS%Rd_dx_h(isd:ied,jsd:jed), source=0.0)
-    allocate(CS%beta_dx2_h(isd:ied,jsd:jed), source=0.0)
-    allocate(CS%f2_dx2_h(isd:ied,jsd:jed), source=0.0)
-
-    do j=js-1,je+1 ; do i=is-1,ie+1
-      CS%f2_dx2_h(i,j) = ((G%dxT(i,j)**2) + (G%dyT(i,j)**2)) * &
-          max(0.25 * ((G%Coriolis2Bu(I,J) + G%Coriolis2Bu(I-1,J-1)) + &
-                      (G%Coriolis2Bu(I-1,J) + G%Coriolis2Bu(I,J-1))), &
-              absurdly_small_freq**2)
-      CS%beta_dx2_h(i,j) = oneOrTwo * ((G%dxT(i,j)**2) + (G%dyT(i,j)**2)) * (sqrt(0.5 * &
-          ( ((((G%CoriolisBu(I,J)-G%CoriolisBu(I-1,J)) * G%IdxCv(i,J))**2) + &
-             (((G%CoriolisBu(I,J-1)-G%CoriolisBu(I-1,J-1)) * G%IdxCv(i,J-1))**2)) + &
-            ((((G%CoriolisBu(I,J)-G%CoriolisBu(I,J-1)) * G%IdyCu(I,j))**2) + &
-             (((G%CoriolisBu(I-1,J)-G%CoriolisBu(I-1,J-1)) * G%IdyCu(I-1,j))**2)) ) ))
-    enddo ; enddo
-  endif
+  if (CS%calculate_Rd_dx) CS%calculate_cg1 = .true. ! We will need %cg1
 
   if (CS%calculate_cg1) then
     in_use = .true.
-    allocate(CS%cg1(isd:ied,jsd:jed), source=0.0)
     call get_param(param_file, mdl, "DEFAULT_ANSWER_DATE", default_answer_date, &
                  "This sets the default value for the various _ANSWER_DATE parameters.", &
                  default=99991231)
@@ -2243,6 +2105,184 @@ subroutine VarMix_init(Time, G, GV, US, param_file, diag, CS)
                "If true, include the beta term in the Leith nonlinear eddy viscosity.", &
                default=.true.)
 
+    if (.not. CS%use_stored_slopes) call MOM_error(FATAL, &
+           "MOM_lateral_mixing_coeffs.F90, VarMix_init: "//&
+           "USE_STORED_SLOPES must be True when using QG Leith.")
+  endif
+
+  ! Re-enable variable mixing if one of the schemes was enabled
+  CS%use_variable_mixing = in_use .or. CS%use_variable_mixing
+
+  !$omp target update to( CS )
+
+  if (CS%Resoln_use_ebt .or. CS%khth_use_ebt_struct .or. CS%kdgl90_use_ebt_struct &
+      .or. CS%BS_EBT_power>0. .or. CS%khtr_use_ebt_struct) then
+    allocate(CS%ebt_struct(isd:ied,jsd:jed,GV%ke), source=0.0)
+  endif
+
+  if (CS%BS_EBT_power>0. .or. CS%BS_use_sqg_struct) then
+    allocate(CS%BS_struct(isd:ied,jsd:jed,GV%ke), source=0.0)
+    CS%id_BS_struct = register_diag_field('ocean_model', 'BS_struct', diag%axesTl, Time, &
+              'Vertical structure of backscatter', 'nondim')
+  endif
+
+  if (CS%khth_use_ebt_struct .or. CS%khth_use_sqg_struct) then
+    allocate(CS%khth_struct(isd:ied, jsd:jed, gv%ke), source=0.0)
+    CS%id_khth_struct = register_diag_field('ocean_model', 'khth_struct', diag%axesTl, Time, &
+            'Vertical structure of thickness diffusivity', 'nondim')
+  endif
+
+  if (CS%khtr_use_ebt_struct .or. CS%khtr_use_sqg_struct) then
+    allocate(CS%khtr_struct(isd:ied, jsd:jed, gv%ke), source=0.0)
+    CS%id_khtr_struct = register_diag_field('ocean_model', 'khtr_struct', diag%axesTl, Time, &
+            'Vertical structure of tracer diffusivity', 'nondim')
+  endif
+
+  if (CS%kdgl90_use_ebt_struct .or. CS%kdgl90_use_sqg_struct) then
+    allocate(CS%kdgl90_struct(isd:ied, jsd:jed, gv%ke), source=0.0)
+    CS%id_kdgl90_struct = register_diag_field('ocean_model', 'kdgl90_struct', diag%axesTl, Time, &
+            'Vertical structure of GL90 diffusivity', 'nondim')
+  endif
+
+  if (CS%use_stored_slopes .or. (CS%interpolated_sqg_struct .and. (CS%sqg_expo>0.0))) then
+    allocate(CS%slope_x(IsdB:IedB,jsd:jed,GV%ke+1), source=0.0)
+    allocate(CS%slope_y(isd:ied,JsdB:JedB,GV%ke+1), source=0.0)
+  endif
+
+  if (CS%calculate_Eady_growth_rate) then
+    allocate(CS%SN_u(IsdB:IedB,jsd:jed), source=0.0)
+    allocate(CS%SN_v(isd:ied,JsdB:JedB), source=0.0)
+    CS%id_SN_u = register_diag_field('ocean_model', 'SN_u', diag%axesCu1, Time, &
+       'Inverse eddy time-scale, S*N, at u-points', 's-1', conversion=US%s_to_T)
+    CS%id_SN_v = register_diag_field('ocean_model', 'SN_v', diag%axesCv1, Time, &
+       'Inverse eddy time-scale, S*N, at v-points', 's-1', conversion=US%s_to_T)
+    !$omp target enter data map(alloc: CS%SN_u, CS%SN_v)
+  endif
+
+  CS%id_sqg_struct = register_diag_field('ocean_model', 'sqg_struct', diag%axesTl, Time, &
+            'Vertical structure of SQG mode', 'nondim')
+  if (CS%BS_use_sqg_struct .or. CS%khth_use_sqg_struct .or. CS%khtr_use_sqg_struct &
+      .or. CS%kdgl90_use_sqg_struct .or. CS%id_sqg_struct>0) then
+    allocate(CS%sqg_struct(isd:ied,jsd:jed,GV%ke), source=0.0)
+  endif
+
+  if (KhTr_Slope_Cff>0. .or. KhTh_Slope_Cff>0.) then
+    allocate(CS%L2u(IsdB:IedB,jsd:jed), source=0.0)
+    allocate(CS%L2v(isd:ied,JsdB:JedB), source=0.0)
+    ! These are used in hor_diff and thickness diffuse. Allocate once at initialization
+    !$omp target enter data map(alloc: CS%L2u, CS%L2v)
+
+    if (CS%Visbeck_L_scale<0) then
+      ! Undo the rescaling of CS%Visbeck_L_scale. This do-concurrent kernel fills CS%L2u/L2v
+      ! directly on the device, so no host->device update is needed (or wanted -- the host
+      ! copy is never touched here and pushing it would overwrite the values just computed).
+      do concurrent( j=js:je, I=is-1:Ieq)
+        CS%L2u(I,j) = (US%L_to_m*CS%Visbeck_L_scale)**2 * G%areaCu(I,j)
+      enddo
+      do concurrent( J=js-1:Jeq, i=is:ie)
+        CS%L2v(i,J) = (US%L_to_m*CS%Visbeck_L_scale)**2 * G%areaCv(i,J)
+      enddo
+    else
+      CS%L2u(:,:) = CS%Visbeck_L_scale**2
+      CS%L2v(:,:) = CS%Visbeck_L_scale**2
+      !$omp target update to( CS%L2u, CS%L2v)
+    endif
+
+    CS%id_L2u = register_diag_field('ocean_model', 'L2u', diag%axesCu1, Time, &
+       'Length scale squared for mixing coefficient, at u-points', &
+       'm2', conversion=US%L_to_m**2)
+    CS%id_L2v = register_diag_field('ocean_model', 'L2v', diag%axesCv1, Time, &
+       'Length scale squared for mixing coefficient, at v-points', &
+       'm2', conversion=US%L_to_m**2)
+  endif
+
+  if (CS%Resoln_scaling_used) then
+    allocate(CS%Res_fn_h(isd:ied,jsd:jed), source=0.0)
+    allocate(CS%Res_fn_q(IsdB:IedB,JsdB:JedB), source=0.0)
+    allocate(CS%Res_fn_u(IsdB:IedB,jsd:jed), source=0.0)
+    allocate(CS%Res_fn_v(isd:ied,JsdB:JedB), source=0.0)
+    allocate(CS%beta_dx2_q(IsdB:IedB,JsdB:JedB), source=0.0)
+    allocate(CS%beta_dx2_u(IsdB:IedB,jsd:jed), source=0.0)
+    allocate(CS%beta_dx2_v(isd:ied,JsdB:JedB), source=0.0)
+    allocate(CS%f2_dx2_q(IsdB:IedB,JsdB:JedB), source=0.0)
+    allocate(CS%f2_dx2_u(IsdB:IedB,jsd:jed), source=0.0)
+    allocate(CS%f2_dx2_v(isd:ied,JsdB:JedB), source=0.0)
+
+    !$omp target enter data map(alloc: CS%Res_fn_h, CS%Res_fn_q, CS%Res_fn_u, CS%Res_fn_v)
+    !$omp target enter data map(alloc: CS%f2_dx2_q, CS%beta_dx2_q, &
+    !$omp&                             CS%f2_dx2_u, CS%beta_dx2_u, &
+    !$omp&                             CS%f2_dx2_v, CS%beta_dx2_v)
+
+    CS%id_Res_fn = register_diag_field('ocean_model', 'Res_fn', diag%axesT1, Time, &
+       'Resolution function for scaling diffusivities', 'nondim')
+
+    do concurrent( J=js-1:Jeq, I=is-1:Ieq)
+      CS%f2_dx2_q(I,J) = ((G%dxBu(I,J)**2) + (G%dyBu(I,J)**2)) * &
+                         max(G%Coriolis2Bu(I,J), absurdly_small_freq**2)
+      CS%beta_dx2_q(I,J) = oneOrTwo * ((G%dxBu(I,J)**2) + (G%dyBu(I,J)**2)) * (sqrt(0.5 * &
+          ( ((((G%CoriolisBu(I,J)-G%CoriolisBu(I-1,J)) * G%IdxCv(i,J))**2) + &
+             (((G%CoriolisBu(I+1,J)-G%CoriolisBu(I,J)) * G%IdxCv(i+1,J))**2)) + &
+            ((((G%CoriolisBu(I,J)-G%CoriolisBu(I,J-1)) * G%IdyCu(I,j))**2) + &
+             (((G%CoriolisBu(I,J+1)-G%CoriolisBu(I,J)) * G%IdyCu(I,j+1))**2)) ) ))
+    enddo
+
+    do concurrent( j=js:je, I=is-1:Ieq)
+      CS%f2_dx2_u(I,j) = ((G%dxCu(I,j)**2) + (G%dyCu(I,j)**2)) * &
+          max(0.5* (G%Coriolis2Bu(I,J)+G%Coriolis2Bu(I,J-1)), absurdly_small_freq**2)
+      CS%beta_dx2_u(I,j) = oneOrTwo * ((G%dxCu(I,j)**2) + (G%dyCu(I,j)**2)) * (sqrt( &
+          ((G%CoriolisBu(I,J)-G%CoriolisBu(I,J-1)) * G%IdyCu(I,j))**2 + &
+          0.25*( ((((G%CoriolisBu(I,J-1)-G%CoriolisBu(I-1,J-1)) * G%IdxCv(i,J-1))**2) + &
+                  (((G%CoriolisBu(I+1,J)-G%CoriolisBu(I,J)) * G%IdxCv(i+1,J))**2)) + &
+                 ((((G%CoriolisBu(I+1,J-1)-G%CoriolisBu(I,J-1)) * G%IdxCv(i+1,J-1))**2) + &
+                  (((G%CoriolisBu(I,J)-G%CoriolisBu(I-1,J)) * G%IdxCv(i,J))**2)) ) ))
+    enddo
+
+    do concurrent( J=js-1:Jeq, i=is:ie)
+      CS%f2_dx2_v(i,J) = ((G%dxCv(i,J)**2) + (G%dyCv(i,J)**2)) * &
+          max(0.5*(G%Coriolis2Bu(I,J)+G%Coriolis2Bu(I-1,J)), absurdly_small_freq**2)
+      CS%beta_dx2_v(i,J) = oneOrTwo * ((G%dxCv(i,J)**2) + (G%dyCv(i,J)**2)) * (sqrt( &
+          ((G%CoriolisBu(I,J)-G%CoriolisBu(I-1,J)) * G%IdxCv(i,J))**2 + &
+          0.25*( ((((G%CoriolisBu(I,J)-G%CoriolisBu(I,J-1)) * G%IdyCu(I,j))**2) + &
+                  (((G%CoriolisBu(I-1,J+1)-G%CoriolisBu(I-1,J)) * G%IdyCu(I-1,j+1))**2)) + &
+                 ((((G%CoriolisBu(I,J+1)-G%CoriolisBu(I,J)) * G%IdyCu(I,j+1))**2) + &
+                  (((G%CoriolisBu(I-1,J)-G%CoriolisBu(I-1,J-1)) * G%IdyCu(I-1,j))**2)) ) ))
+    enddo
+
+  endif
+
+  if (CS%Depth_scaled_KhTh) then
+    allocate(CS%Depth_fn_u(IsdB:IedB,jsd:jed), source=0.0)
+    allocate(CS%Depth_fn_v(isd:ied,JsdB:JedB), source=0.0)
+    !$omp target enter data map(alloc: CS%Depth_fn_u, CS%Depth_fn_v)
+  endif
+
+  if (CS%calculate_Rd_dx) then
+    allocate(CS%Rd_dx_h(isd:ied,jsd:jed), source=0.0)
+    allocate(CS%beta_dx2_h(isd:ied,jsd:jed), source=0.0)
+    allocate(CS%f2_dx2_h(isd:ied,jsd:jed), source=0.0)
+
+    !$omp target enter data map(alloc: CS%Rd_dx_h)
+    !$omp target enter data map(alloc: CS%f2_dx2_h, CS%beta_dx2_h)
+
+    do concurrent( j=js-1:je+1, i=is-1:ie+1)
+      CS%f2_dx2_h(i,j) = ((G%dxT(i,j)**2) + (G%dyT(i,j)**2)) * &
+          max(0.25 * ((G%Coriolis2Bu(I,J) + G%Coriolis2Bu(I-1,J-1)) + &
+                      (G%Coriolis2Bu(I-1,J) + G%Coriolis2Bu(I,J-1))), &
+              absurdly_small_freq**2)
+      CS%beta_dx2_h(i,j) = oneOrTwo * ((G%dxT(i,j)**2) + (G%dyT(i,j)**2)) * (sqrt(0.5 * &
+          ( ((((G%CoriolisBu(I,J)-G%CoriolisBu(I-1,J)) * G%IdxCv(i,J))**2) + &
+             (((G%CoriolisBu(I,J-1)-G%CoriolisBu(I-1,J-1)) * G%IdxCv(i,J-1))**2)) + &
+            ((((G%CoriolisBu(I,J)-G%CoriolisBu(I,J-1)) * G%IdyCu(I,j))**2) + &
+             (((G%CoriolisBu(I-1,J)-G%CoriolisBu(I-1,J-1)) * G%IdyCu(I-1,j))**2)) ) ))
+    enddo
+  endif
+
+  if (CS%calculate_cg1) then
+    allocate(CS%cg1(isd:ied,jsd:jed), source=0.0)
+    !$omp target enter data map(alloc: CS%cg1)
+  endif
+
+  if (CS%Use_QG_Leith_GM) then
     allocate(CS%Laplac3_const_u(IsdB:IedB,jsd:jed), source=0.0)
     allocate(CS%Laplac3_const_v(isd:ied,JsdB:JedB), source=0.0)
     allocate(CS%KH_u_QG(IsdB:IedB,jsd:jed,GV%ke), source=0.0)
@@ -2266,33 +2306,7 @@ subroutine VarMix_init(Time, G, GV, US, param_file, diag, CS)
       grid_sp_v3 = grid_sp_v2*sqrt(grid_sp_v2)
       CS%Laplac3_const_v(i,J) = Leith_Lap_const * grid_sp_v3
     enddo ; enddo
-
-    if (.not. CS%use_stored_slopes) call MOM_error(FATAL, &
-           "MOM_lateral_mixing_coeffs.F90, VarMix_init: "//&
-           "USE_STORED_SLOPES must be True when using QG Leith.")
   endif
-
-  ! Re-enable variable mixing if one of the schemes was enabled
-  CS%use_variable_mixing = in_use .or. CS%use_variable_mixing
-
-  ! Map CS to device at initialization.
-  !$omp target enter data map(to: CS)
-
-  ! Zero intialized arrays that will be filled in later
-  !$omp target enter data map(alloc: CS%cg1)
-  !$omp target enter data map(alloc: CS%Rd_dx_h)
-  !$omp target enter data map(alloc: CS%Depth_fn_u, CS%Depth_fn_v)
-  !$omp target enter data map(alloc: CS%Res_fn_h, CS%Res_fn_q, CS%Res_fn_u, CS%Res_fn_v)
-  !$omp target enter data map(alloc: CS%SN_u, CS%SN_v)
-
-  ! Arrays that will be filled in during initialization
-  !$omp target enter data map(to: CS%f2_dx2_h, CS%beta_dx2_h, &
-  !$omp&                          CS%f2_dx2_q, CS%beta_dx2_q, &
-  !$omp&                          CS%f2_dx2_u, CS%beta_dx2_u, &
-  !$omp&                          CS%f2_dx2_v, CS%beta_dx2_v)
-
-  ! These are used in hor_diff and thickness diffuse. Allocate once at initialization
-  !$omp target enter data map(to: CS%L2u, CS%L2v)
 
 end subroutine VarMix_init
 
@@ -2300,23 +2314,21 @@ end subroutine VarMix_init
 subroutine VarMix_end(CS)
   type(VarMix_CS), intent(inout) :: CS
 
-  ! Remove component arrays from device before host deallocation
-  !$omp target exit data map(delete: CS%cg1)
-  !$omp target exit data map(delete: CS%Rd_dx_h)
-  !$omp target exit data map(delete: CS%Depth_fn_u, CS%Depth_fn_v)
-  !$omp target exit data map(delete: CS%Res_fn_h, CS%Res_fn_q, CS%Res_fn_u, CS%Res_fn_v)
-  !$omp target exit data map(delete: CS%SN_u, CS%SN_v)
+  !$omp target exit data map(delete: CS%cg1) if (allocated(CS%cg1))
+  !$omp target exit data map(delete: CS%Rd_dx_h) if (allocated(CS%Rd_dx_h))
+  !$omp target exit data map(delete: CS%Depth_fn_u, CS%Depth_fn_v) if (allocated(CS%Depth_fn_u))
+  !$omp target exit data map(delete: CS%Res_fn_h, CS%Res_fn_q, CS%Res_fn_u, CS%Res_fn_v) &
+  !$omp&   if (allocated(CS%Res_fn_h))
+  !$omp target exit data map(delete: CS%SN_u, CS%SN_v) if (allocated(CS%SN_u))
 
-  !$omp target exit data map(delete: CS%f2_dx2_h, CS%beta_dx2_h, &
-  !$omp&                             CS%f2_dx2_q, CS%beta_dx2_q, &
+  !$omp target exit data map(delete: CS%f2_dx2_h, CS%beta_dx2_h) if (allocated(CS%f2_dx2_h))
+  !$omp target exit data map(delete: CS%f2_dx2_q, CS%beta_dx2_q, &
   !$omp&                             CS%f2_dx2_u, CS%beta_dx2_u, &
-  !$omp&                             CS%f2_dx2_v, CS%beta_dx2_v)
+  !$omp&                             CS%f2_dx2_v, CS%beta_dx2_v) &
+  !$omp&   if (allocated(CS%f2_dx2_q))
 
   ! These are used in MOM_tracer_hor_diff and thickness diffuse.
-  !$omp target exit data map(delete: CS%L2u, CS%L2v)
-
-  ! Delete control structure from device
-  !$omp target exit data map(delete: CS)
+  !$omp target exit data map(delete: CS%L2u, CS%L2v) if (allocated(CS%L2u))
 
   if (allocated(CS%ebt_struct))  deallocate(CS%ebt_struct)
   if (allocated(CS%sqg_struct))  deallocate(CS%sqg_struct)
