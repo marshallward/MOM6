@@ -1245,8 +1245,10 @@ subroutine calc_slope_functions_using_just_e(h, G, GV, US, CS, e)
   real, dimension(SZI_(G),SZJ_(G),SZK_(GV)+1), intent(in)    :: e  !< Interface position [Z ~> m]
   ! type(thermo_var_ptrs),                     intent(in)    :: tv !< Thermodynamic variables
   ! Local variables
-  real :: E_x(SZIB_(G),SZJ_(G))  ! X-slope of interface at u points [Z L-1 ~> nondim] (for diagnostics)
-  real :: E_y(SZI_(G),SZJB_(G))  ! Y-slope of interface at v points [Z L-1 ~> nondim] (for diagnostics)
+  real :: E_x(SZIB_(G),SZJ_(G), merge(GV%ke, CS%nkblock, CS%nkblock==0) )  ! X-slope of interface at u 
+                                                                           ! points [Z L-1 ~> nondim] (for diagnostics)
+  real :: E_y(SZI_(G),SZJB_(G), merge(GV%ke, CS%nkblock, CS%nkblock==0) )  ! Y-slope of interface at v 
+                                                                           ! points [Z L-1 ~> nondim] (for diagnostics)
   real :: dz_tot(SZI_(G),SZJ_(G)) ! The total thickness of the water columns [Z ~> m]
   ! real :: dz(SZI_(G),SZJ_(G),SZK_(GV)) ! The vertical distance across each layer [Z ~> m]
   real :: H_cutoff      ! Local estimate of a minimum thickness for masking [H ~> m or kg m-2]
@@ -1266,6 +1268,7 @@ subroutine calc_slope_functions_using_just_e(h, G, GV, US, CS, e)
                         ! bathymetric depth for certain calculations.
   integer :: is, ie, js, je, nz
   integer :: i, j, k
+  integer :: kk, k_start, k_end, kmax, nkblock
 
   if (.not. CS%initialized) call MOM_error(FATAL, "calc_slope_functions_using_just_e: "// &
          "Module must be initialized before it is used.")
@@ -1277,8 +1280,9 @@ subroutine calc_slope_functions_using_just_e(h, G, GV, US, CS, e)
          "%SN_v is not associated with use_variable_mixing.")
 
   is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec ; nz = GV%ke
+  nkblock = merge(GV%ke, CS%nkblock, CS%nkblock==0)
 
-  !$omp target enter data map(alloc: E_x, E_y, S2N2_u_local, S2N2_v_local)
+  !$omp target enter data map(alloc: E_x, E_y, S2N2_u_local, S2N2_v_local, dz_tot )
 
   h_neglect = GV%H_subroundoff
   H_cutoff = real(2*nz) * (GV%Angstrom_H + h_neglect)
@@ -1305,52 +1309,59 @@ subroutine calc_slope_functions_using_just_e(h, G, GV, US, CS, e)
   ! calculate the first-mode gravity wave speed and then blend the equatorial
   ! and midlatitude deformation radii, using calc_resoln_function as a template.
 
-  do k=nz,CS%VarMix_Ktop,-1
 
-    ! Calculate the interface slopes E_x and E_y and u- and v- points respectively
-    do concurrent( j=js-1:je+1, i=is-1:ie )
-      E_x(I,j) = (e(i+1,j,K)-e(i,j,K))*G%IdxCu(I,j)
-      ! Mask slopes where interface intersects topography
-      if (min(h(i,j,k),h(i+1,j,k)) < H_cutoff) E_x(I,j) = 0.
-    enddo
-    do concurrent( J=js-1:je, i=is-1:ie+1 )
-      E_y(i,J) = (e(i,j+1,K)-e(i,j,K))*G%IdyCv(i,J)
-      ! Mask slopes where interface intersects topography
-      if (min(h(i,j,k),h(i,j+1,k)) < H_cutoff) E_y(i,J) = 0.
-    enddo
+  ! Calculate the interface slopes E_x and E_y and u- and v- points respectively
+  do k_start=CS%VarMix_Ktop,nz,nkblock
+    k_end = min(k_start+nkblock-1, nz)
+    kmax = k_end - k_start + 1
 
+    do concurrent( kk=1:kmax, j=js-1:je+1, i=is-1:ie ) DO_LOCALITY(local( k ))
+      k = k_start + kk - 1
+      E_x(I,j,kk) = (e(i+1,j,K)-e(i,j,K))*G%IdxCu(I,j)
+      ! Mask slopes where interface intersects topography
+      if (min(h(i,j,k),h(i+1,j,k)) < H_cutoff) E_x(I,j,kk) = 0.
+    enddo
+    do concurrent( kk=1:kmax, J=js-1:je, i=is-1:ie+1 ) DO_LOCALITY(local( k ))
+      k = kk + k_start - 1
+      E_y(i,J,kk) = (e(i,j+1,K)-e(i,j,K))*G%IdyCv(i,J)
+      ! Mask slopes where interface intersects topography
+      if (min(h(i,j,k),h(i,j+1,k)) < H_cutoff) E_y(i,J,kk) = 0.
+    enddo
+  
     ! Calculate N*S*h from this layer and add to the sum
-    do concurrent( j=js:je, i=is-1:ie ) DO_LOCALITY(local( S2, Hdn, Hup, H_geom ))
-      S2 = ( E_x(I,j)**2  + 0.25*( &
-            ((E_y(i,J)**2) + (E_y(i+1,J-1)**2)) + ((E_y(i+1,J)**2) + (E_y(i,J-1)**2)) ) )
+    do concurrent( kk=1:kmax, j=js:je, i=is-1:ie ) DO_LOCALITY(local( S2, Hdn, Hup, H_geom, k ))
+      k = kk + k_start - 1
+      S2 = ( E_x(I,j,kk)**2  + 0.25*( &
+            ((E_y(i,J,kk)**2) + (E_y(i+1,J-1,kk)**2)) + ((E_y(i+1,J,kk)**2) + (E_y(i,J-1,kk)**2)) ) )
       if (min(h(i,j,k-1), h(i+1,j,k-1), h(i,j,k), h(i+1,j,k)) < H_cutoff) S2 = 0.0
-
       Hdn = 2.*h(i,j,k)*h(i,j,k-1) / (h(i,j,k) + h(i,j,k-1) + h_neglect)
       Hup = 2.*h(i+1,j,k)*h(i+1,j,k-1) / (h(i+1,j,k) + h(i+1,j,k-1) + h_neglect)
       H_geom = sqrt(Hdn*Hup)
       ! N2 = GV%g_prime(k) / (GV%H_to_Z * max(Hdn, Hup, CS%h_min_N2))
       S2N2_u_local(I,j,k) = (H_geom * S2) * (GV%g_prime(k) / max(Hdn, Hup, CS%h_min_N2) )
     enddo
-    do concurrent( J=js-1:je, i=is:ie ) DO_LOCALITY(local( S2, Hdn, Hup, H_geom ))
-      S2 = ( E_y(i,J)**2  + 0.25*( &
-            ((E_x(I,j)**2) + (E_x(I-1,j+1)**2)) + ((E_x(I,j+1)**2) + (E_x(I-1,j)**2)) ) )
+    do concurrent( kk=1:kmax, J=js-1:je, i=is:ie ) DO_LOCALITY(local( S2, Hdn, Hup, H_geom, k ))
+      k = kk + k_start - 1
+      S2 = ( E_y(i,J,kk)**2  + 0.25*( &
+            ((E_x(I,j,kk)**2) + (E_x(I-1,j+1,kk)**2)) + ((E_x(I,j+1,kk)**2) + (E_x(I-1,j,kk)**2)) ) )
       if (min(h(i,j,k-1), h(i,j+1,k-1), h(i,j,k), h(i,j+1,k)) < H_cutoff) S2 = 0.0
-
       Hdn = 2.*h(i,j,k)*h(i,j,k-1) / (h(i,j,k) + h(i,j,k-1) + h_neglect)
       Hup = 2.*h(i,j+1,k)*h(i,j+1,k-1) / (h(i,j+1,k) + h(i,j+1,k-1) + h_neglect)
       H_geom = sqrt(Hdn*Hup)
       ! N2 = GV%g_prime(k) / (GV%H_to_Z * max(Hdn, Hup, CS%h_min_N2))
       S2N2_v_local(i,J,k) = (H_geom * S2) * (GV%g_prime(k) / (max(Hdn, Hup, CS%h_min_N2)))
     enddo
+  enddo
 
-  enddo ! k
-
+  !$omp target teams loop
   do j=js,je
-    do concurrent( I=is-1:ie )
+    !$omp loop
+    do I=is-1,ie
       CS%SN_u(I,j) = 0.0
     enddo
     do k=nz,CS%VarMix_Ktop,-1
-      do concurrent( I=is-1:ie )
+      !$omp loop
+      do I=is-1,ie
         CS%SN_u(I,j) = CS%SN_u(I,j) + S2N2_u_local(I,j,k)
       enddo
     enddo
@@ -1362,7 +1373,8 @@ subroutine calc_slope_functions_using_just_e(h, G, GV, US, CS, e)
                                                 max(dz_tot(i,j), dz_tot(i+1,j), GV%dz_subroundoff) )
       enddo
     else
-      do concurrent( I=is-1:ie ) DO_LOCALITY(local(h1, h2))
+      !$omp loop
+      do I=is-1,ie
         h1 = max(G%meanSL(i,j) + G%bathyT(i,j), 0.0)
         h2 = max(G%meanSL(i+1,j) + G%bathyT(i+1,j), 0.0)
         if ( min(h1, h2) > dZ_cutoff ) then
@@ -1374,12 +1386,15 @@ subroutine calc_slope_functions_using_just_e(h, G, GV, US, CS, e)
     endif
   enddo
 
+  !$omp target teams loop
   do J=js-1,je
-    do concurrent( i=is:ie )
+    !$omp loop
+    do i=is,ie
       CS%SN_v(i,J) = 0.0
     enddo
     do k=nz,CS%VarMix_Ktop,-1
-      do concurrent( i=is:ie )
+      !$omp loop
+      do i=is,ie
         CS%SN_v(i,J) = CS%SN_v(i,J) + S2N2_v_local(i,J,k)
       enddo
     enddo
@@ -1389,7 +1404,8 @@ subroutine calc_slope_functions_using_just_e(h, G, GV, US, CS, e)
                                                 max(dz_tot(i,j), dz_tot(i,j+1), GV%dz_subroundoff) )
       enddo
     else
-      do concurrent( i=is:ie ) DO_LOCALITY(local(h1, h2))
+      !$omp loop
+      do i=is,ie
         ! There is a primordial horizontal indexing bug on the following line from the previous
         ! versions of the code.  This comment should be deleted by the end of 2024.
         ! if ( min(G%bathyT(i,j), G%bathyT(i+1,j)) + G%Z_ref > dZ_cutoff ) then
@@ -1404,7 +1420,7 @@ subroutine calc_slope_functions_using_just_e(h, G, GV, US, CS, e)
     endif
   enddo
 
-  !$omp target exit data map(delete: E_x, E_y, S2N2_u_local, S2N2_v_local )
+  !$omp target exit data map(delete: E_x, E_y, S2N2_u_local, S2N2_v_local, dz_tot )
 
 end subroutine calc_slope_functions_using_just_e
 
