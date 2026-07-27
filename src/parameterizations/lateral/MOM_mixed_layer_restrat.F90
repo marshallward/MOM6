@@ -798,7 +798,6 @@ subroutine mixedlayer_restrat_Bodner(CS, G, GV, US, h, uhtr, vhtr, tv, forces, d
                           ! mode [Z T-1 ~> m s-1]
   real :: covTS(SZI_(G))  ! SGS TS covariance in Stanley param; currently 0 [C S ~> degC ppt]
   real :: varS(SZI_(G))   ! SGS S variance in Stanley param; currently 0 [S2 ~> ppt2]
-  real :: dmu(SZK_(GV))   ! Change in mu(z) across layer k [nondim]
   real :: Rml_int(SZI_(G)) ! Potential density integrated through the mixed layer [R H ~> kg m-2 or kg2 m-5]
   real :: SpV_ml(SZI_(G)) ! Specific volume evaluated at the surface pressure [R-1 ~> m3 kg-1]
   real :: SpV_int(SZI_(G)) ! Specific volume integrated through the mixed layer [H R-1 ~> m4 kg-1 or m]
@@ -833,24 +832,15 @@ subroutine mixedlayer_restrat_Bodner(CS, G, GV, US, h, uhtr, vhtr, tv, forces, d
                           ! fractional power [Z2 s2 T-2 m-2 ~> 1]
   real, parameter :: two_thirds = 2./3.  ! [nondim]
   real :: tau_bgrow, tau_bdecay ! Local copies of the BLD filter timescales for GPU kernels [T ~> s]
-  real :: h_MLD_l(SZI_(G),SZJ_(G)) ! Plain local copy of h_MLD for device mapping [H ~> m or kg m-2]
-  real :: MLDf_l(SZI_(G),SZJ_(G))  ! Plain local copy of CS%MLD_filtered for device mapping [H ~> m or kg m-2]
-  real :: MLDfs_l(SZI_(G),SZJ_(G)) ! Plain local copy of CS%MLD_filtered_slow for device mapping [H ~> m or kg m-2]
   real :: tau_mgrow, tau_mdecay ! Local copies of the MLD filter timescales for GPU kernels [T ~> s]
-  real :: bflux_l(SZI_(G),SZJ_(G)) ! Plain local copy of bflux for clean device mapping [Z2 T-3 ~> m2 s-3]
-  real :: BLD_l(SZI_(G),SZJ_(G))   ! Plain local copy of BLD for clean device mapping [Z ~> m]
-  real :: wpupf_l(SZI_(G),SZJ_(G)) ! Plain local copy of CS%wpup_filtered for clean device mapping [L H T-2 ~> m2 s-2]
   real :: l_mstar, l_nstar, l_min_wstar2 ! Local copies of Bodner CS scalars for GPU kernels [nondim]/[Z2 T-2]
   real :: zL_zH ! Local copy of the US%Z_to_L * GV%Z_to_H rescaling factor [nondim]
   real :: rho3d(SZI_(G),SZJ_(G),SZK_(GV)) ! p=0 (sigma_0) density for the GPU integral [R ~> kg m-3]
-  real :: T_l(SZI_(G),SZJ_(G),SZK_(GV)) ! Plain local copy of tv%T for the device 3D EOS call [C ~> degC]
-  real :: S_l(SZI_(G),SZJ_(G),SZK_(GV)) ! Plain local copy of tv%S for the device 3D EOS call [S ~> ppt]
   real :: p3d(SZI_(G),SZJ_(G),SZK_(GV)) ! A pressure of 0 (sigma_0) for the device 3D EOS call [R L2 T-2 ~> Pa]
   integer :: EOSdom3d(3,2) ! The 3D (i,j,k) computational domain for the equation of state
   real :: Rml_i  ! Per-column running density integral through "big H" [R H ~> kg m-2]
   real :: htot_i ! Per-column running mixed-layer thickness [H ~> m or kg m-2]
   real :: l_Angstrom ! Local copy of GV%Angstrom_H for GPU kernels [H ~> m or kg m-2]
-  real :: Cr_l(SZI_(G),SZJ_(G)) ! Plain local copy of CS%Cr_space for clean device mapping [nondim]
   real :: l_MLE_tail_dh ! Local copy of CS%MLE_tail_dh for GPU kernels [nondim]
   logical :: line_is_empty, keep_going
   integer, dimension(2) :: EOSdom ! The i-computational domain for the equation of state
@@ -904,16 +894,13 @@ subroutine mixedlayer_restrat_Bodner(CS, G, GV, US, h, uhtr, vhtr, tv, forces, d
   ! Apply time filter to h_MLD (to remove diurnal cycle) to obtain "little h".
   ! "little h" is representative of the active mixing layer depth, used in B22 formula (eq 27).
   tau_bgrow = CS%BLD_growing_Tfilt ; tau_bdecay = CS%BLD_decaying_Tfilt
-  h_MLD_l(:,:) = h_MLD(:,:)
-  MLDf_l(:,:) = CS%MLD_filtered(:,:)
-  !$omp target enter data map(to: h_MLD_l, MLDf_l) map(alloc: little_h)
+  !$omp target enter data map(to: h_MLD, CS%MLD_filtered) map(alloc: little_h)
   do concurrent (j=js-1:je+1, i=is-1:ie+1)
-    little_h(i,j) = rmean2ts(h_MLD_l(i,j), MLDf_l(i,j), &
+    little_h(i,j) = rmean2ts(h_MLD(i,j), CS%MLD_filtered(i,j), &
                              tau_bgrow, tau_bdecay, dt)
-    MLDf_l(i,j) = little_h(i,j)
+    CS%MLD_filtered(i,j) = little_h(i,j)
   enddo
-  !$omp target exit data map(from: little_h, MLDf_l) map(release: h_MLD_l)
-  CS%MLD_filtered(:,:) = MLDf_l(:,:)
+  !$omp target exit data map(from: little_h, CS%MLD_filtered) map(release: h_MLD)
 
   ! Calculate "big H", representative of the mixed layer depth, used in B22 formula (eq 27).
   if (CS%MLD_grid) then
@@ -929,13 +916,12 @@ subroutine mixedlayer_restrat_Bodner(CS, G, GV, US, h, uhtr, vhtr, tv, forces, d
     enddo ; enddo
   else
     tau_mgrow = CS%MLD_growing_Tfilt ; tau_mdecay = CS%MLD_decaying_Tfilt
-    MLDfs_l(:,:) = CS%MLD_filtered_slow(:,:)
-    !$omp target enter data map(to: little_h, MLDfs_l) map(alloc: big_H)
+    !$omp target enter data map(to: little_h, CS%MLD_filtered_slow) map(alloc: big_H)
     do concurrent (j=js-1:je+1, i=is-1:ie+1)
-      big_H(i,j) = rmean2ts(little_h(i,j), MLDfs_l(i,j), &
+      big_H(i,j) = rmean2ts(little_h(i,j), CS%MLD_filtered_slow(i,j), &
                             tau_mgrow, tau_mdecay, dt)
     enddo
-    !$omp target exit data map(from: big_H) map(release: little_h, MLDfs_l)
+    !$omp target exit data map(from: big_H) map(release: little_h, CS%MLD_filtered_slow)
   endif
   do j=js-1,je+1 ; do i=is-1,ie+1
     CS%MLD_filtered_slow(i,j) = big_H(i,j)
@@ -970,26 +956,23 @@ subroutine mixedlayer_restrat_Bodner(CS, G, GV, US, h, uhtr, vhtr, tv, forces, d
   else
     l_mstar = CS%mstar ; l_nstar = CS%nstar ; l_min_wstar2 = CS%min_wstar2
     zL_zH = US%Z_to_L * GV%Z_to_H
-    bflux_l(:,:) = bflux(:,:) ; BLD_l(:,:) = BLD(:,:)
-    !$omp target enter data map(to: bflux_l, BLD_l, U_star_2d) map(alloc: wpup)
+    !$omp target enter data map(to: bflux, BLD, U_star_2d) map(alloc: wpup)
     do concurrent (j=js-1:je+1, i=is-1:ie+1) DO_LOCALITY(local(w_star3))
-      w_star3 = max(0., -bflux_l(i,j)) * BLD_l(i,j)    ! In [Z3 T-3 ~> m3 s-3]
+      w_star3 = max(0., -bflux(i,j)) * BLD(i,j)    ! In [Z3 T-3 ~> m3 s-3]
       wpup(i,j) = max( (cuberoot(l_mstar * U_star_2d(i,j)**3 + l_nstar * w_star3))**2, l_min_wstar2 ) &
           * zL_zH ! In [L H T-2 ~> m2 s-2 or kg m-1 s-2]
     enddo
-    !$omp target exit data map(from: wpup) map(release: bflux_l, BLD_l, U_star_2d)
+    !$omp target exit data map(from: wpup) map(release: bflux, BLD, U_star_2d)
   endif
 
   ! We filter w'u' with the same time scales used for "little h"
-  wpupf_l(:,:) = CS%wpup_filtered(:,:)
-  !$omp target enter data map(to: wpup, wpupf_l)
+  !$omp target enter data map(to: wpup, CS%wpup_filtered)
   do concurrent (j=js-1:je+1, i=is-1:ie+1)
-    wpup(i,j) = rmean2ts(wpup(i,j), wpupf_l(i,j), &
+    wpup(i,j) = rmean2ts(wpup(i,j), CS%wpup_filtered(i,j), &
                          tau_bgrow, tau_bdecay, dt)
-    wpupf_l(i,j) = wpup(i,j)
+    CS%wpup_filtered(i,j) = wpup(i,j)
   enddo
-  !$omp target exit data map(from: wpup, wpupf_l)
-  CS%wpup_filtered(:,:) = wpupf_l(:,:)
+  !$omp target exit data map(from: wpup, CS%wpup_filtered)
 
   if (CS%id_lfbod > 0) then
     do j=js-1,je+1 ; do i=is-1,ie+1
@@ -1037,10 +1020,8 @@ subroutine mixedlayer_restrat_Bodner(CS, G, GV, US, h, uhtr, vhtr, tv, forces, d
   EOSdom(:) = EOS_domain(G%HI, halo=1)
   l_Angstrom = GV%Angstrom_H
   l_MLE_tail_dh = CS%MLE_tail_dh
-  Cr_l(:,:) = CS%Cr_space(:,:)
-  ! Inputs for the device 3D EOS density (p=0 / sigma_0).  tv%T/tv%S are copied to plain locals so
-  ! they map cleanly; the 3D domain mirrors the 1D EOS_domain extended over j (halo 1) and k.
-  T_l(:,:,:) = tv%T(:,:,:) ; S_l(:,:,:) = tv%S(:,:,:)
+  ! Inputs for the device 3D EOS density (p=0 / sigma_0).  The 3D domain mirrors the 1D EOS_domain
+  ! extended over j (halo 1) and k.
   p3d(:,:,:) = 0.0
   EOSdom3d(1,:) = EOS_domain(G%HI, halo=1)
   EOSdom3d(2,:) = [(js-1) - (G%jsd-1), (je+1) - (G%jsd-1)]
@@ -1050,14 +1031,14 @@ subroutine mixedlayer_restrat_Bodner(CS, G, GV, US, h, uhtr, vhtr, tv, forces, d
   ! update.  Inputs produced by the earlier host-side loops are mapped in once; the integral outputs
   ! (htot/buoy_av/vol_dt_avail) stay resident for U/V, and uhml/vhml stay resident for the h update.
   !$omp target data &
-  !$omp   map(to: little_h, big_H, wpup, Cr_l, T_l, S_l, p3d) map(alloc: rho3d) &
+  !$omp   map(to: little_h, big_H, wpup, CS%Cr_space, tv%T, tv%S, p3d) map(alloc: rho3d) &
   !$omp   map(from: vol_dt_avail, htot, buoy_av, uhml, vhml, uDml_diag, vDml_diag)
 
   if ((GV%Boussinesq .or. GV%semi_Boussinesq) .and. .not.CS%use_Stanley_ML) then
     ! Active path: density at p=0 (sigma_0) computed ON THE DEVICE via the 3D EOS interface (the
     ! polymorphic dispatch is resolved host-side, the per-element evaluation runs in do concurrent),
     ! then the per-column mixed-layer integral is offloaded.
-    call calculate_density(T_l, S_l, p3d, rho3d, tv%eqn_of_state, EOSdom3d)
+    call calculate_density(tv%T, tv%S, p3d, rho3d, tv%eqn_of_state, EOSdom3d)
 
     do concurrent (k=1:nz, j=js-1:je+1, i=is-1:ie+1)
       vol_dt_avail(i,j,k) = max(I4dt*G%areaT(i,j)*(h(i,j,k)-l_Angstrom), 0.0)
@@ -1143,7 +1124,7 @@ subroutine mixedlayer_restrat_Bodner(CS, G, GV, US, h, uhtr, vhtr, tv, forces, d
       h_big = 0.5*( big_H(i,j) + big_H(i+1,j) )                       ! [H ~> m or kg m-2]
       grd_b = ( buoy_av(i+1,j) - buoy_av(i,j) ) * G%IdxCu(I,j)        ! [L H-1 T-2 ~> s-2 or m3 kg-1 s-2]
       r_wpup = 2. / ( wpup(i,j) + wpup(i+1,j) )                       ! [T2 L-1 H-1 ~> s2 m-2 or m s2 kg-1]
-      psi_mag = ( ( ( (0.5*(Cr_l(i,j) + Cr_l(i+1,j))) * grid_dsd ) & ! [L2 H T-1 ~> m3 s-1 or kg s-1]
+      psi_mag = ( ( ( (0.5*(CS%Cr_space(i,j) + CS%Cr_space(i+1,j))) * grid_dsd ) & ! [L2 H T-1 ~> m3 s-1 or kg s-1]
                   * ( absf * h_sml ) ) * ( ( h_big**2 ) * grd_b ) ) * r_wpup
     else  ! There is no flux on land and no gradient at open boundary points.
       psi_mag = 0.0
@@ -1185,7 +1166,7 @@ subroutine mixedlayer_restrat_Bodner(CS, G, GV, US, h, uhtr, vhtr, tv, forces, d
       h_big = 0.5*( big_H(i,j) + big_H(i,j+1) )                       ! [H ~> m or kg m-2]
       grd_b = ( buoy_av(i,j+1) - buoy_av(i,j) ) * G%IdyCv(I,j)        ! [L H-1 T-2 ~> s-2 or m3 kg-1 s-2]
       r_wpup = 2. / ( wpup(i,j) + wpup(i,j+1) )                       ! [T2 L-1 H-1 ~> s2 m-2 or m s2 kg-1]
-      psi_mag = ( ( ( (0.5*(Cr_l(i,j) + Cr_l(i,j+1))) * grid_dsd ) & ! [L2 H T-1 ~> m3 s-1 or kg s-1]
+      psi_mag = ( ( ( (0.5*(CS%Cr_space(i,j) + CS%Cr_space(i,j+1))) * grid_dsd ) & ! [L2 H T-1 ~> m3 s-1 or kg s-1]
                   * ( absf * h_sml ) ) * ( ( h_big**2 ) * grd_b ) ) * r_wpup
     else  ! There is no flux on land and no gradient at open boundary points.
       psi_mag = 0.0
