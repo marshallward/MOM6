@@ -806,7 +806,7 @@ subroutine calc_slope_functions(h, tv, dt, G, GV, US, CS, OBC)
     call find_eta(h, tv, G, GV, US, e, halo_size=2)
 
     if (CS%use_simpler_Eady_growth_rate) then
-      !$omp target enter data map(to: tv, tv%T, tv%S, CS%slope_x, CS%slope_y)
+      !$omp target enter data map(to: tv, tv%T, tv%S)
       !$omp target enter data map(to: tv%SpV_avg) if (allocated(tv%SpV_avg))
       !$omp target enter data map(to: tv%p_surf) if (associated(tv%p_surf))
       !$omp target enter data map(alloc: N2_u, N2_v, dzu, dzv, dzSxN, dzSyN)
@@ -817,10 +817,10 @@ subroutine calc_slope_functions(h, tv, dt, G, GV, US, CS, OBC)
       call calc_Eady_growth_rate_2D(CS, G, GV, US, h, e, dzu, dzv, dzSxN, dzSyN, CS%SN_u, CS%SN_v)
       !$omp target exit data map(release: tv%SpV_avg) if (allocated(tv%SpV_avg))
       !$omp target exit data map(release: tv%p_surf) if (associated(tv%p_surf))
-      !$omp target exit data map(release: tv, tv%T, tv%S, CS%slope_x, CS%slope_y)
+      !$omp target exit data map(release: tv, tv%T, tv%S)
       !$omp target exit data map(delete: N2_u, N2_v, dzu, dzv, dzSxN, dzSyN)
     elseif (CS%use_stored_slopes) then
-      !$omp target enter data map(to: tv, tv%T, tv%S, CS%slope_x, CS%slope_y)
+      !$omp target enter data map(to: tv, tv%T, tv%S)
       !$omp target enter data map(to: tv%SpV_avg) if (allocated(tv%SpV_avg))
       !$omp target enter data map(to: tv%p_surf) if (associated(tv%p_surf))
       !$omp target enter data map(alloc: N2_u, N2_v)
@@ -828,7 +828,7 @@ subroutine calc_slope_functions(h, tv, dt, G, GV, US, CS, OBC)
                                   CS%slope_x, CS%slope_y, niblock, njblock, nkblock, N2_u=N2_u, &
                                   N2_v=N2_v, halo=1, OBC=OBC, OBC_N2=CS%OBC_friendly)
       call calc_Visbeck_coeffs_old(h, CS%slope_x, CS%slope_y, N2_u, N2_v, G, GV, US, CS, OBC)
-      !$omp target exit data map(release: tv%T, tv%S, tv, CS%slope_x, CS%slope_y)
+      !$omp target exit data map(release: tv%T, tv%S, tv)
       !$omp target exit data map(release: tv%p_surf) if (associated(tv%p_surf))
       !$omp target exit data map(delete: N2_u, N2_v )
     else
@@ -970,7 +970,7 @@ subroutine calc_Visbeck_coeffs_old(h, slope_x, slope_y, N2_u, N2_v, G, GV, US, C
   ! calculate the first-mode gravity wave speed and then blend the equatorial
   ! and midlatitude deformation radii, using calc_resoln_function as a template.
 
-  ! UMW NOTE: H_u should be local, but this causes segfaults with nvfortran 26.3
+  ! H_u should be local, but this causes segfaults with nvfortran 26.3
   do concurrent(j=js:je) !local( H_u )
     do concurrent(I=is-1:ie)
       CS%SN_u(I,j) = 0. ; H_u(I) = 0. ; S2_u(I,j) = 0.
@@ -1014,7 +1014,7 @@ subroutine calc_Visbeck_coeffs_old(h, slope_x, slope_y, N2_u, N2_v, G, GV, US, C
     enddo
   enddo
 
-  ! UMW NOTE: H_v should be local, but this causes segfaults with nvfortran 26.3
+  ! H_v should be local, but this causes segfaults with nvfortran 26.3
   do concurrent(J=js-1:je) !local( H_v )
     do concurrent(i=is:ie)
       CS%SN_v(i,J) = 0. ; H_v(i) = 0. ; S2_v(i,J) = 0.
@@ -2147,6 +2147,7 @@ subroutine VarMix_init(Time, G, GV, US, param_file, diag, CS)
   if (CS%use_stored_slopes .or. (CS%interpolated_sqg_struct .and. (CS%sqg_expo>0.0))) then
     allocate(CS%slope_x(IsdB:IedB,jsd:jed,GV%ke+1), source=0.0)
     allocate(CS%slope_y(isd:ied,JsdB:JedB,GV%ke+1), source=0.0)
+    !$omp target enter data map(alloc: CS%slope_x, CS%slope_y)
   endif
 
   if (CS%calculate_Eady_growth_rate) then
