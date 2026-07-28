@@ -759,7 +759,7 @@ subroutine write_energy(u, v, h, tv, day, n, G, GV, US, CS, tracer_CSp, dt_forci
 
   ! Use reproducing sums to do global integrals relate to the heat, salinity and water budgets.
   if (CS%use_temperature) then
-    !$omp target update to(tv%S, tv%T)
+    !$omp target enter data map(to:tv%S, tv%T)
     do concurrent (j=js:je, i=is:ie) DO_LOCALITY(local(k))
       Salt_int(i,j) = 0.0 ; Temp_int(i,j) = 0.0
       do k=1,nz
@@ -779,7 +779,7 @@ subroutine write_energy(u, v, h, tv, day, n, G, GV, US, CS, tracer_CSp, dt_forci
     ! Return the globally summed values to the original variables.
     salt_EFP = EFP_list(1) ; heat_EFP = EFP_list(2) ; CS%fresh_water_in_EFP = EFP_list(3)
     CS%net_salt_in_EFP = EFP_list(4) ; CS%net_heat_in_EFP = EFP_list(5)
-
+    !$omp target exit data map(release: tv%S, tv%T)
   else
     call EFP_sum_across_PEs(CS%fresh_water_in_EFP)
   endif
