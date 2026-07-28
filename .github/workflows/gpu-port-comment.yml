@@ -1,0 +1,167 @@
+# This file is part of MOM6, the Modular Ocean Model version 6.
+# See the LICENSE file for licensing information.
+# SPDX-License-Identifier: Apache-2.0
+
+# Posts/updates a PR comment summarizing GPU-port coverage progress, and publishes the
+# line-by-line HTML report to GitHub Pages: under pr-<number>/ for a PR, or under
+# porting_progress/ for a push to dev/gpu (i.e. once a PR merges). Split out from
+# verify-linux.yml's gpu-port-report job on purpose: that job checks out and runs a PR's
+# code (which may come from a fork) and so must stay read-only, while commenting and
+# pushing to gh-pages needs write access. workflow_run always executes with the base
+# repository's permissions and never checks out the triggering PR's code, so it's the
+# safe place to do those writes.
+
+name: GPU port PR comment
+
+on:
+  workflow_run:
+    workflows: ["Linux verification"]
+    types: [completed]
+
+permissions: {}
+
+jobs:
+  publish-pages:
+    if: >-
+      github.event.workflow_run.event == 'pull_request' ||
+      (github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'dev/gpu')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      url: ${{ steps.publish.outputs.url }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download HTML report artifact
+        id: download
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: gpu-port-html
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ github.token }}
+          # Outside the checked-out repo on purpose: this directory must survive
+          # switching the working tree to gh-pages below, which a path inside the repo
+          # (e.g. "report/") would not — an untracked "report/" would collide with a
+          # same-named tracked path if one ever existed on gh-pages, aborting the checkout.
+          path: ${{ runner.temp }}/gpu-port-report
+
+      - name: Publish report to gh-pages
+        id: publish
+        if: steps.download.outcome == 'success'
+        env:
+          REPORT_DIR: ${{ runner.temp }}/gpu-port-report
+        run: |
+          if [ ! -f "$REPORT_DIR/gpu_port_publish_path.txt" ] || [ ! -d "$REPORT_DIR/gpu_port_html" ]; then
+            echo 'Report artifact incomplete; nothing to publish.'
+            exit 0
+          fi
+          PUBLISH_PATH=$(cat "$REPORT_DIR/gpu_port_publish_path.txt")
+
+          git config user.name 'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+
+          if git fetch origin gh-pages --depth=1 2>/dev/null; then
+            git checkout -B gh-pages FETCH_HEAD
+          else
+            git checkout --orphan gh-pages
+            git rm -rf . -q
+          fi
+
+          rm -rf "$PUBLISH_PATH"
+          mkdir -p "$PUBLISH_PATH"
+          cp -r "$REPORT_DIR/gpu_port_html/." "$PUBLISH_PATH/"
+
+          {
+            echo '<!doctype html><html><head><meta charset="utf-8">'
+            echo '<title>GPU port coverage previews</title></head><body>'
+            echo '<h1>GPU port coverage previews</h1>'
+            if [ -d porting_progress ]; then
+              echo '<p><a href="porting_progress/index.html">Latest on dev/gpu</a></p>'
+            fi
+            echo '<ul>'
+            for d in pr-*/; do
+              [ -d "$d" ] || continue
+              n="${d%/}"
+              echo "<li><a href=\"$n/index.html\">$n</a></li>"
+            done
+            echo '</ul></body></html>'
+          } > index.html
+
+          # Scoped on purpose (not "git add -A"): the working tree may contain other
+          # untracked leftovers from earlier steps, and this must only ever commit the
+          # publish path plus the regenerated index.
+          git add -- "$PUBLISH_PATH" index.html
+          if git diff --cached --quiet; then
+            echo 'No changes to publish.'
+          else
+            git commit -q -m "Publish GPU port report for $PUBLISH_PATH"
+            git push origin HEAD:gh-pages
+          fi
+
+          OWNER="${GITHUB_REPOSITORY%%/*}"
+          REPO="${GITHUB_REPOSITORY#*/}"
+          echo "url=https://${OWNER}.github.io/${REPO}/$PUBLISH_PATH/" >> "$GITHUB_OUTPUT"
+
+  comment:
+    if: github.event.workflow_run.event == 'pull_request'
+    needs: publish-pages
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+
+    steps:
+      - name: Download PR comment artifact
+        id: download
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: gpu-port-pr-comment
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ github.token }}
+
+      - name: Post or update PR comment
+        if: steps.download.outcome == 'success'
+        uses: actions/github-script@v7
+        env:
+          PAGES_URL: ${{ needs.publish-pages.outputs.url }}
+        with:
+          script: |
+            const fs = require('fs');
+            if (!fs.existsSync('pr_number.txt') || !fs.existsSync('gpu_port_comment.md')) {
+              console.log('Comment artifact incomplete; nothing to post.');
+              return;
+            }
+            const prNumber = parseInt(fs.readFileSync('pr_number.txt', 'utf8').trim(), 10);
+            let body = fs.readFileSync('gpu_port_comment.md', 'utf8');
+            const pagesUrl = process.env.PAGES_URL;
+            if (pagesUrl) {
+              body += `\n[Full line-by-line coverage report](${pagesUrl})\n`;
+            }
+            const marker = '<!-- gpu-port-report -->';
+            const fullBody = `${marker}\n${body}`;
+
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber,
+            });
+            const existing = comments.find(c => c.body && c.body.includes(marker));
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body: fullBody,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: prNumber,
+                body: fullBody,
+              });
+            }
