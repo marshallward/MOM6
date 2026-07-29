@@ -801,7 +801,6 @@ subroutine calc_slope_functions(h, tv, dt, G, GV, US, CS, OBC)
   if (nkblock == 0) nkblock = GV%ke
 
   if (CS%calculate_Eady_growth_rate) then
-    !$omp target update to(h)
     !$omp target enter data map(alloc: e)
     call find_eta(h, tv, G, GV, US, e, halo_size=2)
 
@@ -877,7 +876,7 @@ subroutine calc_Visbeck_coeffs_old(h, slope_x, slope_y, N2_u, N2_v, G, GV, US, C
   real :: H_geom        ! The geometric mean of Hup and Hdn [H ~> m or kg m-2].
   real :: S2max         ! An upper bound on the squared slopes [Z2 L-2 ~> nondim]
   real :: wNE, wSE, wSW, wNW ! Weights of adjacent points [nondim]
-  real :: H_u(SZIB_(G)), H_v(SZI_(G)) ! Layer thicknesses at u- and v-points [H ~> m or kg m-2]
+  real :: H_u(SZIB_(G), SZJ_(G)), H_v(SZI_(G), SZJB_(G)) ! Layer thicknesses at u- and v-points [H ~> m or kg m-2]
 
   ! Note that at some points in the code S2_u and S2_v hold the running depth
   ! integrals of the squared slope [H ~> m or kg m-2] before the average is taken.
@@ -897,8 +896,7 @@ subroutine calc_Visbeck_coeffs_old(h, slope_x, slope_y, N2_u, N2_v, G, GV, US, C
                                  ! interface or the inward equivalent with OBCs [H4 ~> m4 or kg4 m-8]
   integer :: i, j, k, is, ie, js, je, nz
 
-  !$omp target enter data map(alloc: h4_u, h4_v,S2_u,S2_v,H_u, H_v)
-  ! !$omp target enter data map(to: CS%SN_u, CS%SN_v)
+  !$omp target enter data map(alloc: h4_u, h4_v,S2_u,S2_v,H_u, H_v, OBC_dir_u, OBC_dir_v)
 
   if (.not. CS%initialized) call MOM_error(FATAL, "calc_Visbeck_coeffs_old: "// &
          "Module must be initialized before it is used.")
@@ -970,10 +968,9 @@ subroutine calc_Visbeck_coeffs_old(h, slope_x, slope_y, N2_u, N2_v, G, GV, US, C
   ! calculate the first-mode gravity wave speed and then blend the equatorial
   ! and midlatitude deformation radii, using calc_resoln_function as a template.
 
-  ! H_u should be local, but this causes segfaults with nvfortran 26.3
-  do concurrent(j=js:je) !local( H_u )
+  do concurrent(j=js:je)
     do concurrent(I=is-1:ie)
-      CS%SN_u(I,j) = 0. ; H_u(I) = 0. ; S2_u(I,j) = 0.
+      CS%SN_u(I,j) = 0. ; H_u(I,j) = 0. ; S2_u(I,j) = 0.
     enddo
     do K=2,nz ; do concurrent(I=is-1:ie) &
         DO_LOCALITY(local(Hdn, Hup, H_geom, wSE, wNW, wNE, wSW, S2, N2))
@@ -1002,22 +999,21 @@ subroutine calc_Visbeck_coeffs_old(h, slope_x, slope_y, N2_u, N2_v, G, GV, US, C
       N2 = max(0., N2_u(I,j,k))
       CS%SN_u(I,j) = CS%SN_u(I,j) + sqrt( S2*N2 )*H_geom
       S2_u(I,j) = S2_u(I,j) + S2*H_geom
-      H_u(I) = H_u(I) + H_geom
+      H_u(I,j) = H_u(I,j) + H_geom
     enddo ; enddo
     do concurrent(I=is-1:ie)
-      if (H_u(I)>0.) then
-        CS%SN_u(I,j) = G%OBCmaskCu(I,j) * CS%SN_u(I,j) / H_u(I)
-        S2_u(I,j) =  G%OBCmaskCu(I,j) * S2_u(I,j) / H_u(I)
+      if (H_u(I,j)>0.) then
+        CS%SN_u(I,j) = G%OBCmaskCu(I,j) * CS%SN_u(I,j) / H_u(I,j)
+        S2_u(I,j) =  G%OBCmaskCu(I,j) * S2_u(I,j) / H_u(I,j)
       else
         CS%SN_u(I,j) = 0.
       endif
     enddo
   enddo
 
-  ! H_v should be local, but this causes segfaults with nvfortran 26.3
-  do concurrent(J=js-1:je) !local( H_v )
+  do concurrent(J=js-1:je)
     do concurrent(i=is:ie)
-      CS%SN_v(i,J) = 0. ; H_v(i) = 0. ; S2_v(i,J) = 0.
+      CS%SN_v(i,J) = 0. ; H_v(i,J) = 0. ; S2_v(i,J) = 0.
     enddo
     do K=2,nz ; do concurrent(i=is:ie) &
       & DO_LOCALITY(local(Hdn, Hup, H_geom, wSE, wNW, wNE, wSW, S2, N2))
@@ -1046,12 +1042,12 @@ subroutine calc_Visbeck_coeffs_old(h, slope_x, slope_y, N2_u, N2_v, G, GV, US, C
       N2 = max(0., N2_v(i,J,K))
       CS%SN_v(i,J) = CS%SN_v(i,J) + sqrt( S2*N2 )*H_geom
       S2_v(i,J) = S2_v(i,J) + S2*H_geom
-      H_v(i) = H_v(i) + H_geom
+      H_v(i,J) = H_v(i,J) + H_geom
     enddo ; enddo
     do concurrent(i=is:ie)
-      if (H_v(i)>0.) then
-        CS%SN_v(i,J) = G%OBCmaskCv(i,J) * CS%SN_v(i,J) / H_v(i)
-        S2_v(i,J) = G%OBCmaskCv(i,J) * S2_v(i,J) / H_v(i)
+      if (H_v(i,j)>0.) then
+        CS%SN_v(i,J) = G%OBCmaskCv(i,J) * CS%SN_v(i,J) / H_v(i,J)
+        S2_v(i,J) = G%OBCmaskCv(i,J) * S2_v(i,J) / H_v(i,J)
       else
         CS%SN_v(i,J) = 0.
       endif
@@ -1076,8 +1072,7 @@ subroutine calc_Visbeck_coeffs_old(h, slope_x, slope_y, N2_u, N2_v, G, GV, US, C
                   unscale=US%s_to_T, scalar_pair=.true.)
   endif
 
-  !$omp target exit data map(delete: h4_u, h4_v,S2_u,S2_v,H_u, H_v)
-  ! !$omp target exit data map(from: CS%SN_u, CS%SN_v)
+  !$omp target exit data map(delete: h4_u, h4_v,S2_u,S2_v,H_u, H_v, OBC_dir_u, OBC_dir_v)
 
 end subroutine calc_Visbeck_coeffs_old
 
