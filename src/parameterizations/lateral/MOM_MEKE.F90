@@ -423,7 +423,11 @@ subroutine step_forward_MEKE(MEKE, h, SN_u, SN_v, visc, dt, G, GV, US, CS, hu, h
       !$omp target update to(MEKE%MEKE)
     endif
 
-    ! needs bitwise pow, run on host for now
+    ! TODO: THIS RUNS ON THE HOST, BE WARY! AAAAAA
+    ! MEKE_lengthScales_0d takes (1+x)**0.8 / (1+x)**0.25 and the intrinsic pow differs
+    ! CPU vs GPU in the last bit, so this stays on the host (with the depth_tot /
+    ! bottomFac2 / barotrFac2 / LmixScale syncs below) until a bit-reproducible pow
+    ! lands.  Only bottomFac2 (the **0.8) actually diverged on device.
     !$omp target update from(depth_tot)
     call MEKE_lengthScales(CS, MEKE, G, GV, US, SN_u, SN_v, MEKE%MEKE, depth_tot, bottomFac2, barotrFac2, LmixScale)
     !$omp target update to(bottomFac2, barotrFac2, LmixScale)
@@ -1292,8 +1296,8 @@ subroutine MEKE_lengthScales(CS, MEKE, G, GV, US, SN_u, SN_v, EKE, depth_tot, &
   is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec
   h_neglect = GV%H_subroundoff
 
-  ! This loop stays on the host: MEKE_lengthScales_0d takes (1+x)**0.8, and pow
-  ! differs between CPU and GPU in the last bit, which breaks bitwise reproduction.
+  ! TODO: THIS RUNS ON THE HOST, BE WARY! AAAAAA (see the note at the call site in
+  ! step_forward_MEKE: the intrinsic pow in MEKE_lengthScales_0d is not bitwise CPU==GPU)
 !$OMP do
   do j=js,je ; do i=is,ie
     if (.not.CS%use_old_lscale) then
