@@ -1196,9 +1196,10 @@ subroutine step_MOM(forces_in, fluxes_in, sfc_state, Time_start, time_int_in, CS
   endif
 
   ! Accumulate the surface fluxes for assessing conservation
-  if (do_thermo .and. fluxes%fluxes_used) &
+  if (do_thermo .and. fluxes%fluxes_used) then
     call accumulate_net_input(fluxes, sfc_state, CS%tv, fluxes%dt_buoy_accum, &
                               G, US, CS%sum_output_CSp)
+  endif
 
   if (MOM_state_is_synchronized(CS)) then
     call write_energy(CS%u, CS%v, CS%h, CS%tv, Time_local, CS%nstep_tot, &
@@ -4246,18 +4247,23 @@ subroutine extract_surface_state(CS, sfc_state_in)
   sfc_state%T_is_conT = CS%tv%T_is_conT
   sfc_state%S_is_absS = CS%tv%S_is_absS
 
-  do j=js,je ; do i=is,ie
+  !$omp target enter data map(to: sfc_state)
+  !$omp target enter data map(alloc: sfc_state%sea_lev(is:ie,js:je), sfc_state%Hml(is:ie,js:je))
+
+  do concurrent (j=js:je, i=is:ie)
     sfc_state%sea_lev(i,j) = CS%ave_ssh_ibc(i,j)
-  enddo ; enddo
+  enddo
 
   if (allocated(sfc_state%frazil) .and. associated(CS%tv%frazil)) then ; do j=js,je ; do i=is,ie
     sfc_state%frazil(i,j) = CS%tv%frazil(i,j)
   enddo ; enddo ; endif
 
   ! copy Hml into sfc_state, so that caps can access it
-  do j=js,je ; do i=is,ie
+  do concurrent (j=js:je, i=is:ie)
     sfc_state%Hml(i,j) = CS%Hml(i,j)
-  enddo ; enddo
+  enddo
+
+  !$omp target exit data map(from: sfc_state%Hml(is:ie,js:je), sfc_state%sea_lev(is:ie,js:je))
 
   if (CS%Hmix < 0.0) then  ! A bulk mixed layer is in use, so layer 1 has the properties
     if (use_temperature) then ; do j=js,je ; do i=is,ie
@@ -4280,9 +4286,11 @@ subroutine extract_surface_state(CS, sfc_state_in)
     endif
     ! Determine the mean tracer properties of the uppermost depth_ml fluid.
 
-    !$OMP parallel do default(shared) private(depth,dh)
+    !$omp target enter data map(alloc: sfc_state%SST(is:ie,js:je), sfc_state%SSS(is:ie,js:je), sfc_state%sfc_density(is:ie,js:je))
+
+    !$omp target teams loop private(depth,dh)
     do j=js,je
-      do i=is,ie
+      do concurrent (i=is:ie)
         depth(i) = 0.0
         if (use_temperature) then
           sfc_state%SST(i,j) = 0.0 ; sfc_state%SSS(i,j) = 0.0
@@ -4291,7 +4299,7 @@ subroutine extract_surface_state(CS, sfc_state_in)
         endif
       enddo
 
-      do k=1,nz ; do i=is,ie
+      do k=1,nz ; do concurrent (i=is:ie)
         if (depth(i) + h(i,j,k)*H_rescale < depth_ml) then
           dh = h(i,j,k)*H_rescale
         elseif (depth(i) < depth_ml) then
@@ -4308,7 +4316,7 @@ subroutine extract_surface_state(CS, sfc_state_in)
         depth(i) = depth(i) + dh
       enddo ; enddo
   ! Calculate the average properties of the mixed layer depth.
-      do i=is,ie
+      do concurrent (i=is:ie)
         if (CS%answer_date < 20190101) then
           if (depth(i) < GV%H_subroundoff*H_rescale) &
               depth(i) = GV%H_subroundoff*H_rescale
@@ -4342,6 +4350,8 @@ subroutine extract_surface_state(CS, sfc_state_in)
       enddo
     enddo ! end of j loop
 
+    !$omp target exit data map(from: sfc_state%SST(is:ie,js:je), sfc_state%SSS(is:ie,js:je), sfc_state%sfc_density(is:ie,js:je))
+    !$omp target enter data map(alloc: sfc_state%u(is-1:ie,js:je), sfc_state%v(is:ie,js-1:je))
 !   Determine the mean velocities in the uppermost depth_ml fluid.
     ! NOTE: Velocity loops start on `[ij]s-1` in order to update halo values
     !       required by the speed diagnostic on the non-symmetric grid.
@@ -4397,13 +4407,14 @@ subroutine extract_surface_state(CS, sfc_state_in)
         enddo
       enddo ! end of j loop
     else ! Hmix_UV<=0.
-      do j=js,je ; do I=is-1,ie
+      do concurrent (j=js:je, I=is-1:ie)
         sfc_state%u(I,j) = CS%u(I,j,1)
-      enddo ; enddo
-      do J=js-1,je ; do i=is,ie
+      enddo
+      do concurrent (J=js-1:je, i=is:ie)
         sfc_state%v(i,J) = CS%v(i,J,1)
-      enddo ; enddo
+      enddo
     endif
+    !$omp target exit data map(from: sfc_state%u(is-1:ie,js:je), sfc_state%v(is:ie,js-1:je))
   endif  ! (CS%Hmix >= 0.0)
 
 
@@ -4481,12 +4492,12 @@ subroutine extract_surface_state(CS, sfc_state_in)
     enddo ; enddo ; enddo
   else
     if (allocated(sfc_state%ocean_mass)) then
-      !$OMP parallel do default(shared)
-      do j=js,je ; do i=is,ie ; sfc_state%ocean_mass(i,j) = 0.0 ; enddo ; enddo
-      !$OMP parallel do default(shared)
-      do j=js,je ; do k=1,nz ; do i=is,ie
+      !$omp target enter data map(alloc: sfc_state%ocean_mass(is:ie,js:je))
+      do concurrent (j=js:je, i=is:ie) ; sfc_state%ocean_mass(i,j) = 0.0 ; enddo
+      do concurrent (j=js:je, k=1:nz, i=is:ie)
         sfc_state%ocean_mass(i,j) = sfc_state%ocean_mass(i,j) + GV%H_to_RZ*h(i,j,k)
-      enddo ; enddo ; enddo
+      enddo
+      !$omp target exit data map(from: sfc_state%ocean_mass(is:ie,js:je))
     endif
     if (allocated(sfc_state%ocean_heat)) then
       !$OMP parallel do default(shared)
@@ -4507,6 +4518,7 @@ subroutine extract_surface_state(CS, sfc_state_in)
       enddo ; enddo ; enddo
     endif
   endif
+  !$omp target exit data map(release: sfc_state)
 
   if (associated(CS%tracer_flow_CSp)) then
     call call_tracer_surface_state(sfc_state, h, G, GV, US, CS%tracer_flow_CSp)
