@@ -4234,9 +4234,22 @@ subroutine extract_surface_state(CS, sfc_state_in)
           do_integrals=.true., omit_frazil=.not.associated(CS%tv%frazil),&
           use_iceshelves=use_iceshelves)
     !$omp target enter data map(to: sfc_state_in)
-    !$omp target enter data map(to: sfc_state_in%sea_lev, sfc_state_in%Hml, &
-    !$omp   sfc_state_in%sfc_density, sfc_state_in%SST, sfc_state_in%SSS, &
-    !$omp   sfc_state_in%u, sfc_state_in%v, sfc_state_in%ocean_mass)
+    ! guard maps so mapping logic adapts to any changes in alloc logic inside allocate_surface_state
+    !$omp target enter data if(allocated(sfc_state_in%sea_lev)) map(to: sfc_state_in%sea_lev)
+    !$omp target enter data if(allocated(sfc_state_in%Hml)) map(to: sfc_state_in%Hml)
+    !$omp target enter data if(allocated(sfc_state_in%u)) map(to: sfc_state_in%u)
+    !$omp target enter data if(allocated(sfc_state_in%v)) map(to: sfc_state_in%v)
+    !$omp target enter data if(allocated(sfc_state_in%SST)) map(to: sfc_state_in%SSS)
+    !$omp target enter data if(allocated(sfc_state_in%SSS)) map(to: sfc_state_in%SST)
+    !$omp target enter data if(allocated(sfc_state_in%sfc_density)) map(to: sfc_state_in%sfc_density)
+    !$omp target enter data if(allocated(sfc_state_in%frazil)) map(to: sfc_state_in%frazil)
+    !$omp target enter data if(allocated(sfc_state_in%melt_potential)) map(to: sfc_state_in%melt_potential)
+    !$omp target enter data if(allocated(sfc_state_in%ocean_mass)) map(to: sfc_state_in%ocean_mass)
+    !$omp target enter data if(allocated(sfc_state_in%ocean_heat)) map(to: sfc_state_in%ocean_heat)
+    !$omp target enter data if(allocated(sfc_state_in%ocean_salt)) map(to: sfc_state_in%ocean_salt)
+    !$omp target enter data if(allocated(sfc_state_in%taux_shelf)) map(to: sfc_state_in%taux_shelf)
+    !$omp target enter data if(allocated(sfc_state_in%tauy_shelf)) map(to: sfc_state_in%tauy_shelf)
+    !$omp target enter data if(allocated(sfc_state_in%fco2)) map(to: sfc_state_in%fco2)
   endif
 
   if (CS%rotate_index) then
@@ -4244,6 +4257,21 @@ subroutine extract_surface_state(CS, sfc_state_in)
     call allocate_surface_state(sfc_state, G, use_temperature, &
               do_integrals=.true., omit_frazil=.not.associated(CS%tv%frazil),&
               use_iceshelves=use_iceshelves, sfc_state_in=sfc_state_in, turns=turns)
+    !$omp target enter data if(allocated(sfc_state%sea_lev)) map(to: sfc_state%sea_lev)
+    !$omp target enter data if(allocated(sfc_state%Hml)) map(to: sfc_state%Hml)
+    !$omp target enter data if(allocated(sfc_state%u)) map(to: sfc_state%u)
+    !$omp target enter data if(allocated(sfc_state%v)) map(to: sfc_state%v)
+    !$omp target enter data if(allocated(sfc_state%SST)) map(to: sfc_state%SSS)
+    !$omp target enter data if(allocated(sfc_state%SSS)) map(to: sfc_state%SST)
+    !$omp target enter data if(allocated(sfc_state%sfc_density)) map(to: sfc_state%sfc_density)
+    !$omp target enter data if(allocated(sfc_state%frazil)) map(to: sfc_state%frazil)
+    !$omp target enter data if(allocated(sfc_state%melt_potential)) map(to: sfc_state%melt_potential)
+    !$omp target enter data if(allocated(sfc_state%ocean_mass)) map(to: sfc_state%ocean_mass)
+    !$omp target enter data if(allocated(sfc_state%ocean_heat)) map(to: sfc_state%ocean_heat)
+    !$omp target enter data if(allocated(sfc_state%ocean_salt)) map(to: sfc_state%ocean_salt)
+    !$omp target enter data if(allocated(sfc_state%taux_shelf)) map(to: sfc_state%taux_shelf)
+    !$omp target enter data if(allocated(sfc_state%tauy_shelf)) map(to: sfc_state%tauy_shelf)
+    !$omp target enter data if(allocated(sfc_state%fco2)) map(to: sfc_state%fco2)
   else
     sfc_state => sfc_state_in
   endif
@@ -4255,9 +4283,9 @@ subroutine extract_surface_state(CS, sfc_state_in)
     sfc_state%sea_lev(i,j) = CS%ave_ssh_ibc(i,j)
   enddo
 
-  if (allocated(sfc_state%frazil) .and. associated(CS%tv%frazil)) then ; do j=js,je ; do i=is,ie
+  if (allocated(sfc_state%frazil) .and. associated(CS%tv%frazil)) then ; do concurrent (j=js:je, i=is:ie)
     sfc_state%frazil(i,j) = CS%tv%frazil(i,j)
-  enddo ; enddo ; endif
+  enddo ; endif
 
   ! copy Hml into sfc_state, so that caps can access it
   do concurrent (j=js:je, i=is:ie)
@@ -4265,16 +4293,16 @@ subroutine extract_surface_state(CS, sfc_state_in)
   enddo
 
   if (CS%Hmix < 0.0) then  ! A bulk mixed layer is in use, so layer 1 has the properties
-    if (use_temperature) then ; do j=js,je ; do i=is,ie
+    if (use_temperature) then ; do concurrent (j=js:je, i=is:ie)
       sfc_state%SST(i,j) = CS%tv%T(i,j,1)
       sfc_state%SSS(i,j) = CS%tv%S(i,j,1)
-    enddo ; enddo ; endif
-    do j=js,je ; do I=is-1,ie
+    enddo ; endif
+    do concurrent (j=js:je, I=is-1:ie)
       sfc_state%u(I,j) = CS%u(I,j,1)
-    enddo ; enddo
-    do J=js-1,je ; do i=is,ie
+    enddo
+    do concurrent (J=js-1:je, i=is:ie)
       sfc_state%v(i,J) = CS%v(i,J,1)
-    enddo ; enddo
+    enddo
 
   else  ! (CS%Hmix >= 0.0)
     H_rescale = 1.0
@@ -4285,7 +4313,7 @@ subroutine extract_surface_state(CS, sfc_state_in)
     endif
     ! Determine the mean tracer properties of the uppermost depth_ml fluid.
 
-    !$omp target teams loop private(depth,dh)
+    !$omp target teams loop private(depth,dh,I_depth,missing_depth)
     do j=js,je
       do concurrent (i=is:ie)
         depth(i) = 0.0
@@ -4354,13 +4382,13 @@ subroutine extract_surface_state(CS, sfc_state_in)
     if (CS%Hmix_UV>0.) then
       depth_ml = CS%Hmix_UV
       if (CS%answer_date < 20190101) depth_ml = GV%H_to_Z*CS%Hmix_UV
-      !$OMP parallel do default(shared) private(depth,dh,hv)
+      !$omp target teams loop private(depth,dh,hv)
       do J=js-1,je
-        do i=is,ie
+        do concurrent (i=is:ie)
           depth(i) = 0.0
           sfc_state%v(i,J) = 0.0
         enddo
-        do k=1,nz ; do i=is,ie
+        do k=1,nz ; do concurrent (i=is:ie)
           hv = 0.5 * (h(i,j,k) + h(i,j+1,k)) * H_rescale
           if (depth(i) + hv < depth_ml) then
             dh = hv
@@ -4373,18 +4401,18 @@ subroutine extract_surface_state(CS, sfc_state_in)
           depth(i) = depth(i) + dh
         enddo ; enddo
         ! Calculate the average properties of the mixed layer depth.
-        do i=is,ie
+        do concurrent (i=is:ie)
           sfc_state%v(i,J) = sfc_state%v(i,J) / max(depth(i), GV%H_subroundoff*H_rescale)
         enddo
       enddo ! end of j loop
 
-      !$OMP parallel do default(shared) private(depth,dh,hu)
+      !$omp target teams loop private(depth,dh,hu)
       do j=js,je
-        do I=is-1,ie
+        do concurrent (I=is-1:ie)
           depth(I) = 0.0
           sfc_state%u(I,j) = 0.0
         enddo
-        do k=1,nz ; do I=is-1,ie
+        do k=1,nz ; do concurrent (I=is-1:ie)
           hu = 0.5 * (h(i,j,k) + h(i+1,j,k)) * H_rescale
           if (depth(i) + hu < depth_ml) then
             dh = hu
@@ -4397,7 +4425,7 @@ subroutine extract_surface_state(CS, sfc_state_in)
           depth(I) = depth(I) + dh
         enddo ; enddo
         ! Calculate the average properties of the mixed layer depth.
-        do I=is-1,ie
+        do concurrent (I=is-1:ie)
           sfc_state%u(I,j) = sfc_state%u(I,j) / max(depth(I), GV%H_subroundoff*H_rescale)
         enddo
       enddo ! end of j loop
@@ -4412,6 +4440,8 @@ subroutine extract_surface_state(CS, sfc_state_in)
   endif  ! (CS%Hmix >= 0.0)
 
   if (allocated(sfc_state%melt_potential)) then
+    ! leaving unported due to calculate_TFreeze
+    !$omp target update from(sfc_state%melt_potential)
     !$OMP parallel do default(shared) private(depth_ml, dh, T_freeze, depth, pres, delT)
     do j=js,je
       do i=is,ie
@@ -4454,61 +4484,52 @@ subroutine extract_surface_state(CS, sfc_state_in)
         endif
       enddo
     enddo ! end of j loop
+    !$omp target update to(sfc_state%melt_potential)
   endif   ! melt_potential
 
   if (allocated(sfc_state%taux_shelf) .and. allocated(CS%visc%taux_shelf)) then
-    !$OMP parallel do default(shared)
-    do j=js,je ; do I=is-1,ie
+    do concurrent (j=js:je, I=is-1:ie)
       sfc_state%taux_shelf(I,j) = CS%visc%taux_shelf(I,j)
-    enddo ; enddo
+    enddo
   endif
   if (allocated(sfc_state%tauy_shelf) .and. allocated(CS%visc%tauy_shelf)) then
-    !$OMP parallel do default(shared)
-    do J=js-1,je ; do i=is,ie
+    do concurrent (J=js-1:je, i=is:ie)
       sfc_state%tauy_shelf(i,J) = CS%visc%tauy_shelf(i,J)
-    enddo ; enddo
+    enddo
   endif
 
   if (allocated(sfc_state%ocean_mass) .and. allocated(sfc_state%ocean_heat) .and. &
       allocated(sfc_state%ocean_salt)) then
-    !$OMP parallel do default(shared)
-    do j=js,je ; do i=is,ie
+    do concurrent (j=js:je, i=is:ie)
       sfc_state%ocean_mass(i,j) = 0.0
       sfc_state%ocean_heat(i,j) = 0.0 ; sfc_state%ocean_salt(i,j) = 0.0
-    enddo ; enddo
-    !$OMP parallel do default(shared) private(mass)
-    do j=js,je ; do k=1,nz ; do i=is,ie
+    enddo
+    do concurrent (j=js:je, k=1:nz, i=is:ie)
       mass = GV%H_to_RZ*h(i,j,k)
       sfc_state%ocean_mass(i,j) = sfc_state%ocean_mass(i,j) + mass
       sfc_state%ocean_heat(i,j) = sfc_state%ocean_heat(i,j) + mass * CS%tv%T(i,j,k)
       sfc_state%ocean_salt(i,j) = sfc_state%ocean_salt(i,j) + mass * (1.0e-3*CS%tv%S(i,j,k))
-    enddo ; enddo ; enddo
+    enddo
   else
     if (allocated(sfc_state%ocean_mass)) then
-      !$omp target enter data map(alloc: sfc_state%ocean_mass(is:ie,js:je))
       do concurrent (j=js:je, i=is:ie) ; sfc_state%ocean_mass(i,j) = 0.0 ; enddo
       do concurrent (j=js:je, k=1:nz, i=is:ie)
         sfc_state%ocean_mass(i,j) = sfc_state%ocean_mass(i,j) + GV%H_to_RZ*h(i,j,k)
       enddo
-      !$omp target exit data map(from: sfc_state%ocean_mass(is:ie,js:je))
     endif
     if (allocated(sfc_state%ocean_heat)) then
-      !$OMP parallel do default(shared)
-      do j=js,je ; do i=is,ie ; sfc_state%ocean_heat(i,j) = 0.0 ; enddo ; enddo
-      !$OMP parallel do default(shared) private(mass)
-      do j=js,je ; do k=1,nz ; do i=is,ie
+      do concurrent (j=js:je, i=is:ie) ; sfc_state%ocean_heat(i,j) = 0.0 ; enddo
+      do concurrent (j=js:je, k=1:nz, i=is:ie)
         mass = GV%H_to_RZ*h(i,j,k)
         sfc_state%ocean_heat(i,j) = sfc_state%ocean_heat(i,j) + mass * CS%tv%T(i,j,k)
-      enddo ; enddo ; enddo
+      enddo
     endif
     if (allocated(sfc_state%ocean_salt)) then
-      !$OMP parallel do default(shared)
-      do j=js,je ; do i=is,ie ; sfc_state%ocean_salt(i,j) = 0.0 ; enddo ; enddo
-      !$OMP parallel do default(shared) private(mass)
-      do j=js,je ; do k=1,nz ; do i=is,ie
+      do concurrent (j=js:je, i=is:ie) ; sfc_state%ocean_salt(i,j) = 0.0 ; enddo
+      do concurrent (j=js:je, k=1:nz, i=is:ie)
         mass = GV%H_to_RZ*h(i,j,k)
         sfc_state%ocean_salt(i,j) = sfc_state%ocean_salt(i,j) + mass * (1.0e-3*CS%tv%S(i,j,k))
-      enddo ; enddo ; enddo
+      enddo
     endif
   endif
 
@@ -4518,6 +4539,8 @@ subroutine extract_surface_state(CS, sfc_state_in)
 
   if (CS%check_bad_sfc_vals) then
     numberOfErrors=0 ! count number of errors
+    !$omp target update from(sfc_state%sea_lev, sfc_state%u, sfc_state%v)
+    !$omp target update if(use_temperature) from(sfc_state%SST, sfc_state%SST)
     do j=js,je ; do i=is,ie
       if (G%mask2dT(i,j)>0.) then
         localError = sfc_state%sea_lev(i,j) < -G%bathyT(i,j) - G%Z_ref &
@@ -4567,12 +4590,56 @@ subroutine extract_surface_state(CS, sfc_state_in)
     endif
   endif
 
-  if (CS%debug) call MOM_surface_chksum("Post extract_sfc", sfc_state, G, US, haloshift=0, symmetric=.true.)
+  if (CS%debug) then
+    !$omp target update if(allocated(sfc_state%sea_lev)) from(sfc_state%sea_lev)
+    !$omp target update if(allocated(sfc_state%Hml)) from(sfc_state%Hml)
+    !$omp target update if(allocated(sfc_state%u)) from(sfc_state%u)
+    !$omp target update if(allocated(sfc_state%v)) from(sfc_state%v)
+    !$omp target update if(allocated(sfc_state%SST)) from(sfc_state%SSS)
+    !$omp target update if(allocated(sfc_state%SSS)) from(sfc_state%SST)
+    !$omp target update if(allocated(sfc_state%frazil)) from(sfc_state%frazil)
+    !$omp target update if(allocated(sfc_state%melt_potential)) from(sfc_state%melt_potential)
+    !$omp target update if(allocated(sfc_state%ocean_mass)) from(sfc_state%ocean_mass)
+    !$omp target update if(allocated(sfc_state%ocean_heat)) from(sfc_state%ocean_heat)
+    !$omp target update if(allocated(sfc_state%ocean_salt)) from(sfc_state%ocean_salt)
+    call MOM_surface_chksum("Post extract_sfc", sfc_state, G, US, haloshift=0, symmetric=.true.)
+  endif
 
   ! Rotate sfc_state back onto the input grid, sfc_state_in
   if (CS%rotate_index) then
+    !$omp target exit data if(allocated(sfc_state%sea_lev)) map(from: sfc_state%sea_lev)
+    !$omp target exit data if(allocated(sfc_state%Hml)) map(from: sfc_state%Hml)
+    !$omp target exit data if(allocated(sfc_state%u)) map(from: sfc_state%u)
+    !$omp target exit data if(allocated(sfc_state%v)) map(from: sfc_state%v)
+    !$omp target exit data if(allocated(sfc_state%SST)) map(from: sfc_state%SSS)
+    !$omp target exit data if(allocated(sfc_state%SSS)) map(from: sfc_state%SST)
+    !$omp target exit data if(allocated(sfc_state%sfc_density)) map(from: sfc_state%sfc_density)
+    !$omp target exit data if(allocated(sfc_state%frazil)) map(from: sfc_state%frazil)
+    !$omp target exit data if(allocated(sfc_state%melt_potential)) map(from: sfc_state%melt_potential)
+    !$omp target exit data if(allocated(sfc_state%ocean_mass)) map(from: sfc_state%ocean_mass)
+    !$omp target exit data if(allocated(sfc_state%ocean_heat)) map(from: sfc_state%ocean_heat)
+    !$omp target exit data if(allocated(sfc_state%ocean_salt)) map(from: sfc_state%ocean_salt)
+    !$omp target exit data if(allocated(sfc_state%taux_shelf)) map(from: sfc_state%taux_shelf)
+    !$omp target exit data if(allocated(sfc_state%tauy_shelf)) map(from: sfc_state%tauy_shelf)
+    !$omp target exit data if(allocated(sfc_state%fco2)) map(from: sfc_state%fco2)
+    !$omp target exit data map(delete: sfc_state)
     call rotate_surface_state(sfc_state, sfc_state_in, G_in, -turns)
     call deallocate_surface_state(sfc_state)
+    !$omp target update if(allocated(sfc_state_in%sea_lev)) to(sfc_state_in%sea_lev)
+    !$omp target update if(allocated(sfc_state_in%Hml)) to(sfc_state_in%Hml)
+    !$omp target update if(allocated(sfc_state_in%u)) to(sfc_state_in%u)
+    !$omp target update if(allocated(sfc_state_in%v)) to(sfc_state_in%v)
+    !$omp target update if(allocated(sfc_state_in%SST)) to(sfc_state_in%SSS)
+    !$omp target update if(allocated(sfc_state_in%SSS)) to(sfc_state_in%SST)
+    !$omp target update if(allocated(sfc_state_in%sfc_density)) to(sfc_state_in%sfc_density)
+    !$omp target update if(allocated(sfc_state_in%frazil)) to(sfc_state_in%frazil)
+    !$omp target update if(allocated(sfc_state_in%melt_potential)) to(sfc_state_in%melt_potential)
+    !$omp target update if(allocated(sfc_state_in%ocean_mass)) to(sfc_state_in%ocean_mass)
+    !$omp target update if(allocated(sfc_state_in%ocean_heat)) to(sfc_state_in%ocean_heat)
+    !$omp target update if(allocated(sfc_state_in%ocean_salt)) to(sfc_state_in%ocean_salt)
+    !$omp target update if(allocated(sfc_state_in%taux_shelf)) to(sfc_state_in%taux_shelf)
+    !$omp target update if(allocated(sfc_state_in%tauy_shelf)) to(sfc_state_in%tauy_shelf)
+    !$omp target update if(allocated(sfc_state_in%fco2)) to(sfc_state_in%fco2)
   endif
 
   call callTree_leave("extract_surface_sfc_state()")
