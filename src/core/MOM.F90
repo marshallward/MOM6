@@ -1173,12 +1173,16 @@ subroutine step_MOM(forces_in, fluxes_in, sfc_state, Time_start, time_int_in, CS
     !$omp   if (CS%time_in_cycle > 0. .or. CS%time_in_thermo_cycle > 0.)
 
     if (CS%time_in_cycle > 0.0) then
+      !$omp target update if(allocated(sfc_state_diag%u)) from(sfc_state_diag%u)
+      !$omp target update if(allocated(sfc_state_diag%v)) from(sfc_state_diag%v)
       call enable_averages(CS%time_in_cycle, Time_local, CS%diag)
       call post_surface_dyn_diags(CS%sfc_IDs, G, CS%diag, sfc_state_diag, ssh)
     endif
 
     if (CS%time_in_thermo_cycle > 0.0) then
       !$omp target update from(CS%ave_ssh_ibc)
+      !$omp target update if(allocated(sfc_state_diag%SST)) from(sfc_state_diag%SST)
+      !$omp target update if(allocated(sfc_state_diag%SSS)) from(sfc_state_diag%SSS)
       call enable_averages(CS%time_in_thermo_cycle, Time_local, CS%diag)
       call post_surface_thermo_diags(CS%sfc_IDs, G, GV, US, CS%diag, CS%time_in_thermo_cycle, &
                                      sfc_state_diag, CS%tv, ssh, CS%ave_ssh_ibc)
@@ -1197,6 +1201,10 @@ subroutine step_MOM(forces_in, fluxes_in, sfc_state, Time_start, time_int_in, CS
 
   ! Accumulate the surface fluxes for assessing conservation
   if (do_thermo .and. fluxes%fluxes_used) then
+    !$omp target update from(sfc_state%SST) &
+    !$omp   if(.not.associated(fluxes%heat_content_evap) .and. &
+    !$omp      .not.(associated(CS%tv%TempxPme) .and. &
+    !$omp      associated(fluxes%evap)))
     call accumulate_net_input(fluxes, sfc_state, CS%tv, fluxes%dt_buoy_accum, &
                               G, US, CS%sum_output_CSp)
   endif
@@ -4239,8 +4247,8 @@ subroutine extract_surface_state(CS, sfc_state_in)
     !$omp target enter data if(allocated(sfc_state_in%Hml)) map(to: sfc_state_in%Hml)
     !$omp target enter data if(allocated(sfc_state_in%u)) map(to: sfc_state_in%u)
     !$omp target enter data if(allocated(sfc_state_in%v)) map(to: sfc_state_in%v)
-    !$omp target enter data if(allocated(sfc_state_in%SST)) map(to: sfc_state_in%SSS)
-    !$omp target enter data if(allocated(sfc_state_in%SSS)) map(to: sfc_state_in%SST)
+    !$omp target enter data if(allocated(sfc_state_in%SSS)) map(to: sfc_state_in%SSS)
+    !$omp target enter data if(allocated(sfc_state_in%SST)) map(to: sfc_state_in%SST)
     !$omp target enter data if(allocated(sfc_state_in%sfc_density)) map(to: sfc_state_in%sfc_density)
     !$omp target enter data if(allocated(sfc_state_in%frazil)) map(to: sfc_state_in%frazil)
     !$omp target enter data if(allocated(sfc_state_in%melt_potential)) map(to: sfc_state_in%melt_potential)
@@ -4257,12 +4265,13 @@ subroutine extract_surface_state(CS, sfc_state_in)
     call allocate_surface_state(sfc_state, G, use_temperature, &
               do_integrals=.true., omit_frazil=.not.associated(CS%tv%frazil),&
               use_iceshelves=use_iceshelves, sfc_state_in=sfc_state_in, turns=turns)
+    !$omp target enter data map(to: sfc_state)
     !$omp target enter data if(allocated(sfc_state%sea_lev)) map(to: sfc_state%sea_lev)
     !$omp target enter data if(allocated(sfc_state%Hml)) map(to: sfc_state%Hml)
     !$omp target enter data if(allocated(sfc_state%u)) map(to: sfc_state%u)
     !$omp target enter data if(allocated(sfc_state%v)) map(to: sfc_state%v)
-    !$omp target enter data if(allocated(sfc_state%SST)) map(to: sfc_state%SSS)
-    !$omp target enter data if(allocated(sfc_state%SSS)) map(to: sfc_state%SST)
+    !$omp target enter data if(allocated(sfc_state%SSS)) map(to: sfc_state%SSS)
+    !$omp target enter data if(allocated(sfc_state%SST)) map(to: sfc_state%SST)
     !$omp target enter data if(allocated(sfc_state%sfc_density)) map(to: sfc_state%sfc_density)
     !$omp target enter data if(allocated(sfc_state%frazil)) map(to: sfc_state%frazil)
     !$omp target enter data if(allocated(sfc_state%melt_potential)) map(to: sfc_state%melt_potential)
@@ -4540,7 +4549,7 @@ subroutine extract_surface_state(CS, sfc_state_in)
   if (CS%check_bad_sfc_vals) then
     numberOfErrors=0 ! count number of errors
     !$omp target update from(sfc_state%sea_lev, sfc_state%u, sfc_state%v)
-    !$omp target update if(use_temperature) from(sfc_state%SST, sfc_state%SST)
+    !$omp target update if(use_temperature) from(sfc_state%SSS, sfc_state%SST)
     do j=js,je ; do i=is,ie
       if (G%mask2dT(i,j)>0.) then
         localError = sfc_state%sea_lev(i,j) < -G%bathyT(i,j) - G%Z_ref &
@@ -4595,8 +4604,8 @@ subroutine extract_surface_state(CS, sfc_state_in)
     !$omp target update if(allocated(sfc_state%Hml)) from(sfc_state%Hml)
     !$omp target update if(allocated(sfc_state%u)) from(sfc_state%u)
     !$omp target update if(allocated(sfc_state%v)) from(sfc_state%v)
-    !$omp target update if(allocated(sfc_state%SST)) from(sfc_state%SSS)
-    !$omp target update if(allocated(sfc_state%SSS)) from(sfc_state%SST)
+    !$omp target update if(allocated(sfc_state%SSS)) from(sfc_state%SSS)
+    !$omp target update if(allocated(sfc_state%SST)) from(sfc_state%SST)
     !$omp target update if(allocated(sfc_state%frazil)) from(sfc_state%frazil)
     !$omp target update if(allocated(sfc_state%melt_potential)) from(sfc_state%melt_potential)
     !$omp target update if(allocated(sfc_state%ocean_mass)) from(sfc_state%ocean_mass)
@@ -4611,8 +4620,8 @@ subroutine extract_surface_state(CS, sfc_state_in)
     !$omp target exit data if(allocated(sfc_state%Hml)) map(from: sfc_state%Hml)
     !$omp target exit data if(allocated(sfc_state%u)) map(from: sfc_state%u)
     !$omp target exit data if(allocated(sfc_state%v)) map(from: sfc_state%v)
-    !$omp target exit data if(allocated(sfc_state%SST)) map(from: sfc_state%SSS)
-    !$omp target exit data if(allocated(sfc_state%SSS)) map(from: sfc_state%SST)
+    !$omp target exit data if(allocated(sfc_state%SSS)) map(from: sfc_state%SSS)
+    !$omp target exit data if(allocated(sfc_state%SST)) map(from: sfc_state%SST)
     !$omp target exit data if(allocated(sfc_state%sfc_density)) map(from: sfc_state%sfc_density)
     !$omp target exit data if(allocated(sfc_state%frazil)) map(from: sfc_state%frazil)
     !$omp target exit data if(allocated(sfc_state%melt_potential)) map(from: sfc_state%melt_potential)
@@ -4629,8 +4638,8 @@ subroutine extract_surface_state(CS, sfc_state_in)
     !$omp target update if(allocated(sfc_state_in%Hml)) to(sfc_state_in%Hml)
     !$omp target update if(allocated(sfc_state_in%u)) to(sfc_state_in%u)
     !$omp target update if(allocated(sfc_state_in%v)) to(sfc_state_in%v)
-    !$omp target update if(allocated(sfc_state_in%SST)) to(sfc_state_in%SSS)
-    !$omp target update if(allocated(sfc_state_in%SSS)) to(sfc_state_in%SST)
+    !$omp target update if(allocated(sfc_state_in%SSS)) to(sfc_state_in%SSS)
+    !$omp target update if(allocated(sfc_state_in%SST)) to(sfc_state_in%SST)
     !$omp target update if(allocated(sfc_state_in%sfc_density)) to(sfc_state_in%sfc_density)
     !$omp target update if(allocated(sfc_state_in%frazil)) to(sfc_state_in%frazil)
     !$omp target update if(allocated(sfc_state_in%melt_potential)) to(sfc_state_in%melt_potential)

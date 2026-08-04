@@ -316,6 +316,18 @@ program MOM6
   call callTree_waypoint("done initialize_MOM")
 
   call extract_surface_state(MOM_CSp, sfc_state)
+  ! needed to feed adjust_ice_sheet_frazil, set_forcing, shelf_calc_flux
+  !$omp target update if(allocated(sfc_state%Hml)) from(sfc_state%Hml)
+  !$omp target update if(allocated(sfc_state%u)) from(sfc_state%u)
+  !$omp target update if(allocated(sfc_state%v)) from(sfc_state%v)
+  !$omp target update if(allocated(sfc_state%SSS)) from(sfc_state%SSS)
+  !$omp target update if(allocated(sfc_state%SST)) from(sfc_state%SST)
+  !$omp target update if(allocated(sfc_state%sfc_density)) from(sfc_state%sfc_density)
+  !$omp target update if(allocated(sfc_state%frazil)) from(sfc_state%frazil)
+  !$omp target update if(allocated(sfc_state%ocean_mass)) from(sfc_state%ocean_mass)
+  !$omp target update if(allocated(sfc_state%taux_shelf)) from(sfc_state%taux_shelf)
+  !$omp target update if(allocated(sfc_state%tauy_shelf)) from(sfc_state%tauy_shelf)
+  !$omp target update if(allocated(sfc_state%fco2)) from(sfc_state%fco2)
 
   if (use_ice_shelf .and. allocated(sfc_state%frazil)) &
     call adjust_ice_sheet_frazil(sfc_state, fluxes, Ice_shelf_CSp)
