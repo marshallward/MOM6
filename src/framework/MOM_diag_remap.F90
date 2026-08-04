@@ -28,7 +28,7 @@
 !   * vertically_interpolate_diag_field, which calls vertically_interpolate_field
 !   * horizontally_average_diag_field, which calls horizontally_average_field
 
-
+#include "do_concurrent_compat.h"
 module MOM_diag_remap
 
 use MOM_coms,             only : reproducing_sum_EFP, EFP_to_real
@@ -496,16 +496,19 @@ subroutine do_remap(remap_cs, G, GV, US, isdf, jsdf, h, staggered_in_x, staggere
 
 end subroutine do_remap
 
-!> Calculate masks for target grid
-subroutine diag_remap_calc_hmask(remap_cs, G, mask)
+!> Calculate masks for target grid.
+!! Both mask and h must already be present on the device (via prior enter data map).
+!! G%mask2dT must also be device-resident.
+subroutine diag_remap_calc_hmask(remap_cs, G, mask, h)
   type(diag_remap_ctrl),  intent(in)  :: remap_cs !< Diagnostic coordinate control structure
   type(ocean_grid_type),  intent(in)  :: G    !< Ocean grid structure
   real, dimension(G%isd:,G%jsd:,:), &
                           intent(out) :: mask !< h-point mask for target grid [nondim]
+  real, dimension(G%isd:,G%jsd:,:), &
+                          intent(in)  :: h    !< Target grid thicknesses [H ~> m or kg m-2] or [Z ~> m]
 
   ! Local variables
-  real, dimension(remap_cs%nz) :: h_dest ! Destination thicknesses [H ~> m or kg m-2] or [Z ~> m]
-  integer :: i, j, k
+  integer :: i, j, k, nz
   logical :: mask_vanished_layers
   real :: h_tot      ! Sum of all thicknesses [H ~> m or kg m-2] or [Z ~> m]
   real :: h_err      ! An estimate of a negligible thickness [H ~> m or kg m-2] or [Z ~> m]
@@ -514,31 +517,38 @@ subroutine diag_remap_calc_hmask(remap_cs, G, mask)
 
   ! Only z*-like diagnostic coordinates should have a 3d mask
   mask_vanished_layers = (remap_cs%vertical_coord == coordinateMode('ZSTAR'))
-  mask(:,:,:) = 0.
+  nz = remap_cs%nz
 
-  do j=G%jsc-1,G%jec+1 ; do i=G%isc-1,G%iec+1
+  ! Zero the mask on the device
+  do concurrent(k = 1:nz, j = G%jsd:G%jed, i = G%isd:G%ied)
+    mask(i,j,k) = 0.
+  end do
+
+  ! Compute mask: (i,j) parallelized on GPU, k-loop sequential (cumulative h_err)
+  do concurrent(j = G%jsc-1:G%jec+1, i = G%isc-1:G%iec+1) DO_LOCALITY(local(h_tot, h_err, k))
     if (G%mask2dT(i,j)>0.) then
       if (mask_vanished_layers) then
-        h_dest(:) = remap_cs%h(i,j,:)
         h_tot = 0.
         h_err = 0.
-        do k=1, remap_cs%nz
-          h_tot = h_tot + h_dest(k)
+        do k=1, nz
+          h_tot = h_tot + h(i,j,k)
           ! This is an overestimate of how thick a vanished layer might be, that
           ! appears due to round-off.
           h_err = h_err + epsilon(h_tot) * h_tot
           ! Mask out vanished layers
-          if (h_dest(k)<=8.*h_err) then
+          if (h(i,j,k)<=8.*h_err) then
             mask(i,j,k) = 0.
           else
             mask(i,j,k) = 1.
           endif
         enddo
       else ! all layers might contain data
-        mask(i,j,:) = 1.
+        do k=1, nz
+          mask(i,j,k) = 1.
+        enddo
       endif
     endif
-  enddo ; enddo
+  enddo
 
 end subroutine diag_remap_calc_hmask
 
