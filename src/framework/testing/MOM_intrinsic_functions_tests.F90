@@ -2,7 +2,7 @@
 ! See the LICENSE file for licensing information.
 ! SPDX-License-Identifier: Apache-2.0
 
-!> Unit tests for MOM_intrinsic_functions module, including exp_repro()
+!> Unit tests for MOM_intrinsic_functions
 module MOM_intrinsic_functions_tests
 
 use, intrinsic :: iso_fortran_env, only : real128
@@ -25,20 +25,42 @@ implicit none ; private
 
 public :: run_intrinsic_functions_tests
 
-! Mold value for default real
 real, parameter :: rmold = 0.
+  !< Mold value for default real
 
-! Mathematical constants.
+! Mathematical constants
 real, parameter :: ln2 = 0.693147180559945309417232121458176568
   !< ln(2) = 0.6931471805599453094172321...
 real, parameter :: half_ln2 = 0.346573590279972654708616060729088284
   !< ln(2)/2 = 0.3465735902799726547086160...
 real, parameter :: sqrt2 = 1.41421356237309504880168872420969808
   !< sqrt(2) = 1.4142135623730950488016887...
-real, parameter :: e_val = 2.71828182845904523536028747135266250
+real, parameter :: exp1 = 2.71828182845904523536028747135266250
   !< e = 2.7182818284590452353602874...
 real, parameter :: inv_e = 0.367879441171442321595523770161460867
   !< 1/e = 0.3678794411714423215955237...
+real, parameter :: exp_033 = 1.39096812846378028786273560331663894
+  !< Correctly rounded exp(0.33) for nearest double precision value [nondim]
+real, parameter :: exp_tiny_pos = 1.00000000000000100000000000000057771
+  !< Correctly rounded exp(1e-15) for nearest double precision value [nondim]
+real, parameter :: exp_tiny_neg = 0.999999999999999000000000000000422295
+  !< Correctly rounded exp(-1e-15) for nearest double precision value [nondim]
+real, parameter :: exp_709_78 = 1.79282279439451562090841253934897711e+308
+  !< Correctly rounded exp(709.78) for nearest double precision value [nondim]
+real, parameter :: exp_neg_708_39 = 2.23940149888046784447996828327569305e-308
+  !< Correctly rounded exp(-708.39) for nearest double precision value [nondim]
+real, parameter :: exp_neg2 = 0.135335283236612691893999494972484403
+  !< Correctly rounded exp(-2) [nondim]
+real, parameter :: exp2 = 7.38905609893065022723042746057500781
+  !< Correctly rounded exp(2) [nondim]
+real, parameter :: log_huge = 709.782712893383973096206318587064743
+  !< Correctly rounded log(huge()) for double precision [nondim]
+real, parameter :: exp_log_huge = 1.79769313486227321783964963090004165e+308
+  !< Correctly rounded exp(log_huge) [nondim]
+real, parameter :: log_tiny = -708.396418532264078748994506895542145
+  !< Correctly rounded log(tiny()) for double precision [nondim]
+real, parameter :: exp_log_tiny = 2.22507385850726251792173072917790692e-308
+  !< Correctly rounded exp(log_tiny) [nondim]
 
 ! Module-level flag to enable/disable IEEE exception tests
 logical :: ieee_flags_supported = .false.
@@ -62,7 +84,7 @@ subroutine test_exp_zero
 
   val = exp_repro(0.)
 
-  print '(a,ES22.15)', "  exp_repro(0) = ", val
+  print '(2x, "exp_repro(0) = ", ES22.15)', val
 
   call assert(val == 1., "exp_repro(0) should equal 1 exactly")
 end subroutine test_exp_zero
@@ -74,7 +96,7 @@ subroutine test_exp_neg_zero
 
   val = exp_repro(-0.)
 
-  print '(a,ES22.15)', "  exp_repro(-0) = ", val
+  print '(2x, "exp_repro(-0) = ", ES22.15)', val
 
   call assert(val == 1., "exp_repro(-0) should equal 1 exactly")
 end subroutine test_exp_neg_zero
@@ -86,9 +108,9 @@ subroutine test_exp_one
   real, parameter :: tol = 1.e-15
 
   val = exp_repro(1.)
-  err = abs(val - e_val) / e_val
+  err = abs(val - exp1) / exp1
 
-  print '(a,ES22.15,a,ES9.2)', "  exp_repro(1) = ", val, ", rel err = ", err
+  print '(2x, "exp_repro(1) = ", ES22.15, ", rel err = ", ES9.2)', val, err
 
   call assert(err < tol, "exp_repro(1) relative error exceeds tolerance")
 end subroutine test_exp_one
@@ -102,7 +124,7 @@ subroutine test_exp_neg_one
   val = exp_repro(-1.)
   err = abs(val - inv_e) / inv_e
 
-  print '(a,ES22.15,a,ES9.2)', "  exp_repro(-1) = ", val, ", rel err = ", err
+  print '(2x, "exp_repro(-1) = ", ES22.15, ", rel err = ", ES9.2)', val, err
 
   call assert(err < tol, "exp_repro(-1) relative error exceeds tolerance")
 end subroutine test_exp_neg_one
@@ -114,11 +136,11 @@ subroutine test_exp_general
   real, parameter :: tol = 1.e-15
 
   x = 0.33
-  ref = exp(x)  ! Use intrinsic as reference for general case
+  ref = exp_033
   val = exp_repro(x)
   err = abs(val - ref) / ref
 
-  print '(a,ES22.15,a,ES9.2)', "  exp_repro(0.33) = ", val, ", rel err = ", err
+  print '(2x, "exp_repro(0.33) = ", ES22.15, ", rel err = ", ES9.2)', val, err
 
   call assert(err < tol, "exp_repro(0.33) relative error exceeds tolerance")
 end subroutine test_exp_general
@@ -132,7 +154,7 @@ subroutine test_exp_ln2
   val = exp_repro(ln2)
   err = abs(val - 2.0) / 2.0
 
-  print '(a,ES22.15,a,ES9.2)', "  exp_repro(ln2) = ", val, ", rel err = ", err
+  print '(2x, "exp_repro(ln2) = ", ES22.15, ", rel err = ", ES9.2)', val, err
 
   call assert(err < tol, "exp_repro(ln(2)) should be close to 2")
 end subroutine test_exp_ln2
@@ -146,7 +168,7 @@ subroutine test_exp_neg_ln2
   val = exp_repro(-ln2)
   err = abs(val - 0.5) / 0.5
 
-  print '(a,ES22.15,a,ES9.2)', "  exp_repro(-ln2) = ", val, ", rel err = ", err
+  print '(2x, "exp_repro(-ln2) = ", ES22.15, ", rel err = ", ES9.2)', val, err
 
   call assert(err < tol, "exp_repro(-ln(2)) should be close to 0.5")
 end subroutine test_exp_neg_ln2
@@ -160,7 +182,7 @@ subroutine test_exp_half_ln2
   val = exp_repro(half_ln2)
   err = abs(val - sqrt2) / sqrt2
 
-  print '(a,ES22.15,a,ES9.2)', "  exp_repro(ln2/2) = ", val, ", rel err = ", err
+  print '(2x, "exp_repro(ln2/2) = ", ES22.15, ", rel err = ", ES9.2)', val, err
 
   call assert(err < tol, "exp_repro(0.5*ln(2)) should be close to sqrt(2)")
 end subroutine test_exp_half_ln2
@@ -172,11 +194,11 @@ subroutine test_exp_tiny_pos
   real, parameter :: tol = 1.e-15
 
   x = 1.0e-15
-  ref = exp(x)
+  ref = exp_tiny_pos
   val = exp_repro(x)
   err = abs(val - ref) / ref
 
-  print '(a,ES22.15,a,ES9.2)', "  exp_repro(1e-15) = ", val, ", rel err = ", err
+  print '(2x, "exp_repro(1e-15) = ", ES22.15, ", rel err = ", ES9.2)', val, err
 
   call assert(err < tol, "exp_repro(1e-15) relative error exceeds tolerance")
 end subroutine test_exp_tiny_pos
@@ -188,11 +210,11 @@ subroutine test_exp_tiny_neg
   real, parameter :: tol = 1.e-15
 
   x = -1.0e-15
-  ref = exp(x)
+  ref = exp_tiny_neg
   val = exp_repro(x)
   err = abs(val - ref) / ref
 
-  print '(a,ES22.15,a,ES9.2)', "  exp_repro(-1e-15) = ", val, ", rel err = ", err
+  print '(2x, "exp_repro(-1e-15) = ", ES22.15, ", rel err = ", ES9.2)', val, err
 
   call assert(err < tol, "exp_repro(-1e-15) relative error exceeds tolerance")
 end subroutine test_exp_tiny_neg
@@ -203,10 +225,10 @@ subroutine test_exp_overflow
   real :: x, val, ref
 
   x = 1000.
-  ref = exp(x)  ! Should be +Inf
+  ref = ieee_value(0., ieee_positive_inf)
   val = exp_repro(x)
 
-  print '(a,ES22.15)', "  exp_repro(1000) = ", val
+  print '(2x, "exp_repro(1000) = ", ES22.15)', val
 
   call assert(val == ref, "exp_repro(1000) should overflow to +Inf")
 end subroutine test_exp_overflow
@@ -217,10 +239,10 @@ subroutine test_exp_underflow
   real :: x, val, ref
 
   x = -1000.
-  ref = exp(x)  ! Should be 0
+  ref = 0.
   val = exp_repro(x)
 
-  print '(a,ES22.15)', "  exp_repro(-1000) = ", val
+  print '(2x, "exp_repro(-1000) = ", ES22.15)', val
 
   call assert(val == ref, "exp_repro(-1000) should underflow to 0")
 end subroutine test_exp_underflow
@@ -232,11 +254,11 @@ subroutine test_exp_near_overflow
   real, parameter :: tol = 1.e-14
 
   x = 709.78
-  ref = exp(x)
+  ref = exp_709_78
   val = exp_repro(x)
   err = abs(val - ref) / ref
 
-  print '(a,ES22.15,a,ES9.2)', "  exp_repro(709.78) = ", val, ", rel err = ", err
+  print '(2x, "exp_repro(709.78) = ", ES22.15, ", rel err = ", ES9.2)', val, err
 
   call assert(err < tol, "exp_repro(709.78) relative error exceeds tolerance")
 end subroutine test_exp_near_overflow
@@ -248,11 +270,11 @@ subroutine test_exp_near_underflow
   real, parameter :: tol = 1.e-14
 
   x = -708.39
-  ref = exp(x)
+  ref = exp_neg_708_39
   val = exp_repro(x)
   err = abs(val - ref) / ref
 
-  print '(a,ES22.15,a,ES9.2)', "  exp_repro(-708.39) = ", val, ", rel err = ", err
+  print '(2x, "exp_repro(-708.39) = ", ES22.15, ", rel err = ", ES9.2)', val, err
 
   call assert(err < tol, "exp_repro(-708.39) relative error exceeds tolerance")
 end subroutine test_exp_near_underflow
@@ -264,10 +286,10 @@ subroutine test_exp_subnormal
   real, parameter :: tol = 1.e-10  ! Relaxed for subnormals
 
   x = -745.13
-  ref = exp(x)
+  ref = nearest(0., 1.)
   val = exp_repro(x)
 
-  print '(a,ES22.15)', "  exp_repro(-745.13) = ", val
+  print '(2x, "exp_repro(-745.13) = ", ES22.15)', val
 
   ! For subnormals, check absolute error or that both are very small
   if (ref > 0.) then
@@ -283,14 +305,13 @@ end subroutine test_exp_subnormal
 subroutine test_exp_largest_float
   real :: x, val, ref, err
   real, parameter :: tol = 1.e-13  ! Relaxed due to log/exp round-trip error
-  real, parameter :: LOG_HUGE = log(huge(rmold))
 
-  x = LOG_HUGE
-  ref = exp(x)
+  x = log_huge
+  ref = exp_log_huge
   val = exp_repro(x)
   err = abs(val - ref) / ref
 
-  print '(a,ES22.15,a,ES9.2)', "  exp_repro(log(huge)) = ", val, ", rel err = ", err
+  print '(2x, "exp_repro(log(huge)) = ", ES22.15, ", rel err = ", ES9.2)', val, err
 
   call assert(err < tol, "exp_repro(log(huge)) relative error exceeds tolerance")
 end subroutine test_exp_largest_float
@@ -300,13 +321,12 @@ end subroutine test_exp_largest_float
 subroutine test_exp_smallest_float
   real :: val, ref, err
   real, parameter :: tol = 5.e-14
-  real, parameter :: LOG_TINY = log(tiny(rmold))
 
-  ref = tiny(1.)
-  val = exp_repro(LOG_TINY)
+  ref = exp_log_tiny
+  val = exp_repro(log_tiny)
   err = abs(val - ref) / ref
 
-  print '(a,ES22.15,a,ES9.2)', "  exp_repro(log(tiny)) = ", val, ", rel err = ", err
+  print '(2x, "exp_repro(log(tiny)) = ", ES22.15, ", rel err = ", ES9.2)', val, err
 
   call assert(err < tol, "exp_repro(log(tiny)) relative error exceeds tolerance")
 end subroutine test_exp_smallest_float
@@ -320,7 +340,7 @@ subroutine test_exp_pos_inf
   ref = ieee_value(0., ieee_positive_inf)
   val = exp_repro(x)
 
-  print '(a,ES22.15)', "  exp_repro(+Inf) = ", val
+  print '(2x, "exp_repro(+Inf) = ", ES22.15)', val
 
   call assert(val == ref, "exp_repro(+Inf) should equal +Inf")
 end subroutine test_exp_pos_inf
@@ -333,7 +353,7 @@ subroutine test_exp_neg_inf
   x = ieee_value(0., ieee_negative_inf)
   val = exp_repro(x)
 
-  print '(a,ES22.15)', "  exp_repro(-Inf) = ", val
+  print '(2x, "exp_repro(-Inf) = ", ES22.15)', val
 
   call assert(val == 0., "exp_repro(-Inf) should equal 0")
 end subroutine test_exp_neg_inf
@@ -346,7 +366,7 @@ subroutine test_exp_nan
   x = ieee_value(0., ieee_quiet_nan)
   val = exp_repro(x)
 
-  print '(a,ES22.15)', "  exp_repro(NaN) = ", val
+  print '(2x, "exp_repro(NaN) = ", ES22.15)', val
 
   call assert(ieee_is_nan(val), "exp_repro(NaN) should be NaN")
 end subroutine test_exp_nan
@@ -359,7 +379,7 @@ subroutine test_exp_neg_nan
   x = -ieee_value(0., ieee_quiet_nan)
   val = exp_repro(x)
 
-  print '(a,ES22.15)', "  exp_repro(-NaN) = ", val
+  print '(2x, "exp_repro(-NaN) = ", ES22.15)', val
 
   call assert(ieee_is_nan(val), "exp_repro(-NaN) should be NaN")
 end subroutine test_exp_neg_nan
@@ -369,7 +389,7 @@ end subroutine test_exp_neg_nan
 !!
 !! exp_repro should be within 1.5 ULP of the true value (1 ULP with FMA).
 !! We test against 2 ULP to allow for combined error from exp_repro and the
-!! intrinsic exp() reference.
+!! quad-precision reference.
 subroutine test_exp_ulp_accuracy
   integer, parameter :: npts = 10000
   real, parameter :: xmin = -10.
@@ -462,27 +482,26 @@ subroutine test_exp_ulp_accuracy
     if (ulp_err >= 1.0) count_one_ulp = count_one_ulp + 1
   enddo
 
-  print '(a,1x,i0,1x,a)', "Tested", npts, "points in [-10, 10]"
+  print '("Tested ", i0, " points in [-10, 10]")', npts
 
-  print '(a21,1x,ES12.5,1x,a,1x,f10.4)', "max abs err:", max_abs_err, &
-      "at x =", x_max_abs
-  print '(a21,1x,ES12.5,1x,a,1x,f10.4)', "max rel err:", max_rel_err, &
-      "at x =", x_max_rel
-  print '(a21,1x,f12.10,1x,a,1x,f10.4)', "max ULP err (vs exp):", max_ulp, &
-      "at x =", x_max_ulp
+  print '("max abs err:", t24, ES12.5, " at x = ", f10.4)', &
+      max_abs_err, x_max_abs
+  print '("max rel err:", t24, ES12.5, " at x = ", f10.4)', &
+      max_rel_err, x_max_rel
+  print '("max ULP err (vs quad):", t25, f12.10, " at x = ", f10.4)', &
+      max_ulp, x_max_ulp
+  print '("mean abs err:", t24, ES12.5)', sum_abs_err / npts
+  print '("mean rel err:", t24, ES12.5)', sum_rel_err / npts
+  print '("RMS err:", t24, ES12.5)', sqrt(sum_sq_err / npts)
 
-  print '(a21,1x,ES12.5)', "mean abs err:", sum_abs_err / npts
-  print '(a21,1x,ES12.5)', "mean rel err:", sum_rel_err / npts
-  print '(a21,1x,ES12.5)', "RMS err:", sqrt(sum_sq_err / npts)
+  print '("correct (<0.5 ULP):", t25, i0, 1x, "(", f6.2, "%)")', &
+      count_exact, 100. * count_exact / npts
+  print '("above 0.5 ULP:", t25, i0, 1x, "(", f6.2, "%)")', &
+      count_half_ulp, 100. * count_half_ulp / npts
+  print '("above 1 ULP:", t25, i0, 1x, "(", f6.2, "%)")', &
+      count_one_ulp, 100. * count_one_ulp / npts
 
-  print '(a21,1x,i0,1x,a,1x,f6.2,a)', "correct (<0.5 ULP):", count_exact, &
-      "(", 100. * count_exact / npts, "%)"
-  print '(a21,1x,i0,1x,a,1x,f6.2,a)', "above 0.5 ULP:", count_half_ulp, &
-      "(", 100. * count_half_ulp / npts, "%)"
-  print '(a21,1x,i0,1x,a,1x,f6.2,a)', "above 1 ULP:", count_one_ulp, &
-      "(", 100. * count_one_ulp / npts, "%)"
-
-  ! exp_repro should be within 2 ULP of intrinsic exp
+  ! exp_repro should be within 2 ULP of the quad-precision reference.
   call assert(max_ulp < max_ulp_tol, "exp_repro max ULP error exceeds 2 over [-10, 10]")
 end subroutine test_exp_ulp_accuracy
 
@@ -496,7 +515,11 @@ subroutine test_exp_elemental
   x(:) = [-2., -1., 0., 1., 2.]
 
   do i = 1, 5
-    ref(i) = exp(x(i))
+    if (x(i) == -2.) ref(i) = exp_neg2
+    if (x(i) == -1.) ref(i) = inv_e
+    if (x(i) == 0.) ref(i) = 1.
+    if (x(i) == 1.) ref(i) = exp1
+    if (x(i) == 2.) ref(i) = exp2
     val(i) = exp_repro(x(i))
   enddo
 
@@ -662,26 +685,49 @@ subroutine print_ieee_flags_summary
   real :: test_values(12)
 
   if (.not. ieee_flags_supported) then
-    print '(a)', "  IEEE flags not supported on this platform"
+    print '(2x, "IEEE flags not supported on this platform")'
     return
   endif
 
   ! Define test cases
-  test_names(1) = "exact (0)"; test_values(1) = 0.
-  test_names(2) = "normal"; test_values(2) = 0.33
-  test_names(3) = "overflow"; test_values(3) = 1000.
-  test_names(4) = "underflow"; test_values(4) = -1000.
-  test_names(5) = "near overflow"; test_values(5) = 709.78
-  test_names(6) = "near underflow"; test_values(6) = -708.39
-  test_names(7) = "largest float"; test_values(7) = log(huge(rmold))
-  test_names(8) = "smallest normal"; test_values(8) = log(tiny(rmold))
-  test_names(9) = "+Inf"; test_values(9) = ieee_value(0., ieee_positive_inf)
-  test_names(10) = "-Inf"; test_values(10) = ieee_value(0., ieee_negative_inf)
-  test_names(11) = "NaN"; test_values(11) = ieee_value(0., ieee_quiet_nan)
-  test_names(12) = "sNaN"; test_values(12) = ieee_value(0., ieee_signaling_nan)
+  test_names(1) = "exact (0)"
+  test_values(1) = 0.
 
-  print '(/a,2x,a,3x,a)', "IEEE flags summary:", "exp()", "exp_repro"
-  print '(a18,2x,a5,3x,a5)', "", "IOUXZ", "IOUXZ"
+  test_names(2) = "normal"
+  test_values(2) = 0.33
+
+  test_names(3) = "overflow"
+  test_values(3) = 1000.
+
+  test_names(4) = "underflow"
+  test_values(4) = -1000.
+
+  test_names(5) = "near overflow"
+  test_values(5) = 709.78
+
+  test_names(6) = "near underflow"
+  test_values(6) = -708.39
+
+  test_names(7) = "largest float"
+  test_values(7) = log_huge
+
+  test_names(8) = "smallest normal"
+  test_values(8) = log_tiny
+
+  test_names(9) = "+Inf"
+  test_values(9) = ieee_value(0., ieee_positive_inf)
+
+  test_names(10) = "-Inf"
+  test_values(10) = ieee_value(0., ieee_negative_inf)
+
+  test_names(11) = "NaN"
+  test_values(11) = ieee_value(0., ieee_quiet_nan)
+
+  test_names(12) = "sNaN"
+  test_values(12) = ieee_value(0., ieee_signaling_nan)
+
+  print '(/, "IEEE flags summary:", 1x, "exp()", 3x, "exp_repro")'
+  print '(a18, 2x, "IOUXZ", 3x, "IOUXZ")', ""
 
   do i = 1, 12
     x = test_values(i)
@@ -696,7 +742,8 @@ subroutine print_ieee_flags_summary
     val_repro = exp_repro(x)
     call get_flag_string(flags_repro, flag_str_repro)
 
-    print '(a18,a,a5,a,a5)', trim(test_names(i)), ": ", flag_str_intrinsic, "   ", flag_str_repro
+    print '(a18, ": ", a5, 3x, a5)', &
+        trim(test_names(i)), flag_str_intrinsic, flag_str_repro
   enddo
 
 contains
