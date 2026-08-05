@@ -3733,7 +3733,7 @@ subroutine diag_update_remap_grids(diag_cs, alt_h, alt_T, alt_S, update_intensiv
     enddo
   endif
   if (update_extensive_local) then
-    diag_cs%h_begin(:,:,:) = diag_cs%h(:,:,:)
+    if (diag_cs%num_diag_coords > 0) diag_cs%h_begin(:,:,:) = diag_cs%h(:,:,:)
     if (dz_diag_needed) diag_cs%dz_begin(:,:,:) = dz_diag(:,:,:)
     do m=1, diag_cs%num_diag_coords
       if (diag_cs%diag_remap_cs(m)%Z_based_coord) then
