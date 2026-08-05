@@ -4288,13 +4288,27 @@ subroutine extract_surface_state(CS, sfc_state_in)
   sfc_state%T_is_conT = CS%tv%T_is_conT
   sfc_state%S_is_absS = CS%tv%S_is_absS
 
+  ! these mappings needed to avoid segfaults because of nested derived types
+  !$omp target enter data map(to: CS)
+  ! Preference would be to combine the omp statement with the if statement, but doing so
+  ! triggers an ICE in MacOS homebrew gfortran 16.1.0.
+  !$ if (use_temperature .or. (allocated(sfc_state%frazil) .and. associated(CS%tv%frazil))) then
+    !$omp target enter data map(to: CS%tv)
+  !$ endif
+  !$omp target enter data if(use_temperature) map(to: CS%tv%T, CS%tv%S)
+
   do concurrent (j=js:je, i=is:ie)
     sfc_state%sea_lev(i,j) = CS%ave_ssh_ibc(i,j)
   enddo
 
-  if (allocated(sfc_state%frazil) .and. associated(CS%tv%frazil)) then ; do concurrent (j=js:je, i=is:ie)
-    sfc_state%frazil(i,j) = CS%tv%frazil(i,j)
-  enddo ; endif
+  if (allocated(sfc_state%frazil) .and. associated(CS%tv%frazil)) then
+    ! needed to prevent segfault
+    !$omp target data map(to: CS%tv%frazil)
+    do concurrent (j=js:je, i=is:ie)
+      sfc_state%frazil(i,j) = CS%tv%frazil(i,j)
+    enddo
+    !$omp end target data
+  endif
 
   ! copy Hml into sfc_state, so that caps can access it
   do concurrent (j=js:je, i=is:ie)
@@ -4496,12 +4510,20 @@ subroutine extract_surface_state(CS, sfc_state_in)
     !$omp target update to(sfc_state%melt_potential)
   endif   ! melt_potential
 
+  ! Preference would be to combine the omp statement with the if statement, but doing so
+  ! triggers an ICE in MacOS homebrew gfortran 16.1.0.
+  !$ if ((allocated(sfc_state%taux_shelf) .and. allocated(CS%visc%taux_shelf)) .or. &
+  !$     (allocated(sfc_state%tauy_shelf) .and. allocated(CS%visc%tauy_shelf))) then
+    !$omp target enter data map(to: CS%visc)
+  !$ endif
   if (allocated(sfc_state%taux_shelf) .and. allocated(CS%visc%taux_shelf)) then
+    !$omp target enter data map(to: CS%visc%taux_shelf)
     do concurrent (j=js:je, I=is-1:ie)
       sfc_state%taux_shelf(I,j) = CS%visc%taux_shelf(I,j)
     enddo
   endif
   if (allocated(sfc_state%tauy_shelf) .and. allocated(CS%visc%tauy_shelf)) then
+    !$omp target enter data map(to: CS%visc%tauy_shelf)
     do concurrent (J=js-1:je, i=is:ie)
       sfc_state%tauy_shelf(i,J) = CS%visc%tauy_shelf(i,J)
     enddo
@@ -4650,6 +4672,11 @@ subroutine extract_surface_state(CS, sfc_state_in)
     !$omp target update if(allocated(sfc_state_in%tauy_shelf)) to(sfc_state_in%tauy_shelf)
     !$omp target update if(allocated(sfc_state_in%fco2)) to(sfc_state_in%fco2)
   endif
+  !$omp target exit data if(use_temperature) map(release: CS%tv%T, CS%tv%S)
+  !$omp target exit data &
+  !$omp   if (use_temperature .or. (allocated(sfc_state%frazil) .and. associated(CS%tv%frazil))) &
+  !$omp   map(release: CS%tv)
+  !$omp target exit data map(release: CS)
 
   call callTree_leave("extract_surface_sfc_state()")
 end subroutine extract_surface_state
