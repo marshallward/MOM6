@@ -389,17 +389,22 @@ subroutine tracer_hordiff(h, dt, MEKE, VarMix, visc, G, GV, US, CS, Reg, tv, do_
   if (CS%check_diffusive_CFL) then
     if (CS%show_call_tree) call callTree_waypoint("Checking diffusive CFL (tracer_hordiff)")
     max_CFL = 0.0
-    do j=js,je ; do i=is,ie
+    !$omp target enter data map(alloc: CFL)
+    do concurrent (j=js:je, i=is:ie) DO_LOCALITY(reduce(max:max_CFL))
       CFL(i,j) = 2.0*((khdt_x(I-1,j) + khdt_x(I,j)) + &
                       (khdt_y(i,J-1) + khdt_y(i,J))) * G%IareaT(i,j)
-      if (max_CFL < CFL(i,j)) max_CFL = CFL(i,j)
-    enddo ; enddo
+      max_CFL = max(max_CFL, CFL(i,j))
+    enddo
     call cpu_clock_begin(id_clock_sync)
     call max_across_PEs(max_CFL)
     call cpu_clock_end(id_clock_sync)
     num_itts = max(1, ceiling(max_CFL - 4.0*EPSILON(max_CFL)))
     I_numitts = 1.0 / (real(num_itts))
-    if (CS%id_CFL > 0) call post_data(CS%id_CFL, CFL, CS%diag)
+    if (CS%id_CFL > 0) then
+      !$omp target update from(CFL)
+      call post_data(CS%id_CFL, CFL, CS%diag)
+    endif
+    !$omp target exit data map(release: CFL)
   elseif (CS%max_diff_CFL > 0.0) then
     num_itts = max(1, ceiling(CS%max_diff_CFL - 4.0*EPSILON(CS%max_diff_CFL)))
     I_numitts = 1.0 / (real(num_itts))
