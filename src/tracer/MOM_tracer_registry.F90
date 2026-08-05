@@ -773,7 +773,7 @@ subroutine post_tracer_transport_diagnostics(G, GV, Reg, h_diag, diag)
   is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec ; nz = GV%ke
 
   ! If any tracers are posting 100m vertical integrals, compute weights
-  frac_under_100m(:,:,:) = 0.0
+  if (Reg%ntr > 0) frac_under_100m(:,:,:) = 0.0
   ! khi will be the largest layer index corresponding where ztop < 100m and ztop >= 100m
   ! in any column (we can reduce computation of 100m integrals by only looping through khi
   ! rather than GV%ke)
