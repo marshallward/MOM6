@@ -326,7 +326,7 @@ $(BUILD)/%/config.status: \
 	cd $(@D) && $(MOM_ENV) ../../../configure -n $(MOM_ACFLAGS) \
 	 || (cat config.log && false)
 
-../configure:
+../configure: FORCE
 	$(MAKE) -C ../ configure
 
 ALL_EXECS = symmetric asymmetric repro openmp opt opt_target coupled nuopc \
