@@ -5,7 +5,7 @@
 !> Unit tests for MOM_intrinsic_functions module, including exp_repro()
 module MOM_intrinsic_functions_tests
 
-use, intrinsic :: iso_fortran_env, only : int64, real64, real128
+use, intrinsic :: iso_fortran_env, only : real128
 use, intrinsic :: ieee_arithmetic, only : ieee_value
 use, intrinsic :: ieee_arithmetic, only : ieee_quiet_nan, ieee_signaling_nan
 use, intrinsic :: ieee_arithmetic, only : ieee_positive_inf, ieee_negative_inf
@@ -28,16 +28,16 @@ public :: run_intrinsic_functions_tests
 ! Mold value for default real
 real, parameter :: rmold = 0.
 
-! Mathematical constants as hex literals for bitwise reproducibility
-real, parameter :: ln2 = transfer(int(z'3FE62E42FEFA39EF', int64), rmold)
+! Mathematical constants.
+real, parameter :: ln2 = 0.693147180559945309417232121458176568
   !< ln(2) = 0.6931471805599453094172321...
-real, parameter :: half_ln2 = transfer(int(z'3FD62E42FEFA39EF', int64), rmold)
+real, parameter :: half_ln2 = 0.346573590279972654708616060729088284
   !< ln(2)/2 = 0.3465735902799726547086160...
-real, parameter :: sqrt2 = transfer(int(z'3FF6A09E667F3BCD', int64), rmold)
+real, parameter :: sqrt2 = 1.41421356237309504880168872420969808
   !< sqrt(2) = 1.4142135623730950488016887...
-real, parameter :: e_val = transfer(int(z'4005BF0A8B145769', int64), rmold)
+real, parameter :: e_val = 2.71828182845904523536028747135266250
   !< e = 2.7182818284590452353602874...
-real, parameter :: inv_e = transfer(int(z'3FD78B56362CEF38', int64), rmold)
+real, parameter :: inv_e = 0.367879441171442321595523770161460867
   !< 1/e = 0.3678794411714423215955237...
 
 ! Module-level flag to enable/disable IEEE exception tests
@@ -283,8 +283,7 @@ end subroutine test_exp_subnormal
 subroutine test_exp_largest_float
   real :: x, val, ref, err
   real, parameter :: tol = 1.e-13  ! Relaxed due to log/exp round-trip error
-  ! log(huge) = 709.78271289338397... = 0x40862E42FEFA39EF
-  real, parameter :: LOG_HUGE = transfer(int(z'40862E42FEFA39EF', int64), rmold)
+  real, parameter :: LOG_HUGE = log(huge(rmold))
 
   x = LOG_HUGE
   ref = exp(x)
@@ -301,8 +300,7 @@ end subroutine test_exp_largest_float
 subroutine test_exp_smallest_float
   real :: val, ref, err
   real, parameter :: tol = 5.e-14
-  ! log(tiny) = -708.39641853226408... = 0xC086232BDD7ABCD2
-  real, parameter :: LOG_TINY = transfer(int(z'C086232BDD7ABCD2', int64), rmold)
+  real, parameter :: LOG_TINY = log(tiny(rmold))
 
   ref = tiny(1.)
   val = exp_repro(LOG_TINY)
@@ -404,8 +402,10 @@ subroutine test_exp_ulp_accuracy
   enddo
 
   ! Compute test and reference values
-  val = exp_repro(x)
-  ref = exp(real(x, real128))
+  do i = 1, npts
+    val(i) = exp_repro(x(i))
+    ref(i) = exp(real(x(i), real128))
+  enddo
 
   ! Initialize statistics
   max_abs_err = 0.
@@ -493,9 +493,12 @@ subroutine test_exp_elemental
   real, parameter :: tol = 1.e-14
   integer :: i
 
-  x = [-2., -1., 0., 1., 2.]
-  ref = exp(x)
-  val = exp_repro(x)
+  x(:) = [-2., -1., 0., 1., 2.]
+
+  do i = 1, 5
+    ref(i) = exp(x(i))
+    val(i) = exp_repro(x(i))
+  enddo
 
   do i = 1, 5
     if (ref(i) /= 0.) then
@@ -646,7 +649,7 @@ end subroutine test_exp_flags_nan
 
 !> Print a summary table of IEEE exception flags for various inputs
 !!
-!! This is informational only — it shows which flags are raised by exp() and
+!! This is informational only - it shows which flags are raised by exp() and
 !! exp_repro() for different input categories. Not enforced by assertions.
 subroutine print_ieee_flags_summary
   real, volatile :: x, val_intrinsic, val_repro
@@ -670,8 +673,8 @@ subroutine print_ieee_flags_summary
   test_names(4) = "underflow"; test_values(4) = -1000.
   test_names(5) = "near overflow"; test_values(5) = 709.78
   test_names(6) = "near underflow"; test_values(6) = -708.39
-  test_names(7) = "largest float"; test_values(7) = transfer(int(z'40862E42FEFA39EF', int64), rmold)
-  test_names(8) = "smallest normal"; test_values(8) = transfer(int(z'C086232BDD7ABCD2', int64), rmold)
+  test_names(7) = "largest float"; test_values(7) = log(huge(rmold))
+  test_names(8) = "smallest normal"; test_values(8) = log(tiny(rmold))
   test_names(9) = "+Inf"; test_values(9) = ieee_value(0., ieee_positive_inf)
   test_names(10) = "-Inf"; test_values(10) = ieee_value(0., ieee_negative_inf)
   test_names(11) = "NaN"; test_values(11) = ieee_value(0., ieee_quiet_nan)
@@ -760,7 +763,7 @@ subroutine run_intrinsic_functions_tests
   call suite%add(test_exp_nan, "test_exp_nan")
   call suite%add(test_exp_neg_nan, "test_exp_neg_nan")
 
-  ! Evaluate error if quadratic is available
+  ! Evaluate error if quad precision is available
   if (real128 >= 0) then
     call suite%add(test_exp_ulp_accuracy, "test_exp_ulp_accuracy")
   endif
