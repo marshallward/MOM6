@@ -3839,6 +3839,7 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, &
   !$omp target enter data map(alloc: CS%set_visc_CSp)
   call set_visc_init(Time, G, GV, US, param_file, diag, CS%visc, CS%set_visc_CSp, restart_CSp, CS%OBC)
 
+  !$omp target enter data map(alloc: CS%thickness_diffuse_CSp)
   call thickness_diffuse_init(Time, G, GV, US, param_file, diag, CS%CDp, CS%thickness_diffuse_CSp)
   if (CS%interface_filter) &
     call interface_filter_init(Time, G, GV, US, param_file, diag, CS%CDp, CS%interface_filter_CSp)

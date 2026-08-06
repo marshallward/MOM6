@@ -248,10 +248,6 @@ subroutine thickness_diffuse(h, uhtr, vhtr, tv, dt, G, GV, US, MEKE, VarMix, CDp
     cg1 => null()
   endif
 
-  !$omp target update to(CS%Khth, CS%KHTH_Slope_Cff, CS%max_Khth_CFL, CS%Khth_Min, CS%Khth_Max, &
-  !$omp   CS%slope_max, CS%use_FGNV_streamfn, CS%FGNV_scale, CS%MEKE_GEOMETRIC_alpha, &
-  !$omp   CS%MEKE_GEOMETRIC_epsilon, CS%GM_src_alt, CS%MEKE_src_slope_bug, CS%use_GM_work_bug, &
-  !$omp   CS%id_slope_x, CS%id_slope_y, CS%id_sfn_unlim_x, CS%id_sfn_unlim_y, CS%id_sfn_x, CS%id_sfn_y)
   !$omp target update to(MEKE%KhTh_fac)
   !$omp target enter data map(alloc: KH_u_CFL, KH_v_CFL, Khth_Loc_u, Khth_Loc_v, int_slope_u, int_slope_v, &
   !$omp                     e, KH_u, KH_v, uhD, vhD) map(to: VarMix, VarMix%res_fn_u, VarMix%res_fn_v)
@@ -2587,9 +2583,13 @@ subroutine thickness_diffuse_init(Time, G, GV, US, param_file, diag, CDp, CS)
     call MOM_error(FATAL, "THICKNESSDIFFUSE_NJBLOCK must be nonnegative; "//&
                           "use 0 to select the default block size.")
 
+  !$omp target update to(CS)
+  !$omp target enter data if(CS%read_khth) map(to: CS%khth2d)
+
   if (CS%use_GME_thickness_diffuse) then
     allocate(CS%KH_u_GME(G%IsdB:G%IedB, G%jsd:G%jed, GV%ke+1), source=0.)
     allocate(CS%KH_v_GME(G%isd:G%ied, G%JsdB:G%JedB, GV%ke+1), source=0.)
+    !$omp target enter data map(to: CS%Kh_u_GME, CS%Kh_v_GME)
   endif
 
   CS%id_uhGM = register_diag_field('ocean_model', 'uhGM', diag%axesCuL, Time, &
@@ -2608,8 +2608,10 @@ subroutine thickness_diffuse_init(Time, G, GV, US, param_file, diag, CDp, CS)
           'W m-2', conversion=US%RZ3_T3_to_W_m2*US%L_to_Z**2, cmor_field_name='tnkebto', &
           cmor_long_name='Integrated Tendency of Ocean Mesoscale Eddy KE from Parameterized Eddy Advection', &
           cmor_standard_name='tendency_of_ocean_eddy_kinetic_energy_content_due_to_parameterized_eddy_advection')
-  if (CS%id_GMwork > 0) &
+  if (CS%id_GMwork > 0) then
     allocate(CS%GMwork(G%isd:G%ied,G%jsd:G%jed), source=0.)
+    !$omp target enter data map(to: CS%GMwork)
+  endif
 
   CS%id_KH_u = register_diag_field('ocean_model', 'KHTH_u', diag%axesCui, Time, &
            'Parameterized mesoscale eddy advection diffusivity at U-point', &
@@ -2636,13 +2638,17 @@ subroutine thickness_diffuse_init(Time, G, GV, US, param_file, diag, CDp, CS)
 
   CS%id_slope_x =  register_diag_field('ocean_model', 'neutral_slope_x', diag%axesCui, Time, &
            'Zonal slope of neutral surface', 'nondim', conversion=US%Z_to_L)
-  if (CS%id_slope_x > 0) &
+  if (CS%id_slope_x > 0) then
     allocate(CS%diagSlopeX(G%IsdB:G%IedB,G%jsd:G%jed,GV%ke+1), source=0.)
+    !$omp target enter data map(to: CS%diagSlopeX)
+  endif
 
   CS%id_slope_y =  register_diag_field('ocean_model', 'neutral_slope_y', diag%axesCvi, Time, &
            'Meridional slope of neutral surface', 'nondim', conversion=US%Z_to_L)
-  if (CS%id_slope_y > 0) &
+  if (CS%id_slope_y > 0) then
     allocate(CS%diagSlopeY(G%isd:G%ied,G%JsdB:G%JedB,GV%ke+1), source=0.)
+    !$omp target enter data map(to: CS%diagSlopeY)
+  endif
 
   CS%id_sfn_x =  register_diag_field('ocean_model', 'GM_sfn_x', diag%axesCui, Time, &
            'Parameterized Zonal Overturning Streamfunction', &
