@@ -892,11 +892,15 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV
 
   !$omp target enter data &
   !$omp   map(alloc: diag_sfn_x, diag_sfn_y, uhtot, Work_u, vhtot, Work_v, h_avail, h_avail_rsum, &
-  !$omp     h_frac, pres, dz, S, T, dzN2_u, Slope_x_PE, slope_x, slope2_Ratio_u, Sfn_unlim_u, hN2_x_PE, &
+  !$omp     h_frac, pres, dz, S, T, dzN2_u, Slope_x_PE, slope2_Ratio_u, Sfn_unlim_u, hN2_x_PE, &
   !$omp     drho_dT_u, drho_dT_dT_h, drho_dS_u, drdkDe_u, drdi_u, diag_sfn_unlim_x, pres_u, T_u, S_u, &
-  !$omp     dzN2_v, Slope_y_PE, slope_y, slope2_Ratio_v, Sfn_unlim_v, hN2_y_PE, drho_dT_v, drho_dT_dT_hr, &
+  !$omp     dzN2_v, Slope_y_PE, slope2_Ratio_v, Sfn_unlim_v, hN2_y_PE, drho_dT_v, drho_dT_dT_hr, &
   !$omp     drho_dS_v, drdj_v, diag_sfn_unlim_y, T_v, S_v, pres_v, drdkDe_v) &
-  !$omp   map(to: tv, tv%T, tv%S, tv%p_surf, meke, meke%gm_src)
+  !$omp   map(to: tv, tv%T, tv%S, meke)
+  !$omp target enter data if(present_slope_x) map(to: slope_x)
+  !$omp target enter data if(present_slope_y) map(to: slope_y)
+  !$omp target enter data if(associated(tv%p_surf)) map(to: tv%p_surf)
+  !$omp target enter data if(allocated(MEKE%GM_src)) map(to: MEKE%GM_src)
 
   do concurrent (k=1:nz+1, j=G%jsd:G%jed, i=G%isdB:G%iedB)
     Slope_x_PE(i,j,k) = 0.0
@@ -917,9 +921,11 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV
   endif
 
   ! Rescale the thicknesses, perhaps using the specific volume.
-  !$omp target enter data map(to: tv, tv%SpV_avg) map(alloc: dz)
+  !$omp target enter data map(to: tv) map(alloc: dz)
+  !$omp target enter data if(allocated(tv%SpV_avg)) map(to: tv%SpV_avg)
   call thickness_to_dz(h, tv, dz, G, GV, US, halo_size=1, do_offload=.true.)
-  !$omp target exit data map(release: tv, tv%SpV_avg) map(from: dz)
+  !$omp target exit data if(allocated(tv%SpV_avg)) map(release: tv%SpV_avg)
+  !$omp target exit data map(release: tv) map(from: dz)
 
   if (CS%use_FGNV_streamfn .and. .not. associated(cg1)) call MOM_error(FATAL, &
        "cg1 must be associated when using FGNV streamfunction.")
@@ -966,7 +972,7 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV
     EOSdom_u(1,2) = iend-istart+1
     EOSdom_u(2,2) = jend-jstart+1
     EOSdom_h1(1,2) = iend-istart+2
-    EOSdom_h1(1,2) = jend-jstart+1
+    EOSdom_h1(2,2) = jend-jstart+1
     do concurrent (j=jstart:jend, i=istart:iend)
       jj = j - jstart + 1 ; ii = i - istart + 1
       dzN2_u(ii,jj,1) = 0. ; dzN2_u(ii,jj,nz+1) = 0.
@@ -1823,12 +1829,15 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV
 
   !$omp target exit data &
   !$omp   map(release: diag_sfn_x, diag_sfn_y, uhtot, Work_u, vhtot, Work_v, h_avail, h_avail_rsum, &
-  !$omp     h_frac, pres, dz, S, T, dzN2_u, Slope_x_PE, slope_x, slope2_Ratio_u, Sfn_unlim_u, &
+  !$omp     h_frac, pres, dz, S, T, dzN2_u, Slope_x_PE, slope2_Ratio_u, Sfn_unlim_u, &
   !$omp     hN2_x_PE, drho_dT_u, drho_dT_dT_h, drho_dS_u, drdkDe_u, drdi_u, diag_sfn_unlim_x, pres_u, &
-  !$omp     T_u, S_u, dzN2_v, Slope_y_PE, slope_y, slope2_Ratio_v, Sfn_unlim_v, hN2_y_PE, &
+  !$omp     T_u, S_u, dzN2_v, Slope_y_PE, slope2_Ratio_v, Sfn_unlim_v, hN2_y_PE, &
   !$omp     drho_dT_v, drho_dT_dT_hr, drho_dS_v, drdj_v, diag_sfn_unlim_y, T_v, S_v, pres_v, &
-  !$omp     drdkDe_v, tv, tv%T, tv%S, tv%p_surf, meke) &
-  !$omp   map(from: meke%gm_src)
+  !$omp     drdkDe_v, tv, tv%T, tv%S, meke)
+  !$omp target exit data if(present_slope_x) map(release: slope_x)
+  !$omp target exit data if(present_slope_y) map(release: slope_y)
+  !$omp target exit data if(associated(tv%p_surf)) map(release: tv%p_surf)
+  !$omp target exit data if(allocated(MEKE%GM_src)) map(from: MEKE%GM_src)
 
 end subroutine thickness_diffuse_full
 
