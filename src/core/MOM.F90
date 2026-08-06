@@ -1323,8 +1323,10 @@ subroutine step_MOM_dynamics(forces, p_surf_begin, p_surf_end, dt, dt_tr_adv, &
     if (CS%thickness_diffuse) then
       call cpu_clock_begin(id_clock_thick_diff)
 
-      if (CS%VarMix%use_variable_mixing) &
+      if (CS%VarMix%use_variable_mixing) then
+        !$omp target update from(h)
         call calc_slope_functions(h, CS%tv, dt, G, GV, US, CS%VarMix, OBC=CS%OBC)
+      endif
 
       !$omp target update from(h, CS%uhtr, CS%vhtr)
       call thickness_diffuse(h, CS%uhtr, CS%vhtr, CS%tv, dt_tr_adv, G, GV, US, &
@@ -1332,8 +1334,9 @@ subroutine step_MOM_dynamics(forces, p_surf_begin, p_surf_end, dt, dt_tr_adv, &
                              CS%stoch_CS, u, v)
 
       call cpu_clock_end(id_clock_thick_diff)
+      !$omp target update from(h)
       call pass_var(h, G%Domain, clock=id_clock_pass, halo=CS%dyn_h_stencil)
-      !$omp target update to(h, CS%uhtr, CS%vhtr)
+      !$omp target update to(h)
       if (showCallTree) call callTree_waypoint("finished thickness_diffuse_first (step_MOM)")
     endif
 
@@ -1513,17 +1516,20 @@ subroutine step_MOM_dynamics(forces, p_surf_begin, p_surf_end, dt, dt_tr_adv, &
     if (CS%thickness_diffuse) then
       call cpu_clock_begin(id_clock_thick_diff)
 
-      if (CS%VarMix%use_variable_mixing) &
+      if (CS%VarMix%use_variable_mixing) then
+        !$omp target update from(h)
         call calc_slope_functions(h, CS%tv, dt, G, GV, US, CS%VarMix, OBC=CS%OBC)
+      endif
 
       !$omp target update from(h, CS%uhtr, CS%vhtr)
       call thickness_diffuse(h, CS%uhtr, CS%vhtr, CS%tv, dt, G, GV, US, &
                              CS%MEKE, CS%VarMix, CS%CDp, CS%thickness_diffuse_CSp, &
                              CS%stoch_CS, u, v)
       call cpu_clock_end(id_clock_thick_diff)
+      !$omp target update from(h)
       call pass_var(h, G%Domain, clock=id_clock_pass, halo=CS%dyn_h_stencil)
       if (CS%debug) call hchksum(h,"Post-thickness_diffuse h", G%HI, haloshift=1, unscale=GV%H_to_MKS)
-      !$omp target update to(h, CS%uhtr, CS%vhtr)
+      !$omp target update to(h)
       if (showCallTree) call callTree_waypoint("finished thickness_diffuse (step_MOM)")
     endif
 

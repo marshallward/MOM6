@@ -224,7 +224,6 @@ subroutine thickness_diffuse(h, uhtr, vhtr, tv, dt, G, GV, US, MEKE, VarMix, CDp
   if (niblock == 0) niblock = ie-is+2
   if (njblock == 0) njblock = je-js+2
 
-  !$omp target enter data map(to: MEKE) if(allocated(MEKE%GM_src) .or. allocated(MEKE%Kh))
   !$omp target enter data map(alloc: MEKE%GM_src) if(allocated(MEKE%GM_src))
   !$omp target enter data map(alloc: MEKE%Kh) if(allocated(MEKE%Kh))
 
@@ -249,7 +248,11 @@ subroutine thickness_diffuse(h, uhtr, vhtr, tv, dt, G, GV, US, MEKE, VarMix, CDp
     cg1 => null()
   endif
 
-  !$omp target update to(CS, MEKE)
+  !$omp target update to(CS%Khth, CS%KHTH_Slope_Cff, CS%max_Khth_CFL, CS%Khth_Min, CS%Khth_Max, &
+  !$omp   CS%slope_max, CS%use_FGNV_streamfn, CS%FGNV_scale, CS%MEKE_GEOMETRIC_alpha, &
+  !$omp   CS%MEKE_GEOMETRIC_epsilon, CS%GM_src_alt, CS%MEKE_src_slope_bug, CS%use_GM_work_bug, &
+  !$omp   CS%id_slope_x, CS%id_slope_y, CS%id_sfn_unlim_x, CS%id_sfn_unlim_y, CS%id_sfn_x, CS%id_sfn_y)
+  !$omp target update to(MEKE%KhTh_fac)
   !$omp target enter data map(alloc: KH_u_CFL, KH_v_CFL, Khth_Loc_u, Khth_Loc_v, int_slope_u, int_slope_v, &
   !$omp                     e, KH_u, KH_v, uhD, vhD) map(to: VarMix, VarMix%res_fn_u, VarMix%res_fn_v)
 
@@ -663,7 +666,6 @@ subroutine thickness_diffuse(h, uhtr, vhtr, tv, dt, G, GV, US, MEKE, VarMix, CDp
   !$omp                    e, KH_u, KH_v, uhD, vhD, VarMix, VarMix%res_fn_u, VarMix%res_fn_v)
   !$omp target exit data map(from: MEKE%GM_src) if(allocated(MEKE%GM_src))
   !$omp target exit data map(from: MEKE%Kh) if(allocated(MEKE%Kh))
-  !$omp target exit data map(release: MEKE) if(allocated(MEKE%GM_src) .or. allocated(MEKE%Kh))
 
 end subroutine thickness_diffuse
 
