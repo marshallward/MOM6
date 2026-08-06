@@ -41,6 +41,10 @@ integer(kind=int_kind), parameter :: neg_inf_bits &
     = ior(pos_inf_bits, ishft(-1_int_kind, signbit))
   !< IEEE -Inf bit pattern
 
+! Fast integer rounding offset
+real, parameter :: round_bias = 1.5 * 2_int_kind**(digits(real_mold) - 1)
+  !< Binary offset used to trigger rounding of fractional values
+
 contains
 
 !> Reproducible exponential function
@@ -71,10 +75,10 @@ module procedure exp_repro
   ! Range of K = nint(x / ln2) for which direct exponent scaling is safe.
   ! Beyond this range, a bias is applied to handle subnormals and overflow.
   ! NOTE: Fortran exponent is defined as one less than IEEE exponent.
-  integer, parameter :: Kmin = minexponent(real_mold) + 1
+  real, parameter :: Kmin = real(minexponent(real_mold) + 1)
     !< Minimum K before subnormal scaling is needed
     !! Kmin = (minexponent() - 1) + 1 (for min exp(r)) + 1 (safety buffer)
-  integer, parameter :: Kmax = maxexponent(real_mold) - 2
+  real, parameter :: Kmax = real(maxexponent(real_mold) - 2)
     !< Maximum K before overflow scaling is needed
     !! Kmax = (maxexponent() - 1) - 0 (max exp(r)) - 1 (safety buffer)
   integer(kind=int_kind), parameter :: Kbias = maxexponent(real_mold) - 2
@@ -88,7 +92,7 @@ module procedure exp_repro
     ! Cached value of x / ln2 [nondim]
   real :: K
     ! Nearest IEEE-rounded integer to (x / ln2) [nondim]
-    ! NOTE: Stored as a real to avoid extra type conversion
+    ! NOTE: K is stored as real to avoid int/real type conversions
   real :: r
     ! Range-reduced input, r = x - K ln2 [nondim]
   real :: e
@@ -162,15 +166,18 @@ module procedure exp_repro
   ! A resolved exponent is in the range {-1022,1023}, so K must be in
   ! {-1021,1023}.  (For safety, we further reduce the range by 1).
 
-  ! Determine if K is outside the supported exponent range.  If so, then apply
-  ! a bias j to normalize the exponent.
+  ! Determine if K is outside the supported exponent range.
+  ! If so, then apply a bias j to normalize the exponent.
   ! Kbias is chosen so that the exponent is "something near 1".
-  j = merge(Kbias, 0_int_kind, K < real(Kmin, kind(real_mold))) &
-      + merge(-Kbias, 0_int_kind, K > real(Kmax, kind(real_mold)))
+  j = merge(Kbias, 0, K < Kmin) + merge(-Kbias, 0, K > Kmax)
 
-  ! Get the bit representation of exp(r) and extract the integer value of K
+  ! Get the bit representation of exp(r)
   eb = transfer(e, int_mold)
-  Kb = int(K, int_kind)
+
+  ! This is a fast alternative to int(K), similar to fast_rint().
+  ! Kb includes the biased 2**52 in its exponent field, but these are dropped
+  ! during the later ishft() operation.
+  Kb = transfer(K + round_bias, int_mold)
 
   ! Rescale to exp(r) to exp(x), possibly including the j bias.
   eb = eb + ishft(Kb + j, expbit)
@@ -178,9 +185,9 @@ module procedure exp_repro
 
   ! Undo the 2**j bias as floating point multiplication.
   ! - For "normals", this has no effect.
-  ! - For subnormals, this will force subnormal estimation (if enabled)
+  ! - For subnormals, this will force subnormal estimation (if enabled).
   ! - For resolvable K beyond this range, it triggers an over/underflow.
-  ! - Extreme K have already been filtered out by the initial min(max(x))
+  ! - Extreme values of K have already been filtered out by the min/max step.
   fb = ishft(int(expbias, int_kind) - j, expbit)
   a = a * transfer(fb, real_mold)
 end procedure exp_repro
@@ -253,9 +260,6 @@ pure function fast_rint(x) result(n)
     !< Real value to be rounded to the nearest integer
   real :: n
     !< Nearest integer to x, stored as a real
-
-  real, parameter :: round_bias = 1.5 * 2_int_kind**(digits(real_mold) - 1)
-    !< Binary offset used to trigger rounding of fractional values
 
   n = (x + round_bias) - round_bias
 end function fast_rint
