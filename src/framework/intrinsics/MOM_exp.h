@@ -1,7 +1,7 @@
-!// exp_repro.h - Preprocessor macros for reproducible exp()
+!// MOM_exp.h - Preprocessor macros for reproducible exp()
 !//
 !// Usage:
-!//   #include "exp_repro.h"
+!//   #include "MOM_exp.h"
 !//
 !// Required:
 !//   use ieee_arithmetic, only : ieee_rint

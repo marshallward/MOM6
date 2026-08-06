@@ -33,13 +33,6 @@ integer, parameter :: expwidth = signbit - expbit
 integer, parameter :: expbias = maxexponent(real_mold) - 1
   !< Exponent bias
 
-integer, parameter :: lower_scale_threshold = minexponent(real_mold) + 1
-  !< Lower exponent threshold below which subnormal scaling is used
-integer, parameter :: upper_scale_threshold = maxexponent(real_mold) - 4
-  !< Upper exponent threshold above which overflow-safe scaling is used
-integer(kind=int_kind), parameter :: exponent_scale = maxexponent(real_mold) - 2
-  !< Exponent adjustment used for overflow and subnormal scaling
-
 ! IEEE 754 special values
 integer(kind=int_kind), parameter :: pos_inf_bits &
     = ishft(2_int_kind**expwidth - 1_int_kind, expbit)
@@ -75,6 +68,19 @@ module procedure exp_repro
   real, parameter :: ln2_lo = 1.90821492927058770002e-10
     !< Lower precision bits of ln2: 1.90821492927058770002e-10 [nondim]
 
+  ! Range of K = nint(x / ln2) for which direct exponent scaling is safe.
+  ! Beyond this range, a bias is applied to handle subnormals and overflow.
+  ! NOTE: Fortran exponent is defined as one less than IEEE exponent.
+  integer, parameter :: Kmin = minexponent(real_mold) + 1
+    !< Minimum K before subnormal scaling is needed
+    !! Kmin = (minexponent() - 1) + 1 (for min exp(r)) + 1 (safety buffer)
+  integer, parameter :: Kmax = maxexponent(real_mold) - 2
+    !< Maximum K before overflow scaling is needed
+    !! Kmax = (maxexponent() - 1) - 0 (max exp(r)) - 1 (safety buffer)
+  integer(kind=int_kind), parameter :: Kbias = maxexponent(real_mold) - 2
+    !< Exponent adjustment used for overflow and subnormal scaling
+    !! Any bias which rescales 2**K exp(r) to O(1) works here.
+
   ! Range-reduction variables
   real :: xc
     ! x after being bounded by xmin and xmax [nondim]
@@ -91,8 +97,10 @@ module procedure exp_repro
   integer(kind=int_kind) :: xb, Kb, eb
     ! Bit representations of x, K, e
 
-  integer(kind=int_kind) :: j, fb
-    ! j-scaling for subnormal handling; fb is the scaling factor bits
+  integer(kind=int_kind) :: j
+    ! Bias added to K to compensate for exponent K beyond {-1022,..,+1023}.
+  integer(kind=int_kind) :: fb
+    ! Bit representation of the j-bias, 2**j
 
   logical :: nonfinite
     ! True if input is a nonfinite float (+/-Inf, NaN)
@@ -150,23 +158,29 @@ module procedure exp_repro
   ! Compute exp(x) = 2**K exp(r), an exact power-of-2 calculation.
   ! Adjust scaling to compensate for subnormal output.
 
-  ! Determine if a subnormal j-scaling may be required.  The range is reduced
-  ! to account for the range of exp(r).
-  j = merge(exponent_scale, 0_int_kind, K < real(lower_scale_threshold, kind(real_mold))) &
-      + merge(-exponent_scale, 0_int_kind, K > real(upper_scale_threshold, kind(real_mold)))
+  ! exp(r) has range [0.707, 1.414], so it shifts K by either 0 or -1.
+  ! A resolved exponent is in the range {-1022,1023}, so K must be in
+  ! {-1021,1023}.  (For safety, we further reduce the range by 1).
 
-  ! Get the bit representation of exp(r) and K
+  ! Determine if K is outside the supported exponent range.  If so, then apply
+  ! a bias j to normalize the exponent.
+  ! Kbias is chosen so that the exponent is "something near 1".
+  j = merge(Kbias, 0_int_kind, K < real(Kmin, kind(real_mold))) &
+      + merge(-Kbias, 0_int_kind, K > real(Kmax, kind(real_mold)))
+
+  ! Get the bit representation of exp(r) and extract the integer value of K
   eb = transfer(e, int_mold)
   Kb = int(K, int_kind)
 
-  ! Rescale to 2**(K+j) exp(r)
-  ! For most values, j is zero and this completes scaling.
+  ! Rescale to exp(r) to exp(x), possibly including the j bias.
   eb = eb + ishft(Kb + j, expbit)
   a = transfer(eb, real_mold)
 
-  ! Undo the 2**j scale as a multiplication.
-  ! For subnormals, this set the subnormal scale.
-  ! For more extreme values of K, this will trigger over/underflow.
+  ! Undo the 2**j bias as floating point multiplication.
+  ! - For "normals", this has no effect.
+  ! - For subnormals, this will force subnormal estimation (if enabled)
+  ! - For resolvable K beyond this range, it triggers an over/underflow.
+  ! - Extreme K have already been filtered out by the initial min(max(x))
   fb = ishft(int(expbias, int_kind) - j, expbit)
   a = a * transfer(fb, real_mold)
 end procedure exp_repro
@@ -220,9 +234,9 @@ end function exp_remez_horner_10
 
 !> An optimized nearest-integer function for floating point reals.
 !!
-!! The value x is shifted from 2**K (1 + a) to 2**(digits-1+K) (1.5 + a'), causing
-!! any fractional bits to be rounded according to current IEEE setting.  In
-!! almost all cases, this is nearest ties-to-even.
+!! The value x is shifted from 2**K (1 + a) to 2**(digits-1+K) (1.5 + a'),
+!! causing the fractional part to be rounded according to the current IEEE
+!! settings.  In almost all cases, this is nearest ties-to-even.
 !!
 !! The behavior of this function does not match nint() or anint().  The nint()
 !! function always ties away from zero, e.g. nint(2.5) = 3.
@@ -232,7 +246,7 @@ end function exp_remez_horner_10
 !!
 !! It is essential that compilers not reduce (x+b)-b to x.  This can typically
 !! be ensured as long as parentheses are respected.  This is managed by the
-!! ENABLE_FAST_RINT macro in exp_repro.h and assigned to NEAREST_INT().  If
+!! ENABLE_FAST_RINT macro in MOM_exp.h and assigned to NEAREST_INT().  If
 !! unset, then ieee_rint() is used.
 pure function fast_rint(x) result(n)
   real, intent(in) :: x
@@ -240,7 +254,7 @@ pure function fast_rint(x) result(n)
   real :: n
     !< Nearest integer to x, stored as a real
 
-  real, parameter :: round_bias = 1.5 * 2_int64**(digits(real_mold) - 1)
+  real, parameter :: round_bias = 1.5 * 2_int_kind**(digits(real_mold) - 1)
     !< Binary offset used to trigger rounding of fractional values
 
   n = (x + round_bias) - round_bias

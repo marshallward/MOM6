@@ -506,6 +506,108 @@ subroutine test_exp_ulp_accuracy
 end subroutine test_exp_ulp_accuracy
 
 
+!> Test the exponential property: exp(r1) * exp(r2) = exp(r1 + r2)
+!!
+!! This property test verifies that exp_repro produces consistent results
+!! by checking that the product of two exponentials equals the exponential
+!! of the sum, within floating-point tolerance.
+subroutine test_exp_product_property
+  integer, parameter :: npts = 1000
+  real, parameter :: tol = 1.e-14
+
+  real :: r1, r2
+  real :: exp_r1, exp_r2, exp_sum
+  real :: product_result, sum_result
+  real :: err, max_err
+  real :: r1_max, r2_max
+  integer :: i
+  real :: seed
+
+  max_err = 0.
+
+  ! Use a simple deterministic sequence for reproducibility
+  seed = 0.123456789
+
+  do i = 1, npts
+    ! Generate pseudo-random values in a range where sum won't overflow
+    ! Keep r1, r2 in [-5, 5] so r1+r2 in [-10, 10]
+    seed = mod(seed * 1103515245. + 12345., 2.**31)
+    r1 = (seed / 2.**31) * 10. - 5.
+
+    seed = mod(seed * 1103515245. + 12345., 2.**31)
+    r2 = (seed / 2.**31) * 10. - 5.
+
+    exp_r1 = exp_repro(r1)
+    exp_r2 = exp_repro(r2)
+    exp_sum = exp_repro(r1 + r2)
+
+    product_result = exp_r1 * exp_r2
+    sum_result = exp_sum
+
+    if (sum_result /= 0.) then
+      err = abs(product_result - sum_result) / abs(sum_result)
+      if (err > max_err) then
+        max_err = err
+        r1_max = r1
+        r2_max = r2
+      endif
+    endif
+  enddo
+
+  print '("Tested ", i0, " random (r1, r2) pairs")', npts
+  print '("max rel err in exp(r1)*exp(r2) vs exp(r1+r2):", t48, ES12.5)', max_err
+  print '("  at r1 = ", f10.6, ", r2 = ", f10.6)', r1_max, r2_max
+
+  call assert(max_err < tol, "exp_repro product property test failed")
+end subroutine test_exp_product_property
+
+
+!> Test the exponential property: exp(-x) = 1/exp(x)
+!!
+!! This property test verifies that exp_repro(-x) equals the reciprocal
+!! of exp_repro(x), within floating-point tolerance.
+subroutine test_exp_negation_property
+  integer, parameter :: npts = 1000
+  real, parameter :: tol = 1.e-14
+
+  real :: x
+  real :: exp_neg_x, inv_exp_x
+  real :: err, max_err
+  real :: x_max
+  integer :: i
+  real :: seed
+
+  max_err = 0.
+
+  ! Use a simple deterministic sequence for reproducibility
+  seed = 0.987654321
+
+  do i = 1, npts
+    ! Generate pseudo-random values in a range that avoids overflow/underflow
+    ! Keep x in [-300, 300] so both exp(x) and exp(-x) are representable
+    seed = mod(seed * 1103515245. + 12345., 2.**31)
+    x = (seed / 2.**31) * 600. - 300.
+
+    exp_neg_x = exp_repro(-x)
+    inv_exp_x = 1. / exp_repro(x)
+
+    if (inv_exp_x /= 0. .and. exp_neg_x /= 0.) then
+      err = abs(exp_neg_x - inv_exp_x) / abs(inv_exp_x)
+      if (err > max_err) then
+        max_err = err
+        x_max = x
+      endif
+    endif
+  enddo
+
+  print '("Tested ", i0, " random x values")', npts
+  print '("max rel err in exp(-x) vs 1/exp(x):", t48, ES12.5)', max_err
+  print '("  at x = ", f10.6)', x_max
+
+  call assert(max_err < tol, "exp_repro negation property test failed")
+end subroutine test_exp_negation_property
+
+
 !> Test that exp_repro is elemental (works on arrays)
 subroutine test_exp_elemental
   real :: x(5), val(5), ref(5), err
@@ -814,6 +916,10 @@ subroutine run_intrinsic_functions_tests
   if (real128 >= 0) then
     call suite%add(test_exp_ulp_accuracy, "test_exp_ulp_accuracy")
   endif
+
+  ! Property tests
+  call suite%add(test_exp_product_property, "test_exp_product_property")
+  call suite%add(test_exp_negation_property, "test_exp_negation_property")
 
   ! Elemental test
   call suite%add(test_exp_elemental, "test_exp_elemental")
