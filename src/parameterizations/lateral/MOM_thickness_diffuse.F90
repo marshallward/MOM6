@@ -568,7 +568,13 @@ subroutine thickness_diffuse(h, uhtr, vhtr, tv, dt, G, GV, US, MEKE, VarMix, CDp
 
   ! offer diagnostic fields for averaging
   if (query_averaging_enabled(CS%diag)) then
-    !$omp target update from(uhD, vhD)
+    !$omp target update if (CS%id_uhGM>0) from(uhD)
+    !$omp target update if (CS%id_vhGM>0) from(vhD)
+    !$omp target update if (CS%id_GMwork>0) from(CS%GMWork)
+    !$omp target update if (CS%id_KH_u>0) from(KH_u)
+    !$omp target update if (CS%id_KH_v>0) from(KH_v)
+    !$omp target update if (CS%id_KH_u1>0 .and. .not.CS%id_KH_u>0) from(KH_u(:,:,1))
+    !$omp target update if (CS%id_KH_v1>0 .and. .not.CS%id_KH_v>0) from(KH_v(:,:,1))
     if (CS%id_uhGM > 0)   call post_data(CS%id_uhGM, uhD, CS%diag)
     if (CS%id_vhGM > 0)   call post_data(CS%id_vhGM, vhD, CS%diag)
     if (CS%id_GMwork > 0) call post_data(CS%id_GMwork, CS%GMwork, CS%diag)
@@ -582,6 +588,9 @@ subroutine thickness_diffuse(h, uhtr, vhtr, tv, dt, G, GV, US, MEKE, VarMix, CDp
     ! are depth independent.  If a thickness-weighted average were used, the variations
     ! of thickness could give a spurious depth dependence to the diagnosed KH_t.
     if (CS%id_KH_t > 0 .or. CS%id_KH_t1 > 0 .or. CS%Use_KH_in_MEKE) then
+      !$omp target update if(.not.CS%id_KH_u>0) from(KH_u)
+      !$omp target update if(.not.CS%id_KH_v>0) from(KH_v)
+      !$omp target update from(h)
       do k=1,nz
         ! thicknesses across u and v faces, converted to 0/1 mask
         ! layer average of the interface diffusivities KH_u and KH_v
