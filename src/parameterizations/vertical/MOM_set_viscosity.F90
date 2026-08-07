@@ -1254,6 +1254,7 @@ end subroutine set_viscous_BBL
 !> Determine the normalized open length of each interface, given the edge depths and normalized
 !! volumes below each interface.
 pure subroutine find_L_open_uniform_slope(vol_below, Dp, Dm, L, GV)
+  !$omp declare target
   type(verticalGrid_type),     intent(in)  :: GV   !< The ocean's vertical grid structure.
   real, dimension(SZK_(GV)+1), intent(in)  :: vol_below !< The volume below each interface, normalized by
                                                    !! the full horizontal area of a velocity cell [Z ~> m]
@@ -1263,14 +1264,12 @@ pure subroutine find_L_open_uniform_slope(vol_below, Dp, Dm, L, GV)
                                                    !! of a velocity cell [Z ~> m]
   real, dimension(SZK_(GV)+1), intent(out) :: L    !< The fraction of the full cell width that is open at
                                                    !! the depth of each interface [nondim]
-  !$omp declare target
 
   ! Local variables
   real :: slope     ! The absolute value of the bottom depth slope across a cell times the cell width [Z ~> m].
   real :: I_slope   ! The inverse of the normalized slope [Z-1 ~> m-1]
   real :: Vol_open  ! The cell volume above which it is open [Z ~> m].
   integer :: K, nz
-  !$omp declare target
 
   nz = GV%ke
 
@@ -1296,6 +1295,7 @@ end subroutine find_L_open_uniform_slope
 !> Determine the normalized open length of each interface for concave bathymetry (from the ocean perspective)
 !! using trigonometric expressions.   In this case there can be two separate open regions.
 pure subroutine find_L_open_concave_trigonometric(vol_below, D_vel, Dp, Dm, L, GV)
+  !$omp declare target
   type(verticalGrid_type),     intent(in)  :: GV   !< The ocean's vertical grid structure.
   real, dimension(SZK_(GV)+1), intent(in)  :: vol_below !< The volume below each interface, normalized by
                                                    !! the full horizontal area of a velocity cell [Z ~> m]
@@ -1306,7 +1306,6 @@ pure subroutine find_L_open_concave_trigonometric(vol_below, D_vel, Dp, Dm, L, G
                                                    !! of a velocity cell [Z ~> m]
   real, dimension(SZK_(GV)+1), intent(out) :: L    !< The fraction of the full cell width that is open at
                                                    !! the depth of each interface [nondim]
-  !$omp declare target
 
   ! Local variables
   real :: crv              ! crv is the curvature of the bottom depth across a
@@ -1328,7 +1327,6 @@ pure subroutine find_L_open_concave_trigonometric(vol_below, D_vel, Dp, Dm, L, G
   real, parameter :: C1_3 = 1.0/3.0, C1_12 = 1.0/12.0 ! Rational constants [nondim]
   real, parameter :: C2pi_3 = 8.0*atan(1.0)/3.0  ! An irrational constant, 2/3 pi. [nondim]
   integer :: K, nz
-  !$omp declare target
 
   nz = GV%ke
 
@@ -1391,6 +1389,7 @@ end subroutine find_L_open_concave_trigonometric
 !> Determine the normalized open length of each interface for concave bathymetry (from the ocean perspective) using
 !! iterative methods to solve the relevant cubic equations.   In this case there can be two separate open regions.
 pure subroutine find_L_open_concave_iterative(vol_below, D_vel, Dp, Dm, L, GV)
+  !$omp declare target
   type(verticalGrid_type),     intent(in)  :: GV   !< The ocean's vertical grid structure.
   real, dimension(SZK_(GV)+1), intent(in)  :: vol_below !< The volume below each interface, normalized by
                                                    !! the full horizontal area of a velocity cell [Z ~> m]
@@ -1401,7 +1400,6 @@ pure subroutine find_L_open_concave_iterative(vol_below, D_vel, Dp, Dm, L, GV)
                                                    !! of a velocity cell [Z ~> m]
   real, dimension(SZK_(GV)+1), intent(out) :: L    !< The fraction of the full cell width that is open at
                                                    !! the depth of each interface [nondim]
-  !$omp declare target
 
   ! Local variables
   real :: crv              ! crv is the curvature of the bottom depth across a
@@ -1450,7 +1448,6 @@ pure subroutine find_L_open_concave_iterative(vol_below, D_vel, Dp, Dm, L, GV)
   real, parameter :: C1_3 = 1.0 / 3.0, C1_12 = 1.0 / 12.0 ! Rational constants [nondim]
   integer :: K, nz, itt
   integer, parameter :: max_itt = 10
-  !$omp declare target
 
   nz = GV%ke
 
@@ -1718,6 +1715,7 @@ end subroutine find_L_open_concave_iterative
 !> Test the validity the normalized open lengths of each interface for concave bathymetry (from the ocean perspective)
 !! by evaluating and returing the relevant cubic equations.
 pure subroutine test_L_open_concave(vol_below, D_vel, Dp, Dm, L, vol_err, GV)
+  !$omp declare target
   type(verticalGrid_type),     intent(in)  :: GV   !< The ocean's vertical grid structure.
   real, dimension(SZK_(GV)+1), intent(in)  :: vol_below !< The volume below each interface, normalized by
                                                    !! the full horizontal area of a velocity cell [Z ~> m]
@@ -1730,7 +1728,6 @@ pure subroutine test_L_open_concave(vol_below, D_vel, Dp, Dm, L, vol_err, GV)
                                                    !! the depth of each interface [nondim]
   real, dimension(SZK_(GV)+1), intent(out) :: vol_err !< The difference between vol_below and the
                                                    !! value obtained from using L in the cubic equation [Z ~> m]
-  !$omp declare target
 
   ! Local variables
   real :: crv              ! crv is the curvature of the bottom depth across a
@@ -1754,7 +1751,6 @@ pure subroutine test_L_open_concave(vol_below, D_vel, Dp, Dm, L, vol_err, GV)
 
   real, parameter :: C1_3 = 1.0 / 3.0, C1_12 = 1.0 / 12.0 ! Rational constants [nondim]
   integer :: K, nz
-  !$omp declare target
 
   nz = GV%ke
 
@@ -1801,6 +1797,7 @@ end subroutine test_L_open_concave
 !! perspective) using Newton's method iterations.  In this case there is a single open region
 !! with the minimum depth at one edge of the cell.
 pure subroutine find_L_open_convex(vol_below, D_vel, Dp, Dm, L, GV, US, CS)
+  !$omp declare target
   type(verticalGrid_type),     intent(in)  :: GV   !< The ocean's vertical grid structure.
   real, dimension(SZK_(GV)+1), intent(in)  :: vol_below  !< The volume below each interface, normalized by
                                                    !! the full horizontal area of a velocity cell [Z ~> m]
@@ -1814,7 +1811,6 @@ pure subroutine find_L_open_convex(vol_below, D_vel, Dp, Dm, L, GV, US, CS)
   type(unit_scale_type),       intent(in)  :: US   !< A dimensional unit scaling type
   type(set_visc_CS),           intent(in)  :: CS   !< The control structure returned by a previous
                                                    !! call to set_visc_init.
-  !$omp declare target
 
   ! Local variables
   real :: crv              ! crv is the curvature of the bottom depth across a
@@ -1848,7 +1844,6 @@ pure subroutine find_L_open_convex(vol_below, D_vel, Dp, Dm, L, GV, US, CS)
   logical :: use_L0, do_one_L_iter  ! Control flags for L(:) Newton iteration
   integer :: K, nz, itt
   integer, parameter:: maxitt = 20
-  !$omp declare target
 
   nz = GV%ke
 
@@ -1965,6 +1960,7 @@ end subroutine find_L_open_convex
 
 !> This subroutine finds a thickness-weighted value of v at the u-points.
 pure function set_v_at_u(v, h, G, GV, i, j, k, mask2dCv, OBC)
+  !$omp declare target
   type(ocean_grid_type),   intent(in) :: G    !< The ocean's grid structure
   type(verticalGrid_type), intent(in) :: GV !< Vertical grid structure
   real, dimension(SZI_(G),SZJB_(G),SZK_(GV)), &
@@ -1979,7 +1975,6 @@ pure function set_v_at_u(v, h, G, GV, i, j, k, mask2dCv, OBC)
   type(ocean_OBC_type),    pointer    :: OBC  !< A pointer to an open boundary condition structure
   real                                :: set_v_at_u !< The return value of v at u points points in the
                                               !! same units as u, i.e. [L T-1 ~> m s-1] or other units.
-  !$omp declare target
 
   ! This subroutine finds a thickness-weighted value of v at the u-points.
   real :: hwt(0:1,-1:0)    ! Masked weights used to average u onto v [H ~> m or kg m-2].
@@ -2011,6 +2006,7 @@ end function set_v_at_u
 
 !> This subroutine finds a thickness-weighted value of u at the v-points.
 pure function set_u_at_v(u, h, G, GV, i, j, k, mask2dCu, OBC)
+  !$omp declare target
   type(ocean_grid_type),   intent(in) :: G    !< The ocean's grid structure
   type(verticalGrid_type), intent(in) :: GV !< Vertical grid structure
   real, dimension(SZIB_(G),SZJ_(G),SZK_(GV)), &
@@ -2025,7 +2021,6 @@ pure function set_u_at_v(u, h, G, GV, i, j, k, mask2dCu, OBC)
   type(ocean_OBC_type),    pointer    :: OBC  !< A pointer to an open boundary condition structure
   real                                :: set_u_at_v !< The return value of u at v points in the
                                               !! same units as u, i.e. [L T-1 ~> m s-1] or other units.
-  !$omp declare target
 
   ! This subroutine finds a thickness-weighted value of u at the v-points.
   real :: hwt(-1:0,0:1)    ! Masked weights used to average u onto v [H ~> m or kg m-2].
