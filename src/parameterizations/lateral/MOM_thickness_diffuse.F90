@@ -221,7 +221,7 @@ subroutine thickness_diffuse(h, uhtr, vhtr, tv, dt, G, GV, US, MEKE, VarMix, CDp
   h_neglect = GV%H_subroundoff
 
   niblock = CS%niblock ; njblock = CS%njblock
-  if (niblock == 0) niblock = ie-is+2
+  if (niblock == 0) niblock = ie-is+3
   if (njblock == 0) njblock = je-js+2
 
   !$omp target enter data map(alloc: MEKE%GM_src) if(allocated(MEKE%GM_src))
@@ -746,15 +746,13 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV
   real, dimension(niblock,njblock) :: &
     drho_dT_u, &  ! The derivative of density with temperature at u points [R C-1 ~> kg m-3 degC-1]
     drho_dS_u     ! The derivative of density with salinity at u points [R S-1 ~> kg m-3 ppt-1].
-  real, dimension(niblock+1,njblock) :: scrap ! An array to pass to calculate_density_second_derivs()
+  real, dimension(niblock,njblock) :: scrap ! An array to pass to calculate_density_second_derivs()
                   ! with various units that will be ignored [various]
   real, dimension(niblock,njblock) :: &
     drho_dT_v, &  ! The derivative of density with temperature at v points [R C-1 ~> kg m-3 degC-1]
-    drho_dS_v  ! The derivative of density with salinity at v points [R S-1 ~> kg m-3 ppt-1].
-  real, dimension(niblock,njblock) :: &
+    drho_dS_v, &  ! The derivative of density with salinity at v points [R S-1 ~> kg m-3 ppt-1].
+    drho_dT_dT_h, & ! The second derivative of density with temperature at h points [R C-2 ~> kg m-3 degC-2]
     drho_dT_dT_hr ! The second derivative of density with temperature at h (+1) points [R C-2 ~> kg m-3 degC-2]
-  real, dimension(niblock+1,njblock) :: &
-    drho_dT_dT_h  ! The second derivative of density with temperature at h points [R C-2 ~> kg m-3 degC-2]
   real :: uhtot(SZIB_(G),SZJ_(G))  ! The vertical sum of uhD [H L2 T-1 ~> m3 s-1 or kg s-1].
   real :: vhtot(SZI_(G),SZJB_(G))  ! The vertical sum of vhD [H L2 T-1 ~> m3 s-1 or kg s-1].
   real, dimension(niblock,njblock) :: &
@@ -765,7 +763,7 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV
     T_v, &        ! Temperature on the interface at the v-point [C ~> degC].
     S_v, &        ! Salinity on the interface at the v-point [S ~> ppt].
     pres_v        ! Pressure on the interface at the v-point [R L2 T-2 ~> Pa].
-  real, dimension(niblock+1,njblock) :: &
+  real, dimension(niblock,njblock) :: &
     T_h, &        ! Temperature on the interface at the h-point [C ~> degC].
     S_h, &        ! Salinity on the interface at the h-point [S ~> ppt].
     pres_h        ! Pressure on the interface at the h-point [R L2 T-2 ~> Pa].
@@ -971,8 +969,8 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV
   EOSdom_v(:,1) = 1
   EOSdom_h1(:,1) = 1
 
-  do jsb=js,je,njj ; do IsbB=is-1,ie,nIIB
-    IebB = min(IsbB+nIIB-1, ie)
+  do jsb=js,je,njj ; do IsbB=is-1,ie,nIIB-1
+    IebB = min(IsbB+nIIB-2, ie)
     jeb = min(jsb+njj-1, je)
     IIe = IebB-IsbB+1
     jje = jeb-jsb+1
@@ -1694,8 +1692,8 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV
     do concurrent (j=js:je, I=is-1:ie) ; uhD(I,j,1) = -uhtot(I,j) ; enddo
     do concurrent (J=js-1:je, i=is:ie) ; vhD(i,J,1) = -vhtot(i,J) ; enddo
   else
-    do jsb=js,je,njj ; do IsbB=is-1,ie,nIIB
-      IebB = min(IsbB+nIIB-1, ie)
+    do jsb=js,je,njj ; do IsbB=is-1,ie,nIIB-1
+      IebB = min(IsbB+nIIB-2, ie)
       jeb = min(jsb+njj-1, je)
       IIe = IebB-IsbB+1
       jje = jeb-jsb+1
