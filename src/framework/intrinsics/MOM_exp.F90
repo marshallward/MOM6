@@ -169,7 +169,7 @@ module procedure exp_repro
   ! Determine if K is outside the supported exponent range.
   ! If so, then apply a bias j to normalize the exponent.
   ! Kbias is chosen so that the exponent is "something near 1".
-  j = merge(Kbias, 0, K < Kmin) + merge(-Kbias, 0, K > Kmax)
+  j = merge(Kbias, 0_int_kind, K < Kmin) + merge(-Kbias, 0_int_kind, K > Kmax)
 
   ! Get the bit representation of exp(r)
   eb = transfer(e, int_mold)
