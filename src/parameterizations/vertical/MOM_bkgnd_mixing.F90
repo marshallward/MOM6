@@ -310,7 +310,7 @@ end subroutine bkgnd_mixing_init
 
 !> Calculates the vertical background diffusivities/viscosities
 subroutine calculate_bkgnd_mixing(h, tv, N2_lay, Kd_lay, Kd_int, Kv_bkgnd, &
-                                  is, ie, js, je, G, GV, US, CS)
+                                  is, ie, js, je, dz, G, GV, US, CS)
 
   type(ocean_grid_type),                       intent(in)    :: G   !< Grid structure.
   type(verticalGrid_type),                     intent(in)    :: GV  !< Vertical grid structure.
@@ -328,6 +328,7 @@ subroutine calculate_bkgnd_mixing(h, tv, N2_lay, Kd_lay, Kd_int, Kv_bkgnd, &
   integer,                                     intent(in)    :: ie  !< Ending i-index of columns to work on.
   integer,                                     intent(in)    :: js  !< Starting j-index of rows to work on.
   integer,                                     intent(in)    :: je  !< Ending j-index of rows to work on.
+  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)),   intent(in)    :: dz  !< Height change across layers [Z ~> m].
   type(unit_scale_type),                       intent(in)    :: US  !< A dimensional unit scaling type.
   type(bkgnd_mixing_cs),                       pointer       :: CS  !< Control structure.
 
@@ -337,7 +338,6 @@ subroutine calculate_bkgnd_mixing(h, tv, N2_lay, Kd_lay, Kd_int, Kv_bkgnd, &
   real, dimension(SZK_(GV)+1) :: Kv_col     !< Viscosities at the interfaces [m2 s-1].
   real, dimension(is:ie,js:je) :: Kd_sfc !< Surface value of the diffusivity [H Z T-1 ~> m2 s-1].
   real, dimension(is:ie,js:je) :: depth  !< Distance from surface of an interface [H ~> m].
-  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)) :: dz !< Height change across layers [Z ~> m].
   real :: depth_c    !< Depth of the center of a layer [H ~> m or kg m-2].
   real :: I_Hmix     !< Inverse of fixed mixed layer thickness [H-1 ~> m-1 or m2 kg-1].
   real :: I_x30      !< 2/acos(2) = 1/(sin(30 deg) * acosh(1/sin(30 deg))) [nondim].
@@ -366,8 +366,6 @@ subroutine calculate_bkgnd_mixing(h, tv, N2_lay, Kd_lay, Kd_int, Kv_bkgnd, &
 
   ! Set up the background diffusivity.
   if (CS%Bryan_Lewis_diffusivity) then
-
-    call thickness_to_dz(h, tv, dz, G, GV, US, is=is, ie=ie, js=js, je=je)
 
     do j=js,je ; do i=is,ie
       depth_int(1) = 0.0
