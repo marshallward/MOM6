@@ -679,15 +679,10 @@ subroutine set_diffusivity(u, v, h, u_h, v_h, tv, fluxes, optics, visc, dt, Kd_i
     endif
 
     ! Add the Nikurashin and / or tidal bottom-driven mixing
-    ! TODO: tile/port tidal mixing row routine.
     if (CS%use_tidal_mixing) then
-      do j=jsb,jeb
-        call calculate_tidal_mixing(dz(:,j,:), j, N2_bot(:,j), rho_bot(:,j), N2_lay(:,j,:), &
-                                    N2_int(:,j,:), &
-                                    TKE_to_Kd(:,j,:), maxTKE(:,j,:), G, GV, US, CS%tidal_mixing, &
-                                    CS%Kd_max, visc%Kv_slow, Kd_lay_2d(:,j,:), &
-                                    Kd_int_2d(:,j,:), VBF)
-      enddo
+      call calculate_tidal_mixing(dz, isb, ieb, jsb, jeb, nii, njj, N2_bot, rho_bot, N2_lay, N2_int, &
+                                  TKE_to_Kd, maxTKE, G, GV, US, CS%tidal_mixing, &
+                                  CS%Kd_max, visc%Kv_slow, Kd_lay_2d, Kd_int_2d, VBF)
     endif
 
     ! Add diffusivity from internal tides ray tracing

@@ -1384,7 +1384,7 @@ end subroutine itidal_lowmode_loss
 !> been summed across all angles, frequencies, and modes for a given mechanism and location.
 !!
 !> It can be called from another module to get values from this module's (private) CS.
-subroutine get_lowmode_loss(i,j,G,CS,mechanism,TKE_loss_sum)
+pure subroutine get_lowmode_loss(i,j,G,CS,mechanism,TKE_loss_sum)
   integer,               intent(in)  :: i   !< The i-index of the value to be reported.
   integer,               intent(in)  :: j   !< The j-index of the value to be reported.
   type(ocean_grid_type), intent(in)  :: G   !< The ocean's grid structure
