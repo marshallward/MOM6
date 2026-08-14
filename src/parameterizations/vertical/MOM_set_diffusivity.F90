@@ -765,7 +765,7 @@ subroutine set_diffusivity(u, v, h, u_h, v_h, tv, fluxes, optics, visc, dt, Kd_i
     if (CS%bottomdraglaw .and. (CS%BBL_effic > 0.0)) then
       if (CS%use_LOTW_BBL_diffusivity) then
         ! TODO: tile/port - exp with answer change
-        call add_LOTW_BBL_diffusivity(h, u, v, tv, fluxes, visc, isb, ieb, jsb, jeb, &
+        call add_LOTW_BBL_diffusivity(h, u, v, tv, fluxes, visc, isb, ieb, jsb, jeb, nii, njj, &
                                       dz, N2_int, Rho_bot, Kd_int_2d, &
                                       G, GV, US, CS, dd%Kd_BBL, Kd_lay_2d)
         !$omp target update to(Kd_lay_2d, Kd_int_2d)
@@ -1912,7 +1912,7 @@ end subroutine add_drag_diffusivity
 !> Calculates a BBL diffusivity use a Prandtl number 1 diffusivity with a law of the
 !! wall turbulent viscosity, up to a BBL height where the energy used for mixing has
 !! consumed the mechanical TKE input.
-subroutine add_LOTW_BBL_diffusivity(h, u, v, tv, fluxes, visc, is, ie, js, je, dz, N2_int, &
+subroutine add_LOTW_BBL_diffusivity(h, u, v, tv, fluxes, visc, isb, ieb, jsb, jeb, nii, njj, dz, N2_int, &
                                     Rho_bot, Kd_int, &
                                     G, GV, US, CS, Kd_BBL, Kd_lay)
   type(ocean_grid_type),    intent(in)    :: G  !< Grid structure
@@ -1929,10 +1929,12 @@ subroutine add_LOTW_BBL_diffusivity(h, u, v, tv, fluxes, visc, is, ie, js, je, d
   type(forcing),            intent(in)    :: fluxes !< Surface fluxes structure
   type(vertvisc_type),      intent(in)    :: visc !< Structure containing vertical viscosities, bottom
                                                   !! boundary layer properties and related fields.
-  integer,                  intent(in)    :: is !< Start i-index of columns to work on
-  integer,                  intent(in)    :: ie !< End i-index of columns to work on
-  integer,                  intent(in)    :: js !< Start j-index of rows to work on
-  integer,                  intent(in)    :: je !< End j-index of rows to work on
+  integer,                  intent(in)    :: isb !< Start i-index of columns to work on
+  integer,                  intent(in)    :: ieb !< End i-index of columns to work on
+  integer,                  intent(in)    :: jsb !< Start j-index of rows to work on
+  integer,                  intent(in)    :: jeb !< End j-index of rows to work on
+  integer,                  intent(in)    :: nii !< Size of the i-block [nondim].
+  integer,                  intent(in)    :: njj !< Size of the j-block [nondim].
   real, dimension(SZI_(G),SZJ_(G),SZK_(GV)), &
                             intent(in)    :: dz !< Height change across layers [Z ~> m]
   real, dimension(SZI_(G),SZJ_(G),SZK_(GV)+1), &
@@ -1972,8 +1974,10 @@ subroutine add_LOTW_BBL_diffusivity(h, u, v, tv, fluxes, visc, is, ie, js, je, d
   real :: N2_min           ! Minimum value of N2 to use in calculation of TKE_Kd_wall [T-2 ~> s-2]
   logical :: Rayleigh_drag ! Set to true if there are Rayleigh drag velocities defined in visc, on
                            ! the assumption that this extracted energy also drives diapycnal mixing.
-  integer :: i, j, k
+  integer :: i, j, k, ii, jj, iie, jje
   logical :: do_diag_Kd_BBL
+
+  iie = ieb-isb+1 ; jje = jeb-jsb+1
 
   if (.not.(CS%bottomdraglaw .and. (CS%BBL_effic > 0.0))) return
   do_diag_Kd_BBL = associated(Kd_BBL)
@@ -1987,7 +1991,8 @@ subroutine add_LOTW_BBL_diffusivity(h, u, v, tv, fluxes, visc, is, ie, js, je, d
   cdrag_sqrt = sqrt(CS%cdrag)
 
   ! TODO: tile/port single-row LOTW BBL routine and column temporaries.
-  do j=js,je ; do i=is,ie ! Developed in single-column mode
+  do jj=1,jje ; do ii=1,iie ! Developed in single-column mode
+    j = jsb+jj-1 ; i = isb+ii-1
 
     ! Column-wise parameters.
     absf = 0.25 * ((abs(G%CoriolisBu(I-1,J-1)) + abs(G%CoriolisBu(I,J))) + &
