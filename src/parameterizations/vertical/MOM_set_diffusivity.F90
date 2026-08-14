@@ -313,7 +313,12 @@ subroutine set_diffusivity(u, v, h, u_h, v_h, tv, fluxes, optics, visc, dt, Kd_i
     TKE_to_Kd     !< Conversion rate (~1.0 / (G_Earth + dRho_lay)) between
                   !< TKE dissipated within a layer and Kd in that layer [T2 Z-1 ~> s2 m-1]
 
-  real, dimension(SZI_(G),SZK_(GV)) :: &
+  ! prof_*_2d are block-sized hand-off buffers between get_lowmode_diffusivity
+  ! and this routine's own diagnostic copy loops. These bounds resolve
+  ! CS%niblock/CS%njblock the same way the executable resolver below does (see
+  ! dRho_int above); the two must stay in step.
+  real, dimension(merge(G%iec-G%isc+1, CS%niblock, CS%niblock==0), &
+                  merge(G%jec-G%jsc+1, CS%njblock, CS%njblock==0), SZK_(GV)) :: &
     prof_leak_2d, & !< vertical profile for leakage [Z-1 ~> m-1]
     prof_quad_2d, & !< vertical profile for bottom drag [Z-1 ~> m-1]
     prof_itidal_2d, & !< vertical profile for wave drag [Z-1 ~> m-1]
@@ -333,7 +338,12 @@ subroutine set_diffusivity(u, v, h, u_h, v_h, tv, fluxes, optics, visc, dt, Kd_i
     Kv_bkgnd, &   !< Background interface viscosities [H Z T-1 ~> m2 s-1 or Pa s]
     Kd_int_2d  !< The interface diffusivities [H Z T-1 ~> m2 s-1 or kg m-1 s-1]
 
-  real, dimension(SZI_(G),SZK_(GV)+1) :: &
+  ! Kd_*_2d are block-sized hand-off buffers between get_lowmode_diffusivity
+  ! and this routine's own diagnostic copy loops. These bounds resolve
+  ! CS%niblock/CS%njblock the same way the executable resolver below does (see
+  ! dRho_int above); the two must stay in step.
+  real, dimension(merge(G%iec-G%isc+1, CS%niblock, CS%niblock==0), &
+                  merge(G%jec-G%jsc+1, CS%njblock, CS%njblock==0), SZK_(GV)+1) :: &
     Kd_leak_2d, & !< internal tides leakage diffusivity [H Z T-1 ~> m2 s-1 or kg m-1 s-1]
     Kd_quad_2d, & !< internal tides bottom drag diffusivity [H Z T-1 ~> m2 s-1 or kg m-1 s-1]
     Kd_itidal_2d, & !< internal tides wave drag diffusivity [H Z T-1 ~> m2 s-1 or kg m-1 s-1]
@@ -686,17 +696,17 @@ subroutine set_diffusivity(u, v, h, u_h, v_h, tv, fluxes, optics, visc, dt, Kd_i
     endif
 
     ! Add diffusivity from internal tides ray tracing
-    ! TODO: tile/port internal tide row routine and diagnostics.
     if (CS%use_int_tides) then
-      do j=jsb,jeb
-        call get_lowmode_diffusivity(G, GV, h, tv, US, h_bot(:,j), k_bot(:,j), j, N2_lay(:,j,:), &
-                                     N2_int(:,j,:), TKE_to_Kd(:,j,:), CS%Kd_max, &
-                                     CS%int_tide_CSp, Kd_leak_2d, Kd_quad_2d, Kd_itidal_2d, &
-                                     Kd_Froude_2d, Kd_slope_2d, &
-                                     Kd_lay_2d(:,j,:), Kd_int_2d(:,j,:), prof_leak_2d, &
-                                     prof_quad_2d, prof_itidal_2d, prof_froude_2d, &
-                                     prof_slope_2d)
+      call get_lowmode_diffusivity(G, GV, h, tv, US, h_bot, k_bot, isb, ieb, jsb, jeb, nii, njj, &
+                                   N2_lay, N2_int, TKE_to_Kd, CS%Kd_max, &
+                                   CS%int_tide_CSp, Kd_leak_2d, Kd_quad_2d, Kd_itidal_2d, &
+                                   Kd_Froude_2d, Kd_slope_2d, &
+                                   Kd_lay_2d, Kd_int_2d, prof_leak_2d, &
+                                   prof_quad_2d, prof_itidal_2d, prof_froude_2d, &
+                                   prof_slope_2d)
 
+      do jj=1,jje
+      j = jsb+jj-1
         if (CS%id_kbbl > 0) then ; do ii=1,iie ; i = isb+ii-1
           dd%kbbl(i,j) = k_bot(i,j)
         enddo ; endif
@@ -704,50 +714,50 @@ subroutine set_diffusivity(u, v, h, u_h, v_h, tv, fluxes, optics, visc, dt, Kd_i
           dd%bbl_thick(i,j) = h_bot(i,j)
         enddo ; endif
         if (CS%id_Kd_leak > 0) then ; do K=1,nz+1 ; do ii=1,iie ; i = isb+ii-1
-          dd%Kd_leak(i,j,K) = Kd_leak_2d(i,K)
+          dd%Kd_leak(i,j,K) = Kd_leak_2d(ii,jj,K)
         enddo ; enddo ; endif
         if (CS%id_Kd_quad > 0) then ; do K=1,nz+1 ; do ii=1,iie ; i = isb+ii-1
-          dd%Kd_quad(i,j,K) = Kd_quad_2d(i,K)
+          dd%Kd_quad(i,j,K) = Kd_quad_2d(ii,jj,K)
         enddo ; enddo ; endif
         if (CS%id_Kd_itidal > 0) then ; do K=1,nz+1 ; do ii=1,iie ; i = isb+ii-1
-          dd%Kd_itidal(i,j,K) = Kd_itidal_2d(i,K)
+          dd%Kd_itidal(i,j,K) = Kd_itidal_2d(ii,jj,K)
         enddo ; enddo ; endif
         if (CS%id_Kd_Froude > 0) then ; do K=1,nz+1 ; do ii=1,iie ; i = isb+ii-1
-          dd%Kd_Froude(i,j,K) = Kd_Froude_2d(i,K)
+          dd%Kd_Froude(i,j,K) = Kd_Froude_2d(ii,jj,K)
         enddo ; enddo ; endif
         if (CS%id_Kd_slope > 0) then ; do K=1,nz+1 ; do ii=1,iie ; i = isb+ii-1
-          dd%Kd_slope(i,j,K) = Kd_slope_2d(i,K)
+          dd%Kd_slope(i,j,K) = Kd_slope_2d(ii,jj,K)
         enddo ; enddo ; endif
         if (associated (VBF%Kd_leak)) then ; do K=1,nz+1 ; do ii=1,iie ; i = isb+ii-1
-          VBF%Kd_leak(i,j,K) = min(Kd_leak_2d(i,K), CS%Kd_max)
+          VBF%Kd_leak(i,j,K) = min(Kd_leak_2d(ii,jj,K), CS%Kd_max)
         enddo ; enddo ; endif
         if (associated (VBF%Kd_quad)) then ; do K=1,nz+1 ; do ii=1,iie ; i = isb+ii-1
-          VBF%Kd_quad(i,j,K) = min(Kd_quad_2d(i,K), CS%Kd_max)
+          VBF%Kd_quad(i,j,K) = min(Kd_quad_2d(ii,jj,K), CS%Kd_max)
         enddo ; enddo ; endif
         if (associated (VBF%Kd_itidal)) then ; do K=1,nz+1 ; do ii=1,iie ; i = isb+ii-1
-          VBF%Kd_itidal(i,j,K) = min(Kd_itidal_2d(i,K), CS%Kd_max)
+          VBF%Kd_itidal(i,j,K) = min(Kd_itidal_2d(ii,jj,K), CS%Kd_max)
         enddo ; enddo ; endif
         if (associated (VBF%Kd_Froude)) then ; do K=1,nz+1 ; do ii=1,iie ; i = isb+ii-1
-          VBF%Kd_Froude(i,j,K) = min(Kd_Froude_2d(i,K), CS%Kd_max)
+          VBF%Kd_Froude(i,j,K) = min(Kd_Froude_2d(ii,jj,K), CS%Kd_max)
         enddo ; enddo ; endif
         if (associated (VBF%Kd_slope)) then ; do K=1,nz+1 ; do ii=1,iie ; i = isb+ii-1
-          VBF%Kd_slope(i,j,K) = min(Kd_slope_2d(i,K), CS%Kd_max)
+          VBF%Kd_slope(i,j,K) = min(Kd_slope_2d(ii,jj,K), CS%Kd_max)
         enddo ; enddo ; endif
 
         if (CS%id_prof_leak > 0) then ; do k=1,nz ; do ii=1,iie ; i = isb+ii-1
-          dd%prof_leak(i,j,k) = prof_leak_2d(i,k)
+          dd%prof_leak(i,j,k) = prof_leak_2d(ii,jj,k)
         enddo ; enddo ; endif
         if (CS%id_prof_quad > 0) then ; do k=1,nz ; do ii=1,iie ; i = isb+ii-1
-          dd%prof_quad(i,j,k) = prof_quad_2d(i,k)
+          dd%prof_quad(i,j,k) = prof_quad_2d(ii,jj,k)
         enddo ; enddo ; endif
         if (CS%id_prof_itidal > 0) then ; do k=1,nz ; do ii=1,iie ; i = isb+ii-1
-          dd%prof_itidal(i,j,k) = prof_itidal_2d(i,k)
+          dd%prof_itidal(i,j,k) = prof_itidal_2d(ii,jj,k)
         enddo ; enddo ; endif
         if (CS%id_prof_Froude > 0) then ; do k=1,nz ; do ii=1,iie ; i = isb+ii-1
-          dd%prof_Froude(i,j,k) = prof_Froude_2d(i,k)
+          dd%prof_Froude(i,j,k) = prof_Froude_2d(ii,jj,k)
         enddo ; enddo ; endif
         if (CS%id_prof_slope > 0) then ; do k=1,nz ; do ii=1,iie ; i = isb+ii-1
-          dd%prof_slope(i,j,k) = prof_slope_2d(i,k)
+          dd%prof_slope(i,j,k) = prof_slope_2d(ii,jj,k)
         enddo ; enddo ; endif
       enddo
     endif

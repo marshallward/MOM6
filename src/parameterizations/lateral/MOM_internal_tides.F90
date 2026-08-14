@@ -2,6 +2,8 @@
 ! See the LICENSE file for licensing information.
 ! SPDX-License-Identifier: Apache-2.0
 
+#include "do_concurrent_compat.h"
+
 !> Subroutines that use the ray-tracing equations to propagate the internal tide energy density.
 !!
 !! \author Benjamin Mater & Robert Hallberg, 2015
@@ -1403,7 +1405,8 @@ end subroutine get_lowmode_loss
 
 
 !> Returns the values of diffusivity corresponding to various mechanisms
-subroutine get_lowmode_diffusivity(G, GV, h, tv, US, h_bot, k_bot, j, N2_lay, N2_int, TKE_to_Kd, Kd_max, CS, &
+subroutine get_lowmode_diffusivity(G, GV, h, tv, US, h_bot, k_bot, isb, ieb, jsb, jeb, nii, njj, &
+                                   N2_lay, N2_int, TKE_to_Kd, Kd_max, CS, &
                                    Kd_leak, Kd_quad, Kd_itidal, Kd_Froude, Kd_slope, &
                                    Kd_lay, Kd_int, profile_leak, profile_quad, profile_itidal, &
                                    profile_Froude, profile_slope)
@@ -1414,14 +1417,19 @@ subroutine get_lowmode_diffusivity(G, GV, h, tv, US, h_bot, k_bot, j, N2_lay, N2
                                        intent(in)  :: h       !< Layer thicknesses [H ~> m or kg m-2]
   type(thermo_var_ptrs),               intent(in)  :: tv      !< Structure containing pointers to any available
   type(unit_scale_type),               intent(in)  :: US      !< A dimensional unit scaling type
-  real, dimension(SZI_(G)),            intent(in)  :: h_bot   !< Bottom boundary layer thickness [H ~> m or kg m-2]
-  integer, dimension(SZI_(G)),         intent(in)  :: k_bot   !< Bottom boundary layer top layer index
-  integer,                             intent(in)  :: j       !< The j-index to work on
-  real, dimension(SZI_(G),SZK_(GV)),   intent(in)  :: N2_lay  !< The squared buoyancy frequency of the
+  real, dimension(SZI_(G),SZJ_(G)),    intent(in)  :: h_bot   !< Bottom boundary layer thickness [H ~> m or kg m-2]
+  integer, dimension(SZI_(G),SZJ_(G)), intent(in)  :: k_bot   !< Bottom boundary layer top layer index
+  integer,                             intent(in)  :: isb !< Starting i-index to work on
+  integer,                             intent(in)  :: ieb !< Ending i-index to work on
+  integer,                             intent(in)  :: jsb !< Starting j-index to work on
+  integer,                             intent(in)  :: jeb !< Ending j-index to work on
+  integer,                             intent(in)  :: nii !< Size of the i-block [nondim].
+  integer,                             intent(in)  :: njj !< Size of the j-block [nondim].
+  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)),   intent(in)  :: N2_lay  !< The squared buoyancy frequency of the
                                                               !! layers [T-2 ~> s-2].
-  real, dimension(SZI_(G),SZK_(GV)+1), intent(in)  :: N2_int  !< The squared buoyancy frequency of the
+  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)+1), intent(in)  :: N2_int  !< The squared buoyancy frequency of the
                                                               !! interfaces [T-2 ~> s-2].
-  real, dimension(SZI_(G),SZK_(GV)),   intent(in)  :: TKE_to_Kd !< The conversion rate between the TKE
+  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)),   intent(in)  :: TKE_to_Kd !< The conversion rate between the TKE
                                                               !! dissipated within a layer and the
                                                               !! diapycnal diffusivity within that layer,
                                                               !! usually (~Rho_0 / (G_Earth * dRho_lay))
@@ -1433,29 +1441,29 @@ subroutine get_lowmode_diffusivity(G, GV, h, tv, US, h_bot, k_bot, j, N2_lay, N2
                                                               !! [H Z T-1 ~> m2 s-1 or kg m-1 s-1].
   type(int_tide_cs),                    intent(in)    :: CS   !< The control structure for this module
 
-  real, dimension(SZI_(G),SZK_(GV)+1),  intent(out) :: Kd_leak        !< Diffusivity due to background drag
+  real, dimension(nii,njj,SZK_(GV)+1),  intent(out) :: Kd_leak        !< Diffusivity due to background drag
                                                                       !! [H Z T-1 ~> m2 s-1 or kg m-1 s-1].
-  real, dimension(SZI_(G),SZK_(GV)+1),  intent(out) :: Kd_quad        !< Diffusivity due to bottom drag
+  real, dimension(nii,njj,SZK_(GV)+1),  intent(out) :: Kd_quad        !< Diffusivity due to bottom drag
                                                                       !! [H Z T-1 ~> m2 s-1 or kg m-1 s-1].
-  real, dimension(SZI_(G),SZK_(GV)+1),  intent(out) :: Kd_itidal      !< Diffusivity due to wave drag
+  real, dimension(nii,njj,SZK_(GV)+1),  intent(out) :: Kd_itidal      !< Diffusivity due to wave drag
                                                                       !! [H Z T-1 ~> m2 s-1 or kg m-1 s-1].
-  real, dimension(SZI_(G),SZK_(GV)+1),  intent(out) :: Kd_Froude      !< Diffusivity due to high Froude breaking
+  real, dimension(nii,njj,SZK_(GV)+1),  intent(out) :: Kd_Froude      !< Diffusivity due to high Froude breaking
                                                                       !! [H Z T-1 ~> m2 s-1 or kg m-1 s-1].
-  real, dimension(SZI_(G),SZK_(GV)+1),  intent(out) :: Kd_slope       !< Diffusivity due to critical slopes
+  real, dimension(nii,njj,SZK_(GV)+1),  intent(out) :: Kd_slope       !< Diffusivity due to critical slopes
                                                                       !! [H Z T-1 ~> m2 s-1 or kg m-1 s-1].
-  real, dimension(SZI_(G),SZK_(GV)),    intent(inout) :: Kd_lay       !< The diapycnal diffusivity in layers
+  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)),    intent(inout) :: Kd_lay       !< The diapycnal diffusivity in layers
                                                                       !! [H Z T-1 ~> m2 s-1 or kg m-1 s-1].
-  real, dimension(SZI_(G),SZK_(GV)+1),  intent(inout) :: Kd_int       !< The diapycnal diffusivity at interfaces
+  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)+1),  intent(inout) :: Kd_int       !< The diapycnal diffusivity at interfaces
                                                                       !! [H Z T-1 ~> m2 s-1 or kg m-1 s-1].
-  real, dimension(SZI_(G), SZK_(GV)),   intent(out) :: profile_leak   !< Normalized profile for background drag
+  real, dimension(nii,njj,SZK_(GV)),   intent(out) :: profile_leak   !< Normalized profile for background drag
                                                                       !! [H-1 ~> m-1 or m2 kg-1]
-  real, dimension(SZI_(G), SZK_(GV)),   intent(out) :: profile_quad   !< Normalized profile for  bottom drag
+  real, dimension(nii,njj,SZK_(GV)),   intent(out) :: profile_quad   !< Normalized profile for  bottom drag
                                                                       !! [H-1 ~> m-1 or m2 kg-1]
-  real, dimension(SZI_(G), SZK_(GV)),   intent(out) :: profile_itidal !< Normalized profile for wave drag
+  real, dimension(nii,njj,SZK_(GV)),   intent(out) :: profile_itidal !< Normalized profile for wave drag
                                                                       !! [H-1 ~> m-1 or m2 kg-1]
-  real, dimension(SZI_(G), SZK_(GV)),   intent(out) :: profile_Froude !< Normalized profile for Froude drag
+  real, dimension(nii,njj,SZK_(GV)),   intent(out) :: profile_Froude !< Normalized profile for Froude drag
                                                                       !! [H-1 ~> m-1 or m2 kg-1]
-  real, dimension(SZI_(G), SZK_(GV)),   intent(out) :: profile_slope  !< Normalized profile for critical slopes
+  real, dimension(nii,njj,SZK_(GV)),   intent(out) :: profile_slope  !< Normalized profile for critical slopes
                                                                       !! [H-1 ~> m-1 or m2 kg-1]
 
   ! local variables
@@ -1502,10 +1510,18 @@ subroutine get_lowmode_diffusivity(G, GV, h, tv, US, h_bot, k_bot, j, N2_lay, N2
           threshold_renorm_N, & ! Maximum allowable error on N profile [H T-1 ~> m s-1 or kg m-2 s-1]
           threshold_verif       ! Maximum allowable error on verification [nondim]
 
-  logical :: non_Bous ! fully Non-Boussinesq
-  integer :: i, k, is, ie, nz
+  ! Flags and diagnostic values for the MOM_error calls hoisted out of the i-loop below,
+  ! so the loop body itself makes no calls with side effects.
+  logical :: found_negative_N2
+  logical :: mismatch_N, mismatch_N2, mismatch_bbl, mismatch_stl1, mismatch_stl2
+  integer :: bad_i_N, bad_i_N2, bad_i_bbl, bad_i_stl1, bad_i_stl2
+  integer :: bad_j_N, bad_j_N2, bad_j_bbl, bad_j_stl1, bad_j_stl2
+  real :: bad_verif_N, bad_verif_N2, bad_verif_bbl, bad_verif_stl1, bad_verif_stl2
 
-  is=G%isc ; ie=G%iec ; nz=GV%ke
+  logical :: non_Bous ! fully Non-Boussinesq
+  integer :: i, j, k, ii, jj, iie, jje, nz
+
+  iie=ieb-isb+1 ; jje=jeb-jsb+1 ; nz=GV%ke
 
   non_Bous = .not.(GV%Boussinesq .or. GV%semi_Boussinesq)
 
@@ -1519,26 +1535,31 @@ subroutine get_lowmode_diffusivity(G, GV, h, tv, US, h_bot, k_bot, j, N2_lay, N2
   threshold_renorm_N  = 1.0e-13 * GV%m_to_H * US%T_to_s
   threshold_verif = 1.0e-13
 
+  found_negative_N2 = .false.
+  mismatch_N = .false. ; mismatch_N2 = .false. ; mismatch_bbl = .false.
+  mismatch_stl1 = .false. ; mismatch_stl2 = .false.
+
+  do jj=1,jje
+  j = jsb+jj-1
+
   ! init output arrays
-  profile_leak(:,:) = 0.0
-  profile_quad(:,:) = 0.0
-  profile_slope(:,:) = 0.0
-  profile_itidal(:,:) = 0.0
-  profile_Froude(:,:) = 0.0
+  do k=1,nz ; do ii=1,iie ; i = isb+ii-1
+    profile_leak(ii,jj,k) = 0.0
+    profile_quad(ii,jj,k) = 0.0
+    profile_slope(ii,jj,k) = 0.0
+    profile_itidal(ii,jj,k) = 0.0
+    profile_Froude(ii,jj,k) = 0.0
+  enddo ; enddo
 
-  Kd_leak_lay(:) = 0.0
-  Kd_quad_lay(:) = 0.0
-  Kd_itidal_lay(:) = 0.0
-  Kd_Froude_lay(:) = 0.0
-  Kd_slope_lay(:) = 0.0
+  do K=1,nz+1 ; do ii=1,iie ; i = isb+ii-1
+    Kd_leak(ii,jj,K) = 0.0
+    Kd_quad(ii,jj,K) = 0.0
+    Kd_itidal(ii,jj,K) = 0.0
+    Kd_Froude(ii,jj,K) = 0.0
+    Kd_slope(ii,jj,K) = 0.0
+  enddo ; enddo
 
-  Kd_leak(:,:) = 0.0
-  Kd_quad(:,:) = 0.0
-  Kd_itidal(:,:) = 0.0
-  Kd_Froude(:,:) = 0.0
-  Kd_slope(:,:) = 0.0
-
-  do i=is,ie
+  do ii=1,iie ; i = isb+ii-1
 
     ! create vertical profiles for diffusivities in layers
     renorm_N = 0.0
@@ -1549,14 +1570,14 @@ subroutine get_lowmode_diffusivity(G, GV, h, tv, US, h_bot, k_bot, j, N2_lay, N2
     tmp_StLau_slope = 0.0
     htot = 0.0
     htmp = 0.0
-    I_h_bot = 1.0 / h_bot(i)
+    I_h_bot = 1.0 / h_bot(i,j)
 
     do k=1,nz
       ! N-profile
-      if (N2_lay(i,k) < 0.) call MOM_error(WARNING, "negative buoyancy freq")
-      renorm_N = renorm_N + (sqrt(max(N2_lay(i,k), 0.)) * h(i,j,k))
+      if (N2_lay(i,j,k) < 0.) found_negative_N2 = .true.
+      renorm_N = renorm_N + (sqrt(max(N2_lay(i,j,k), 0.)) * h(i,j,k))
       ! N2-profile
-      renorm_N2 = renorm_N2 + (max(N2_lay(i,k), 0.) * h(i,j,k))
+      renorm_N2 = renorm_N2 + (max(N2_lay(i,j,k), 0.) * h(i,j,k))
       ! total depth
       htot = htot + h(i,j,k)
     enddo
@@ -1568,7 +1589,7 @@ subroutine get_lowmode_diffusivity(G, GV, h, tv, US, h_bot, k_bot, j, N2_lay, N2
     profile_StLaurent_slope(:) = 0.0
 
     ! BBL-profile
-    h_rmn = h_bot(i)
+    h_rmn = h_bot(i,j)
     do k=nz,1,-1
       if (G%mask2dT(i,j) > 0.0) then
         profile_BBL(k) = 0.0
@@ -1589,14 +1610,14 @@ subroutine get_lowmode_diffusivity(G, GV, h, tv, US, h_bot, k_bot, j, N2_lay, N2
       if (G%mask2dT(i,j) > 0.0) then
         ! N - profile
         if (renorm_N > threshold_renorm_N) then
-           profile_N(k) = sqrt(max(N2_lay(i,k), 0.)) / renorm_N
+           profile_N(k) = sqrt(max(N2_lay(i,j,k), 0.)) / renorm_N
         else
            profile_N(k) = 1 / htot
         endif
 
         ! N2 - profile
         if (renorm_N2 > threshold_renorm_N2) then
-           profile_N2(k) = max(N2_lay(i,k), 0.) / renorm_N2
+           profile_N2(k) = max(N2_lay(i,j,k), 0.) / renorm_N2
         else
            profile_N2(k) = 1 / htot
         endif
@@ -1653,25 +1674,20 @@ subroutine get_lowmode_diffusivity(G, GV, h, tv, US, h_bot, k_bot, j, N2_lay, N2
            verif_stl2 = verif_stl2 + (profile_StLaurent_slope(k) * h(i,j,k))
          enddo
 
-         if (abs(verif_N -1.0) > threshold_verif) then
-           write(stdout,'(I0,", ",I0,F18.10)') i, j, verif_N
-           call MOM_error(FATAL, "mismatch integral for N profile")
+         if ((abs(verif_N -1.0) > threshold_verif) .and. .not.mismatch_N) then
+           mismatch_N = .true. ; bad_i_N = i ; bad_j_N = j ; bad_verif_N = verif_N
          endif
-         if (abs(verif_N2 -1.0) > threshold_verif) then
-           write(stdout,'(I0,", ",I0,F18.10)') i, j, verif_N2
-           call MOM_error(FATAL, "mismatch integral for N2 profile")
+         if ((abs(verif_N2 -1.0) > threshold_verif) .and. .not.mismatch_N2) then
+           mismatch_N2 = .true. ; bad_i_N2 = i ; bad_j_N2 = j ; bad_verif_N2 = verif_N2
          endif
-         if (abs(verif_bbl -1.0) > threshold_verif) then
-           write(stdout,'(I0,", ",I0,F18.10)') i, j, verif_bbl
-           call MOM_error(FATAL, "mismatch integral for bbl profile")
+         if ((abs(verif_bbl -1.0) > threshold_verif) .and. .not.mismatch_bbl) then
+           mismatch_bbl = .true. ; bad_i_bbl = i ; bad_j_bbl = j ; bad_verif_bbl = verif_bbl
          endif
-         if (abs(verif_stl1 -1.0) > threshold_verif) then
-           write(stdout,'(I0,", ",I0,F18.10)') i, j, verif_stl1
-           call MOM_error(FATAL, "mismatch integral for stl1 profile")
+         if ((abs(verif_stl1 -1.0) > threshold_verif) .and. .not.mismatch_stl1) then
+           mismatch_stl1 = .true. ; bad_i_stl1 = i ; bad_j_stl1 = j ; bad_verif_stl1 = verif_stl1
          endif
-         if (abs(verif_stl2 -1.0) > threshold_verif) then
-           write(stdout,'(I0,", ",I0,F18.10)') i, j, verif_stl2
-           call MOM_error(FATAL, "mismatch integral for stl2 profile")
+         if ((abs(verif_stl2 -1.0) > threshold_verif) .and. .not.mismatch_stl2) then
+           mismatch_stl2 = .true. ; bad_i_stl2 = i ; bad_j_stl2 = j ; bad_verif_stl2 = verif_stl2
          endif
 
       endif
@@ -1682,10 +1698,10 @@ subroutine get_lowmode_diffusivity(G, GV, h, tv, US, h_bot, k_bot, j, N2_lay, N2
 
     ! get TKE loss value and compute diffusivities in layers
     if (CS%apply_background_drag) then
-      call get_lowmode_loss(i, j, G, CS, "LeakDrag", TKE_loss)
+      TKE_loss = CS%tot_leak_loss(i,j)
       ! insert logic to switch between profiles here
       ! if trim(CS%leak_profile) == "N2" then
-      profile_leak(i,:) = profile_N2(:)
+      profile_leak(ii,jj,:) = profile_N2(:)
       ! elseif trim(CS%leak_profile) == "N" then
       ! profile_leak(:) = profile_N(:)
       ! something else
@@ -1694,21 +1710,21 @@ subroutine get_lowmode_diffusivity(G, GV, h, tv, US, h_bot, k_bot, j, N2_lay, N2
       do k=1,nz
         ! layer diffusivity for processus
         if (h(i,j,k) >= CS%min_thick_layer_Kd) then
-          TKE_to_Kd_lim = min(TKE_to_Kd(i,k), CS%max_TKE_to_Kd)
-          Kd_leak_lay(k) = CS%mixing_effic * TKE_loss * TKE_to_Kd_lim * profile_leak(i,k) * h(i,j,k)
+          TKE_to_Kd_lim = min(TKE_to_Kd(i,j,k), CS%max_TKE_to_Kd)
+          Kd_leak_lay(k) = CS%mixing_effic * TKE_loss * TKE_to_Kd_lim * profile_leak(ii,jj,k) * h(i,j,k)
         else
           Kd_leak_lay(k) = 0.
         endif
         ! add to total Kd in layer
-        if (CS%update_Kd) Kd_lay(i,k) = Kd_lay(i,k) + min(Kd_leak_lay(k), Kd_max)
+        if (CS%update_Kd) Kd_lay(i,j,k) = Kd_lay(i,j,k) + min(Kd_leak_lay(k), Kd_max)
       enddo
     endif
 
     if (CS%apply_Froude_drag) then
-      call get_lowmode_loss(i, j, G, CS, "Froude", TKE_loss)
+      TKE_loss = CS%tot_Froude_loss(i,j)
       ! insert logic to switch between profiles here
       ! if trim(CS%Froude_profile) == "N" then
-      profile_Froude(i,:) = profile_N(:)
+      profile_Froude(ii,jj,:) = profile_N(:)
       ! elseif trim(CS%Froude_profile) == "N2" then
       ! profile_Froude(:) = profile_N2(:)
       ! something else
@@ -1716,21 +1732,21 @@ subroutine get_lowmode_diffusivity(G, GV, h, tv, US, h_bot, k_bot, j, N2_lay, N2
       do k=1,nz
         ! layer diffusivity for processus
         if (h(i,j,k) >= CS%min_thick_layer_Kd) then
-          TKE_to_Kd_lim = min(TKE_to_Kd(i,k), CS%max_TKE_to_Kd)
-          Kd_Froude_lay(k) = CS%mixing_effic * TKE_loss * TKE_to_Kd_lim * profile_Froude(i,k) * h(i,j,k)
+          TKE_to_Kd_lim = min(TKE_to_Kd(i,j,k), CS%max_TKE_to_Kd)
+          Kd_Froude_lay(k) = CS%mixing_effic * TKE_loss * TKE_to_Kd_lim * profile_Froude(ii,jj,k) * h(i,j,k)
         else
           Kd_Froude_lay(k) = 0.
         endif
         ! add to total Kd in layer
-        if (CS%update_Kd) Kd_lay(i,k) = Kd_lay(i,k) + min(Kd_Froude_lay(k), Kd_max)
+        if (CS%update_Kd) Kd_lay(i,j,k) = Kd_lay(i,j,k) + min(Kd_Froude_lay(k), Kd_max)
       enddo
     endif
 
     if (CS%apply_wave_drag) then
-      call get_lowmode_loss(i, j, G, CS, "WaveDrag", TKE_loss)
+      TKE_loss = CS%tot_itidal_loss(i,j)
       ! insert logic to switch between profiles here
       ! if trim(CS%wave_profile) == "StLaurent" then
-      profile_itidal(i,:) = profile_StLaurent(:)
+      profile_itidal(ii,jj,:) = profile_StLaurent(:)
       ! elseif trim(CS%Froude_profile) == "N2" then
       ! profile_itidal(:) = profile_N2(:)
       ! something else
@@ -1738,21 +1754,21 @@ subroutine get_lowmode_diffusivity(G, GV, h, tv, US, h_bot, k_bot, j, N2_lay, N2
       do k=1,nz
         ! layer diffusivity for processus
         if (h(i,j,k) >= CS%min_thick_layer_Kd) then
-          TKE_to_Kd_lim = min(TKE_to_Kd(i,k), CS%max_TKE_to_Kd)
-          Kd_itidal_lay(k) = CS%mixing_effic * TKE_loss * TKE_to_Kd_lim * profile_itidal(i,k) * h(i,j,k)
+          TKE_to_Kd_lim = min(TKE_to_Kd(i,j,k), CS%max_TKE_to_Kd)
+          Kd_itidal_lay(k) = CS%mixing_effic * TKE_loss * TKE_to_Kd_lim * profile_itidal(ii,jj,k) * h(i,j,k)
         else
           Kd_itidal_lay(k) = 0.
         endif
         ! add to total Kd in layer
-        if (CS%update_Kd) Kd_lay(i,k) = Kd_lay(i,k) + min(Kd_itidal_lay(k), Kd_max)
+        if (CS%update_Kd) Kd_lay(i,j,k) = Kd_lay(i,j,k) + min(Kd_itidal_lay(k), Kd_max)
       enddo
     endif
 
     if (CS%apply_residual_drag) then
-      call get_lowmode_loss(i, j, G, CS, "SlopeDrag", TKE_loss)
+      TKE_loss = CS%tot_residual_loss(i,j)
       ! insert logic to switch between profiles here
       ! if trim(CS%wave_profile) == "StLaurent" then
-      profile_slope(i,:) = profile_StLaurent_slope(:)
+      profile_slope(ii,jj,:) = profile_StLaurent_slope(:)
       ! elseif trim(CS%Froude_profile) == "N2" then
       ! profile_itidal(:) = profile_N2(:)
       ! something else
@@ -1760,21 +1776,21 @@ subroutine get_lowmode_diffusivity(G, GV, h, tv, US, h_bot, k_bot, j, N2_lay, N2
       do k=1,nz
         ! layer diffusivity for processus
         if (h(i,j,k) >= CS%min_thick_layer_Kd) then
-          TKE_to_Kd_lim = min(TKE_to_Kd(i,k), CS%max_TKE_to_Kd)
-          Kd_slope_lay(k) = CS%mixing_effic * TKE_loss * TKE_to_Kd_lim * profile_slope(i,k) * h(i,j,k)
+          TKE_to_Kd_lim = min(TKE_to_Kd(i,j,k), CS%max_TKE_to_Kd)
+          Kd_slope_lay(k) = CS%mixing_effic * TKE_loss * TKE_to_Kd_lim * profile_slope(ii,jj,k) * h(i,j,k)
         else
           Kd_slope_lay(k) = 0.
         endif
         ! add to total Kd in layer
-        if (CS%update_Kd) Kd_lay(i,k) = Kd_lay(i,k) + min(Kd_slope_lay(k), Kd_max)
+        if (CS%update_Kd) Kd_lay(i,j,k) = Kd_lay(i,j,k) + min(Kd_slope_lay(k), Kd_max)
       enddo
     endif
 
     if (CS%apply_bottom_drag) then
-      call get_lowmode_loss(i, j, G, CS, "QuadDrag", TKE_loss)
+      TKE_loss = CS%tot_quad_loss(i,j)
       ! insert logic to switch between profiles here
       ! if trim(CS%bottom_profile) == "BBL" then
-      profile_quad(i,:) = profile_BBL(:)
+      profile_quad(ii,jj,:) = profile_BBL(:)
       ! elseif trim(CS%bottom_profile) == "N2" then
       ! profile_quad(:) = profile_N2(:)
       ! something else
@@ -1782,62 +1798,87 @@ subroutine get_lowmode_diffusivity(G, GV, h, tv, US, h_bot, k_bot, j, N2_lay, N2
       do k=1,nz
         ! layer diffusivity for processus
         if (h(i,j,k) >= CS%min_thick_layer_Kd) then
-          TKE_to_Kd_lim = min(TKE_to_Kd(i,k), CS%max_TKE_to_Kd)
-          Kd_quad_lay(k) = CS%mixing_effic * TKE_loss * TKE_to_Kd_lim * profile_quad(i,k) * h(i,j,k)
+          TKE_to_Kd_lim = min(TKE_to_Kd(i,j,k), CS%max_TKE_to_Kd)
+          Kd_quad_lay(k) = CS%mixing_effic * TKE_loss * TKE_to_Kd_lim * profile_quad(ii,jj,k) * h(i,j,k)
         else
           Kd_quad_lay(k) = 0.
         endif
         ! add to total Kd in layer
-        if (CS%update_Kd) Kd_lay(i,k) = Kd_lay(i,k) + min(Kd_quad_lay(k), Kd_max)
+        if (CS%update_Kd) Kd_lay(i,j,k) = Kd_lay(i,j,k) + min(Kd_quad_lay(k), Kd_max)
       enddo
     endif
 
     ! interpolate Kd_[] to interfaces and add to Kd_int
     if (CS%apply_background_drag) then
       do k=1,nz+1
-        if (k>1)    Kd_leak(i,K) = 0.5*Kd_leak_lay(k-1)
-        if (k<nz+1) Kd_leak(i,K) = Kd_leak(i,K) + 0.5*Kd_leak_lay(k)
+        if (k>1)    Kd_leak(ii,jj,K) = 0.5*Kd_leak_lay(k-1)
+        if (k<nz+1) Kd_leak(ii,jj,K) = Kd_leak(ii,jj,K) + 0.5*Kd_leak_lay(k)
         ! add to Kd_int
-        if (CS%update_Kd) Kd_int(i,K) = Kd_int(i,K) + min(Kd_leak(i,K), Kd_max)
+        if (CS%update_Kd) Kd_int(i,j,K) = Kd_int(i,j,K) + min(Kd_leak(ii,jj,K), Kd_max)
       enddo
     endif
 
     if (CS%apply_wave_drag) then
       do k=1,nz+1
-        if (k>1)    Kd_itidal(i,K) = 0.5*Kd_itidal_lay(k-1)
-        if (k<nz+1) Kd_itidal(i,K) = Kd_itidal(i,K) + 0.5*Kd_itidal_lay(k)
+        if (k>1)    Kd_itidal(ii,jj,K) = 0.5*Kd_itidal_lay(k-1)
+        if (k<nz+1) Kd_itidal(ii,jj,K) = Kd_itidal(ii,jj,K) + 0.5*Kd_itidal_lay(k)
         ! add to Kd_int
-        if (CS%update_Kd) Kd_int(i,K) = Kd_int(i,K) + min(Kd_itidal(i,K), Kd_max)
+        if (CS%update_Kd) Kd_int(i,j,K) = Kd_int(i,j,K) + min(Kd_itidal(ii,jj,K), Kd_max)
       enddo
     endif
 
     if (CS%apply_Froude_drag) then
       do k=1,nz+1
-        if (k>1)    Kd_Froude(i,K) = 0.5*Kd_Froude_lay(k-1)
-        if (k<nz+1) Kd_Froude(i,K) = Kd_Froude(i,K) + 0.5*Kd_Froude_lay(k)
+        if (k>1)    Kd_Froude(ii,jj,K) = 0.5*Kd_Froude_lay(k-1)
+        if (k<nz+1) Kd_Froude(ii,jj,K) = Kd_Froude(ii,jj,K) + 0.5*Kd_Froude_lay(k)
         ! add to Kd_int
-        if (CS%update_Kd) Kd_int(i,K) = Kd_int(i,K) + min(Kd_Froude(i,K), Kd_max)
+        if (CS%update_Kd) Kd_int(i,j,K) = Kd_int(i,j,K) + min(Kd_Froude(ii,jj,K), Kd_max)
       enddo
     endif
 
     if (CS%apply_residual_drag) then
       do k=1,nz+1
-        if (k>1)    Kd_slope(i,K) = 0.5*Kd_slope_lay(k-1)
-        if (k<nz+1) Kd_slope(i,K) = Kd_slope(i,K) + 0.5*Kd_slope_lay(k)
+        if (k>1)    Kd_slope(ii,jj,K) = 0.5*Kd_slope_lay(k-1)
+        if (k<nz+1) Kd_slope(ii,jj,K) = Kd_slope(ii,jj,K) + 0.5*Kd_slope_lay(k)
         ! add to Kd_int
-        if (CS%update_Kd) Kd_int(i,K) = Kd_int(i,K) + min(Kd_slope(i,K), Kd_max)
+        if (CS%update_Kd) Kd_int(i,j,K) = Kd_int(i,j,K) + min(Kd_slope(ii,jj,K), Kd_max)
       enddo
     endif
 
     if (CS%apply_bottom_drag) then
       do k=1,nz+1
-        if (k>1)    Kd_quad(i,K) = 0.5*Kd_quad_lay(k-1)
-        if (k<nz+1) Kd_quad(i,K) = Kd_quad(i,K) + 0.5*Kd_quad_lay(k)
+        if (k>1)    Kd_quad(ii,jj,K) = 0.5*Kd_quad_lay(k-1)
+        if (k<nz+1) Kd_quad(ii,jj,K) = Kd_quad(ii,jj,K) + 0.5*Kd_quad_lay(k)
         ! add to Kd_int
-        if (CS%update_Kd) Kd_int(i,K) = Kd_int(i,K) + min(Kd_quad(i,K), Kd_max)
+        if (CS%update_Kd) Kd_int(i,j,K) = Kd_int(i,j,K) + min(Kd_quad(ii,jj,K), Kd_max)
       enddo
     endif
   enddo ! i-loop
+
+  enddo ! j-loop
+
+  if (found_negative_N2) call MOM_error(WARNING, "negative buoyancy freq")
+
+  if (mismatch_N) then
+    write(stdout,'(I0,", ",I0,F18.10)') bad_i_N, bad_j_N, bad_verif_N
+    call MOM_error(FATAL, "mismatch integral for N profile")
+  endif
+  if (mismatch_N2) then
+    write(stdout,'(I0,", ",I0,F18.10)') bad_i_N2, bad_j_N2, bad_verif_N2
+    call MOM_error(FATAL, "mismatch integral for N2 profile")
+  endif
+  if (mismatch_bbl) then
+    write(stdout,'(I0,", ",I0,F18.10)') bad_i_bbl, bad_j_bbl, bad_verif_bbl
+    call MOM_error(FATAL, "mismatch integral for bbl profile")
+  endif
+  if (mismatch_stl1) then
+    write(stdout,'(I0,", ",I0,F18.10)') bad_i_stl1, bad_j_stl1, bad_verif_stl1
+    call MOM_error(FATAL, "mismatch integral for stl1 profile")
+  endif
+  if (mismatch_stl2) then
+    write(stdout,'(I0,", ",I0,F18.10)') bad_i_stl2, bad_j_stl2, bad_verif_stl2
+    call MOM_error(FATAL, "mismatch integral for stl2 profile")
+  endif
 
 end subroutine get_lowmode_diffusivity
 
