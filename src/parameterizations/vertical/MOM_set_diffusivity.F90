@@ -19,7 +19,7 @@ use MOM_diag_mediator,       only : diag_ctrl, time_type
 use MOM_diag_mediator,       only : post_data, register_diag_field
 use MOM_diagnose_kdwork,     only : vbf_CS
 use MOM_debugging,           only : hchksum, uvchksum, Bchksum, hchksum_pair
-use MOM_EOS,                 only : calculate_density, calculate_density_derivs, EOS_domain
+use MOM_EOS,                 only : calculate_density, calculate_density_derivs
 use MOM_error_handler,       only : MOM_error, is_root_pe, FATAL, WARNING, NOTE
 use MOM_error_handler,       only : callTree_showQuery
 use MOM_error_handler,       only : callTree_enter, callTree_leave, callTree_waypoint
@@ -338,7 +338,14 @@ subroutine set_diffusivity(u, v, h, u_h, v_h, tv, fluxes, optics, visc, dt, Kd_i
     Kd_quad_2d, & !< internal tides bottom drag diffusivity [H Z T-1 ~> m2 s-1 or kg m-1 s-1]
     Kd_itidal_2d, & !< internal tides wave drag diffusivity [H Z T-1 ~> m2 s-1 or kg m-1 s-1]
     Kd_Froude_2d, & !< internal tides high Froude diffusivity [H Z T-1 ~> m2 s-1 or kg m-1 s-1]
-    Kd_slope_2d, & !< internal tides critical slopes diffusivity [H Z T-1 ~> m2 s-1 or kg m-1 s-1]
+    Kd_slope_2d   !< internal tides critical slopes diffusivity [H Z T-1 ~> m2 s-1 or kg m-1 s-1]
+
+  ! KT_extra/KS_extra are block-sized hand-off buffers between double_diffusion
+  ! and this routine's own consumer loops. These bounds resolve CS%niblock/
+  ! CS%njblock the same way the executable resolver below does (see dRho_int
+  ! above); the two must stay in step.
+  real, dimension(merge(G%iec-G%isc+1, CS%niblock, CS%niblock==0), &
+                  merge(G%jec-G%jsc+1, CS%njblock, CS%njblock==0), SZK_(GV)+1) :: &
     KT_extra, &   !< Double diffusion diffusivity of temperature [H Z T-1 ~> m2 s-1 or kg m-1 s-1]
     KS_extra      !< Double diffusion diffusivity of salinity [H Z T-1 ~> m2 s-1 or kg m-1 s-1]
 
@@ -565,44 +572,46 @@ subroutine set_diffusivity(u, v, h, u_h, v_h, tv, fluxes, optics, visc, dt, Kd_i
     enddo ; endif
 
     ! Double-diffusion (old method)
-    ! TODO: tile/port old double-diffusion path and row-local work arrays.
     if (CS%double_diffusion) then
       !$omp target update from(Kd_lay_2d, Kd_extra_T, Kd_extra_S, KT_extra, KS_extra)
-      do j=jsb,jeb
-        call double_diffusion(tv, h, T_f, S_f, j, G, GV, US, CS, KT_extra, KS_extra)
-        ! One of Kd_extra_T and Kd_extra_S is always 0. Kd_extra_S is positive for salt fingering.
-        ! Kd_extra_T is positive for double diffusive convection.
-        do K=2,nz ; do ii=1,iie ; i = isb+ii-1
-          if (KS_extra(i,K) > KT_extra(i,K)) then ! salt fingering
-            Kd_lay_2d(i,j,k-1) = Kd_lay_2d(i,j,k-1) + 0.5 * KT_extra(i,K)
-            Kd_lay_2d(i,j,k)   = Kd_lay_2d(i,j,k)   + 0.5 * KT_extra(i,K)
-            Kd_extra_S(i,j,K) = KS_extra(i,K) - KT_extra(i,K)
-            Kd_extra_T(i,j,K) = 0.0
-          elseif (KT_extra(i,K) > 0.0) then ! double-diffusive convection
-            Kd_lay_2d(i,j,k-1) = Kd_lay_2d(i,j,k-1) + 0.5 * KS_extra(i,K)
-            Kd_lay_2d(i,j,k)   = Kd_lay_2d(i,j,k)   + 0.5 * KS_extra(i,K)
-            Kd_extra_T(i,j,K) = KT_extra(i,K) - KS_extra(i,K)
-            Kd_extra_S(i,j,K) = 0.0
-          else ! There is no double diffusion at this interface.
-            Kd_extra_T(i,j,K) = 0.0
-            Kd_extra_S(i,j,K) = 0.0
-          endif
-        enddo ; enddo
-        if (associated(dd%KT_extra)) then ; do K=1,nz+1 ; do ii=1,iie ; i = isb+ii-1
-          dd%KT_extra(i,j,K) = KT_extra(i,K)
-        enddo ; enddo ; endif
+      call double_diffusion(tv, h, T_f, S_f, isb, ieb, jsb, jeb, nii, njj, G, GV, US, CS, KT_extra, KS_extra)
+      ! One of Kd_extra_T and Kd_extra_S is always 0. Kd_extra_S is positive for salt fingering.
+      ! Kd_extra_T is positive for double diffusive convection.
+      do K=2,nz ; do jj=1,jje ; do ii=1,iie
+        j = jsb+jj-1 ; i = isb+ii-1
+        if (KS_extra(ii,jj,K) > KT_extra(ii,jj,K)) then ! salt fingering
+          Kd_lay_2d(i,j,k-1) = Kd_lay_2d(i,j,k-1) + 0.5 * KT_extra(ii,jj,K)
+          Kd_lay_2d(i,j,k)   = Kd_lay_2d(i,j,k)   + 0.5 * KT_extra(ii,jj,K)
+          Kd_extra_S(i,j,K) = KS_extra(ii,jj,K) - KT_extra(ii,jj,K)
+          Kd_extra_T(i,j,K) = 0.0
+        elseif (KT_extra(ii,jj,K) > 0.0) then ! double-diffusive convection
+          Kd_lay_2d(i,j,k-1) = Kd_lay_2d(i,j,k-1) + 0.5 * KS_extra(ii,jj,K)
+          Kd_lay_2d(i,j,k)   = Kd_lay_2d(i,j,k)   + 0.5 * KS_extra(ii,jj,K)
+          Kd_extra_T(i,j,K) = KT_extra(ii,jj,K) - KS_extra(ii,jj,K)
+          Kd_extra_S(i,j,K) = 0.0
+        else ! There is no double diffusion at this interface.
+          Kd_extra_T(i,j,K) = 0.0
+          Kd_extra_S(i,j,K) = 0.0
+        endif
+      enddo ; enddo ; enddo
+      if (associated(dd%KT_extra)) then ; do K=1,nz+1 ; do jj=1,jje ; do ii=1,iie
+        j = jsb+jj-1 ; i = isb+ii-1
+        dd%KT_extra(i,j,K) = KT_extra(ii,jj,K)
+      enddo ; enddo ; enddo ; endif
 
-        if (associated(dd%KS_extra)) then ; do K=1,nz+1 ; do ii=1,iie ; i = isb+ii-1
-          dd%KS_extra(i,j,K) = KS_extra(i,K)
-        enddo ; enddo ; endif
+      if (associated(dd%KS_extra)) then ; do K=1,nz+1 ; do jj=1,jje ; do ii=1,iie
+        j = jsb+jj-1 ; i = isb+ii-1
+        dd%KS_extra(i,j,K) = KS_extra(ii,jj,K)
+      enddo ; enddo ; enddo ; endif
 
-        if (associated(VBF%Kd_ddiff_T)) then ; do K=1,nz+1 ; do ii=1,iie ; i = isb+ii-1
-          VBF%Kd_ddiff_T(i,j,K) = KT_extra(i,K)
-        enddo ; enddo ; endif
-        if (associated(VBF%Kd_ddiff_S)) then ; do K=1,nz+1 ; do ii=1,iie ; i = isb+ii-1
-          VBF%Kd_ddiff_S(i,j,K) = KS_extra(i,K)
-        enddo ; enddo ; endif
-      enddo
+      if (associated(VBF%Kd_ddiff_T)) then ; do K=1,nz+1 ; do jj=1,jje ; do ii=1,iie
+        j = jsb+jj-1 ; i = isb+ii-1
+        VBF%Kd_ddiff_T(i,j,K) = KT_extra(ii,jj,K)
+      enddo ; enddo ; enddo ; endif
+      if (associated(VBF%Kd_ddiff_S)) then ; do K=1,nz+1 ; do jj=1,jje ; do ii=1,iie
+        j = jsb+jj-1 ; i = isb+ii-1
+        VBF%Kd_ddiff_S(i,j,K) = KS_extra(ii,jj,K)
+      enddo ; enddo ; enddo ; endif
     endif
 
     ! Apply double diffusion via CVMix
@@ -612,6 +621,7 @@ subroutine set_diffusivity(u, v, h, u_h, v_h, tv, fluxes, optics, visc, dt, Kd_i
       !$omp target update from(KD_extra_T, KD_extra_S, KT_extra)
       call cpu_clock_begin(id_clock_CVMix_ddiff)
       do j=jsb,jeb
+        jj = j-jsb+1
         if (associated(dd%drho_rat)) then
           call compute_ddiff_coeffs(h, tv, G, GV, US, j, Kd_extra_T, Kd_extra_S, &
                                     CS%CVMix_ddiff_csp, dd%drho_rat)
@@ -619,10 +629,10 @@ subroutine set_diffusivity(u, v, h, u_h, v_h, tv, fluxes, optics, visc, dt, Kd_i
           call compute_ddiff_coeffs(h, tv, G, GV, US, j, Kd_extra_T, Kd_extra_S, CS%CVMix_ddiff_csp)
         endif
         if (associated(VBF%Kd_ddiff_T)) then ; do K=1,nz+1 ; do ii=1,iie ; i = isb+ii-1
-          VBF%Kd_ddiff_T(i,j,K) = KT_extra(i,K)
+          VBF%Kd_ddiff_T(i,j,K) = KT_extra(ii,jj,K)
         enddo ; enddo ; endif
         if (associated(VBF%Kd_ddiff_S)) then ; do K=1,nz+1 ; do ii=1,iie ; i = isb+ii-1
-          VBF%Kd_ddiff_S(i,j,K) = KS_extra(i,K)
+          VBF%Kd_ddiff_S(i,j,K) = KS_extra(ii,jj,K)
         enddo ; enddo ; endif
       enddo
       call cpu_clock_end(id_clock_CVMix_ddiff)
@@ -663,12 +673,9 @@ subroutine set_diffusivity(u, v, h, u_h, v_h, tv, fluxes, optics, visc, dt, Kd_i
     endif
 
     ! Add the ML_Rad diffusivity.
-    ! TODO: tile/port ML radiation row routine.
     if (CS%ML_radiation) then
-      do j=jsb,jeb
-        call add_MLrad_diffusivity(dz(:,j,:), fluxes, tv, j, Kd_int_2d(:,j,:), G, GV, US, CS, &
-                                   TKE_to_Kd(:,j,:), Kd_lay_2d(:,j,:))
-      enddo
+      call add_MLrad_diffusivity(dz, fluxes, tv, isb, ieb, jsb, jeb, nii, njj, Kd_int_2d, G, GV, US, CS, &
+                                 TKE_to_Kd, Kd_lay_2d)
     endif
 
     ! Add the Nikurashin and / or tidal bottom-driven mixing
@@ -1556,7 +1563,7 @@ end subroutine find_N2
 !! be made run-time variables rather than hard-coded constants.
 !!
 !! \todo Find reference for NCAR tech note above.
-subroutine double_diffusion(tv, h, T_f, S_f, j, G, GV, US, CS, Kd_T_dd, Kd_S_dd)
+subroutine double_diffusion(tv, h, T_f, S_f, isb, ieb, jsb, jeb, nii, njj, G, GV, US, CS, Kd_T_dd, Kd_S_dd)
   type(ocean_grid_type),    intent(in)  :: G   !< The ocean's grid structure.
   type(verticalGrid_type),  intent(in)  :: GV  !< The ocean's vertical grid structure.
   type(unit_scale_type),    intent(in)  :: US  !< A dimensional unit scaling type
@@ -1570,16 +1577,21 @@ subroutine double_diffusion(tv, h, T_f, S_f, j, G, GV, US, CS, Kd_T_dd, Kd_S_dd)
   real, dimension(SZI_(G),SZJ_(G),SZK_(GV)), &
                             intent(in)  :: S_f !< Layer salinities with values in massless
                                                !! layers filled vertically by diffusion [S ~> ppt].
-  integer,                  intent(in)  :: j   !< Meridional index upon which to work.
+  integer,                  intent(in)  :: isb !< Starting i-index to work on
+  integer,                  intent(in)  :: ieb !< Ending i-index to work on
+  integer,                  intent(in)  :: jsb !< Starting j-index to work on
+  integer,                  intent(in)  :: jeb !< Ending j-index to work on
+  integer,                  intent(in)  :: nii !< Size of the i-block [nondim].
+  integer,                  intent(in)  :: njj !< Size of the j-block [nondim].
   type(set_diffusivity_CS), intent(in)  :: CS  !< Module control structure.
-  real, dimension(SZI_(G),SZK_(GV)+1),       &
+  real, dimension(nii,njj,SZK_(GV)+1),       &
                             intent(out) :: Kd_T_dd !< Interface double diffusion diapycnal
                                                !! diffusivity for temp [H Z T-1 ~> m2 s-1 or kg m-1 s-1]
-  real, dimension(SZI_(G),SZK_(GV)+1),       &
+  real, dimension(nii,njj,SZK_(GV)+1),       &
                             intent(out) :: Kd_S_dd !< Interface double diffusion diapycnal
                                                !! diffusivity for saln [H Z T-1 ~> m2 s-1 or kg m-1 s-1]
 
-  real, dimension(SZI_(G)) :: &
+  real, dimension(nii,njj) :: &
     dRho_dT,  &    ! partial derivatives of density with respect to temperature [R C-1 ~> kg m-3 degC-1]
     dRho_dS,  &    ! partial derivatives of density with respect to salinity [R S-1 ~> kg m-3 ppt-1]
     pres,     &    ! pressure at each interface [R L2 T-2 ~> Pa]
@@ -1594,48 +1606,56 @@ subroutine double_diffusion(tv, h, T_f, S_f, j, G, GV, US, CS, Kd_T_dd, Kd_S_dd)
   real :: Kd_dd   ! The dominant double diffusive diffusivity [H Z T-1 ~> m2 s-1 or kg m-1 s-1]
   real :: prandtl ! flux ratio for diffusive convection regime [nondim]
 
-  integer, dimension(2) :: EOSdom ! The i-computational domain for the equation of state
-  integer :: i, k, is, ie, nz
-  is = G%isc ; ie = G%iec ; nz = GV%ke
+  integer, dimension(2,2) :: EOSdom ! The computational domain for the equation of state
+  integer :: i, j, k, ii, jj, iie, jje, nz
+  nz = GV%ke
+  iie = ieb-isb+1 ; jje = jeb-jsb+1
 
-  ! TODO: tile/port single-row double diffusion loops and EOS derivative calls.
   if (associated(tv%eqn_of_state)) then
-    do i=is,ie
-      pres(i) = 0.0 ; Kd_T_dd(i,1) = 0.0 ; Kd_S_dd(i,1) = 0.0
-      Kd_T_dd(i,nz+1) = 0.0 ; Kd_S_dd(i,nz+1) = 0.0
-    enddo
-    if (associated(tv%p_surf)) then ; do i=is,ie ; pres(i) = tv%p_surf(i,j) ; enddo ; endif
-    EOSdom(:) = EOS_domain(G%HI)
+    do jj=1,jje ; do ii=1,iie
+      pres(ii,jj) = 0.0 ; Kd_T_dd(ii,jj,1) = 0.0 ; Kd_S_dd(ii,jj,1) = 0.0
+      Kd_T_dd(ii,jj,nz+1) = 0.0 ; Kd_S_dd(ii,jj,nz+1) = 0.0
+    enddo ; enddo
+    if (associated(tv%p_surf)) then
+      do jj=1,jje ; do ii=1,iie
+        j = jsb+jj-1 ; i = isb+ii-1
+        pres(ii,jj) = tv%p_surf(i,j)
+      enddo ; enddo
+    endif
+    EOSdom(1,1) = 1 ; EOSdom(1,2) = iie
+    EOSdom(2,1) = 1 ; EOSdom(2,2) = jje
     do K=2,nz
-      do i=is,ie
-        pres(i) = pres(i) + (GV%g_Earth*GV%H_to_RZ)*h(i,j,k-1)
-        Temp_Int(i) = 0.5 * (T_f(i,j,k-1) + T_f(i,j,k))
-        Salin_Int(i) = 0.5 * (S_f(i,j,k-1) + S_f(i,j,k))
-      enddo
+      do jj=1,jje ; do ii=1,iie
+        j = jsb+jj-1 ; i = isb+ii-1
+        pres(ii,jj) = pres(ii,jj) + (GV%g_Earth*GV%H_to_RZ)*h(i,j,k-1)
+        Temp_Int(ii,jj) = 0.5 * (T_f(i,j,k-1) + T_f(i,j,k))
+        Salin_Int(ii,jj) = 0.5 * (S_f(i,j,k-1) + S_f(i,j,k))
+      enddo ; enddo
       call calculate_density_derivs(Temp_int, Salin_int, pres, dRho_dT, dRho_dS, &
                                     tv%eqn_of_state, EOSdom)
 
-      do i=is,ie
-        alpha_dT = -1.0*dRho_dT(i) * (T_f(i,j,k-1) - T_f(i,j,k))
-        beta_dS  = dRho_dS(i) * (S_f(i,j,k-1) - S_f(i,j,k))
+      do jj=1,jje ; do ii=1,iie
+        j = jsb+jj-1 ; i = isb+ii-1
+        alpha_dT = -1.0*dRho_dT(ii,jj) * (T_f(i,j,k-1) - T_f(i,j,k))
+        beta_dS  = dRho_dS(ii,jj) * (S_f(i,j,k-1) - S_f(i,j,k))
 
         if ((alpha_dT > beta_dS) .and. (beta_dS > 0.0)) then  ! salt finger case
           Rrho = min(alpha_dT / beta_dS, CS%Max_Rrho_salt_fingers)
           diff_dd = 1.0 - ((RRho-1.0)/(CS%Max_Rrho_salt_fingers-1.0))
           Kd_dd = CS%Max_salt_diff_salt_fingers * diff_dd*diff_dd*diff_dd
-          Kd_T_dd(i,K) = 0.7 * Kd_dd
-          Kd_S_dd(i,K) = Kd_dd
+          Kd_T_dd(ii,jj,K) = 0.7 * Kd_dd
+          Kd_S_dd(ii,jj,K) = Kd_dd
         elseif ((alpha_dT < 0.) .and. (beta_dS < 0.) .and. (alpha_dT > beta_dS)) then ! diffusive convection
           Rrho = alpha_dT / beta_dS
           Kd_dd = CS%Kv_molecular * 0.909 * exp(4.6 * exp(-0.54 * (1/Rrho - 1)))
           prandtl = 0.15*Rrho
           if (Rrho > 0.5) prandtl = (1.85-0.85/Rrho)*Rrho
-          Kd_T_dd(i,K) = Kd_dd
-          Kd_S_dd(i,K) = prandtl * Kd_dd
+          Kd_T_dd(ii,jj,K) = Kd_dd
+          Kd_S_dd(ii,jj,K) = prandtl * Kd_dd
         else
-          Kd_T_dd(i,K) = 0.0 ; Kd_S_dd(i,K) = 0.0
+          Kd_T_dd(ii,jj,K) = 0.0 ; Kd_S_dd(ii,jj,K) = 0.0
         endif
-      enddo
+      enddo ; enddo
     enddo
   endif
 
@@ -2116,33 +2136,39 @@ subroutine add_LOTW_BBL_diffusivity(h, u, v, tv, fluxes, visc, isb, ieb, jsb, je
 end subroutine add_LOTW_BBL_diffusivity
 
 !> This routine adds effects of mixed layer radiation to the layer diffusivities.
-subroutine add_MLrad_diffusivity(dz, fluxes, tv, j, Kd_int, G, GV, US, CS, TKE_to_Kd, Kd_lay)
+subroutine add_MLrad_diffusivity(dz, fluxes, tv, isb, ieb, jsb, jeb, nii, njj, Kd_int, G, GV, US, CS, &
+                                 TKE_to_Kd, Kd_lay)
   type(ocean_grid_type),            intent(in)    :: G      !< The ocean's grid structure
   type(verticalGrid_type),          intent(in)    :: GV     !< The ocean's vertical grid structure
   type(unit_scale_type),            intent(in)    :: US     !< A dimensional unit scaling type
-  real, dimension(SZI_(G),SZK_(GV)), intent(in)   :: dz     !< Height change across layers [Z ~> m]
+  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)), intent(in)   :: dz     !< Height change across layers [Z ~> m]
   type(forcing),                    intent(in)    :: fluxes !< Surface fluxes structure
   type(thermo_var_ptrs),            intent(in)    :: tv     !< Structure containing pointers to any available
                                                             !! thermodynamic fields.
-  integer,                          intent(in)    :: j      !< The j-index to work on
-  real, dimension(SZI_(G),SZK_(GV)+1), intent(inout) :: Kd_int !< The diapycnal diffusivity at interfaces
+  integer,                          intent(in)    :: isb !< Starting i-index to work on
+  integer,                          intent(in)    :: ieb !< Ending i-index to work on
+  integer,                          intent(in)    :: jsb !< Starting j-index to work on
+  integer,                          intent(in)    :: jeb !< Ending j-index to work on
+  integer,                          intent(in)    :: nii !< Size of the i-block [nondim].
+  integer,                          intent(in)    :: njj !< Size of the j-block [nondim].
+  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)+1), intent(inout) :: Kd_int !< The diapycnal diffusivity at interfaces
                                                             !! [H Z T-1 ~> m2 s-1 or kg m-1 s-1]
   type(set_diffusivity_CS),         intent(in)    :: CS     !< Diffusivity control structure
-  real, dimension(SZI_(G),SZK_(GV)), intent(in)   :: TKE_to_Kd !< The conversion rate between the TKE
+  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)), intent(in)   :: TKE_to_Kd !< The conversion rate between the TKE
                                                             !! TKE dissipated within  a layer and the
                                                             !! diapycnal diffusivity witin that layer,
                                                             !! usually (~Rho_0 / (G_Earth * dRho_lay))
                                                             !! [T2 Z-1 ~> s2 m-1]
-  real, dimension(SZI_(G),SZK_(GV)), &
+  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)), &
                           optional, intent(inout) :: Kd_lay !< The diapycnal diffusivity in layers
                                                             !! [H Z T-1 ~> m2 s-1 or kg m-1 s-1].
 
 ! This routine adds effects of mixed layer radiation to the layer diffusivities.
 
-  real, dimension(SZI_(G)) :: h_ml  ! Mixed layer thickness [Z ~> m]
-  real, dimension(SZI_(G)) :: TKE_ml_flux ! Mixed layer TKE flux [H Z2 T-3 ~> m3 s-3 or W m-2]
-  real, dimension(SZI_(G)) :: I_decay   ! A decay rate [Z-1 ~> m-1].
-  real, dimension(SZI_(G)) :: Kd_mlr_ml ! Diffusivities associated with mixed layer radiation
+  real, dimension(nii,njj) :: h_ml  ! Mixed layer thickness [Z ~> m]
+  real, dimension(nii,njj) :: TKE_ml_flux ! Mixed layer TKE flux [H Z2 T-3 ~> m3 s-3 or W m-2]
+  real, dimension(nii,njj) :: I_decay   ! A decay rate [Z-1 ~> m-1].
+  real, dimension(nii,njj) :: Kd_mlr_ml ! Diffusivities associated with mixed layer radiation
                                         ! [H Z T-1 ~> m2 s-1 or kg m-1 s-1]
 
   real :: f_sq              ! The square of the local Coriolis parameter or a related variable [T-2 ~> s-2].
@@ -2159,9 +2185,10 @@ subroutine add_MLrad_diffusivity(dz, fluxes, tv, j, Kd_int, G, GV, US, CS, TKE_t
                             ! layer code [Z-2 ~> m-2]
   real :: dz_neglect        ! A negligibly small height change [Z ~> m]
 
-  logical :: do_any, do_i(SZI_(G))
-  integer :: i, k, is, ie, nz, kml
-  is = G%isc ; ie = G%iec ; nz = GV%ke
+  logical :: do_any, do_i(nii,njj)
+  integer :: i, j, k, nz, kml, ii, jj, iie, jje
+  nz = GV%ke
+  iie = ieb-isb+1 ; jje = jeb-jsb+1
 
   Omega2    = CS%omega**2
   C1_6      = 1.0 / 6.0
@@ -2171,101 +2198,104 @@ subroutine add_MLrad_diffusivity(dz, fluxes, tv, j, Kd_int, G, GV, US, CS, TKE_t
 
   if (.not.CS%ML_radiation) return
 
-  do i=is,ie ; h_ml(i) = 0.0 ; do_i(i) = (G%mask2dT(i,j) > 0.0) ; enddo
-  do k=1,kml ; do i=is,ie ; h_ml(i) = h_ml(i) + dz(i,k) ; enddo ; enddo
+  do jj=1,jje
+    j = jsb+jj-1
+    do ii=1,iie ; i = isb+ii-1 ; h_ml(ii,jj) = 0.0 ; do_i(ii,jj) = (G%mask2dT(i,j) > 0.0) ; enddo
+    do k=1,kml ; do ii=1,iie ; i = isb+ii-1 ; h_ml(ii,jj) = h_ml(ii,jj) + dz(i,j,k) ; enddo ; enddo
 
-  do i=is,ie ; if (do_i(i)) then
-    if (CS%ML_omega_frac >= 1.0) then
-      f_sq = 4.0 * Omega2
-    else
-      f_sq = 0.25 * ((G%Coriolis2Bu(I,J) + G%Coriolis2Bu(I-1,J-1)) + &
-                     (G%Coriolis2Bu(I,J-1) + G%Coriolis2Bu(I-1,J)))
-      if (CS%ML_omega_frac > 0.0) &
-        f_sq = CS%ML_omega_frac * 4.0 * Omega2 + (1.0 - CS%ML_omega_frac) * f_sq
-    endif
-
-    ! Determine the energy flux out of the mixed layer and its vertical decay scale.
-    if (associated(fluxes%ustar) .and. (GV%Boussinesq .or. .not.associated(fluxes%tau_mag))) then
-      ustar_sq = max(fluxes%ustar(i,j), CS%ustar_min)**2
-      u_star_H = GV%Z_to_H * fluxes%ustar(i,j)
-    elseif (allocated(tv%SpV_avg)) then
-      ustar_sq = max(fluxes%tau_mag(i,j) * tv%SpV_avg(i,j,1), CS%ustar_min**2)
-      u_star_H = GV%RZ_to_H * sqrt(fluxes%tau_mag(i,j) / tv%SpV_avg(i,j,1))
-    else  ! This semi-Boussinesq form is mathematically equivalent to the Boussinesq version above.
-     ! Differs at roundoff:  ustar_sq = max(fluxes%tau_mag(i,j) * I_rho, CS%ustar_min**2)
-      ustar_sq = max((sqrt(fluxes%tau_mag(i,j) * I_rho))**2, CS%ustar_min**2)
-      u_star_H = GV%RZ_to_H * sqrt(fluxes%tau_mag(i,j) * GV%Rho0)
-    endif
-    TKE_ml_flux(i) = (CS%mstar * CS%ML_rad_coeff) * (ustar_sq * u_star_H)
-    I_decay_len2_TKE = CS%TKE_decay**2 * (f_sq / ustar_sq)
-
-    if (CS%ML_rad_TKE_decay) &
-      TKE_ml_flux(i) = TKE_ml_flux(i) * exp(-h_ml(i) * sqrt(I_decay_len2_TKE))
-
-    ! Calculate the inverse decay scale
-    h_ml_sq = (CS%ML_rad_efold_coeff * (h_ml(i)+dz_neglect))**2
-    I_decay(i) = sqrt((I_decay_len2_TKE * h_ml_sq + 1.0) / h_ml_sq)
-
-    ! Average the dissipation layer kml+1, using
-    ! a more accurate Taylor series approximations for very thin layers.
-    z1 = dz(i,kml+1) * I_decay(i)
-    if (z1 > 1e-5) then
-      Kd_mlr = TKE_ml_flux(i) * TKE_to_Kd(i,kml+1) * (1.0 - exp(-z1))
-    else
-      Kd_mlr = TKE_ml_flux(i) * TKE_to_Kd(i,kml+1) * (z1 * (1.0 - z1 * (0.5 - C1_6 * z1)))
-    endif
-    Kd_mlr_ml(i) = min(Kd_mlr, CS%ML_rad_kd_max)
-    TKE_ml_flux(i) = TKE_ml_flux(i) * exp(-z1)
-  endif ; enddo
-
-  if (present(Kd_lay)) then
-    do k=1,kml+1 ; do i=is,ie ; if (do_i(i)) then
-      Kd_lay(i,k) = Kd_lay(i,k) + Kd_mlr_ml(i)
-    endif ; enddo ; enddo
-  endif
-  do K=2,kml+1 ; do i=is,ie ; if (do_i(i)) then
-    Kd_int(i,K) = Kd_int(i,K) + Kd_mlr_ml(i)
-  endif ; enddo ; enddo
-  if (kml<=nz-1) then ; do i=is,ie ; if (do_i(i)) then
-    Kd_int(i,Kml+2) = Kd_int(i,Kml+2) + 0.5 * Kd_mlr_ml(i)
-  endif ; enddo ; endif
-
-  do k=kml+2,nz-1
-    do_any = .false.
-    do i=is,ie ; if (do_i(i)) then
-      z1 = dz(i,k)*I_decay(i)
-      if (CS%ML_Rad_bug) then
-        ! These expressions are dimensionally inconsistent. -RWH
-        ! This is supposed to be the integrated energy deposited in the layer,
-        ! not the average over the layer as in these expressions.
-        if (z1 > 1e-5) then
-          Kd_mlr = (TKE_ml_flux(i) * TKE_to_Kd(i,k)) * & ! Units of H Z T-1
-                   US%m_to_Z * ((1.0 - exp(-z1)) / dz(i,k))  ! Units of m-1
-        else
-          Kd_mlr = (TKE_ml_flux(i) * TKE_to_Kd(i,k)) * &  ! Units of H Z T-1
-                   US%m_to_Z * (I_decay(i) * (1.0 - z1 * (0.5 - C1_6*z1))) ! Units of m-1
-        endif
+    do ii=1,iie ; i = isb+ii-1 ; if (do_i(ii,jj)) then
+      if (CS%ML_omega_frac >= 1.0) then
+        f_sq = 4.0 * Omega2
       else
-        if (z1 > 1e-5) then
-          Kd_mlr = (TKE_ml_flux(i) * TKE_to_Kd(i,k)) * (1.0 - exp(-z1))
-        else
-          Kd_mlr = (TKE_ml_flux(i) * TKE_to_Kd(i,k)) * (z1 * (1.0 - z1 * (0.5 - C1_6*z1)))
-        endif
+        f_sq = 0.25 * ((G%Coriolis2Bu(I,J) + G%Coriolis2Bu(I-1,J-1)) + &
+                       (G%Coriolis2Bu(I,J-1) + G%Coriolis2Bu(I-1,J)))
+        if (CS%ML_omega_frac > 0.0) &
+          f_sq = CS%ML_omega_frac * 4.0 * Omega2 + (1.0 - CS%ML_omega_frac) * f_sq
       endif
-      Kd_mlr = min(Kd_mlr, CS%ML_rad_kd_max)
-      if (present(Kd_lay)) then
-        Kd_lay(i,k) = Kd_lay(i,k) + Kd_mlr
-      endif
-      Kd_int(i,K)   = Kd_int(i,K)   + 0.5 * Kd_mlr
-      Kd_int(i,K+1) = Kd_int(i,K+1) + 0.5 * Kd_mlr
 
-      TKE_ml_flux(i) = TKE_ml_flux(i) * exp(-z1)
-      if (TKE_ml_flux(i) * I_decay(i) < 0.1 * CS%Kd_min * Omega2) then
-        do_i(i) = .false.
-      else ; do_any = .true. ; endif
+      ! Determine the energy flux out of the mixed layer and its vertical decay scale.
+      if (associated(fluxes%ustar) .and. (GV%Boussinesq .or. .not.associated(fluxes%tau_mag))) then
+        ustar_sq = max(fluxes%ustar(i,j), CS%ustar_min)**2
+        u_star_H = GV%Z_to_H * fluxes%ustar(i,j)
+      elseif (allocated(tv%SpV_avg)) then
+        ustar_sq = max(fluxes%tau_mag(i,j) * tv%SpV_avg(i,j,1), CS%ustar_min**2)
+        u_star_H = GV%RZ_to_H * sqrt(fluxes%tau_mag(i,j) / tv%SpV_avg(i,j,1))
+      else  ! This semi-Boussinesq form is mathematically equivalent to the Boussinesq version above.
+       ! Differs at roundoff:  ustar_sq = max(fluxes%tau_mag(i,j) * I_rho, CS%ustar_min**2)
+        ustar_sq = max((sqrt(fluxes%tau_mag(i,j) * I_rho))**2, CS%ustar_min**2)
+        u_star_H = GV%RZ_to_H * sqrt(fluxes%tau_mag(i,j) * GV%Rho0)
+      endif
+      TKE_ml_flux(ii,jj) = (CS%mstar * CS%ML_rad_coeff) * (ustar_sq * u_star_H)
+      I_decay_len2_TKE = CS%TKE_decay**2 * (f_sq / ustar_sq)
+
+      if (CS%ML_rad_TKE_decay) &
+        TKE_ml_flux(ii,jj) = TKE_ml_flux(ii,jj) * exp(-h_ml(ii,jj) * sqrt(I_decay_len2_TKE))
+
+      ! Calculate the inverse decay scale
+      h_ml_sq = (CS%ML_rad_efold_coeff * (h_ml(ii,jj)+dz_neglect))**2
+      I_decay(ii,jj) = sqrt((I_decay_len2_TKE * h_ml_sq + 1.0) / h_ml_sq)
+
+      ! Average the dissipation layer kml+1, using
+      ! a more accurate Taylor series approximations for very thin layers.
+      z1 = dz(i,j,kml+1) * I_decay(ii,jj)
+      if (z1 > 1e-5) then
+        Kd_mlr = TKE_ml_flux(ii,jj) * TKE_to_Kd(i,j,kml+1) * (1.0 - exp(-z1))
+      else
+        Kd_mlr = TKE_ml_flux(ii,jj) * TKE_to_Kd(i,j,kml+1) * (z1 * (1.0 - z1 * (0.5 - C1_6 * z1)))
+      endif
+      Kd_mlr_ml(ii,jj) = min(Kd_mlr, CS%ML_rad_kd_max)
+      TKE_ml_flux(ii,jj) = TKE_ml_flux(ii,jj) * exp(-z1)
     endif ; enddo
-    if (.not.do_any) exit
-  enddo
+
+    if (present(Kd_lay)) then
+      do k=1,kml+1 ; do ii=1,iie ; i = isb+ii-1 ; if (do_i(ii,jj)) then
+        Kd_lay(i,j,k) = Kd_lay(i,j,k) + Kd_mlr_ml(ii,jj)
+      endif ; enddo ; enddo
+    endif
+    do K=2,kml+1 ; do ii=1,iie ; i = isb+ii-1 ; if (do_i(ii,jj)) then
+      Kd_int(i,j,K) = Kd_int(i,j,K) + Kd_mlr_ml(ii,jj)
+    endif ; enddo ; enddo
+    if (kml<=nz-1) then ; do ii=1,iie ; i = isb+ii-1 ; if (do_i(ii,jj)) then
+      Kd_int(i,j,Kml+2) = Kd_int(i,j,Kml+2) + 0.5 * Kd_mlr_ml(ii,jj)
+    endif ; enddo ; endif
+
+    do k=kml+2,nz-1
+      do_any = .false.
+      do ii=1,iie ; i = isb+ii-1 ; if (do_i(ii,jj)) then
+        z1 = dz(i,j,k)*I_decay(ii,jj)
+        if (CS%ML_Rad_bug) then
+          ! These expressions are dimensionally inconsistent. -RWH
+          ! This is supposed to be the integrated energy deposited in the layer,
+          ! not the average over the layer as in these expressions.
+          if (z1 > 1e-5) then
+            Kd_mlr = (TKE_ml_flux(ii,jj) * TKE_to_Kd(i,j,k)) * & ! Units of H Z T-1
+                     US%m_to_Z * ((1.0 - exp(-z1)) / dz(i,j,k))  ! Units of m-1
+          else
+            Kd_mlr = (TKE_ml_flux(ii,jj) * TKE_to_Kd(i,j,k)) * &  ! Units of H Z T-1
+                     US%m_to_Z * (I_decay(ii,jj) * (1.0 - z1 * (0.5 - C1_6*z1))) ! Units of m-1
+          endif
+        else
+          if (z1 > 1e-5) then
+            Kd_mlr = (TKE_ml_flux(ii,jj) * TKE_to_Kd(i,j,k)) * (1.0 - exp(-z1))
+          else
+            Kd_mlr = (TKE_ml_flux(ii,jj) * TKE_to_Kd(i,j,k)) * (z1 * (1.0 - z1 * (0.5 - C1_6*z1)))
+          endif
+        endif
+        Kd_mlr = min(Kd_mlr, CS%ML_rad_kd_max)
+        if (present(Kd_lay)) then
+          Kd_lay(i,j,k) = Kd_lay(i,j,k) + Kd_mlr
+        endif
+        Kd_int(i,j,K)   = Kd_int(i,j,K)   + 0.5 * Kd_mlr
+        Kd_int(i,j,K+1) = Kd_int(i,j,K+1) + 0.5 * Kd_mlr
+
+        TKE_ml_flux(ii,jj) = TKE_ml_flux(ii,jj) * exp(-z1)
+        if (TKE_ml_flux(ii,jj) * I_decay(ii,jj) < 0.1 * CS%Kd_min * Omega2) then
+          do_i(ii,jj) = .false.
+        else ; do_any = .true. ; endif
+      endif ; enddo
+      if (.not.do_any) exit
+    enddo
+  enddo ! j-loop
 
 end subroutine add_MLrad_diffusivity
 
