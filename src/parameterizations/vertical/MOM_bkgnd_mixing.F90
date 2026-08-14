@@ -319,24 +319,24 @@ subroutine calculate_bkgnd_mixing(h, tv, N2_lay, Kd_lay, Kd_int, Kv_bkgnd, &
   real, dimension(SZI_(G),SZJ_(G),SZK_(GV)), &
                                 intent(in)    :: h   !< Layer thickness [H ~> m or kg m-2].
   type(thermo_var_ptrs),        intent(in)    :: tv  !< Thermodynamics structure.
-  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)), &
-                                intent(in)    :: N2_lay !< Squared buoyancy frequency
-                                                     !! associated with layers [T-2 ~> s-2].
-  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)), &
-                                intent(inout) :: Kd_lay !< Background diapycnal diffusivity
-                                                     !! of each layer [H Z T-1 ~> m2 s-1].
-  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)+1), &
-                                intent(inout) :: Kd_int !< Background diapycnal diffusivity
-                                                     !! of each interface [H Z T-1 ~> m2 s-1].
-  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)+1), &
-                                intent(inout) :: Kv_bkgnd !< Background vertical viscosity
-                                                     !! at each interface [H Z T-1 ~> m2 s-1].
   integer,                      intent(in)    :: isb !< Starting i-index of columns to work on.
   integer,                      intent(in)    :: ieb !< Ending i-index of columns to work on.
   integer,                      intent(in)    :: jsb !< Starting j-index of rows to work on.
   integer,                      intent(in)    :: jeb !< Ending j-index of rows to work on.
   integer,                      intent(in)    :: nii !< Size of the i-block [nondim].
   integer,                      intent(in)    :: njj !< Size of the j-block [nondim].
+  real, dimension(nii,njj,SZK_(GV)), &
+                                intent(in)    :: N2_lay !< Squared buoyancy frequency
+                                                     !! associated with layers [T-2 ~> s-2].
+  real, dimension(nii,njj,SZK_(GV)), &
+                                intent(inout) :: Kd_lay !< Background diapycnal diffusivity
+                                                     !! of each layer [H Z T-1 ~> m2 s-1].
+  real, dimension(nii,njj,SZK_(GV)+1), &
+                                intent(inout) :: Kd_int !< Background diapycnal diffusivity
+                                                     !! of each interface [H Z T-1 ~> m2 s-1].
+  real, dimension(nii,njj,SZK_(GV)+1), &
+                                intent(inout) :: Kv_bkgnd !< Background vertical viscosity
+                                                     !! at each interface [H Z T-1 ~> m2 s-1].
   real, dimension(SZI_(G),SZJ_(G),SZK_(GV)), &
                                 intent(in)    :: dz  !< Height change across layers [Z ~> m].
   type(unit_scale_type),        intent(in)    :: US  !< A dimensional unit scaling type.
@@ -370,11 +370,11 @@ subroutine calculate_bkgnd_mixing(h, tv, N2_lay, Kd_lay, Kd_int, Kv_bkgnd, &
   ! Start with a constant value that may be replaced below.
   do concurrent (k=1:nz, jj=1:jje, ii=1:iie) DO_LOCALITY(local(i,j))
     j = jsb+jj-1 ; i = isb+ii-1
-    Kd_lay(i,j,k) = CS%Kd
+    Kd_lay(ii,jj,k) = CS%Kd
   enddo
   do concurrent (K=1:nz+1, jj=1:jje, ii=1:iie) DO_LOCALITY(local(i,j))
     j = jsb+jj-1 ; i = isb+ii-1
-    Kv_bkgnd(i,j,K) = 0.0
+    Kv_bkgnd(ii,jj,K) = 0.0
   enddo
 
   ! Set up the background diffusivity.
@@ -401,11 +401,11 @@ subroutine calculate_bkgnd_mixing(h, tv, N2_lay, Kd_lay, Kd_int, Kv_bkgnd, &
 
       ! Update Kd and Kv.
       do K=1,nz+1
-        Kv_bkgnd(i,j,K) = GV%m2_s_to_HZ_T * Kv_col(K)
-        Kd_int(i,j,K) = GV%m2_s_to_HZ_T*Kd_col(K)
+        Kv_bkgnd(ii,jj,K) = GV%m2_s_to_HZ_T * Kv_col(K)
+        Kd_int(ii,jj,K) = GV%m2_s_to_HZ_T*Kd_col(K)
       enddo
       do k=1,nz
-        Kd_lay(i,j,k) = Kd_lay(i,j,k) + 0.5 * GV%m2_s_to_HZ_T * (Kd_col(K) + Kd_col(K+1))
+        Kd_lay(ii,jj,k) = Kd_lay(ii,jj,k) + 0.5 * GV%m2_s_to_HZ_T * (Kd_col(K) + Kd_col(K+1))
       enddo
     enddo ; enddo
 
@@ -417,47 +417,47 @@ subroutine calculate_bkgnd_mixing(h, tv, N2_lay, Kd_lay, Kd_int, Kv_bkgnd, &
       j = jsb+jj-1 ; i = isb+ii-1
       bckgrnd_vdc_psis = CS%bckgrnd_vdc_psim * exp(-(0.4*(G%geoLatT(i,j)+28.9))**2)
       bckgrnd_vdc_psin = CS%bckgrnd_vdc_psim * exp(-(0.4*(G%geoLatT(i,j)-28.9))**2)
-      Kd_int(i,j,1) = (CS%bckgrnd_vdc_eq + bckgrnd_vdc_psin) + bckgrnd_vdc_psis
+      Kd_int(ii,jj,1) = (CS%bckgrnd_vdc_eq + bckgrnd_vdc_psin) + bckgrnd_vdc_psis
 
       if (G%geoLatT(i,j) < -10.0) then
-        Kd_int(i,j,1) = Kd_int(i,j,1) + CS%bckgrnd_vdc1
+        Kd_int(ii,jj,1) = Kd_int(ii,jj,1) + CS%bckgrnd_vdc1
       elseif (G%geoLatT(i,j) <= 10.0) then
-        Kd_int(i,j,1) = Kd_int(i,j,1) + CS%bckgrnd_vdc1 * (G%geoLatT(i,j)/10.0)**2
+        Kd_int(ii,jj,1) = Kd_int(ii,jj,1) + CS%bckgrnd_vdc1 * (G%geoLatT(i,j)/10.0)**2
       else
-        Kd_int(i,j,1) = Kd_int(i,j,1) + CS%bckgrnd_vdc1
+        Kd_int(ii,jj,1) = Kd_int(ii,jj,1) + CS%bckgrnd_vdc1
       endif
 
       ! North Banda Sea
       if ( (G%geoLatT(i,j) < -1.0)  .and. (G%geoLatT(i,j) > -4.0) .and. &
            ( mod(G%geoLonT(i,j)+360.0,360.0) > 103.0) .and. &
            ( mod(G%geoLonT(i,j)+360.0,360.0) < 134.0) ) then
-        Kd_int(i,j,1) = CS%bckgrnd_vdc_Banda
+        Kd_int(ii,jj,1) = CS%bckgrnd_vdc_Banda
       endif
 
       ! Middle Banda Sea
       if ( (G%geoLatT(i,j) <= -4.0) .and. (G%geoLatT(i,j) > -7.0) .and. &
            ( mod(G%geoLonT(i,j)+360.0,360.0) > 106.0) .and. &
            ( mod(G%geoLonT(i,j)+360.0,360.0) < 140.0) ) then
-        Kd_int(i,j,1) = CS%bckgrnd_vdc_Banda
+        Kd_int(ii,jj,1) = CS%bckgrnd_vdc_Banda
       endif
 
       ! South Banda Sea
       if ( (G%geoLatT(i,j) <= -7.0) .and. (G%geoLatT(i,j) > -8.3) .and. &
            ( mod(G%geoLonT(i,j)+360.0,360.0) > 111.0) .and. &
            ( mod(G%geoLonT(i,j)+360.0,360.0) < 142.0) ) then
-        Kd_int(i,j,1) = CS%bckgrnd_vdc_Banda
+        Kd_int(ii,jj,1) = CS%bckgrnd_vdc_Banda
       endif
 
     enddo
     ! Update interior values of Kd and Kv (uniform profile; no interpolation needed).
     do concurrent (K=1:nz+1, jj=1:jje, ii=1:iie) DO_LOCALITY(local(i,j))
       j = jsb+jj-1 ; i = isb+ii-1
-      Kd_int(i,j,K) = Kd_int(i,j,1)
-      Kv_bkgnd(i,j,K) = Kd_int(i,j,1) * CS%prandtl_bkgnd
+      Kd_int(ii,jj,K) = Kd_int(ii,jj,1)
+      Kv_bkgnd(ii,jj,K) = Kd_int(ii,jj,1) * CS%prandtl_bkgnd
     enddo
     do concurrent (k=1:nz, jj=1:jje, ii=1:iie) DO_LOCALITY(local(i,j))
       j = jsb+jj-1 ; i = isb+ii-1
-      Kd_lay(i,j,k) = Kd_int(i,j,1)
+      Kd_lay(ii,jj,k) = Kd_int(ii,jj,1)
     enddo
 
   else
@@ -507,10 +507,10 @@ subroutine calculate_bkgnd_mixing(h, tv, N2_lay, Kd_lay, Kd_int, Kv_bkgnd, &
         do jj=1,jje ; do ii=1,iie
           j = jsb+jj-1 ; i = isb+ii-1
           depth_c = depth(ii,jj) + 0.5*h(i,j,k)
-          if (depth_c <= CS%Hmix) then ; Kd_lay(i,j,k) = CS%Kd_tot_ml
-          elseif (depth_c >= 2.0*CS%Hmix) then ; Kd_lay(i,j,k) = Kd_sfc(ii,jj)
+          if (depth_c <= CS%Hmix) then ; Kd_lay(ii,jj,k) = CS%Kd_tot_ml
+          elseif (depth_c >= 2.0*CS%Hmix) then ; Kd_lay(ii,jj,k) = Kd_sfc(ii,jj)
           else
-            Kd_lay(i,j,k) = ((Kd_sfc(ii,jj) - CS%Kd_tot_ml) * I_Hmix) * depth_c + &
+            Kd_lay(ii,jj,k) = ((Kd_sfc(ii,jj) - CS%Kd_tot_ml) * I_Hmix) * depth_c + &
                             (2.0*CS%Kd_tot_ml - Kd_sfc(ii,jj))
           endif
 
@@ -521,20 +521,20 @@ subroutine calculate_bkgnd_mixing(h, tv, N2_lay, Kd_lay, Kd_int, Kv_bkgnd, &
     else ! There is no vertical structure to the background diffusivity.
       do concurrent (k=1:nz, jj=1:jje, ii=1:iie) DO_LOCALITY(local(i,j))
         j = jsb+jj-1 ; i = isb+ii-1
-        Kd_lay(i,j,k) = Kd_sfc(ii,jj)
+        Kd_lay(ii,jj,k) = Kd_sfc(ii,jj)
       enddo
     endif
 
     ! Update Kd_int and Kv_bkgnd, based on Kd_lay. These might be just used for diagnostics.
     do concurrent (jj=1:jje, ii=1:iie) DO_LOCALITY(local(i,j))
       j = jsb+jj-1 ; i = isb+ii-1
-      Kd_int(i,j,1) = 0.0 ; Kv_bkgnd(i,j,1) = 0.0
-      Kd_int(i,j,nz+1) = 0.0 ; Kv_bkgnd(i,j,nz+1) = 0.0
+      Kd_int(ii,jj,1) = 0.0 ; Kv_bkgnd(ii,jj,1) = 0.0
+      Kd_int(ii,jj,nz+1) = 0.0 ; Kv_bkgnd(ii,jj,nz+1) = 0.0
     enddo
     do concurrent (K=2:nz, jj=1:jje, ii=1:iie) DO_LOCALITY(local(i,j))
       j = jsb+jj-1 ; i = isb+ii-1
-      Kd_int(i,j,K) = 0.5*(Kd_lay(i,j,k-1) + Kd_lay(i,j,k))
-      Kv_bkgnd(i,j,K) = Kd_int(i,j,K) * CS%prandtl_bkgnd
+      Kd_int(ii,jj,K) = 0.5*(Kd_lay(ii,jj,k-1) + Kd_lay(ii,jj,k))
+      Kv_bkgnd(ii,jj,K) = Kd_int(ii,jj,K) * CS%prandtl_bkgnd
     enddo
   endif
 

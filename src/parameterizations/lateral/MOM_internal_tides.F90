@@ -1417,19 +1417,19 @@ subroutine get_lowmode_diffusivity(G, GV, h, tv, US, h_bot, k_bot, isb, ieb, jsb
                                        intent(in)  :: h       !< Layer thicknesses [H ~> m or kg m-2]
   type(thermo_var_ptrs),               intent(in)  :: tv      !< Structure containing pointers to any available
   type(unit_scale_type),               intent(in)  :: US      !< A dimensional unit scaling type
-  real, dimension(SZI_(G),SZJ_(G)),    intent(in)  :: h_bot   !< Bottom boundary layer thickness [H ~> m or kg m-2]
-  integer, dimension(SZI_(G),SZJ_(G)), intent(in)  :: k_bot   !< Bottom boundary layer top layer index
   integer,                             intent(in)  :: isb !< Starting i-index to work on
   integer,                             intent(in)  :: ieb !< Ending i-index to work on
   integer,                             intent(in)  :: jsb !< Starting j-index to work on
   integer,                             intent(in)  :: jeb !< Ending j-index to work on
   integer,                             intent(in)  :: nii !< Size of the i-block [nondim].
   integer,                             intent(in)  :: njj !< Size of the j-block [nondim].
-  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)),   intent(in)  :: N2_lay  !< The squared buoyancy frequency of the
+  real, dimension(nii,njj),            intent(in)  :: h_bot   !< Bottom boundary layer thickness [H ~> m or kg m-2]
+  integer, dimension(nii,njj),         intent(in)  :: k_bot   !< Bottom boundary layer top layer index
+  real, dimension(nii,njj,SZK_(GV)),           intent(in)  :: N2_lay  !< The squared buoyancy frequency of the
                                                               !! layers [T-2 ~> s-2].
-  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)+1), intent(in)  :: N2_int  !< The squared buoyancy frequency of the
+  real, dimension(nii,njj,SZK_(GV)+1),         intent(in)  :: N2_int  !< The squared buoyancy frequency of the
                                                               !! interfaces [T-2 ~> s-2].
-  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)),   intent(in)  :: TKE_to_Kd !< The conversion rate between the TKE
+  real, dimension(nii,njj,SZK_(GV)),           intent(in)  :: TKE_to_Kd !< The conversion rate between the TKE
                                                               !! dissipated within a layer and the
                                                               !! diapycnal diffusivity within that layer,
                                                               !! usually (~Rho_0 / (G_Earth * dRho_lay))
@@ -1451,9 +1451,9 @@ subroutine get_lowmode_diffusivity(G, GV, h, tv, US, h_bot, k_bot, isb, ieb, jsb
                                                                       !! [H Z T-1 ~> m2 s-1 or kg m-1 s-1].
   real, dimension(nii,njj,SZK_(GV)+1),  intent(out) :: Kd_slope       !< Diffusivity due to critical slopes
                                                                       !! [H Z T-1 ~> m2 s-1 or kg m-1 s-1].
-  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)),    intent(inout) :: Kd_lay       !< The diapycnal diffusivity in layers
+  real, dimension(nii,njj,SZK_(GV)),            intent(inout) :: Kd_lay       !< The diapycnal diffusivity in layers
                                                                       !! [H Z T-1 ~> m2 s-1 or kg m-1 s-1].
-  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)+1),  intent(inout) :: Kd_int       !< The diapycnal diffusivity at interfaces
+  real, dimension(nii,njj,SZK_(GV)+1),          intent(inout) :: Kd_int       !< The diapycnal diffusivity at interfaces
                                                                       !! [H Z T-1 ~> m2 s-1 or kg m-1 s-1].
   real, dimension(nii,njj,SZK_(GV)),   intent(out) :: profile_leak   !< Normalized profile for background drag
                                                                       !! [H-1 ~> m-1 or m2 kg-1]
@@ -1570,14 +1570,14 @@ subroutine get_lowmode_diffusivity(G, GV, h, tv, US, h_bot, k_bot, isb, ieb, jsb
     tmp_StLau_slope = 0.0
     htot = 0.0
     htmp = 0.0
-    I_h_bot = 1.0 / h_bot(i,j)
+    I_h_bot = 1.0 / h_bot(ii,jj)
 
     do k=1,nz
       ! N-profile
-      if (N2_lay(i,j,k) < 0.) found_negative_N2 = .true.
-      renorm_N = renorm_N + (sqrt(max(N2_lay(i,j,k), 0.)) * h(i,j,k))
+      if (N2_lay(ii,jj,k) < 0.) found_negative_N2 = .true.
+      renorm_N = renorm_N + (sqrt(max(N2_lay(ii,jj,k), 0.)) * h(i,j,k))
       ! N2-profile
-      renorm_N2 = renorm_N2 + (max(N2_lay(i,j,k), 0.) * h(i,j,k))
+      renorm_N2 = renorm_N2 + (max(N2_lay(ii,jj,k), 0.) * h(i,j,k))
       ! total depth
       htot = htot + h(i,j,k)
     enddo
@@ -1589,7 +1589,7 @@ subroutine get_lowmode_diffusivity(G, GV, h, tv, US, h_bot, k_bot, isb, ieb, jsb
     profile_StLaurent_slope(:) = 0.0
 
     ! BBL-profile
-    h_rmn = h_bot(i,j)
+    h_rmn = h_bot(ii,jj)
     do k=nz,1,-1
       if (G%mask2dT(i,j) > 0.0) then
         profile_BBL(k) = 0.0
@@ -1610,14 +1610,14 @@ subroutine get_lowmode_diffusivity(G, GV, h, tv, US, h_bot, k_bot, isb, ieb, jsb
       if (G%mask2dT(i,j) > 0.0) then
         ! N - profile
         if (renorm_N > threshold_renorm_N) then
-           profile_N(k) = sqrt(max(N2_lay(i,j,k), 0.)) / renorm_N
+           profile_N(k) = sqrt(max(N2_lay(ii,jj,k), 0.)) / renorm_N
         else
            profile_N(k) = 1 / htot
         endif
 
         ! N2 - profile
         if (renorm_N2 > threshold_renorm_N2) then
-           profile_N2(k) = max(N2_lay(i,j,k), 0.) / renorm_N2
+           profile_N2(k) = max(N2_lay(ii,jj,k), 0.) / renorm_N2
         else
            profile_N2(k) = 1 / htot
         endif
@@ -1710,13 +1710,13 @@ subroutine get_lowmode_diffusivity(G, GV, h, tv, US, h_bot, k_bot, isb, ieb, jsb
       do k=1,nz
         ! layer diffusivity for processus
         if (h(i,j,k) >= CS%min_thick_layer_Kd) then
-          TKE_to_Kd_lim = min(TKE_to_Kd(i,j,k), CS%max_TKE_to_Kd)
+          TKE_to_Kd_lim = min(TKE_to_Kd(ii,jj,k), CS%max_TKE_to_Kd)
           Kd_leak_lay(k) = CS%mixing_effic * TKE_loss * TKE_to_Kd_lim * profile_leak(ii,jj,k) * h(i,j,k)
         else
           Kd_leak_lay(k) = 0.
         endif
         ! add to total Kd in layer
-        if (CS%update_Kd) Kd_lay(i,j,k) = Kd_lay(i,j,k) + min(Kd_leak_lay(k), Kd_max)
+        if (CS%update_Kd) Kd_lay(ii,jj,k) = Kd_lay(ii,jj,k) + min(Kd_leak_lay(k), Kd_max)
       enddo
     endif
 
@@ -1732,13 +1732,13 @@ subroutine get_lowmode_diffusivity(G, GV, h, tv, US, h_bot, k_bot, isb, ieb, jsb
       do k=1,nz
         ! layer diffusivity for processus
         if (h(i,j,k) >= CS%min_thick_layer_Kd) then
-          TKE_to_Kd_lim = min(TKE_to_Kd(i,j,k), CS%max_TKE_to_Kd)
+          TKE_to_Kd_lim = min(TKE_to_Kd(ii,jj,k), CS%max_TKE_to_Kd)
           Kd_Froude_lay(k) = CS%mixing_effic * TKE_loss * TKE_to_Kd_lim * profile_Froude(ii,jj,k) * h(i,j,k)
         else
           Kd_Froude_lay(k) = 0.
         endif
         ! add to total Kd in layer
-        if (CS%update_Kd) Kd_lay(i,j,k) = Kd_lay(i,j,k) + min(Kd_Froude_lay(k), Kd_max)
+        if (CS%update_Kd) Kd_lay(ii,jj,k) = Kd_lay(ii,jj,k) + min(Kd_Froude_lay(k), Kd_max)
       enddo
     endif
 
@@ -1754,13 +1754,13 @@ subroutine get_lowmode_diffusivity(G, GV, h, tv, US, h_bot, k_bot, isb, ieb, jsb
       do k=1,nz
         ! layer diffusivity for processus
         if (h(i,j,k) >= CS%min_thick_layer_Kd) then
-          TKE_to_Kd_lim = min(TKE_to_Kd(i,j,k), CS%max_TKE_to_Kd)
+          TKE_to_Kd_lim = min(TKE_to_Kd(ii,jj,k), CS%max_TKE_to_Kd)
           Kd_itidal_lay(k) = CS%mixing_effic * TKE_loss * TKE_to_Kd_lim * profile_itidal(ii,jj,k) * h(i,j,k)
         else
           Kd_itidal_lay(k) = 0.
         endif
         ! add to total Kd in layer
-        if (CS%update_Kd) Kd_lay(i,j,k) = Kd_lay(i,j,k) + min(Kd_itidal_lay(k), Kd_max)
+        if (CS%update_Kd) Kd_lay(ii,jj,k) = Kd_lay(ii,jj,k) + min(Kd_itidal_lay(k), Kd_max)
       enddo
     endif
 
@@ -1776,13 +1776,13 @@ subroutine get_lowmode_diffusivity(G, GV, h, tv, US, h_bot, k_bot, isb, ieb, jsb
       do k=1,nz
         ! layer diffusivity for processus
         if (h(i,j,k) >= CS%min_thick_layer_Kd) then
-          TKE_to_Kd_lim = min(TKE_to_Kd(i,j,k), CS%max_TKE_to_Kd)
+          TKE_to_Kd_lim = min(TKE_to_Kd(ii,jj,k), CS%max_TKE_to_Kd)
           Kd_slope_lay(k) = CS%mixing_effic * TKE_loss * TKE_to_Kd_lim * profile_slope(ii,jj,k) * h(i,j,k)
         else
           Kd_slope_lay(k) = 0.
         endif
         ! add to total Kd in layer
-        if (CS%update_Kd) Kd_lay(i,j,k) = Kd_lay(i,j,k) + min(Kd_slope_lay(k), Kd_max)
+        if (CS%update_Kd) Kd_lay(ii,jj,k) = Kd_lay(ii,jj,k) + min(Kd_slope_lay(k), Kd_max)
       enddo
     endif
 
@@ -1798,13 +1798,13 @@ subroutine get_lowmode_diffusivity(G, GV, h, tv, US, h_bot, k_bot, isb, ieb, jsb
       do k=1,nz
         ! layer diffusivity for processus
         if (h(i,j,k) >= CS%min_thick_layer_Kd) then
-          TKE_to_Kd_lim = min(TKE_to_Kd(i,j,k), CS%max_TKE_to_Kd)
+          TKE_to_Kd_lim = min(TKE_to_Kd(ii,jj,k), CS%max_TKE_to_Kd)
           Kd_quad_lay(k) = CS%mixing_effic * TKE_loss * TKE_to_Kd_lim * profile_quad(ii,jj,k) * h(i,j,k)
         else
           Kd_quad_lay(k) = 0.
         endif
         ! add to total Kd in layer
-        if (CS%update_Kd) Kd_lay(i,j,k) = Kd_lay(i,j,k) + min(Kd_quad_lay(k), Kd_max)
+        if (CS%update_Kd) Kd_lay(ii,jj,k) = Kd_lay(ii,jj,k) + min(Kd_quad_lay(k), Kd_max)
       enddo
     endif
 
@@ -1814,7 +1814,7 @@ subroutine get_lowmode_diffusivity(G, GV, h, tv, US, h_bot, k_bot, isb, ieb, jsb
         if (k>1)    Kd_leak(ii,jj,K) = 0.5*Kd_leak_lay(k-1)
         if (k<nz+1) Kd_leak(ii,jj,K) = Kd_leak(ii,jj,K) + 0.5*Kd_leak_lay(k)
         ! add to Kd_int
-        if (CS%update_Kd) Kd_int(i,j,K) = Kd_int(i,j,K) + min(Kd_leak(ii,jj,K), Kd_max)
+        if (CS%update_Kd) Kd_int(ii,jj,K) = Kd_int(ii,jj,K) + min(Kd_leak(ii,jj,K), Kd_max)
       enddo
     endif
 
@@ -1823,7 +1823,7 @@ subroutine get_lowmode_diffusivity(G, GV, h, tv, US, h_bot, k_bot, isb, ieb, jsb
         if (k>1)    Kd_itidal(ii,jj,K) = 0.5*Kd_itidal_lay(k-1)
         if (k<nz+1) Kd_itidal(ii,jj,K) = Kd_itidal(ii,jj,K) + 0.5*Kd_itidal_lay(k)
         ! add to Kd_int
-        if (CS%update_Kd) Kd_int(i,j,K) = Kd_int(i,j,K) + min(Kd_itidal(ii,jj,K), Kd_max)
+        if (CS%update_Kd) Kd_int(ii,jj,K) = Kd_int(ii,jj,K) + min(Kd_itidal(ii,jj,K), Kd_max)
       enddo
     endif
 
@@ -1832,7 +1832,7 @@ subroutine get_lowmode_diffusivity(G, GV, h, tv, US, h_bot, k_bot, isb, ieb, jsb
         if (k>1)    Kd_Froude(ii,jj,K) = 0.5*Kd_Froude_lay(k-1)
         if (k<nz+1) Kd_Froude(ii,jj,K) = Kd_Froude(ii,jj,K) + 0.5*Kd_Froude_lay(k)
         ! add to Kd_int
-        if (CS%update_Kd) Kd_int(i,j,K) = Kd_int(i,j,K) + min(Kd_Froude(ii,jj,K), Kd_max)
+        if (CS%update_Kd) Kd_int(ii,jj,K) = Kd_int(ii,jj,K) + min(Kd_Froude(ii,jj,K), Kd_max)
       enddo
     endif
 
@@ -1841,7 +1841,7 @@ subroutine get_lowmode_diffusivity(G, GV, h, tv, US, h_bot, k_bot, isb, ieb, jsb
         if (k>1)    Kd_slope(ii,jj,K) = 0.5*Kd_slope_lay(k-1)
         if (k<nz+1) Kd_slope(ii,jj,K) = Kd_slope(ii,jj,K) + 0.5*Kd_slope_lay(k)
         ! add to Kd_int
-        if (CS%update_Kd) Kd_int(i,j,K) = Kd_int(i,j,K) + min(Kd_slope(ii,jj,K), Kd_max)
+        if (CS%update_Kd) Kd_int(ii,jj,K) = Kd_int(ii,jj,K) + min(Kd_slope(ii,jj,K), Kd_max)
       enddo
     endif
 
@@ -1850,7 +1850,7 @@ subroutine get_lowmode_diffusivity(G, GV, h, tv, US, h_bot, k_bot, isb, ieb, jsb
         if (k>1)    Kd_quad(ii,jj,K) = 0.5*Kd_quad_lay(k-1)
         if (k<nz+1) Kd_quad(ii,jj,K) = Kd_quad(ii,jj,K) + 0.5*Kd_quad_lay(k)
         ! add to Kd_int
-        if (CS%update_Kd) Kd_int(i,j,K) = Kd_int(i,j,K) + min(Kd_quad(ii,jj,K), Kd_max)
+        if (CS%update_Kd) Kd_int(ii,jj,K) = Kd_int(ii,jj,K) + min(Kd_quad(ii,jj,K), Kd_max)
       enddo
     endif
   enddo ! i-loop

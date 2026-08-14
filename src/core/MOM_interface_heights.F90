@@ -697,12 +697,12 @@ subroutine find_rho_bottom_2d(G, GV, US, tv, h, dz, pres_int, dz_avg, isb, ieb, 
   real, dimension(nii,njj), &
                             intent(in)  :: dz_avg !< The vertical distance over which to
                                                 !! average [Z ~> m]
-  real, dimension(SZI_(G),SZJ_(G)), &
+  real, dimension(nii,njj), &
                             intent(out) :: Rho_bot !< Near-bottom density [R ~> kg m-3].
-  real, dimension(SZI_(G),SZJ_(G)), &
+  real, dimension(nii,njj), &
                             intent(out) :: h_bot !< Bottom boundary layer thickness
                                                 !! [H ~> m or kg m-2]
-  integer, dimension(SZI_(G),SZJ_(G)), &
+  integer, dimension(nii,njj), &
                             intent(out) :: k_bot !< Bottom boundary layer top layer index
   ! Local variables
   real :: hb(nii,njj)         ! Running sum of the thickness in the bottom boundary
@@ -741,13 +741,13 @@ subroutine find_rho_bottom_2d(G, GV, US, tv, h, dz, pres_int, dz_avg, isb, ieb, 
   if (GV%Boussinesq .or. GV%semi_Boussinesq .or. .not.allocated(tv%SpV_avg)) then
     do concurrent (jj=1:jje, ii=1:iie) DO_LOCALITY(local(i,j))
       j = jsb+jj-1 ; i = isb+ii-1
-      rho_bot(i,j) = GV%Rho0
+      rho_bot(ii,jj) = GV%Rho0
     enddo
 
     ! Obtain bottom boundary layer thickness and index of top layer
     do concurrent (jj=1:jje, ii=1:iie) DO_LOCALITY(local(i,j))
       j = jsb+jj-1 ; i = isb+ii-1
-      hb(ii,jj) = 0.0 ; h_bot(i,j) = 0.0 ; k_bot(i,j) = nz
+      hb(ii,jj) = 0.0 ; h_bot(ii,jj) = 0.0 ; k_bot(ii,jj) = nz
       dz_bbl_rem(ii,jj) = G%mask2dT(i,j) * max(0.0, dz_avg(ii,jj))
       do_i(ii,jj) = .true.
       if (G%mask2dT(i,j) <= 0.0) then
@@ -769,14 +769,14 @@ subroutine find_rho_bottom_2d(G, GV, US, tv, h, dz, pres_int, dz_avg, isb, ieb, 
           ! This layer is fully within the averaging depth.
           dz_bbl_rem(ii,jj) = dz_bbl_rem(ii,jj) - dz(i,j,k)
           hb(ii,jj) = hb(ii,jj) + h(i,j,k)
-          k_bot(i,j) = k
+          k_bot(ii,jj) = k
 #ifndef __NVCOMPILER_OPENMP_GPU
           do_any = .true.
 #endif
         else
           if (dz(i,j,k) > 0.0) then
             frac_in = dz_bbl_rem(ii,jj) / dz(i,j,k)
-            if (frac_in >= 0.5) k_bot(i,j) = k ! update bbl top index if >= 50% of layer
+            if (frac_in >= 0.5) k_bot(ii,jj) = k ! update bbl top index if >= 50% of layer
           else
             frac_in = 0.0
           endif
@@ -801,7 +801,7 @@ subroutine find_rho_bottom_2d(G, GV, US, tv, h, dz, pres_int, dz_avg, isb, ieb, 
     do concurrent (jj=1:jje, ii=1:iie) DO_LOCALITY(local(i,j))
       j = jsb+jj-1 ; i = isb+ii-1
       if (hb(ii,jj) + h_bbl_frac(ii,jj) < GV%H_subroundoff) h_bbl_frac(ii,jj) = GV%H_subroundoff
-      h_bot(i,j) = hb(ii,jj) + h_bbl_frac(ii,jj)
+      h_bot(ii,jj) = hb(ii,jj) + h_bbl_frac(ii,jj)
     enddo
 
   else
@@ -814,7 +814,7 @@ subroutine find_rho_bottom_2d(G, GV, US, tv, h, dz, pres_int, dz_avg, isb, ieb, 
     ! of the layer thicknesses on this density.
     do concurrent (jj=1:jje, ii=1:iie) DO_LOCALITY(local(i,j))
       j = jsb+jj-1 ; i = isb+ii-1
-      hb(ii,jj) = 0.0 ; SpV_h_bot(ii,jj) = 0.0 ; h_bot(i,j) = 0.0 ; k_bot(i,j) = nz
+      hb(ii,jj) = 0.0 ; SpV_h_bot(ii,jj) = 0.0 ; h_bot(ii,jj) = 0.0 ; k_bot(ii,jj) = nz
       dz_bbl_rem(ii,jj) = G%mask2dT(i,j) * max(0.0, dz_avg(ii,jj))
       do_i(ii,jj) = .true.
       if (G%mask2dT(i,j) <= 0.0) then
@@ -840,14 +840,14 @@ subroutine find_rho_bottom_2d(G, GV, US, tv, h, dz, pres_int, dz_avg, isb, ieb, 
           SpV_h_bot(ii,jj) = SpV_h_bot(ii,jj) + h(i,j,k) * tv%SpV_avg(i,j,k)
           dz_bbl_rem(ii,jj) = dz_bbl_rem(ii,jj) - dz(i,j,k)
           hb(ii,jj) = hb(ii,jj) + h(i,j,k)
-          k_bot(i,j) = k
+          k_bot(ii,jj) = k
 #ifndef __NVCOMPILER_OPENMP_GPU
           do_any = .true.
 #endif
         else
           if (dz(i,j,k) > 0.0) then
             frac_in = dz_bbl_rem(ii,jj) / dz(i,j,k)
-            if (frac_in >= 0.5) k_bot(i,j) = k ! update bbl top index if >= 50% of layer
+            if (frac_in >= 0.5) k_bot(ii,jj) = k ! update bbl top index if >= 50% of layer
           else
             frac_in = 0.0
           endif
@@ -904,9 +904,9 @@ subroutine find_rho_bottom_2d(G, GV, US, tv, h, dz, pres_int, dz_avg, isb, ieb, 
     do concurrent (jj=1:jje, ii=1:iie) DO_LOCALITY(local(i,j))
       j = jsb+jj-1 ; i = isb+ii-1
       if (hb(ii,jj) + h_bbl_frac(ii,jj) < GV%H_subroundoff) h_bbl_frac(ii,jj) = GV%H_subroundoff
-      rho_bot(i,j) = G%mask2dT(i,j) * (hb(ii,jj) + h_bbl_frac(ii,jj)) / &
+      rho_bot(ii,jj) = G%mask2dT(i,j) * (hb(ii,jj) + h_bbl_frac(ii,jj)) / &
                      (SpV_h_bot(ii,jj) + h_bbl_frac(ii,jj)*SpV_bbl(ii,jj))
-      h_bot(i,j) = hb(ii,jj) + h_bbl_frac(ii,jj)
+      h_bot(ii,jj) = hb(ii,jj) + h_bbl_frac(ii,jj)
     enddo
   endif
 
