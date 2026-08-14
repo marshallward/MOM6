@@ -2,8 +2,6 @@
 ! See the LICENSE file for licensing information.
 ! SPDX-License-Identifier: Apache-2.0
 
-#include "do_concurrent_compat.h"
-
 !> Subroutines that use the ray-tracing equations to propagate the internal tide energy density.
 !!
 !! \author Benjamin Mater & Robert Hallberg, 2015
@@ -1425,11 +1423,11 @@ subroutine get_lowmode_diffusivity(G, GV, h, tv, US, h_bot, k_bot, isb, ieb, jsb
   integer,                             intent(in)  :: njj !< Size of the j-block [nondim].
   real, dimension(nii,njj),            intent(in)  :: h_bot   !< Bottom boundary layer thickness [H ~> m or kg m-2]
   integer, dimension(nii,njj),         intent(in)  :: k_bot   !< Bottom boundary layer top layer index
-  real, dimension(nii,njj,SZK_(GV)),           intent(in)  :: N2_lay  !< The squared buoyancy frequency of the
+  real, dimension(nii,njj,SZK_(GV)),   intent(in)  :: N2_lay  !< The squared buoyancy frequency of the
                                                               !! layers [T-2 ~> s-2].
-  real, dimension(nii,njj,SZK_(GV)+1),         intent(in)  :: N2_int  !< The squared buoyancy frequency of the
+  real, dimension(nii,njj,SZK_(GV)+1), intent(in)  :: N2_int  !< The squared buoyancy frequency of the
                                                               !! interfaces [T-2 ~> s-2].
-  real, dimension(nii,njj,SZK_(GV)),           intent(in)  :: TKE_to_Kd !< The conversion rate between the TKE
+  real, dimension(nii,njj,SZK_(GV)),   intent(in)  :: TKE_to_Kd !< The conversion rate between the TKE
                                                               !! dissipated within a layer and the
                                                               !! diapycnal diffusivity within that layer,
                                                               !! usually (~Rho_0 / (G_Earth * dRho_lay))
@@ -1451,19 +1449,19 @@ subroutine get_lowmode_diffusivity(G, GV, h, tv, US, h_bot, k_bot, isb, ieb, jsb
                                                                       !! [H Z T-1 ~> m2 s-1 or kg m-1 s-1].
   real, dimension(nii,njj,SZK_(GV)+1),  intent(out) :: Kd_slope       !< Diffusivity due to critical slopes
                                                                       !! [H Z T-1 ~> m2 s-1 or kg m-1 s-1].
-  real, dimension(nii,njj,SZK_(GV)),            intent(inout) :: Kd_lay       !< The diapycnal diffusivity in layers
+  real, dimension(nii,njj,SZK_(GV)),    intent(inout) :: Kd_lay       !< The diapycnal diffusivity in layers
                                                                       !! [H Z T-1 ~> m2 s-1 or kg m-1 s-1].
-  real, dimension(nii,njj,SZK_(GV)+1),          intent(inout) :: Kd_int       !< The diapycnal diffusivity at interfaces
+  real, dimension(nii,njj,SZK_(GV)+1),  intent(inout) :: Kd_int       !< The diapycnal diffusivity at interfaces
                                                                       !! [H Z T-1 ~> m2 s-1 or kg m-1 s-1].
-  real, dimension(nii,njj,SZK_(GV)),   intent(out) :: profile_leak   !< Normalized profile for background drag
+  real, dimension(nii,njj, SZK_(GV)),   intent(out) :: profile_leak   !< Normalized profile for background drag
                                                                       !! [H-1 ~> m-1 or m2 kg-1]
-  real, dimension(nii,njj,SZK_(GV)),   intent(out) :: profile_quad   !< Normalized profile for  bottom drag
+  real, dimension(nii,njj, SZK_(GV)),   intent(out) :: profile_quad   !< Normalized profile for  bottom drag
                                                                       !! [H-1 ~> m-1 or m2 kg-1]
-  real, dimension(nii,njj,SZK_(GV)),   intent(out) :: profile_itidal !< Normalized profile for wave drag
+  real, dimension(nii,njj, SZK_(GV)),   intent(out) :: profile_itidal !< Normalized profile for wave drag
                                                                       !! [H-1 ~> m-1 or m2 kg-1]
-  real, dimension(nii,njj,SZK_(GV)),   intent(out) :: profile_Froude !< Normalized profile for Froude drag
+  real, dimension(nii,njj, SZK_(GV)),   intent(out) :: profile_Froude !< Normalized profile for Froude drag
                                                                       !! [H-1 ~> m-1 or m2 kg-1]
-  real, dimension(nii,njj,SZK_(GV)),   intent(out) :: profile_slope  !< Normalized profile for critical slopes
+  real, dimension(nii,njj, SZK_(GV)),   intent(out) :: profile_slope  !< Normalized profile for critical slopes
                                                                       !! [H-1 ~> m-1 or m2 kg-1]
 
   ! local variables
@@ -1510,8 +1508,7 @@ subroutine get_lowmode_diffusivity(G, GV, h, tv, US, h_bot, k_bot, isb, ieb, jsb
           threshold_renorm_N, & ! Maximum allowable error on N profile [H T-1 ~> m s-1 or kg m-2 s-1]
           threshold_verif       ! Maximum allowable error on verification [nondim]
 
-  ! Flags and diagnostic values for the MOM_error calls hoisted out of the i-loop below,
-  ! so the loop body itself makes no calls with side effects.
+  ! Flags and diagnostic values for the MOM_error calls hoisted out of the i-loop below.
   logical :: found_negative_N2
   logical :: mismatch_N, mismatch_N2, mismatch_bbl, mismatch_stl1, mismatch_stl2
   integer :: bad_i_N, bad_i_N2, bad_i_bbl, bad_i_stl1, bad_i_stl2
@@ -1543,7 +1540,7 @@ subroutine get_lowmode_diffusivity(G, GV, h, tv, US, h_bot, k_bot, isb, ieb, jsb
   j = jsb+jj-1
 
   ! init output arrays
-  do k=1,nz ; do ii=1,iie ; i = isb+ii-1
+  do k=1,nz ; do ii=1,iie
     profile_leak(ii,jj,k) = 0.0
     profile_quad(ii,jj,k) = 0.0
     profile_slope(ii,jj,k) = 0.0
@@ -1551,7 +1548,13 @@ subroutine get_lowmode_diffusivity(G, GV, h, tv, US, h_bot, k_bot, isb, ieb, jsb
     profile_Froude(ii,jj,k) = 0.0
   enddo ; enddo
 
-  do K=1,nz+1 ; do ii=1,iie ; i = isb+ii-1
+  Kd_leak_lay(:) = 0.0
+  Kd_quad_lay(:) = 0.0
+  Kd_itidal_lay(:) = 0.0
+  Kd_Froude_lay(:) = 0.0
+  Kd_slope_lay(:) = 0.0
+
+  do K=1,nz+1 ; do ii=1,iie
     Kd_leak(ii,jj,K) = 0.0
     Kd_quad(ii,jj,K) = 0.0
     Kd_itidal(ii,jj,K) = 0.0

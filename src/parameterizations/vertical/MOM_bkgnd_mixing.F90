@@ -314,48 +314,43 @@ end subroutine bkgnd_mixing_init
 subroutine calculate_bkgnd_mixing(h, tv, N2_lay, Kd_lay, Kd_int, Kv_bkgnd, &
                                   isb, ieb, jsb, jeb, nii, njj, dz, G, GV, US, CS)
 
-  type(ocean_grid_type),        intent(in)    :: G   !< Grid structure.
-  type(verticalGrid_type),      intent(in)    :: GV  !< Vertical grid structure.
-  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)), &
-                                intent(in)    :: h   !< Layer thickness [H ~> m or kg m-2].
-  type(thermo_var_ptrs),        intent(in)    :: tv  !< Thermodynamics structure.
-  integer,                      intent(in)    :: isb !< Starting i-index of columns to work on.
-  integer,                      intent(in)    :: ieb !< Ending i-index of columns to work on.
-  integer,                      intent(in)    :: jsb !< Starting j-index of rows to work on.
-  integer,                      intent(in)    :: jeb !< Ending j-index of rows to work on.
-  integer,                      intent(in)    :: nii !< Size of the i-block [nondim].
-  integer,                      intent(in)    :: njj !< Size of the j-block [nondim].
-  real, dimension(nii,njj,SZK_(GV)), &
-                                intent(in)    :: N2_lay !< Squared buoyancy frequency
-                                                     !! associated with layers [T-2 ~> s-2].
-  real, dimension(nii,njj,SZK_(GV)), &
-                                intent(inout) :: Kd_lay !< Background diapycnal diffusivity
-                                                     !! of each layer [H Z T-1 ~> m2 s-1].
-  real, dimension(nii,njj,SZK_(GV)+1), &
-                                intent(inout) :: Kd_int !< Background diapycnal diffusivity
-                                                     !! of each interface [H Z T-1 ~> m2 s-1].
-  real, dimension(nii,njj,SZK_(GV)+1), &
-                                intent(inout) :: Kv_bkgnd !< Background vertical viscosity
-                                                     !! at each interface [H Z T-1 ~> m2 s-1].
-  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)), &
-                                intent(in)    :: dz  !< Height change across layers [Z ~> m].
-  type(unit_scale_type),        intent(in)    :: US  !< A dimensional unit scaling type.
-  type(bkgnd_mixing_cs),        pointer       :: CS  !< Control structure.
+  type(ocean_grid_type),                     intent(in)    :: G   !< Grid structure.
+  type(verticalGrid_type),                   intent(in)    :: GV  !< Vertical grid structure.
+  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)), intent(in)    :: h   !< Layer thickness [H ~> m or kg m-2].
+  type(thermo_var_ptrs),                     intent(in)    :: tv  !< Thermodynamics structure.
+  integer,                                   intent(in)    :: isb !< Starting i-index of columns to work on.
+  integer,                                   intent(in)    :: ieb !< Ending i-index of columns to work on.
+  integer,                                   intent(in)    :: jsb !< Starting j-index of rows to work on.
+  integer,                                   intent(in)    :: jeb !< Ending j-index of rows to work on.
+  integer,                                   intent(in)    :: nii !< Size of the i-block [nondim].
+  integer,                                   intent(in)    :: njj !< Size of the j-block [nondim].
+  real, dimension(nii,njj,SZK_(GV)),         intent(in)    :: N2_lay !< squared buoyancy frequency associated
+                                                                  !! with layers [T-2 ~> s-2]
+  real, dimension(nii,njj,SZK_(GV)),         intent(inout) :: Kd_lay !< The background diapycnal diffusivity of each
+                                                                  !! layer [H Z T-1 ~> m2 s-1 or kg m-1 s-1]
+  real, dimension(nii,njj,SZK_(GV)+1),       intent(inout) :: Kd_int !< The background diapycnal diffusivity of each
+                                                                  !! interface [H Z T-1 ~> m2 s-1 or kg m-1 s-1]
+  real, dimension(nii,njj,SZK_(GV)+1),       intent(inout) :: Kv_bkgnd !< The background vertical viscosity at
+                                                                  !! each interface [H Z T-1 ~> m2 s-1 or Pa s]
+  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)), intent(in)    :: dz  !< Height change across layers [Z ~> m].
+  type(unit_scale_type),                     intent(in)    :: US  !< A dimensional unit scaling type.
+  type(bkgnd_mixing_cs),                     pointer       :: CS  !< The control structure returned by
+                                                                  !! a previous call to bkgnd_mixing_init.
 
   ! local variables
-  real, dimension(SZK_(GV)+1) :: depth_int  !< Distance from surface of the interfaces [m].
-  real, dimension(SZK_(GV)+1) :: Kd_col     !< Diffusivities at the interfaces [m2 s-1].
-  real, dimension(SZK_(GV)+1) :: Kv_col     !< Viscosities at the interfaces [m2 s-1].
-  real, dimension(nii,njj) :: Kd_sfc !< Surface value of the diffusivity [H Z T-1 ~> m2 s-1].
-  real, dimension(nii,njj) :: depth  !< Distance from surface of an interface [H ~> m].
-  real :: depth_c    !< Depth of the center of a layer [H ~> m or kg m-2].
-  real :: I_Hmix     !< Inverse of fixed mixed layer thickness [H-1 ~> m-1 or m2 kg-1].
-  real :: I_x30      !< 2/acos(2) = 1/(sin(30 deg) * acosh(1/sin(30 deg))) [nondim].
-  real :: deg_to_rad !< Factor converting degrees to radians [radians degree-1], pi/180.
-  real :: abs_sinlat !< Absolute value of sine of latitude [nondim].
-  real :: min_sinlat !< The minimum value of the sine of latitude [nondim].
-  real :: bckgrnd_vdc_psin !< PSI diffusivity in northern hemisphere [H Z T-1 ~> m2 s-1].
-  real :: bckgrnd_vdc_psis !< PSI diffusivity in southern hemisphere [H Z T-1 ~> m2 s-1].
+  real, dimension(SZK_(GV)+1) :: depth_int  !< Distance from surface of the interfaces [m]
+  real, dimension(SZK_(GV)+1) :: Kd_col     !< Diffusivities at the interfaces [m2 s-1]
+  real, dimension(SZK_(GV)+1) :: Kv_col     !< Viscosities at the interfaces [m2 s-1]
+  real, dimension(nii,njj)    :: Kd_sfc     !< Surface value of the diffusivity [H Z T-1 ~> m2 s-1 or kg m-1 s-1]
+  real, dimension(nii,njj)    :: depth      !< Distance from surface of an interface [H ~> m or kg m-2]
+  real :: depth_c    !< depth of the center of a layer [H ~> m or kg m-2]
+  real :: I_Hmix     !< inverse of fixed mixed layer thickness [H-1 ~> m-1 or m2 kg-1]
+  real :: I_x30      !< 2/acos(2) = 1/(sin(30 deg) * acosh(1/sin(30 deg))) [nondim]
+  real :: deg_to_rad !< factor converting degrees to radians [radians degree-1], pi/180.
+  real :: abs_sinlat !< absolute value of sine of latitude [nondim]
+  real :: min_sinlat ! The minimum value of the sine of latitude [nondim]
+  real :: bckgrnd_vdc_psin !< PSI diffusivity in northern hemisphere [H Z T-1 ~> m2 s-1 or kg m-1 s-1]
+  real :: bckgrnd_vdc_psis !< PSI diffusivity in southern hemisphere [H Z T-1 ~> m2 s-1 or kg m-1 s-1]
   integer :: i, j, k, nz, ii, jj, iie, jje
 
   nz = GV%ke
@@ -368,12 +363,10 @@ subroutine calculate_bkgnd_mixing(h, tv, N2_lay, Kd_lay, Kd_int, Kv_bkgnd, &
   !$omp target enter data map(alloc: Kd_sfc, depth)
 
   ! Start with a constant value that may be replaced below.
-  do concurrent (k=1:nz, jj=1:jje, ii=1:iie) DO_LOCALITY(local(i,j))
-    j = jsb+jj-1 ; i = isb+ii-1
+  do concurrent (k=1:nz, jj=1:jje, ii=1:iie)
     Kd_lay(ii,jj,k) = CS%Kd
   enddo
-  do concurrent (K=1:nz+1, jj=1:jje, ii=1:iie) DO_LOCALITY(local(i,j))
-    j = jsb+jj-1 ; i = isb+ii-1
+  do concurrent (K=1:nz+1, jj=1:jje, ii=1:iie)
     Kv_bkgnd(ii,jj,K) = 0.0
   enddo
 
@@ -450,13 +443,11 @@ subroutine calculate_bkgnd_mixing(h, tv, N2_lay, Kd_lay, Kd_int, Kv_bkgnd, &
 
     enddo
     ! Update interior values of Kd and Kv (uniform profile; no interpolation needed).
-    do concurrent (K=1:nz+1, jj=1:jje, ii=1:iie) DO_LOCALITY(local(i,j))
-      j = jsb+jj-1 ; i = isb+ii-1
+    do concurrent (K=1:nz+1, jj=1:jje, ii=1:iie)
       Kd_int(ii,jj,K) = Kd_int(ii,jj,1)
       Kv_bkgnd(ii,jj,K) = Kd_int(ii,jj,1) * CS%prandtl_bkgnd
     enddo
-    do concurrent (k=1:nz, jj=1:jje, ii=1:iie) DO_LOCALITY(local(i,j))
-      j = jsb+jj-1 ; i = isb+ii-1
+    do concurrent (k=1:nz, jj=1:jje, ii=1:iie)
       Kd_lay(ii,jj,k) = Kd_int(ii,jj,1)
     enddo
 
@@ -519,20 +510,17 @@ subroutine calculate_bkgnd_mixing(h, tv, N2_lay, Kd_lay, Kd_int, Kv_bkgnd, &
       enddo
       !$omp end target
     else ! There is no vertical structure to the background diffusivity.
-      do concurrent (k=1:nz, jj=1:jje, ii=1:iie) DO_LOCALITY(local(i,j))
-        j = jsb+jj-1 ; i = isb+ii-1
+      do concurrent (k=1:nz, jj=1:jje, ii=1:iie)
         Kd_lay(ii,jj,k) = Kd_sfc(ii,jj)
       enddo
     endif
 
     ! Update Kd_int and Kv_bkgnd, based on Kd_lay. These might be just used for diagnostics.
-    do concurrent (jj=1:jje, ii=1:iie) DO_LOCALITY(local(i,j))
-      j = jsb+jj-1 ; i = isb+ii-1
+    do concurrent (jj=1:jje, ii=1:iie)
       Kd_int(ii,jj,1) = 0.0 ; Kv_bkgnd(ii,jj,1) = 0.0
       Kd_int(ii,jj,nz+1) = 0.0 ; Kv_bkgnd(ii,jj,nz+1) = 0.0
     enddo
-    do concurrent (K=2:nz, jj=1:jje, ii=1:iie) DO_LOCALITY(local(i,j))
-      j = jsb+jj-1 ; i = isb+ii-1
+    do concurrent (K=2:nz, jj=1:jje, ii=1:iie)
       Kd_int(ii,jj,K) = 0.5*(Kd_lay(ii,jj,k-1) + Kd_lay(ii,jj,k))
       Kv_bkgnd(ii,jj,K) = Kd_int(ii,jj,K) * CS%prandtl_bkgnd
     enddo
