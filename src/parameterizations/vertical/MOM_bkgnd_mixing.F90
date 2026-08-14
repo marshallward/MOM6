@@ -326,11 +326,11 @@ subroutine calculate_bkgnd_mixing(h, tv, N2_lay, Kd_lay, Kd_int, Kv_bkgnd, &
   integer,                                   intent(in)    :: njj !< Size of the j-block [nondim].
   real, dimension(nii,njj,SZK_(GV)),         intent(in)    :: N2_lay !< squared buoyancy frequency associated
                                                                   !! with layers [T-2 ~> s-2]
-  real, dimension(nii,njj,SZK_(GV)),         intent(inout) :: Kd_lay !< The background diapycnal diffusivity of each
+  real, dimension(nii,njj,SZK_(GV)),         intent(out)   :: Kd_lay !< The background diapycnal diffusivity of each
                                                                   !! layer [H Z T-1 ~> m2 s-1 or kg m-1 s-1]
-  real, dimension(nii,njj,SZK_(GV)+1),       intent(inout) :: Kd_int !< The background diapycnal diffusivity of each
+  real, dimension(nii,njj,SZK_(GV)+1),       intent(out)   :: Kd_int !< The background diapycnal diffusivity of each
                                                                   !! interface [H Z T-1 ~> m2 s-1 or kg m-1 s-1]
-  real, dimension(nii,njj,SZK_(GV)+1),       intent(inout) :: Kv_bkgnd !< The background vertical viscosity at
+  real, dimension(nii,njj,SZK_(GV)+1),       intent(out)   :: Kv_bkgnd !< The background vertical viscosity at
                                                                   !! each interface [H Z T-1 ~> m2 s-1 or Pa s]
   real, dimension(SZI_(G),SZJ_(G),SZK_(GV)), intent(in)    :: dz  !< Height change across layers [Z ~> m].
   type(unit_scale_type),                     intent(in)    :: US  !< A dimensional unit scaling type.
@@ -381,8 +381,7 @@ subroutine calculate_bkgnd_mixing(h, tv, N2_lay, Kd_lay, Kd_int, Kv_bkgnd, &
       enddo
 
       call CVMix_init_bkgnd(max_nlev=nz, &
-                            ! Interface depths relative to the surface in m, positive.
-                            zw = depth_int(:), &
+                            zw = depth_int(:), &  !< interface depths relative to the surface in m, must be positive.
                             bl1 = US%Z2_T_to_m2_s*CS%Bryan_Lewis_c1, &
                             bl2 = US%Z2_T_to_m2_s*CS%Bryan_Lewis_c2, &
                             bl3 = US%m_to_Z*CS%Bryan_Lewis_c3, &

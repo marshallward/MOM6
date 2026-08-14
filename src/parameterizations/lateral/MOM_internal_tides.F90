@@ -1508,13 +1508,6 @@ subroutine get_lowmode_diffusivity(G, GV, h, tv, US, h_bot, k_bot, isb, ieb, jsb
           threshold_renorm_N, & ! Maximum allowable error on N profile [H T-1 ~> m s-1 or kg m-2 s-1]
           threshold_verif       ! Maximum allowable error on verification [nondim]
 
-  ! Flags and diagnostic values for the MOM_error calls hoisted out of the i-loop below.
-  logical :: found_negative_N2
-  logical :: mismatch_N, mismatch_N2, mismatch_bbl, mismatch_stl1, mismatch_stl2
-  integer :: bad_i_N, bad_i_N2, bad_i_bbl, bad_i_stl1, bad_i_stl2
-  integer :: bad_j_N, bad_j_N2, bad_j_bbl, bad_j_stl1, bad_j_stl2
-  real :: bad_verif_N, bad_verif_N2, bad_verif_bbl, bad_verif_stl1, bad_verif_stl2
-
   logical :: non_Bous ! fully Non-Boussinesq
   integer :: i, j, k, ii, jj, iie, jje, nz
 
@@ -1532,21 +1525,15 @@ subroutine get_lowmode_diffusivity(G, GV, h, tv, US, h_bot, k_bot, isb, ieb, jsb
   threshold_renorm_N  = 1.0e-13 * GV%m_to_H * US%T_to_s
   threshold_verif = 1.0e-13
 
-  found_negative_N2 = .false.
-  mismatch_N = .false. ; mismatch_N2 = .false. ; mismatch_bbl = .false.
-  mismatch_stl1 = .false. ; mismatch_stl2 = .false.
-
   do jj=1,jje
   j = jsb+jj-1
 
   ! init output arrays
-  do k=1,nz ; do ii=1,iie
-    profile_leak(ii,jj,k) = 0.0
-    profile_quad(ii,jj,k) = 0.0
-    profile_slope(ii,jj,k) = 0.0
-    profile_itidal(ii,jj,k) = 0.0
-    profile_Froude(ii,jj,k) = 0.0
-  enddo ; enddo
+  profile_leak(:,jj,:) = 0.0
+  profile_quad(:,jj,:) = 0.0
+  profile_slope(:,jj,:) = 0.0
+  profile_itidal(:,jj,:) = 0.0
+  profile_Froude(:,jj,:) = 0.0
 
   Kd_leak_lay(:) = 0.0
   Kd_quad_lay(:) = 0.0
@@ -1554,13 +1541,11 @@ subroutine get_lowmode_diffusivity(G, GV, h, tv, US, h_bot, k_bot, isb, ieb, jsb
   Kd_Froude_lay(:) = 0.0
   Kd_slope_lay(:) = 0.0
 
-  do K=1,nz+1 ; do ii=1,iie
-    Kd_leak(ii,jj,K) = 0.0
-    Kd_quad(ii,jj,K) = 0.0
-    Kd_itidal(ii,jj,K) = 0.0
-    Kd_Froude(ii,jj,K) = 0.0
-    Kd_slope(ii,jj,K) = 0.0
-  enddo ; enddo
+  Kd_leak(:,jj,:) = 0.0
+  Kd_quad(:,jj,:) = 0.0
+  Kd_itidal(:,jj,:) = 0.0
+  Kd_Froude(:,jj,:) = 0.0
+  Kd_slope(:,jj,:) = 0.0
 
   do ii=1,iie ; i = isb+ii-1
 
@@ -1577,7 +1562,7 @@ subroutine get_lowmode_diffusivity(G, GV, h, tv, US, h_bot, k_bot, isb, ieb, jsb
 
     do k=1,nz
       ! N-profile
-      if (N2_lay(ii,jj,k) < 0.) found_negative_N2 = .true.
+      if (N2_lay(ii,jj,k) < 0.) call MOM_error(WARNING, "negative buoyancy freq")
       renorm_N = renorm_N + (sqrt(max(N2_lay(ii,jj,k), 0.)) * h(i,j,k))
       ! N2-profile
       renorm_N2 = renorm_N2 + (max(N2_lay(ii,jj,k), 0.) * h(i,j,k))
@@ -1677,20 +1662,25 @@ subroutine get_lowmode_diffusivity(G, GV, h, tv, US, h_bot, k_bot, isb, ieb, jsb
            verif_stl2 = verif_stl2 + (profile_StLaurent_slope(k) * h(i,j,k))
          enddo
 
-         if ((abs(verif_N -1.0) > threshold_verif) .and. .not.mismatch_N) then
-           mismatch_N = .true. ; bad_i_N = i ; bad_j_N = j ; bad_verif_N = verif_N
+         if (abs(verif_N -1.0) > threshold_verif) then
+           write(stdout,'(I0,", ",I0,F18.10)') i, j, verif_N
+           call MOM_error(FATAL, "mismatch integral for N profile")
          endif
-         if ((abs(verif_N2 -1.0) > threshold_verif) .and. .not.mismatch_N2) then
-           mismatch_N2 = .true. ; bad_i_N2 = i ; bad_j_N2 = j ; bad_verif_N2 = verif_N2
+         if (abs(verif_N2 -1.0) > threshold_verif) then
+           write(stdout,'(I0,", ",I0,F18.10)') i, j, verif_N2
+           call MOM_error(FATAL, "mismatch integral for N2 profile")
          endif
-         if ((abs(verif_bbl -1.0) > threshold_verif) .and. .not.mismatch_bbl) then
-           mismatch_bbl = .true. ; bad_i_bbl = i ; bad_j_bbl = j ; bad_verif_bbl = verif_bbl
+         if (abs(verif_bbl -1.0) > threshold_verif) then
+           write(stdout,'(I0,", ",I0,F18.10)') i, j, verif_bbl
+           call MOM_error(FATAL, "mismatch integral for bbl profile")
          endif
-         if ((abs(verif_stl1 -1.0) > threshold_verif) .and. .not.mismatch_stl1) then
-           mismatch_stl1 = .true. ; bad_i_stl1 = i ; bad_j_stl1 = j ; bad_verif_stl1 = verif_stl1
+         if (abs(verif_stl1 -1.0) > threshold_verif) then
+           write(stdout,'(I0,", ",I0,F18.10)') i, j, verif_stl1
+           call MOM_error(FATAL, "mismatch integral for stl1 profile")
          endif
-         if ((abs(verif_stl2 -1.0) > threshold_verif) .and. .not.mismatch_stl2) then
-           mismatch_stl2 = .true. ; bad_i_stl2 = i ; bad_j_stl2 = j ; bad_verif_stl2 = verif_stl2
+         if (abs(verif_stl2 -1.0) > threshold_verif) then
+           write(stdout,'(I0,", ",I0,F18.10)') i, j, verif_stl2
+           call MOM_error(FATAL, "mismatch integral for stl2 profile")
          endif
 
       endif
@@ -1701,7 +1691,7 @@ subroutine get_lowmode_diffusivity(G, GV, h, tv, US, h_bot, k_bot, isb, ieb, jsb
 
     ! get TKE loss value and compute diffusivities in layers
     if (CS%apply_background_drag) then
-      TKE_loss = CS%tot_leak_loss(i,j)
+      call get_lowmode_loss(i, j, G, CS, "LeakDrag", TKE_loss)
       ! insert logic to switch between profiles here
       ! if trim(CS%leak_profile) == "N2" then
       profile_leak(ii,jj,:) = profile_N2(:)
@@ -1724,7 +1714,7 @@ subroutine get_lowmode_diffusivity(G, GV, h, tv, US, h_bot, k_bot, isb, ieb, jsb
     endif
 
     if (CS%apply_Froude_drag) then
-      TKE_loss = CS%tot_Froude_loss(i,j)
+      call get_lowmode_loss(i, j, G, CS, "Froude", TKE_loss)
       ! insert logic to switch between profiles here
       ! if trim(CS%Froude_profile) == "N" then
       profile_Froude(ii,jj,:) = profile_N(:)
@@ -1746,7 +1736,7 @@ subroutine get_lowmode_diffusivity(G, GV, h, tv, US, h_bot, k_bot, isb, ieb, jsb
     endif
 
     if (CS%apply_wave_drag) then
-      TKE_loss = CS%tot_itidal_loss(i,j)
+      call get_lowmode_loss(i, j, G, CS, "WaveDrag", TKE_loss)
       ! insert logic to switch between profiles here
       ! if trim(CS%wave_profile) == "StLaurent" then
       profile_itidal(ii,jj,:) = profile_StLaurent(:)
@@ -1768,7 +1758,7 @@ subroutine get_lowmode_diffusivity(G, GV, h, tv, US, h_bot, k_bot, isb, ieb, jsb
     endif
 
     if (CS%apply_residual_drag) then
-      TKE_loss = CS%tot_residual_loss(i,j)
+      call get_lowmode_loss(i, j, G, CS, "SlopeDrag", TKE_loss)
       ! insert logic to switch between profiles here
       ! if trim(CS%wave_profile) == "StLaurent" then
       profile_slope(ii,jj,:) = profile_StLaurent_slope(:)
@@ -1790,7 +1780,7 @@ subroutine get_lowmode_diffusivity(G, GV, h, tv, US, h_bot, k_bot, isb, ieb, jsb
     endif
 
     if (CS%apply_bottom_drag) then
-      TKE_loss = CS%tot_quad_loss(i,j)
+      call get_lowmode_loss(i, j, G, CS, "QuadDrag", TKE_loss)
       ! insert logic to switch between profiles here
       ! if trim(CS%bottom_profile) == "BBL" then
       profile_quad(ii,jj,:) = profile_BBL(:)
@@ -1859,29 +1849,6 @@ subroutine get_lowmode_diffusivity(G, GV, h, tv, US, h_bot, k_bot, isb, ieb, jsb
   enddo ! i-loop
 
   enddo ! j-loop
-
-  if (found_negative_N2) call MOM_error(WARNING, "negative buoyancy freq")
-
-  if (mismatch_N) then
-    write(stdout,'(I0,", ",I0,F18.10)') bad_i_N, bad_j_N, bad_verif_N
-    call MOM_error(FATAL, "mismatch integral for N profile")
-  endif
-  if (mismatch_N2) then
-    write(stdout,'(I0,", ",I0,F18.10)') bad_i_N2, bad_j_N2, bad_verif_N2
-    call MOM_error(FATAL, "mismatch integral for N2 profile")
-  endif
-  if (mismatch_bbl) then
-    write(stdout,'(I0,", ",I0,F18.10)') bad_i_bbl, bad_j_bbl, bad_verif_bbl
-    call MOM_error(FATAL, "mismatch integral for bbl profile")
-  endif
-  if (mismatch_stl1) then
-    write(stdout,'(I0,", ",I0,F18.10)') bad_i_stl1, bad_j_stl1, bad_verif_stl1
-    call MOM_error(FATAL, "mismatch integral for stl1 profile")
-  endif
-  if (mismatch_stl2) then
-    write(stdout,'(I0,", ",I0,F18.10)') bad_i_stl2, bad_j_stl2, bad_verif_stl2
-    call MOM_error(FATAL, "mismatch integral for stl2 profile")
-  endif
 
 end subroutine get_lowmode_diffusivity
 
