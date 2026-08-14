@@ -45,10 +45,11 @@ contains
 
 !> Evaluate the inverse cosh, either using a math library or an
 !! equivalent expression
-function invcosh(x)
+pure function invcosh(x)
   real, intent(in) :: x !< The argument of the inverse of cosh [nondim].  NaNs will
                         !! occur if x<1, but there is no error checking
   real :: invcosh  ! The inverse of cosh of x [nondim]
+  !$omp declare target
 
 #ifdef __INTEL_COMPILER
   invcosh = acosh(x)
