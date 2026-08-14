@@ -2,6 +2,8 @@
 ! See the LICENSE file for licensing information.
 ! SPDX-License-Identifier: Apache-2.0
 
+#include "do_concurrent_compat.h"
+
 !> Functions for calculating interface heights, including free surface height.
 module MOM_interface_heights
 
@@ -672,11 +674,14 @@ end subroutine find_rho_bottom_1d
 
 
 !> Finds the near-bottom density over a range of j rows.
-subroutine find_rho_bottom_2d(G, GV, US, tv, h, dz, pres_int, dz_avg, is,ie, js, je, Rho_bot, h_bot, k_bot)
+subroutine find_rho_bottom_2d(G, GV, US, tv, h, dz, pres_int, dz_avg, is,ie, js, je, &
+                              niblock, njblock, Rho_bot, h_bot, k_bot)
 
   integer,                  intent(in)  :: js   !< Starting j-index of rows to work on
   integer,                  intent(in)  :: je   !< Ending j-index of rows to work on
   integer, intent(in) :: is, ie
+  integer,                  intent(in)  :: niblock !< Size of the i-block [nondim].
+  integer,                  intent(in)  :: njblock !< Size of the j-block [nondim].
   type(ocean_grid_type),    intent(in)  :: G    !< The ocean's grid structure
   type(verticalGrid_type),  intent(in)  :: GV   !< The ocean's vertical grid structure
   type(unit_scale_type),    intent(in)  :: US   !< A dimensional unit scaling type
@@ -686,9 +691,9 @@ subroutine find_rho_bottom_2d(G, GV, US, tv, h, dz, pres_int, dz_avg, is,ie, js,
                             intent(in)  :: h    !< Layer thicknesses [H ~> m or kg m-2]
   real, dimension(SZI_(G),SZJ_(G),SZK_(GV)), &
                             intent(in)  :: dz   !< Height change across layers [Z ~> m]
-  real, dimension(is:ie,js:je,SZK_(GV)+1), &
+  real, dimension(niblock,njblock,SZK_(GV)+1), &
                             intent(in)  :: pres_int !< Pressure at each interface [R L2 T-2 ~> Pa]
-  real, dimension(is:ie,js:je), &
+  real, dimension(niblock,njblock), &
                             intent(in)  :: dz_avg !< The vertical distance over which to average [Z ~> m]
   real, dimension(SZI_(G),SZJ_(G)), &
                             intent(out) :: Rho_bot !< Near-bottom density [R ~> kg m-3].
@@ -697,27 +702,27 @@ subroutine find_rho_bottom_2d(G, GV, US, tv, h, dz, pres_int, dz_avg, is,ie, js,
   integer, dimension(SZI_(G),SZJ_(G)), &
                             intent(out) :: k_bot !< Bottom boundary layer top layer index
   ! Local variables
-  real :: hb(is:ie,js:je)         ! Running sum of the thickness in the bottom boundary layer [H ~> m or kg m-2]
-  real :: SpV_h_bot(is:ie,js:je)  ! Running sum of the specific volume times thickness in the bottom
+  real :: hb(niblock,njblock)         ! Running sum of the thickness in the bottom boundary layer [H ~> m or kg m-2]
+  real :: SpV_h_bot(niblock,njblock)  ! Running sum of the specific volume times thickness in the bottom
                                       ! boundary layer [H R-1 ~> m4 kg-1 or m]
-  real :: dz_bbl_rem(is:ie,js:je) ! Vertical extent of the boundary layer that has yet to be accounted
+  real :: dz_bbl_rem(niblock,njblock) ! Vertical extent of the boundary layer that has yet to be accounted
                                       ! for [Z ~> m]
-  real :: h_bbl_frac(is:ie,js:je) ! Thickness of the fractional layer that makes up the top of the
+  real :: h_bbl_frac(niblock,njblock) ! Thickness of the fractional layer that makes up the top of the
                                       ! boundary layer [H ~> m or kg m-2]
-  real :: T_bbl(is:ie,js:je)      ! Temperature of the fractional layer that makes up the top of the
+  real :: T_bbl(niblock,njblock)      ! Temperature of the fractional layer that makes up the top of the
                                       ! boundary layer [C ~> degC]
-  real :: S_bbl(is:ie,js:je)      ! Salinity of the fractional layer that makes up the top of the
+  real :: S_bbl(niblock,njblock)      ! Salinity of the fractional layer that makes up the top of the
                                       ! boundary layer [S ~> ppt]
-  real :: P_bbl(is:ie,js:je)      ! Pressure the top of the boundary layer [R L2 T-2 ~> Pa]
-  real :: dp(is:ie,js:je)         ! Pressure change across the fractional layer that makes up the top
+  real :: P_bbl(niblock,njblock)      ! Pressure the top of the boundary layer [R L2 T-2 ~> Pa]
+  real :: dp(niblock,njblock)         ! Pressure change across the fractional layer that makes up the top
                                       ! of the boundary layer [R L2 T-2 ~> Pa]
-  real :: SpV_bbl(is:ie,js:je)    ! In situ specific volume of the fractional layer that makes up the
+  real :: SpV_bbl(niblock,njblock)    ! In situ specific volume of the fractional layer that makes up the
                                       ! top of the boundary layer [R-1 ~> m3 kg-1]
   real :: frac_in                     ! The fraction of a layer that is within the bottom boundary layer [nondim]
-  logical :: do_i(is:ie,js:je), do_any
+  logical :: do_i(niblock,njblock), do_any
   logical :: use_EOS
   integer, dimension(2) :: EOSdom ! The i-computational domain for the equation of state
-  integer :: i, j, k, nz
+  integer :: i, j, k, nz, ii, jj
 
   nz = GV%ke
 
@@ -732,13 +737,14 @@ subroutine find_rho_bottom_2d(G, GV, US, tv, h, dz, pres_int, dz_avg, is,ie, js,
     enddo
 
     ! Obtain bottom boundary layer thickness and index of top layer
-    do concurrent (j=js:je, i=is:ie)
-      hb(i,j) = 0.0 ; h_bot(i,j) = 0.0 ; k_bot(i,j) = nz
-      dz_bbl_rem(i,j) = G%mask2dT(i,j) * max(0.0, dz_avg(i,j))
-      do_i(i,j) = .true.
+    do concurrent (j=js:je, i=is:ie) DO_LOCALITY(local(ii,jj))
+      jj = j-js+1 ; ii = i-is+1
+      hb(ii,jj) = 0.0 ; h_bot(i,j) = 0.0 ; k_bot(i,j) = nz
+      dz_bbl_rem(ii,jj) = G%mask2dT(i,j) * max(0.0, dz_avg(ii,jj))
+      do_i(ii,jj) = .true.
       if (G%mask2dT(i,j) <= 0.0) then
-        h_bbl_frac(i,j) = 0.0
-        do_i(i,j) = .false.
+        h_bbl_frac(ii,jj) = 0.0
+        do_i(ii,jj) = .false.
       endif
     enddo
 
@@ -747,43 +753,47 @@ subroutine find_rho_bottom_2d(G, GV, US, tv, h, dz, pres_int, dz_avg, is,ie, js,
 #ifndef __NVCOMPILER_OPENMP_GPU
       do_any = .false.
 #endif
-      !$omp loop collapse(2)
-      do j=js,je ; do i=is,ie ; if (do_i(i,j)) then
-        if (dz(i,j,k) < dz_bbl_rem(i,j)) then
+      !$omp loop collapse(2) private(ii,jj)
+      do j=js,je ; do i=is,ie
+        jj = j-js+1 ; ii = i-is+1
+        if (do_i(ii,jj)) then
+        if (dz(i,j,k) < dz_bbl_rem(ii,jj)) then
           ! This layer is fully within the averaging depth.
-          dz_bbl_rem(i,j) = dz_bbl_rem(i,j) - dz(i,j,k)
-          hb(i,j) = hb(i,j) + h(i,j,k)
+          dz_bbl_rem(ii,jj) = dz_bbl_rem(ii,jj) - dz(i,j,k)
+          hb(ii,jj) = hb(ii,jj) + h(i,j,k)
           k_bot(i,j) = k
 #ifndef __NVCOMPILER_OPENMP_GPU
           do_any = .true.
 #endif
         else
           if (dz(i,j,k) > 0.0) then
-            frac_in = dz_bbl_rem(i,j) / dz(i,j,k)
+            frac_in = dz_bbl_rem(ii,jj) / dz(i,j,k)
             if (frac_in >= 0.5) k_bot(i,j) = k ! update bbl top index if >= 50% of layer
           else
             frac_in = 0.0
           endif
-          h_bbl_frac(i,j) = frac_in * h(i,j,k)
-          dz_bbl_rem(i,j) = 0.0
-          do_i(i,j) = .false.
+          h_bbl_frac(ii,jj) = frac_in * h(i,j,k)
+          dz_bbl_rem(ii,jj) = 0.0
+          do_i(ii,jj) = .false.
         endif
-      endif ; enddo ; enddo
+        endif
+      enddo ; enddo
 #ifndef __NVCOMPILER_OPENMP_GPU
       if (.not.do_any) exit
 #endif
     enddo
     !$omp end target
-    do concurrent (j=js:je, i=is:ie, do_i(i,j))
+    do concurrent (jj=1:je-js+1, ii=1:ie-is+1, do_i(ii,jj))
       ! The nominal bottom boundary layer is thicker than the water column, but layer 1 is
       ! already included in the averages.  These values are set so that the call to find
       ! the layer-average specific volume will behave sensibly.
-      h_bbl_frac(i,j) = 0.0
+      h_bbl_frac(ii,jj) = 0.0
     enddo
 
-    do concurrent (j=js:je, i=is:ie)
-      if (hb(i,j) + h_bbl_frac(i,j) < GV%H_subroundoff) h_bbl_frac(i,j) = GV%H_subroundoff
-      h_bot(i,j) = hb(i,j) + h_bbl_frac(i,j)
+    do concurrent (j=js:je, i=is:ie) DO_LOCALITY(local(ii,jj))
+      jj = j-js+1 ; ii = i-is+1
+      if (hb(ii,jj) + h_bbl_frac(ii,jj) < GV%H_subroundoff) h_bbl_frac(ii,jj) = GV%H_subroundoff
+      h_bot(i,j) = hb(ii,jj) + h_bbl_frac(ii,jj)
     enddo
 
   else
@@ -794,16 +804,17 @@ subroutine find_rho_bottom_2d(G, GV, US, tv, h, dz, pres_int, dz_avg, is,ie, js,
     ! Set the bottom density to the inverse of the in situ specific volume averaged over the
     ! specified distance, with care taken to avoid having compressibility lead to an imprint
     ! of the layer thicknesses on this density.
-    do concurrent (j=js:je, i=is:ie)
-      hb(i,j) = 0.0 ; SpV_h_bot(i,j) = 0.0 ; h_bot(i,j) = 0.0 ; k_bot(i,j) = nz
-      dz_bbl_rem(i,j) = G%mask2dT(i,j) * max(0.0, dz_avg(i,j))
-      do_i(i,j) = .true.
+    do concurrent (j=js:je, i=is:ie) DO_LOCALITY(local(ii,jj))
+      jj = j-js+1 ; ii = i-is+1
+      hb(ii,jj) = 0.0 ; SpV_h_bot(ii,jj) = 0.0 ; h_bot(i,j) = 0.0 ; k_bot(i,j) = nz
+      dz_bbl_rem(ii,jj) = G%mask2dT(i,j) * max(0.0, dz_avg(ii,jj))
+      do_i(ii,jj) = .true.
       if (G%mask2dT(i,j) <= 0.0) then
         ! Set acceptable values for calling the equation of state over land.
-        T_bbl(i,j) = 0.0 ; S_bbl(i,j) = 0.0 ; dp(i,j) = 0.0 ; P_bbl(i,j) = 0.0
-        SpV_bbl(i,j) = 1.0 ! This value is arbitrary, provided it is non-zero.
-        h_bbl_frac(i,j) = 0.0
-        do_i(i,j) = .false.
+        T_bbl(ii,jj) = 0.0 ; S_bbl(ii,jj) = 0.0 ; dp(ii,jj) = 0.0 ; P_bbl(ii,jj) = 0.0
+        SpV_bbl(ii,jj) = 1.0 ! This value is arbitrary, provided it is non-zero.
+        h_bbl_frac(ii,jj) = 0.0
+        do_i(ii,jj) = .false.
       endif
     enddo
 
@@ -812,20 +823,22 @@ subroutine find_rho_bottom_2d(G, GV, US, tv, h, dz, pres_int, dz_avg, is,ie, js,
 #ifndef __NVCOMPILER_OPENMP_GPU
       do_any = .false.
 #endif
-      !$omp loop collapse(2)
-      do j=js,je ; do i=is,ie ; if (do_i(i,j)) then
-        if (dz(i,j,k) < dz_bbl_rem(i,j)) then
+      !$omp loop collapse(2) private(ii,jj)
+      do j=js,je ; do i=is,ie
+        jj = j-js+1 ; ii = i-is+1
+        if (do_i(ii,jj)) then
+        if (dz(i,j,k) < dz_bbl_rem(ii,jj)) then
           ! This layer is fully within the averaging depth.
-          SpV_h_bot(i,j) = SpV_h_bot(i,j) + h(i,j,k) * tv%SpV_avg(i,j,k)
-          dz_bbl_rem(i,j) = dz_bbl_rem(i,j) - dz(i,j,k)
-          hb(i,j) = hb(i,j) + h(i,j,k)
+          SpV_h_bot(ii,jj) = SpV_h_bot(ii,jj) + h(i,j,k) * tv%SpV_avg(i,j,k)
+          dz_bbl_rem(ii,jj) = dz_bbl_rem(ii,jj) - dz(i,j,k)
+          hb(ii,jj) = hb(ii,jj) + h(i,j,k)
           k_bot(i,j) = k
 #ifndef __NVCOMPILER_OPENMP_GPU
           do_any = .true.
 #endif
         else
           if (dz(i,j,k) > 0.0) then
-            frac_in = dz_bbl_rem(i,j) / dz(i,j,k)
+            frac_in = dz_bbl_rem(ii,jj) / dz(i,j,k)
             if (frac_in >= 0.5) k_bot(i,j) = k ! update bbl top index if >= 50% of layer
           else
             frac_in = 0.0
@@ -833,34 +846,38 @@ subroutine find_rho_bottom_2d(G, GV, US, tv, h, dz, pres_int, dz_avg, is,ie, js,
           if (use_EOS) then
             ! Store the properties of this layer to determine the average
             ! specific volume of the portion that is within the BBL.
-            T_bbl(i,j) = tv%T(i,j,k) ; S_bbl(i,j) = tv%S(i,j,k)
-            dp(i,j) = frac_in * (GV%g_Earth*GV%H_to_RZ * h(i,j,k))
-            P_bbl(i,j) = pres_int(i,j,K) + (1.0-frac_in) * (GV%g_Earth*GV%H_to_RZ * h(i,j,k))
+            T_bbl(ii,jj) = tv%T(i,j,k) ; S_bbl(ii,jj) = tv%S(i,j,k)
+            dp(ii,jj) = frac_in * (GV%g_Earth*GV%H_to_RZ * h(i,j,k))
+            P_bbl(ii,jj) = pres_int(ii,jj,K) + (1.0-frac_in) * (GV%g_Earth*GV%H_to_RZ * h(i,j,k))
           else
-            SpV_bbl(i,j) = tv%SpV_avg(i,j,k)
+            SpV_bbl(ii,jj) = tv%SpV_avg(i,j,k)
           endif
-          h_bbl_frac(i,j) = frac_in * h(i,j,k)
-          dz_bbl_rem(i,j) = 0.0
-          do_i(i,j) = .false.
+          h_bbl_frac(ii,jj) = frac_in * h(i,j,k)
+          dz_bbl_rem(ii,jj) = 0.0
+          do_i(ii,jj) = .false.
         endif
-      endif ; enddo ; enddo
+        endif
+      enddo ; enddo
 #ifndef __NVCOMPILER_OPENMP_GPU
       if (.not.do_any) exit
 #endif
     enddo
     !$omp end target
-    do concurrent (j=js:je, i=is:ie, do_i(i,j))
+    do concurrent (j=js:je, i=is:ie) DO_LOCALITY(local(ii,jj))
+      jj = j-js+1 ; ii = i-is+1
+      if (do_i(ii,jj)) then
       ! The nominal bottom boundary layer is thicker than the water column, but layer 1 is
       ! already included in the averages.  These values are set so that the call to find
       ! the layer-average specific volume will behave sensibly.
       if (use_EOS) then
-        T_bbl(i,j) = tv%T(i,j,1) ; S_bbl(i,j) = tv%S(i,j,1)
-        dp(i,j) = 0.0
-        P_bbl(i,j) = pres_int(i,j,1)
+        T_bbl(ii,jj) = tv%T(i,j,1) ; S_bbl(ii,jj) = tv%S(i,j,1)
+        dp(ii,jj) = 0.0
+        P_bbl(ii,jj) = pres_int(ii,jj,1)
       else
-        SpV_bbl(i,j) = tv%SpV_avg(i,j,1)
+        SpV_bbl(ii,jj) = tv%SpV_avg(i,j,1)
       endif
-      h_bbl_frac(i,j) = 0.0
+      h_bbl_frac(ii,jj) = 0.0
+      endif
     enddo
 
     if (use_EOS) then
@@ -869,17 +886,19 @@ subroutine find_rho_bottom_2d(G, GV, US, tv, h, dz, pres_int, dz_avg, is,ie, js,
       EOSdom(1) = 1
       EOSdom(2) = ie - is + 1
       do j=js,je
-        call average_specific_vol(T_bbl(:,j), S_bbl(:,j), P_bbl(:,j), dp(:,j), &
-                                  SpV_bbl(:,j), tv%eqn_of_state, EOSdom)
+        jj = j-js+1
+        call average_specific_vol(T_bbl(:,jj), S_bbl(:,jj), P_bbl(:,jj), dp(:,jj), &
+                                  SpV_bbl(:,jj), tv%eqn_of_state, EOSdom)
       enddo
       !$omp target update to(SpV_bbl)
     endif
 
-    do concurrent (j=js:je, i=is:ie)
-      if (hb(i,j) + h_bbl_frac(i,j) < GV%H_subroundoff) h_bbl_frac(i,j) = GV%H_subroundoff
-      rho_bot(i,j) = G%mask2dT(i,j) * (hb(i,j) + h_bbl_frac(i,j)) / &
-                     (SpV_h_bot(i,j) + h_bbl_frac(i,j)*SpV_bbl(i,j))
-      h_bot(i,j) = hb(i,j) + h_bbl_frac(i,j)
+    do concurrent (j=js:je, i=is:ie) DO_LOCALITY(local(ii,jj))
+      jj = j-js+1 ; ii = i-is+1
+      if (hb(ii,jj) + h_bbl_frac(ii,jj) < GV%H_subroundoff) h_bbl_frac(ii,jj) = GV%H_subroundoff
+      rho_bot(i,j) = G%mask2dT(i,j) * (hb(ii,jj) + h_bbl_frac(ii,jj)) / &
+                     (SpV_h_bot(ii,jj) + h_bbl_frac(ii,jj)*SpV_bbl(ii,jj))
+      h_bot(i,j) = hb(ii,jj) + h_bbl_frac(ii,jj)
     enddo
   endif
 

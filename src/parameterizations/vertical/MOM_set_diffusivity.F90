@@ -2,6 +2,8 @@
 ! See the LICENSE file for licensing information.
 ! SPDX-License-Identifier: Apache-2.0
 
+#include "do_concurrent_compat.h"
+
 !> Calculate vertical diffusivity from all mixing processes
 module MOM_set_diffusivity
 
@@ -486,6 +488,8 @@ subroutine set_diffusivity(u, v, h, u_h, v_h, tv, fluxes, optics, visc, dt, Kd_i
   !$omp   map(to: T_f, S_f, tv, tv%T, tv%S, CS, CS%bkgnd_mixing_csp, visc, visc%Kd_shear) &
   !$omp   map(alloc: dRho_int, N2_lay, N2_int, N2_bot, rho_bot, h_bot, k_bot, Kd_lay_bkgnd, &
   !$omp     Kd_int_bkgnd, Kv_bkgnd, Kd_lay_2d, Kd_int_2d, kb, maxTKE, TKE_to_Kd, dz)
+  !$omp target enter data if(associated(fluxes%p_surf)) &
+  !$omp   map(to: fluxes, fluxes%p_surf)
 
   ! Smooth the properties through massless layers.
   if (use_EOS) then
@@ -621,7 +625,7 @@ subroutine set_diffusivity(u, v, h, u_h, v_h, tv, fluxes, optics, visc, dt, Kd_i
     ! Calculate conversion ratios from TKE to layer diffusivities.
     if (TKE_to_Kd_used) then
       call find_TKE_to_Kd(h, tv, dRho_int, N2_lay, istart, iend, jstart, jend, niblock, njblock, &
-                          dt, G, GV, US, CS, TKE_to_Kd, maxTKE, kb)
+                          dz, dt, G, GV, US, CS, TKE_to_Kd, maxTKE, kb)
       if (associated(dd%maxTKE)) then ; do concurrent (k=1:nz, j=jstart:jend, i=istart:iend)
         dd%maxTKE(i,j,k) = maxTKE(i,j,k)
       enddo ; endif
@@ -846,6 +850,8 @@ subroutine set_diffusivity(u, v, h, u_h, v_h, tv, fluxes, optics, visc, dt, Kd_i
   !$omp     k_bot, Kd_lay_bkgnd, Kd_int_bkgnd, Kv_bkgnd, CS, CS%bkgnd_mixing_csp, Kd_lay_2d, &
   !$omp     Kd_int_2d, kb, maxTKE, TKE_to_Kd, visc, visc%Kd_shear, dz) &
   !$omp   map(from: Kd_int)
+  !$omp target exit data if(associated(fluxes%p_surf)) &
+  !$omp   map(release: fluxes, fluxes%p_surf)
 
   if (CS%debug) then
     if (present(Kd_lay)) call hchksum(Kd_lay, "Kd_lay", G%HI, haloshift=0, unscale=GV%HZ_T_to_m2_s)
@@ -964,7 +970,7 @@ end subroutine set_diffusivity
 
 !> Convert turbulent kinetic energy to diffusivity
 subroutine find_TKE_to_Kd(h, tv, dRho_int, N2_lay, is, ie, js, je, niblock, njblock, &
-                          dt, G, GV, US, CS, TKE_to_Kd, maxTKE, kb)
+                          dz, dt, G, GV, US, CS, TKE_to_Kd, maxTKE, kb)
   type(ocean_grid_type),            intent(in)    :: G    !< The ocean's grid structure
   type(verticalGrid_type),          intent(in)    :: GV   !< The ocean's vertical grid structure
   type(unit_scale_type),            intent(in)    :: US   !< A dimensional unit scaling type
@@ -983,6 +989,8 @@ subroutine find_TKE_to_Kd(h, tv, dRho_int, N2_lay, is, ie, js, je, niblock, njbl
   integer,                          intent(in)    :: je   !< Ending j-index to work on
   integer,                          intent(in)    :: niblock !< Size of the i-block [nondim].
   integer,                          intent(in)    :: njblock !< Size of the j-block [nondim].
+  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)), &
+                                    intent(in)    :: dz   !< Height change across layers [Z ~> m]
   real,                             intent(in)    :: dt   !< Time increment [T ~> s].
   type(set_diffusivity_CS),         pointer       :: CS   !< Diffusivity control structure
   real, dimension(SZI_(G),SZJ_(G),SZK_(GV)), intent(inout) :: TKE_to_Kd !< The conversion rate
@@ -1004,7 +1012,6 @@ subroutine find_TKE_to_Kd(h, tv, dRho_int, N2_lay, is, ie, js, je, niblock, njbl
                   ! across an interface times the difference across the
                   ! interface above it [nondim]
     rho_0,   &    ! Layer potential densities relative to surface pressure [R ~> kg m-3]
-    dz,      &    ! Height change across layers [Z ~> m]
     maxEnt        ! maxEnt is the maximum value of entrainment from below (with
                   ! compensating entrainment from above to keep the layer
                   ! density from changing) that will not deplete all of the
@@ -1035,7 +1042,7 @@ subroutine find_TKE_to_Kd(h, tv, dRho_int, N2_lay, is, ie, js, je, niblock, njbl
   integer :: i, j, k, nz, i_rem, kmb, kb_min
 
   !$omp target enter data map(alloc: htot, mFkb, p_ref, Rcv_kmb, p_0, do_i, ds_dsp1, dsp1_ds, &
-  !$omp   rho_0, dz, maxEnt)
+  !$omp   rho_0, maxEnt)
 
   nz = GV%ke
   I_dt      = 1.0 / dt
@@ -1048,9 +1055,6 @@ subroutine find_TKE_to_Kd(h, tv, dRho_int, N2_lay, is, ie, js, je, niblock, njbl
   else
     G_IRho0 = GV%H_to_Z*G_Rho0
   endif
-
-  ! Find the vertical distances across layers.
-  call thickness_to_dz(h, tv, dz, G, GV, US, is=is, ie=ie, js=js, je=je, do_offload=.true.)
 
   ! Simple but coordinate-independent estimate of Kd/TKE
   if (CS%simple_TKE_to_Kd) then
@@ -1230,7 +1234,7 @@ subroutine find_TKE_to_Kd(h, tv, dRho_int, N2_lay, is, ie, js, je, niblock, njbl
   !$omp end target
 
   !$omp target exit data map(release: htot, mFkb, p_ref, Rcv_kmb, p_0, do_i, ds_dsp1, dsp1_ds, &
-  !$omp   rho_0, dz, maxEnt)
+  !$omp   rho_0, maxEnt)
 
 end subroutine find_TKE_to_Kd
 
@@ -1273,30 +1277,33 @@ subroutine find_N2(h, tv, T_f, S_f, fluxes, is, ie, js, je, niblock, njblock, &
                             intent(in)  :: dz   !< Height change across layers [Z ~> m]
 
   ! Local variables
-  real, dimension(is:ie,js:je,SZK_(GV)+1) :: &
+  real, dimension(niblock,njblock,SZK_(GV)+1) :: &
     pres               ! pressure at each interface [R L2 T-2 ~> Pa]
-  real, dimension(is:ie,js:je,SZK_(GV)+1) :: &
+  real, dimension(niblock,njblock,SZK_(GV)+1) :: &
     dRho_int_unfilt   ! unfiltered density differences across interfaces [R ~> kg m-3]
-  real, dimension(is:ie,js:je,SZK_(GV)+1) :: &
+  real, dimension(niblock,njblock,SZK_(GV)+1) :: &
     dRho_dT,         & ! partial derivative of density wrt temp [R C-1 ~> kg m-3 degC-1]
     dRho_dS            ! partial derivative of density wrt saln [R S-1 ~> kg m-3 ppt-1]
-  real, dimension(is:ie,js:je) :: &
+  real, dimension(niblock,njblock) :: &
     Temp_int,  &  ! temperature at each interface [C ~> degC]
     Salin_int, &  ! salinity at each interface [S ~> ppt]
     drho_bot,  &  ! A density difference [R ~> kg m-3]
-    h_amp,     &  ! The topographic roughness amplitude [Z ~> m].
     dz_BBL_avg, & ! The distance over which to average to find the near-bottom density [Z ~> m]
     hb,        &  ! The thickness of the bottom layer [H ~> m or kg m-2]
     z_from_bot    ! The height above the bottom [Z ~> m]
+  ! h_amp spans the full i-memory extent because tidal_mixing_h_amp writes into it
+  ! with global i-indices through a dummy argument that is declared SZI_(G).
+  real, dimension(SZI_(G),njblock) :: &
+    h_amp         ! The topographic roughness amplitude [Z ~> m].
 
   real :: dz_int    ! Vertical distance associated with an interface [Z ~> m]
   real :: G_Rho0    ! Gravitational acceleration, perhaps divided by Boussinesq reference density,
                     ! times some unit conversion factors [H T-2 R-1 ~> m4 s-2 kg-1 or m s-2].
   real :: H_neglect ! A negligibly small thickness [H ~> m or kg m-2]
 
-  logical :: do_i(SZI_(G),SZJ_(G)), do_any
+  logical :: do_i(niblock,njblock), do_any
   integer, dimension(2, 2) :: EOSdom ! The i-computational domain for the equation of state
-  integer :: i, j, k, nz
+  integer :: i, j, k, nz, ii, jj
 
   nz = GV%ke
   G_Rho0    = GV%g_Earth_Z_T2 / GV%H_to_RZ
@@ -1316,35 +1323,39 @@ subroutine find_N2(h, tv, T_f, S_f, fluxes, is, ie, js, je, niblock, njblock, &
   !$omp   map(to: CS, dz)
 
   ! Find the (limited) density jump across each interface.
-  do concurrent (j=js:je, i=is:ie)
+  do concurrent (j=js:je, i=is:ie) DO_LOCALITY(local(ii,jj))
+    jj = j-js+1 ; ii = i-is+1
     dRho_int(i,j,1) = 0.0 ; dRho_int(i,j,nz+1) = 0.0
-    dRho_int_unfilt(i,j,1) = 0.0 ; dRho_int_unfilt(i,j,nz+1) = 0.0
+    dRho_int_unfilt(ii,jj,1) = 0.0 ; dRho_int_unfilt(ii,jj,nz+1) = 0.0
   enddo
 
   if (associated(tv%eqn_of_state)) then
     if (associated(fluxes%p_surf)) then
-      do concurrent (j=js:je, i=is:ie)
-        pres(i,j,1) = fluxes%p_surf(i,j)
+      do concurrent (j=js:je, i=is:ie) DO_LOCALITY(local(ii,jj))
+        jj = j-js+1 ; ii = i-is+1
+        pres(ii,jj,1) = fluxes%p_surf(i,j)
       enddo
     else
-      do concurrent (j=js:je, i=is:ie)
-        pres(i,j,1) = 0.0
+      do concurrent (jj=1:je-js+1, ii=1:ie-is+1)
+        pres(ii,jj,1) = 0.0
       enddo
     endif
     ! TODO: tile/port EOS derivative loop for full device coverage.
     do K=2,nz
-      do concurrent (j=js:je, i=is:ie)
-        pres(i,j,K) = pres(i,j,K-1) + (GV%g_Earth*GV%H_to_RZ)*h(i,j,k-1)
-        Temp_Int(i,j) = 0.5 * (T_f(i,j,k) + T_f(i,j,k-1))
-        Salin_Int(i,j) = 0.5 * (S_f(i,j,k) + S_f(i,j,k-1))
+      do concurrent (j=js:je, i=is:ie) DO_LOCALITY(local(ii,jj))
+        jj = j-js+1 ; ii = i-is+1
+        pres(ii,jj,K) = pres(ii,jj,K-1) + (GV%g_Earth*GV%H_to_RZ)*h(i,j,k-1)
+        Temp_Int(ii,jj) = 0.5 * (T_f(i,j,k) + T_f(i,j,k-1))
+        Salin_Int(ii,jj) = 0.5 * (S_f(i,j,k) + S_f(i,j,k-1))
       enddo
       call calculate_density_derivs(Temp_int, Salin_int, pres(:,:,K), &
                                     dRho_dT(:,:,K), dRho_dS(:,:,K), tv%eqn_of_state, EOSdom)
-      do concurrent (j=js:je, i=is:ie)
-        dRho_int(i,j,K) = max(dRho_dT(i,j,K)*(T_f(i,j,k) - T_f(i,j,k-1)) + &
-                              dRho_dS(i,j,K)*(S_f(i,j,k) - S_f(i,j,k-1)), 0.0)
-        dRho_int_unfilt(i,j,K) = max(dRho_dT(i,j,K)*(tv%T(i,j,k) - tv%T(i,j,k-1)) + &
-                                     dRho_dS(i,j,K)*(tv%S(i,j,k) - tv%S(i,j,k-1)), 0.0)
+      do concurrent (j=js:je, i=is:ie) DO_LOCALITY(local(ii,jj))
+        jj = j-js+1 ; ii = i-is+1
+        dRho_int(i,j,K) = max(dRho_dT(ii,jj,K)*(T_f(i,j,k) - T_f(i,j,k-1)) + &
+                              dRho_dS(ii,jj,K)*(S_f(i,j,k) - S_f(i,j,k-1)), 0.0)
+        dRho_int_unfilt(ii,jj,K) = max(dRho_dT(ii,jj,K)*(tv%T(i,j,k) - tv%T(i,j,k-1)) + &
+                                       dRho_dS(ii,jj,K)*(tv%S(i,j,k) - tv%S(i,j,k-1)), 0.0)
       enddo
     enddo
   else
@@ -1368,17 +1379,18 @@ subroutine find_N2(h, tv, T_f, S_f, fluxes, is, ie, js, je, niblock, njblock, &
   enddo
 
   ! Find the bottom boundary layer stratification, and use this in the deepest layers.
-  do concurrent (j=js:je, i=is:ie)
-    hb(i,j) = 0.0 ; dRho_bot(i,j) = 0.0 ; h_amp(i,j) = 0.0
-    z_from_bot(i,j) = 0.5*dz(i,j,nz)
-    do_i(i,j) = (G%mask2dT(i,j) > 0.0)
+  do concurrent (j=js:je, i=is:ie) DO_LOCALITY(local(ii,jj))
+    jj = j-js+1 ; ii = i-is+1
+    hb(ii,jj) = 0.0 ; dRho_bot(ii,jj) = 0.0 ; h_amp(i,jj) = 0.0
+    z_from_bot(ii,jj) = 0.5*dz(i,j,nz)
+    do_i(ii,jj) = (G%mask2dT(i,j) > 0.0)
   enddo
 
   if (CS%use_tidal_mixing) then
     !$omp target update from(h_amp)
     do j=js,je
       ! TODO: tile/port get tidal_mixing_h_amp to recognise tile bounds.
-      call tidal_mixing_h_amp(h_amp(:,j), G, j, CS%tidal_mixing)
+      call tidal_mixing_h_amp(h_amp(:,j-js+1), G, j, CS%tidal_mixing)
     enddo
     !$omp target update to(h_amp)
   endif
@@ -1388,39 +1400,43 @@ subroutine find_N2(h, tv, T_f, S_f, fluxes, is, ie, js, je, niblock, njblock, &
 #ifndef __NVCOMPILER_OPENMP_GPU
     do_any = .false.
 #endif
-    !$omp loop collapse(2) private(dz_int)
-    do j=js,je ; do i=is,ie ; if (do_i(i,j)) then
+    !$omp loop collapse(2) private(dz_int,ii,jj)
+    do j=js,je ; do i=is,ie
+      jj = j-js+1 ; ii = i-is+1
+      if (do_i(ii,jj)) then
       dz_int = 0.5*(dz(i,j,k) + dz(i,j,k-1))
-      z_from_bot(i,j) = z_from_bot(i,j) + dz_int ! middle of the layer above
+      z_from_bot(ii,jj) = z_from_bot(ii,jj) + dz_int ! middle of the layer above
 
-      hb(i,j) = hb(i,j) + 0.5*(h(i,j,k) + h(i,j,k-1))
-      drho_bot(i,j) = drho_bot(i,j) + dRho_int(i,j,K)
+      hb(ii,jj) = hb(ii,jj) + 0.5*(h(i,j,k) + h(i,j,k-1))
+      drho_bot(ii,jj) = drho_bot(ii,jj) + dRho_int(i,j,K)
 
-      if (z_from_bot(i,j) > h_amp(i,j)) then
+      if (z_from_bot(ii,jj) > h_amp(i,jj)) then
         if (k>2) then
           ! Always include at least one full layer.
-          hb(i,j) = hb(i,j) + 0.5*(h(i,j,k-1) + h(i,j,k-2))
-          drho_bot(i,j) = drho_bot(i,j) + dRho_int(i,j,K-1)
+          hb(ii,jj) = hb(ii,jj) + 0.5*(h(i,j,k-1) + h(i,j,k-2))
+          drho_bot(ii,jj) = drho_bot(ii,jj) + dRho_int(i,j,K-1)
         endif
-        do_i(i,j) = .false.
+        do_i(ii,jj) = .false.
 #ifndef __NVCOMPILER_OPENMP_GPU
       else
         do_any = .true.
 #endif
       endif
-    endif ; enddo ; enddo
+      endif
+    enddo ; enddo
 #ifndef __NVCOMPILER_OPENMP_GPU
     if (.not.do_any) exit
 #endif
   enddo
   !$omp end target
 
-  do concurrent (j=js:je, i=is:ie)
-    if (hb(i,j) > 0.0) then
-      N2_bot(i,j) = (G_Rho0 * drho_bot(i,j)) / hb(i,j)
+  do concurrent (j=js:je, i=is:ie) DO_LOCALITY(local(ii,jj))
+    jj = j-js+1 ; ii = i-is+1
+    if (hb(ii,jj) > 0.0) then
+      N2_bot(i,j) = (G_Rho0 * drho_bot(ii,jj)) / hb(ii,jj)
     else ;  N2_bot(i,j) = 0.0 ; endif
-    z_from_bot(i,j) = 0.5*dz(i,j,nz)
-    do_i(i,j) = (G%mask2dT(i,j) > 0.0)
+    z_from_bot(ii,jj) = 0.5*dz(i,j,nz)
+    do_i(ii,jj) = (G%mask2dT(i,j) > 0.0)
   enddo
 
   !$omp target
@@ -1428,23 +1444,26 @@ subroutine find_N2(h, tv, T_f, S_f, fluxes, is, ie, js, je, niblock, njblock, &
 #ifndef __NVCOMPILER_OPENMP_GPU
     do_any = .false.
 #endif
-    !$omp loop collapse(2) private(dz_int)
-    do j=js,je ; do i=is,ie ; if (do_i(i,j)) then
+    !$omp loop collapse(2) private(dz_int,ii,jj)
+    do j=js,je ; do i=is,ie
+      jj = j-js+1 ; ii = i-is+1
+      if (do_i(ii,jj)) then
       dz_int = 0.5*(dz(i,j,k) + dz(i,j,k-1))
-      z_from_bot(i,j) = z_from_bot(i,j) + dz_int ! middle of the layer above
+      z_from_bot(ii,jj) = z_from_bot(ii,jj) + dz_int ! middle of the layer above
 
       N2_int(i,j,K) = N2_bot(i,j)
       if (k>2) N2_lay(i,j,k-1) = N2_bot(i,j)
 
-      if (z_from_bot(i,j) > h_amp(i,j)) then
+      if (z_from_bot(ii,jj) > h_amp(i,jj)) then
         if (k>2) N2_int(i,j,K-1) = N2_bot(i,j)
-        do_i(i,j) = .false.
+        do_i(ii,jj) = .false.
 #ifndef __NVCOMPILER_OPENMP_GPU
       else
         do_any = .true.
 #endif
       endif
-    endif ; enddo ; enddo
+      endif
+    enddo ; enddo
 #ifndef __NVCOMPILER_OPENMP_GPU
     if (.not.do_any) exit
 #endif
@@ -1452,22 +1471,25 @@ subroutine find_N2(h, tv, T_f, S_f, fluxes, is, ie, js, je, niblock, njblock, &
   !$omp end target
 
   if (associated(tv%eqn_of_state)) then
-    do concurrent (K=1:nz+1, j=js:je, i=is:ie)
-      dRho_int(i,j,K) = dRho_int_unfilt(i,j,K)
+    do concurrent (K=1:nz+1, j=js:je, i=is:ie) DO_LOCALITY(local(ii,jj))
+      jj = j-js+1 ; ii = i-is+1
+      dRho_int(i,j,K) = dRho_int_unfilt(ii,jj,K)
     enddo
   endif
 
   ! Average over the larger of the envelope of the topography or a minimal distance.
-  do concurrent (j=js:je, i=is:ie)
-    dz_BBL_avg(i,j) = max(h_amp(i,j), CS%dz_BBL_avg_min)
+  do concurrent (j=js:je, i=is:ie) DO_LOCALITY(local(ii,jj))
+    jj = j-js+1 ; ii = i-is+1
+    dz_BBL_avg(ii,jj) = max(h_amp(i,jj), CS%dz_BBL_avg_min)
   enddo
 
-  call find_rho_bottom(G, GV, US, tv, h, dz, pres, dz_BBL_avg, is,ie,js, je, Rho_bot, h_bot, k_bot)
+  call find_rho_bottom(G, GV, US, tv, h, dz, pres, dz_BBL_avg, is,ie,js, je, &
+                       niblock, njblock, Rho_bot, h_bot, k_bot)
 
   !$omp target exit data &
-  !$omp   map(from: dRho_int, N2_int, N2_lay, dz_BBL_avg, N2_bot, Rho_bot, h_bot, k_bot) &
+  !$omp   map(from: dRho_int, N2_int, N2_lay, N2_bot, Rho_bot, h_bot, k_bot) &
   !$omp   map(release: dRho_dT, dRho_dS, Temp_Int, Salin_Int, h_amp, dRho_int_unfilt, drho_bot, &
-  !$omp     hb, z_from_bot, do_i, CS, pres, dz)
+  !$omp     hb, z_from_bot, do_i, CS, pres, dz, dz_BBL_avg)
 
 end subroutine find_N2
 
