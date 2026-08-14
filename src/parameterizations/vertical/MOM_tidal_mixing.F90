@@ -732,36 +732,17 @@ subroutine calculate_tidal_mixing(dz, isb, ieb, jsb, jeb, nii, njj, N2_bot, Rho_
   real, dimension(:,:,:),           pointer       :: Kv     !< The "slow" vertical viscosity at each interface
                                                             !! (not layer!) [H Z T-1 ~> m2 s-1 or Pa s]
   real, dimension(nii,njj,SZK_(GV)), &
-                          optional, intent(inout) :: Kd_lay !< The diapycnal diffusivity in layers
+                                    intent(inout) :: Kd_lay !< The diapycnal diffusivity in layers
                                                             !! [H Z T-1 ~> m2 s-1 or kg m-1 s-1]
   real, dimension(nii,njj,SZK_(GV)+1), &
-                          optional, intent(inout) :: Kd_int !< The diapycnal diffusivity at interfaces
+                                    intent(inout) :: Kd_int !< The diapycnal diffusivity at interfaces
                                                             !! [H Z T-1 ~> m2 s-1 or kg m-1 s-1]
   type(vbf_CS), pointer                           :: VBF    !< A diagnostic structure for vertical buoyancy fluxes
 
-  integer :: j, jj, jje
-
-  jje = jeb-jsb+1
-
   if (CS%Int_tide_dissipation .or. CS%Lee_wave_dissipation .or. CS%Lowmode_itidal_dissipation) then
     if (CS%use_CVMix_tidal) then
-      do jj=1,jje
-        j = jsb+jj-1
-        ! Kd_lay and Kd_int are each independently optional; forming an array section of one that is
-        ! not present would be an illegal reference, so the presence of each is checked before slicing it.
-        if (present(Kd_lay) .and. present(Kd_int)) then
-          call calculate_CVMix_tidal(dz(:,j,:), j, isb, ieb, nii, N2_int(:,jj,:), G, GV, US, CS, Kv, &
-                                     Kd_lay=Kd_lay(:,jj,:), Kd_int=Kd_int(:,jj,:))
-        elseif (present(Kd_lay)) then
-          call calculate_CVMix_tidal(dz(:,j,:), j, isb, ieb, nii, N2_int(:,jj,:), G, GV, US, CS, Kv, &
-                                     Kd_lay=Kd_lay(:,jj,:))
-        elseif (present(Kd_int)) then
-          call calculate_CVMix_tidal(dz(:,j,:), j, isb, ieb, nii, N2_int(:,jj,:), G, GV, US, CS, Kv, &
-                                     Kd_int=Kd_int(:,jj,:))
-        else
-          call calculate_CVMix_tidal(dz(:,j,:), j, isb, ieb, nii, N2_int(:,jj,:), G, GV, US, CS, Kv)
-        endif
-      enddo
+      call calculate_CVMix_tidal(dz, jsb, jeb, isb, ieb, nii, njj, N2_int, G, GV, US, CS, Kv, &
+                                 Kd_lay=Kd_lay, Kd_int=Kd_int)
     else
       call add_int_tide_diffusivity(dz, isb, ieb, jsb, jeb, nii, njj, N2_bot, Rho_bot, N2_lay, TKE_to_Kd, max_TKE, &
                                     G, GV, US, CS, Kd_max, Kd_lay, Kd_int, VBF)
@@ -772,24 +753,26 @@ end subroutine calculate_tidal_mixing
 
 !> Calls the CVMix routines to compute tidal dissipation and to add the effect of internal-tide-driven
 !! mixing to the interface diffusivities.
-subroutine calculate_CVMix_tidal(dz, j, isb, ieb, nii, N2_int, G, GV, US, CS, Kv, Kd_lay, Kd_int)
+subroutine calculate_CVMix_tidal(dz, jsb, jeb, isb, ieb, nii, njj, N2_int, G, GV, US, CS, Kv, Kd_lay, Kd_int)
   type(ocean_grid_type),   intent(in)    :: G     !< Grid structure.
   type(verticalGrid_type), intent(in)    :: GV    !< ocean vertical grid structure
   type(unit_scale_type),   intent(in)    :: US    !< A dimensional unit scaling type
   type(tidal_mixing_cs),   intent(inout) :: CS    !< This module's control structure.
-  real, dimension(SZI_(G),SZK_(GV)),   intent(in) :: dz     !< The vertical distance across layers [Z ~> m]
-  integer,                 intent(in)    :: j     !< The j-index to work on
+  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)), intent(in) :: dz !< The vertical distance across layers [Z ~> m]
+  integer,                 intent(in)    :: jsb   !< Starting j-index to work on
+  integer,                 intent(in)    :: jeb   !< Ending j-index to work on
   integer,                 intent(in)    :: isb   !< Starting i-index to work on
   integer,                 intent(in)    :: ieb   !< Ending i-index to work on
   integer,                 intent(in)    :: nii   !< Size of the i-block [nondim].
-  real, dimension(nii,SZK_(GV)+1), intent(in) :: N2_int !< The squared buoyancy
+  integer,                 intent(in)    :: njj   !< Size of the j-block [nondim].
+  real, dimension(nii,njj,SZK_(GV)+1), intent(in) :: N2_int !< The squared buoyancy
                                                   !! frequency at the interfaces [T-2 ~> s-2].
   real, dimension(:,:,:),  pointer       :: Kv    !< The "slow" vertical viscosity at each interface
                                                   !! (not layer!) [H Z T-1 ~> m2 s-1 or Pa s]
-  real, dimension(nii,SZK_(GV)), &
+  real, dimension(nii,njj,SZK_(GV)), &
                  optional, intent(inout) :: Kd_lay!< The diapycnal diffusivity in the layers
                                                   !! [H Z T-1 ~> m2 s-1 or kg m-1 s-1].
-  real, dimension(nii,SZK_(GV)+1), &
+  real, dimension(nii,njj,SZK_(GV)+1), &
                  optional, intent(inout) :: Kd_int!< The diapycnal diffusivity at interfaces
                                                   !! [H Z T-1 ~> m2 s-1 or kg m-1 s-1].
   ! Local variables
@@ -814,15 +797,17 @@ subroutine calculate_CVMix_tidal(dz, j, isb, ieb, nii, N2_int, G, GV, US, CS, Kv
   real :: dh, hcorr      ! Limited thicknesses and a cumulative correction [Z ~> m]
   real :: Simmons_coeff  ! A coefficient in the Simmons et al (2004) mixing parameterization [nondim]
 
-  integer :: i, k, ii, iie
+  integer :: i, j, k, ii, jj, iie, jje
   real, parameter :: rho_fw = 1000.0 ! fresh water density [kg m-3]
                                      ! TODO: when coupled, get this from CESM (SHR_CONST_RHOFW)
 
   iie = ieb-isb+1
+  jje = jeb-jsb+1
 
   select case (CS%CVMix_tidal_scheme)
   case (SIMMONS)
-    do ii=1,iie
+    do jj=1,jje ; do ii=1,iie
+      j = jsb+jj-1
       i = isb+ii-1
 
       if (G%mask2dT(i,j)<1) cycle
@@ -831,7 +816,7 @@ subroutine calculate_CVMix_tidal(dz, j, isb, ieb, nii, N2_int, G, GV, US, CS, Kv
       hcorr = 0.0
       ! Compute cell center depth and cell bottom in meters (negative values in the ocean)
       do k=1,GV%ke
-        dh = dz(i,k) ! Nominal thickness to use for increment, in the units of heights
+        dh = dz(i,j,k) ! Nominal thickness to use for increment, in the units of heights
         dh = dh + hcorr ! Take away the accumulated error (could temporarily make dh<0)
         hcorr = min( dh - CS%min_thickness, 0. ) ! If inflating then hcorr<0
         dh = max(dh, CS%min_thickness) ! Limited increment dh>=min_thickness
@@ -856,7 +841,7 @@ subroutine calculate_CVMix_tidal(dz, j, isb, ieb, nii, N2_int, G, GV, US, CS, Kv
 
       ! XXX: Temporary de-scaling of N2_int(i,:) into a temporary variable
       do K=1,GV%ke+1
-        N2_int_i(K) = US%s_to_T**2 * N2_int(ii,K)
+        N2_int_i(K) = US%s_to_T**2 * N2_int(ii,jj,K)
       enddo
 
       call CVMix_coeffs_tidal( Mdiff_out               = Kv_tidal,             &
@@ -873,12 +858,12 @@ subroutine calculate_CVMix_tidal(dz, j, isb, ieb, nii, N2_int, G, GV, US, CS, Kv
       ! Update diffusivity
       if (present(Kd_lay)) then
         do k=1,GV%ke
-          Kd_lay(ii,k) = Kd_lay(ii,k) + 0.5 * GV%m2_s_to_HZ_T * (Kd_tidal(k) + Kd_tidal(k+1))
+          Kd_lay(ii,jj,k) = Kd_lay(ii,jj,k) + 0.5 * GV%m2_s_to_HZ_T * (Kd_tidal(k) + Kd_tidal(k+1))
         enddo
       endif
       if (present(Kd_int)) then
         do K=1,GV%ke+1
-          Kd_int(ii,K) = Kd_int(ii,K) + GV%m2_s_to_HZ_T * Kd_tidal(K)
+          Kd_int(ii,jj,K) = Kd_int(ii,jj,K) + GV%m2_s_to_HZ_T * Kd_tidal(K)
         enddo
       endif
       ! Update viscosity with the proper unit conversion.
@@ -893,7 +878,7 @@ subroutine calculate_CVMix_tidal(dz, j, isb, ieb, nii, N2_int, G, GV, US, CS, Kv
         CS%dd%Kd_itidal(i,j,:) = GV%m2_s_to_HZ_T * Kd_tidal(:)
       endif
       if (allocated(CS%dd%N2_int)) then
-        CS%dd%N2_int(i,j,:) = N2_int(ii,:)
+        CS%dd%N2_int(i,j,:) = N2_int(ii,jj,:)
       endif
       if (allocated(CS%dd%Simmons_coeff_2d)) then
         CS%dd%Simmons_coeff_2d(i,j) = Simmons_coeff
@@ -902,7 +887,7 @@ subroutine calculate_CVMix_tidal(dz, j, isb, ieb, nii, N2_int, G, GV, US, CS, Kv
         CS%dd%vert_dep_3d(i,j,:) = vert_dep(:)
       endif
 
-    enddo ! i=is,ie
+    enddo ; enddo ! jj-ii loops
 
   case (SCHMITTNER)
 
@@ -911,103 +896,106 @@ subroutine calculate_CVMix_tidal(dz, j, isb, ieb, nii, N2_int, G, GV, US, CS, Kv
 
     allocate(exp_hab_zetar(GV%ke+1,GV%ke+1))
 
-    do ii=1,iie
-      i = isb+ii-1
+    do jj=1,jje
+      j = jsb+jj-1
+      do ii=1,iie
+        i = isb+ii-1
 
-      if (G%mask2dT(i,j)<1) cycle
+        if (G%mask2dT(i,j)<1) cycle
 
-      iFaceHeight(:) = 0.0 ! BBL is all relative to the surface
-      hcorr = 0.0
-      ! Compute heights at cell center and interfaces, and rescale layer thicknesses
-      do k=1,GV%ke
-        h_m(k) = dz(i,k)*US%Z_to_m  ! Rescale thicknesses to m for use by CVmix.
-        dh = dz(i,k) ! Nominal thickness to use for increment, in the units of heights
-        dh = dh + hcorr ! Take away the accumulated error (could temporarily make dh<0)
-        hcorr = min( dh - CS%min_thickness, 0. ) ! If inflating then hcorr<0
-        dh = max(dh, CS%min_thickness) ! Limited increment dh>=min_thickness
-        cellHeight(k)    = iFaceHeight(k) - 0.5 * US%Z_to_m*dh
-        iFaceHeight(k+1) = iFaceHeight(k) - US%Z_to_m*dh
-      enddo
-
-      SchmittnerSocn = 0.0 ! TODO: compute this
-
-      ! form the time-invariant part of Schmittner coefficient term
-      call CVMix_compute_Schmittner_invariant(nlev                    = GV%ke,          &
-                                              VertDep                 = vert_dep,       &
-                                              efficiency              = CS%Mu_itides,   &
-                                              rho                     = rho_fw,         &
-                                              exp_hab_zetar           = exp_hab_zetar,  &
-                                              zw                      = iFaceHeight,    &
-                                              CVmix_tidal_params_user = CS%CVMix_tidal_params)
-                  !TODO: in above call, there is no need to pass efficiency, since it gets
-                  ! passed via CVMix_init_tidal and stored in CVMix_tidal_params. Change
-                  ! CVMix API to prevent this redundancy.
-
-      ! remap from input z coordinate to model coordinate:
-      tidal_qe_md(:) = 0.0
-      call remapping_core_h(CS%remap_cs, size(CS%h_src), CS%h_src, CS%tidal_qe_3d_in(i,j,:), &
-                            GV%ke, h_m, tidal_qe_md)
-
-      ! form the Schmittner coefficient that is based on 3D q*E, which is formed from
-      ! summing q_i*TidalConstituent_i over the number of constituents.
-      call CVMix_compute_SchmittnerCoeff( nlev                    = GV%ke,              &
-                                          energy_flux             = US%RZ3_T3_to_W_m2*tidal_qe_md(:), &
-                                          SchmittnerCoeff         = Schmittner_coeff,   &
-                                          exp_hab_zetar           = exp_hab_zetar,      &
-                                          CVmix_tidal_params_user = CS%CVMix_tidal_params)
-
-      ! XXX: Temporary de-scaling of N2_int(i,:) into a temporary variable
-      do k=1,GV%ke+1
-        N2_int_i(k) = US%s_to_T**2 * N2_int(ii,k)
-      enddo
-
-      call CVMix_coeffs_tidal_schmittner( Mdiff_out               = Kv_tidal,             &
-                                          Tdiff_out               = Kd_tidal,             &
-                                          Nsqr                    = N2_int_i,             &
-                                          OceanDepth              = -iFaceHeight(GV%ke+1), &
-                                          nlev                    = GV%ke,                &
-                                          max_nlev                = GV%ke,                &
-                                          SchmittnerCoeff         = Schmittner_coeff,     &
-                                          SchmittnerSouthernOcean = SchmittnerSocn,       &
-                                          CVmix_params            = CS%CVMix_glb_params,  &
-                                          CVmix_tidal_params_user = CS%CVMix_tidal_params)
-
-      ! Update diffusivity
-      if (present(Kd_lay)) then
+        iFaceHeight(:) = 0.0 ! BBL is all relative to the surface
+        hcorr = 0.0
+        ! Compute heights at cell center and interfaces, and rescale layer thicknesses
         do k=1,GV%ke
-          Kd_lay(ii,k) = Kd_lay(ii,k) + 0.5 * GV%m2_s_to_HZ_T * (Kd_tidal(k) + Kd_tidal(k+1))
+          h_m(k) = dz(i,j,k)*US%Z_to_m  ! Rescale thicknesses to m for use by CVmix.
+          dh = dz(i,j,k) ! Nominal thickness to use for increment, in the units of heights
+          dh = dh + hcorr ! Take away the accumulated error (could temporarily make dh<0)
+          hcorr = min( dh - CS%min_thickness, 0. ) ! If inflating then hcorr<0
+          dh = max(dh, CS%min_thickness) ! Limited increment dh>=min_thickness
+          cellHeight(k)    = iFaceHeight(k) - 0.5 * US%Z_to_m*dh
+          iFaceHeight(k+1) = iFaceHeight(k) - US%Z_to_m*dh
         enddo
-      endif
-      if (present(Kd_int)) then
-        do K=1,GV%ke+1
-          Kd_int(ii,K) = Kd_int(ii,K) +  (GV%m2_s_to_HZ_T * Kd_tidal(K))
-        enddo
-      endif
 
-      ! Update viscosity
-      if (associated(Kv)) then
-        do K=1,GV%ke+1
-          Kv(i,j,K) = Kv(i,j,K) + GV%m2_s_to_HZ_T * Kv_tidal(K)   ! Rescale from m2 s-1 to H Z T-1.
-        enddo
-      endif
+        SchmittnerSocn = 0.0 ! TODO: compute this
 
-      ! diagnostics
-      if (allocated(CS%dd%Kd_itidal)) then
-        CS%dd%Kd_itidal(i,j,:) = GV%m2_s_to_HZ_T*Kd_tidal(:)
-      endif
-      if (allocated(CS%dd%N2_int)) then
-        CS%dd%N2_int(i,j,:) = N2_int(ii,:)
-      endif
-      if (allocated(CS%dd%Schmittner_coeff_3d)) then
-        CS%dd%Schmittner_coeff_3d(i,j,:) = Schmittner_coeff(:)
-      endif
-      if (allocated(CS%dd%tidal_qe_md)) then
-        CS%dd%tidal_qe_md(i,j,:) = tidal_qe_md(:)
-      endif
-      if (allocated(CS%dd%vert_dep_3d)) then
-        CS%dd%vert_dep_3d(i,j,:) = vert_dep(:)
-      endif
-    enddo ! i=is,ie
+        ! form the time-invariant part of Schmittner coefficient term
+        call CVMix_compute_Schmittner_invariant(nlev                    = GV%ke,          &
+                                                VertDep                 = vert_dep,       &
+                                                efficiency              = CS%Mu_itides,   &
+                                                rho                     = rho_fw,         &
+                                                exp_hab_zetar           = exp_hab_zetar,  &
+                                                zw                      = iFaceHeight,    &
+                                                CVmix_tidal_params_user = CS%CVMix_tidal_params)
+                    !TODO: in above call, there is no need to pass efficiency, since it gets
+                    ! passed via CVMix_init_tidal and stored in CVMix_tidal_params. Change
+                    ! CVMix API to prevent this redundancy.
+
+        ! remap from input z coordinate to model coordinate:
+        tidal_qe_md(:) = 0.0
+        call remapping_core_h(CS%remap_cs, size(CS%h_src), CS%h_src, CS%tidal_qe_3d_in(i,j,:), &
+                              GV%ke, h_m, tidal_qe_md)
+
+        ! form the Schmittner coefficient that is based on 3D q*E, which is formed from
+        ! summing q_i*TidalConstituent_i over the number of constituents.
+        call CVMix_compute_SchmittnerCoeff( nlev                    = GV%ke,              &
+                                            energy_flux             = US%RZ3_T3_to_W_m2*tidal_qe_md(:), &
+                                            SchmittnerCoeff         = Schmittner_coeff,   &
+                                            exp_hab_zetar           = exp_hab_zetar,      &
+                                            CVmix_tidal_params_user = CS%CVMix_tidal_params)
+
+        ! XXX: Temporary de-scaling of N2_int(i,:) into a temporary variable
+        do k=1,GV%ke+1
+          N2_int_i(k) = US%s_to_T**2 * N2_int(ii,jj,k)
+        enddo
+
+        call CVMix_coeffs_tidal_schmittner( Mdiff_out               = Kv_tidal,             &
+                                            Tdiff_out               = Kd_tidal,             &
+                                            Nsqr                    = N2_int_i,             &
+                                            OceanDepth              = -iFaceHeight(GV%ke+1), &
+                                            nlev                    = GV%ke,                &
+                                            max_nlev                = GV%ke,                &
+                                            SchmittnerCoeff         = Schmittner_coeff,     &
+                                            SchmittnerSouthernOcean = SchmittnerSocn,       &
+                                            CVmix_params            = CS%CVMix_glb_params,  &
+                                            CVmix_tidal_params_user = CS%CVMix_tidal_params)
+
+        ! Update diffusivity
+        if (present(Kd_lay)) then
+          do k=1,GV%ke
+            Kd_lay(ii,jj,k) = Kd_lay(ii,jj,k) + 0.5 * GV%m2_s_to_HZ_T * (Kd_tidal(k) + Kd_tidal(k+1))
+          enddo
+        endif
+        if (present(Kd_int)) then
+          do K=1,GV%ke+1
+            Kd_int(ii,jj,K) = Kd_int(ii,jj,K) +  (GV%m2_s_to_HZ_T * Kd_tidal(K))
+          enddo
+        endif
+
+        ! Update viscosity
+        if (associated(Kv)) then
+          do K=1,GV%ke+1
+            Kv(i,j,K) = Kv(i,j,K) + GV%m2_s_to_HZ_T * Kv_tidal(K)   ! Rescale from m2 s-1 to H Z T-1.
+          enddo
+        endif
+
+        ! diagnostics
+        if (allocated(CS%dd%Kd_itidal)) then
+          CS%dd%Kd_itidal(i,j,:) = GV%m2_s_to_HZ_T*Kd_tidal(:)
+        endif
+        if (allocated(CS%dd%N2_int)) then
+          CS%dd%N2_int(i,j,:) = N2_int(ii,jj,:)
+        endif
+        if (allocated(CS%dd%Schmittner_coeff_3d)) then
+          CS%dd%Schmittner_coeff_3d(i,j,:) = Schmittner_coeff(:)
+        endif
+        if (allocated(CS%dd%tidal_qe_md)) then
+          CS%dd%tidal_qe_md(i,j,:) = tidal_qe_md(:)
+        endif
+        if (allocated(CS%dd%vert_dep_3d)) then
+          CS%dd%vert_dep_3d(i,j,:) = vert_dep(:)
+        endif
+      enddo ! ii=1,iie
+    enddo ! jj=1,jje
 
     deallocate(exp_hab_zetar)
 
