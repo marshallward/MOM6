@@ -739,7 +739,8 @@ subroutine find_rho_bottom_2d(G, GV, US, tv, h, dz, pres_int, dz_avg, isb, ieb, 
   !$omp   map(alloc: hb, SpV_h_bot, dz_bbl_rem, h_bbl_frac, T_bbl, S_bbl, P_bbl, dp, SpV_bbl, do_i)
 
   if (GV%Boussinesq .or. GV%semi_Boussinesq .or. .not.allocated(tv%SpV_avg)) then
-    do concurrent (j=jsb:jeb, i=isb:ieb)
+    do concurrent (jj=1:jje, ii=1:iie) DO_LOCALITY(local(i,j))
+      j = jsb+jj-1 ; i = isb+ii-1
       rho_bot(i,j) = GV%Rho0
     enddo
 

@@ -741,12 +741,16 @@ subroutine calculate_tidal_mixing(dz, isb, ieb, jsb, jeb, nii, njj, N2_bot, Rho_
                                                             !! [H Z T-1 ~> m2 s-1 or kg m-1 s-1]
   type(vbf_CS), pointer                           :: VBF    !< A diagnostic structure for vertical buoyancy fluxes
 
-  integer :: j
+  integer :: j, jj, jje
+
+  jje = jeb-jsb+1
 
   if (CS%Int_tide_dissipation .or. CS%Lee_wave_dissipation .or. CS%Lowmode_itidal_dissipation) then
     if (CS%use_CVMix_tidal) then
-      do j=jsb,jeb
-        call calculate_CVMix_tidal(dz(:,j,:), j, N2_int(:,j,:), G, GV, US, CS, Kv, Kd_lay(:,j,:), Kd_int(:,j,:))
+      do jj=1,jje
+        j = jsb+jj-1
+        call calculate_CVMix_tidal(dz(:,j,:), j, isb, ieb, nii, N2_int(:,j,:), G, GV, US, CS, Kv, &
+                                   Kd_lay(:,j,:), Kd_int(:,j,:))
       enddo
     else
       call add_int_tide_diffusivity(dz, isb, ieb, jsb, jeb, nii, njj, N2_bot, Rho_bot, N2_lay, &
@@ -758,13 +762,16 @@ end subroutine calculate_tidal_mixing
 
 !> Calls the CVMix routines to compute tidal dissipation and to add the effect of internal-tide-driven
 !! mixing to the interface diffusivities.
-subroutine calculate_CVMix_tidal(dz, j, N2_int, G, GV, US, CS, Kv, Kd_lay, Kd_int)
+subroutine calculate_CVMix_tidal(dz, j, isb, ieb, nii, N2_int, G, GV, US, CS, Kv, Kd_lay, Kd_int)
   type(ocean_grid_type),   intent(in)    :: G     !< Grid structure.
   type(verticalGrid_type), intent(in)    :: GV    !< ocean vertical grid structure
   type(unit_scale_type),   intent(in)    :: US    !< A dimensional unit scaling type
   type(tidal_mixing_cs),   intent(inout) :: CS    !< This module's control structure.
   real, dimension(SZI_(G),SZK_(GV)),   intent(in) :: dz     !< The vertical distance across layers [Z ~> m]
   integer,                 intent(in)    :: j     !< The j-index to work on
+  integer,                 intent(in)    :: isb   !< Starting i-index to work on
+  integer,                 intent(in)    :: ieb   !< Ending i-index to work on
+  integer,                 intent(in)    :: nii   !< Size of the i-block [nondim].
   real, dimension(SZI_(G),SZK_(GV)+1), intent(in) :: N2_int !< The squared buoyancy
                                                   !! frequency at the interfaces [T-2 ~> s-2].
   real, dimension(:,:,:),  pointer       :: Kv    !< The "slow" vertical viscosity at each interface
@@ -797,15 +804,16 @@ subroutine calculate_CVMix_tidal(dz, j, N2_int, G, GV, US, CS, Kv, Kd_lay, Kd_in
   real :: dh, hcorr      ! Limited thicknesses and a cumulative correction [Z ~> m]
   real :: Simmons_coeff  ! A coefficient in the Simmons et al (2004) mixing parameterization [nondim]
 
-  integer :: i, k, is, ie
+  integer :: i, k, ii, iie
   real, parameter :: rho_fw = 1000.0 ! fresh water density [kg m-3]
                                      ! TODO: when coupled, get this from CESM (SHR_CONST_RHOFW)
 
-  is  = G%isc ; ie  = G%iec
+  iie = ieb-isb+1
 
   select case (CS%CVMix_tidal_scheme)
   case (SIMMONS)
-    do i=is,ie
+    do ii=1,iie
+      i = isb+ii-1
 
       if (G%mask2dT(i,j)<1) cycle
 
@@ -884,7 +892,7 @@ subroutine calculate_CVMix_tidal(dz, j, N2_int, G, GV, US, CS, Kv, Kd_lay, Kd_in
         CS%dd%vert_dep_3d(i,j,:) = vert_dep(:)
       endif
 
-    enddo ! i=is,ie
+    enddo ! ii=1,iie
 
   case (SCHMITTNER)
 
@@ -893,7 +901,8 @@ subroutine calculate_CVMix_tidal(dz, j, N2_int, G, GV, US, CS, Kv, Kd_lay, Kd_in
 
     allocate(exp_hab_zetar(GV%ke+1,GV%ke+1))
 
-    do i=is,ie
+    do ii=1,iie
+      i = isb+ii-1
 
       if (G%mask2dT(i,j)<1) cycle
 
@@ -988,7 +997,7 @@ subroutine calculate_CVMix_tidal(dz, j, N2_int, G, GV, US, CS, Kv, Kd_lay, Kd_in
       if (allocated(CS%dd%vert_dep_3d)) then
         CS%dd%vert_dep_3d(i,j,:) = vert_dep(:)
       endif
-    enddo ! i=is,ie
+    enddo ! ii=1,iie
 
     deallocate(exp_hab_zetar)
 

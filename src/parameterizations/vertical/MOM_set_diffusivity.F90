@@ -555,29 +555,36 @@ subroutine set_diffusivity(u, v, h, u_h, v_h, tv, fluxes, optics, visc, dt, Kd_i
                                 isb, ieb, jsb, jeb, nii, njj, dz, G, GV, US, CS%bkgnd_mixing_csp)
 
     if (associated(dd%N2_3d)) then
-      do concurrent (K=1:nz+1, j=jsb:jeb, i=isb:ieb)
+      do concurrent (K=1:nz+1, jj=1:jje, ii=1:iie) DO_LOCALITY(local(i,j))
+        j = jsb+jj-1 ; i = isb+ii-1
         dd%N2_3d(i,j,K) = N2_int(i,j,K)
       enddo
     endif
 
-    do concurrent (k=1:nz, j=jsb:jeb, i=isb:ieb)
+    do concurrent (k=1:nz, jj=1:jje, ii=1:iie) DO_LOCALITY(local(i,j))
+      j = jsb+jj-1 ; i = isb+ii-1
       Kd_lay_2d(i,j,k) = Kd_lay_bkgnd(i,j,k)
     enddo
-    do concurrent (K=1:nz+1, j=jsb:jeb, i=isb:ieb)
+    do concurrent (K=1:nz+1, jj=1:jje, ii=1:iie) DO_LOCALITY(local(i,j))
+      j = jsb+jj-1 ; i = isb+ii-1
       Kd_int_2d(i,j,K) = Kd_int_bkgnd(i,j,K)
     enddo
 
     ! Update Kv and 3-d diffusivity diagnostics.
-    if (associated(visc%Kv_slow)) then ; do concurrent (K=1:nz+1, j=jsb:jeb, i=isb:ieb)
+    if (associated(visc%Kv_slow)) then ; do concurrent (K=1:nz+1, jj=1:jje, ii=1:iie) DO_LOCALITY(local(i,j))
+      j = jsb+jj-1 ; i = isb+ii-1
       visc%Kv_slow(i,j,K) = visc%Kv_slow(i,j,K) + Kv_bkgnd(i,j,K)
     enddo ; endif
-    if (CS%id_Kv_bkgnd > 0) then ; do concurrent (K=1:nz+1, j=jsb:jeb, i=isb:ieb)
+    if (CS%id_Kv_bkgnd > 0) then ; do concurrent (K=1:nz+1, jj=1:jje, ii=1:iie) DO_LOCALITY(local(i,j))
+      j = jsb+jj-1 ; i = isb+ii-1
       dd%Kv_bkgnd(i,j,K) = Kv_bkgnd(i,j,K)
     enddo ; endif
-    if (CS%id_Kd_bkgnd > 0) then ; do concurrent (K=1:nz+1, j=jsb:jeb, i=isb:ieb)
+    if (CS%id_Kd_bkgnd > 0) then ; do concurrent (K=1:nz+1, jj=1:jje, ii=1:iie) DO_LOCALITY(local(i,j))
+      j = jsb+jj-1 ; i = isb+ii-1
       dd%Kd_bkgnd(i,j,K) = Kd_int_2d(i,j,K)
     enddo ; endif
-    if (associated(VBF%Kd_bkgnd)) then ; do concurrent (K=1:nz+1, j=jsb:jeb, i=isb:ieb)
+    if (associated(VBF%Kd_bkgnd)) then ; do concurrent (K=1:nz+1, jj=1:jje, ii=1:iie) DO_LOCALITY(local(i,j))
+      j = jsb+jj-1 ; i = isb+ii-1
       VBF%Kd_bkgnd(i,j,K) = Kd_int_2d(i,j,K)
     enddo ; endif
 
@@ -653,31 +660,38 @@ subroutine set_diffusivity(u, v, h, u_h, v_h, tv, fluxes, optics, visc, dt, Kd_i
     if (TKE_to_Kd_used) then
       call find_TKE_to_Kd(h, tv, dRho_int, N2_lay, isb, ieb, jsb, jeb, nii, njj, &
                           dz, dt, G, GV, US, CS, TKE_to_Kd, maxTKE, kb)
-      if (associated(dd%maxTKE)) then ; do concurrent (k=1:nz, j=jsb:jeb, i=isb:ieb)
+      if (associated(dd%maxTKE)) then ; do concurrent (k=1:nz, jj=1:jje, ii=1:iie) DO_LOCALITY(local(i,j))
+        j = jsb+jj-1 ; i = isb+ii-1
         dd%maxTKE(i,j,k) = maxTKE(i,j,k)
       enddo ; endif
-      if (associated(dd%TKE_to_Kd)) then ; do concurrent (k=1:nz, j=jsb:jeb, i=isb:ieb)
+      if (associated(dd%TKE_to_Kd)) then ; do concurrent (k=1:nz, jj=1:jje, ii=1:iie) DO_LOCALITY(local(i,j))
+        j = jsb+jj-1 ; i = isb+ii-1
         dd%TKE_to_Kd(i,j,k) = TKE_to_Kd(i,j,k)
       enddo ; endif
     endif
 
     ! Add the input turbulent diffusivity.
     if (CS%useKappaShear .or. CS%use_CVMix_shear) then
-      do concurrent (K=2:nz, j=jsb:jeb, i=isb:ieb)
+      do concurrent (K=2:nz, jj=1:jje, ii=1:iie) DO_LOCALITY(local(i,j))
+        j = jsb+jj-1 ; i = isb+ii-1
         Kd_int_2d(i,j,K) = visc%Kd_shear(i,j,K) + 0.5 * (Kd_lay_2d(i,j,k-1) + Kd_lay_2d(i,j,k))
       enddo
-      do concurrent (j=jsb:jeb, i=isb:ieb)
+      do concurrent (jj=1:jje, ii=1:iie) DO_LOCALITY(local(i,j))
+        j = jsb+jj-1 ; i = isb+ii-1
         Kd_int_2d(i,j,1) = visc%Kd_shear(i,j,1) ! This isn't actually used. It could be 0.
         Kd_int_2d(i,j,nz+1) = 0.0
       enddo
-      do concurrent (k=1:nz, j=jsb:jeb, i=isb:ieb)
+      do concurrent (k=1:nz, jj=1:jje, ii=1:iie) DO_LOCALITY(local(i,j))
+        j = jsb+jj-1 ; i = isb+ii-1
         Kd_lay_2d(i,j,k) = Kd_lay_2d(i,j,k) + 0.5 * (visc%Kd_shear(i,j,K) + visc%Kd_shear(i,j,K+1))
       enddo
     else
-      do concurrent (j=jsb:jeb, i=isb:ieb)
+      do concurrent (jj=1:jje, ii=1:iie) DO_LOCALITY(local(i,j))
+        j = jsb+jj-1 ; i = isb+ii-1
         Kd_int_2d(i,j,1) = Kd_lay_2d(i,j,1) ; Kd_int_2d(i,j,nz+1) = 0.0
       enddo
-      do concurrent (K=2:nz, j=jsb:jeb, i=isb:ieb)
+      do concurrent (K=2:nz, jj=1:jje, ii=1:iie) DO_LOCALITY(local(i,j))
+        j = jsb+jj-1 ; i = isb+ii-1
         Kd_int_2d(i,j,K) = 0.5 * (Kd_lay_2d(i,j,k-1) + Kd_lay_2d(i,j,k))
       enddo
     endif
@@ -820,7 +834,8 @@ subroutine set_diffusivity(u, v, h, u_h, v_h, tv, fluxes, optics, visc, dt, Kd_i
     endif
 
     ! Copy the 2-d slices into the 3-d array that is exported.
-    do concurrent (K=1:nz+1, j=jsb:jeb, i=isb:ieb)
+    do concurrent (K=1:nz+1, jj=1:jje, ii=1:iie) DO_LOCALITY(local(i,j))
+      j = jsb+jj-1 ; i = isb+ii-1
       Kd_int(i,j,K) = Kd_int_2d(i,j,K)
     enddo
 
@@ -866,7 +881,8 @@ subroutine set_diffusivity(u, v, h, u_h, v_h, tv, fluxes, optics, visc, dt, Kd_i
 
     ! Copy the 2-d slices into the 3-d array that is exported; this was done above for Kd_int.
     ! TODO: tile/port Kd_lay export copy loop.
-    if (present(Kd_lay)) then ; do k=1,nz ; do j=jsb,jeb ; do i=isb,ieb
+    if (present(Kd_lay)) then ; do k=1,nz ; do jj=1,jje ; do ii=1,iie
+      j = jsb+jj-1 ; i = isb+ii-1
       Kd_lay(i,j,k) = Kd_lay_2d(i,j,k)
     enddo ; enddo ; enddo ; endif
 
@@ -1104,7 +1120,8 @@ subroutine find_TKE_to_Kd(h, tv, dRho_int, N2_lay, isb, ieb, jsb, jeb, nii, njj,
 
   ! Simple but coordinate-independent estimate of Kd/TKE
   if (CS%simple_TKE_to_Kd) then
-    do concurrent (k=1:nz, j=jsb:jeb, i=isb:ieb)
+    do concurrent (k=1:nz, jj=1:jje, ii=1:iie) DO_LOCALITY(local(i,j))
+      j = jsb+jj-1 ; i = isb+ii-1
       hN2pO2 = dz(i,j,k) * (N2_lay(i,j,k) + Omega2) ! Units of Z T-2.
       if (hN2pO2 > 0.) then
         TKE_to_Kd(i,j,k) = 1.0 / hN2pO2 ! Units of T2 H-1.
@@ -1113,7 +1130,8 @@ subroutine find_TKE_to_Kd(h, tv, dRho_int, N2_lay, isb, ieb, jsb, jeb, nii, njj,
       ! about the upper diffusivity we allow. Kd_max must be set.
       maxTKE(i,j,k) = hN2pO2 * CS%Kd_max ! Units of H Z2 T-3.
     enddo
-    do concurrent (j=jsb:jeb, i=isb:ieb)
+    do concurrent (jj=1:jje, ii=1:iie) DO_LOCALITY(local(i,j))
+      j = jsb+jj-1 ; i = isb+ii-1
       kb(i,j) = -1 ! kb should not be used by any code in non-layered mode -AJA
     enddo
     return
@@ -1135,7 +1153,8 @@ subroutine find_TKE_to_Kd(h, tv, dRho_int, N2_lay, isb, ieb, jsb, jeb, nii, njj,
     enddo
     call calculate_density(tv%T(:,:,kmb), tv%S(:,:,kmb), p_ref, Rcv_kmb, tv%eqn_of_state, EOSdom)
 
-    do concurrent (j=jsb:jeb, i=isb:ieb)
+    do concurrent (jj=1:jje, ii=1:iie) DO_LOCALITY(local(i,j))
+        j = jsb+jj-1 ; i = isb+ii-1
         !   Determine the next denser layer than the buffer layer in the
         ! coordinate density (sigma-2).
         do k=kmb+1,nz-1 ; if (Rcv_kmb(i,j) <= GV%Rlay(k)) exit ; enddo
@@ -1152,7 +1171,8 @@ subroutine find_TKE_to_Kd(h, tv, dRho_int, N2_lay, isb, ieb, jsb, jeb, nii, njj,
                             ds_dsp1, rho_0)
   else ! not bulkmixedlayer
     kb_min = 2 ; kmb = 0
-    do concurrent (i=isb:ieb, j=jsb:jeb)
+    do concurrent (jj=1:jje, ii=1:iie) DO_LOCALITY(local(i,j))
+      j = jsb+jj-1 ; i = isb+ii-1
       kb(i,j) = 1
     enddo
     call set_density_ratios(h, tv, kb, G, GV, US, CS, isb, ieb, jsb, jeb, nii, njj, &
@@ -1241,18 +1261,21 @@ subroutine find_TKE_to_Kd(h, tv, dRho_int, N2_lay, isb, ieb, jsb, jeb, nii, njj,
 
   ! Now set maxTKE and TKE_to_Kd.
   !$omp target
-  !$omp loop collapse(2)
-  do j=jsb,jeb ; do i=isb,ieb
+  !$omp loop collapse(2) private(i,j)
+  do jj=1,jje ; do ii=1,iie
+    j = jsb+jj-1 ; i = isb+ii-1
     maxTKE(i,j,1) = 0.0 ; TKE_to_Kd(i,j,1) = 0.0
     maxTKE(i,j,nz) = 0.0 ; TKE_to_Kd(i,j,nz) = 0.0
   enddo ; enddo
-  !$omp loop collapse(3)
-  do k=2,kmb ; do j=jsb,jeb ; do i=isb,ieb
+  !$omp loop collapse(3) private(i,j)
+  do k=2,kmb ; do jj=1,jje ; do ii=1,iie
+    j = jsb+jj-1 ; i = isb+ii-1
     maxTKE(i,j,k) = 0.0
     TKE_to_Kd(i,j,k) = 1.0 / ((N2_lay(i,j,k) + Omega2) * (dz(i,j,k) + dz_neglect))
   enddo ; enddo ; enddo
-  !$omp loop collapse(3)
-  do k=kmb+1,kb_min-1 ; do j=jsb,jeb ; do i=isb,ieb
+  !$omp loop collapse(3) private(i,j)
+  do k=kmb+1,kb_min-1 ; do jj=1,jje ; do ii=1,iie
+    j = jsb+jj-1 ; i = isb+ii-1
     !   These are the properties in the deeper mixed and buffer layers, and
     ! should perhaps be revisited.
     maxTKE(i,j,k) = 0.0 ; TKE_to_Kd(i,j,k) = 0.0
@@ -1437,7 +1460,8 @@ subroutine find_N2(h, tv, T_f, S_f, fluxes, isb, ieb, jsb, jeb, nii, njj, &
     N2_lay(i,j,k) = G_Rho0 * 0.5*(dRho_int(ii,jj,K) + dRho_int(ii,jj,K+1)) / &
                     (h(i,j,k) + H_neglect)
   enddo
-  do concurrent (j=jsb:jeb, i=isb:ieb)
+  do concurrent (jj=1:jje, ii=1:iie) DO_LOCALITY(local(i,j))
+    j = jsb+jj-1 ; i = isb+ii-1
     N2_int(i,j,1) = 0.0
     N2_int(i,j,nz+1) = 0.0
   enddo
