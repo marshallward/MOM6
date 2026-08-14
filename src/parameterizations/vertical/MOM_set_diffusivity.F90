@@ -352,6 +352,7 @@ subroutine set_diffusivity(u, v, h, u_h, v_h, tv, fluxes, optics, visc, dt, Kd_i
   logical   :: showCallTree ! If true, show the call tree.
 
   integer :: i, j, k, is, ie, js, je, nz, isd, ied, jsd, jed
+  integer :: ii, jj, iie, jje
 
   real      :: kappa_dt_fill ! diffusivity times a timestep used to fill massless layers [H Z ~> m2 or kg m-1]
 
@@ -519,6 +520,7 @@ subroutine set_diffusivity(u, v, h, u_h, v_h, tv, fluxes, optics, visc, dt, Kd_i
   do jsb = js, je, njj ; do isb = is, ie, nii
     jeb = min(je, jsb + njj - 1)
     ieb = min(ie, isb + nii - 1)
+    jje = jeb-jsb+1 ; iie = ieb-isb+1
 
     call thickness_to_dz(h, tv, dz, G, GV, US, is=isb, ie=ieb, js=jsb, je=jeb, &
                          do_offload=.true.)
@@ -570,7 +572,7 @@ subroutine set_diffusivity(u, v, h, u_h, v_h, tv, fluxes, optics, visc, dt, Kd_i
         call double_diffusion(tv, h, T_f, S_f, j, G, GV, US, CS, KT_extra, KS_extra)
         ! One of Kd_extra_T and Kd_extra_S is always 0. Kd_extra_S is positive for salt fingering.
         ! Kd_extra_T is positive for double diffusive convection.
-        do K=2,nz ; do i=isb,ieb
+        do K=2,nz ; do ii=1,iie ; i = isb+ii-1
           if (KS_extra(i,K) > KT_extra(i,K)) then ! salt fingering
             Kd_lay_2d(i,j,k-1) = Kd_lay_2d(i,j,k-1) + 0.5 * KT_extra(i,K)
             Kd_lay_2d(i,j,k)   = Kd_lay_2d(i,j,k)   + 0.5 * KT_extra(i,K)
@@ -586,18 +588,18 @@ subroutine set_diffusivity(u, v, h, u_h, v_h, tv, fluxes, optics, visc, dt, Kd_i
             Kd_extra_S(i,j,K) = 0.0
           endif
         enddo ; enddo
-        if (associated(dd%KT_extra)) then ; do K=1,nz+1 ; do i=isb,ieb
+        if (associated(dd%KT_extra)) then ; do K=1,nz+1 ; do ii=1,iie ; i = isb+ii-1
           dd%KT_extra(i,j,K) = KT_extra(i,K)
         enddo ; enddo ; endif
 
-        if (associated(dd%KS_extra)) then ; do K=1,nz+1 ; do i=isb,ieb
+        if (associated(dd%KS_extra)) then ; do K=1,nz+1 ; do ii=1,iie ; i = isb+ii-1
           dd%KS_extra(i,j,K) = KS_extra(i,K)
         enddo ; enddo ; endif
 
-        if (associated(VBF%Kd_ddiff_T)) then ; do K=1,nz+1 ; do i=isb,ieb
+        if (associated(VBF%Kd_ddiff_T)) then ; do K=1,nz+1 ; do ii=1,iie ; i = isb+ii-1
           VBF%Kd_ddiff_T(i,j,K) = KT_extra(i,K)
         enddo ; enddo ; endif
-        if (associated(VBF%Kd_ddiff_S)) then ; do K=1,nz+1 ; do i=isb,ieb
+        if (associated(VBF%Kd_ddiff_S)) then ; do K=1,nz+1 ; do ii=1,iie ; i = isb+ii-1
           VBF%Kd_ddiff_S(i,j,K) = KS_extra(i,K)
         enddo ; enddo ; endif
       enddo
@@ -616,10 +618,10 @@ subroutine set_diffusivity(u, v, h, u_h, v_h, tv, fluxes, optics, visc, dt, Kd_i
         else
           call compute_ddiff_coeffs(h, tv, G, GV, US, j, Kd_extra_T, Kd_extra_S, CS%CVMix_ddiff_csp)
         endif
-        if (associated(VBF%Kd_ddiff_T)) then ; do K=1,nz+1 ; do i=isb,ieb
+        if (associated(VBF%Kd_ddiff_T)) then ; do K=1,nz+1 ; do ii=1,iie ; i = isb+ii-1
           VBF%Kd_ddiff_T(i,j,K) = KT_extra(i,K)
         enddo ; enddo ; endif
-        if (associated(VBF%Kd_ddiff_S)) then ; do K=1,nz+1 ; do i=isb,ieb
+        if (associated(VBF%Kd_ddiff_S)) then ; do K=1,nz+1 ; do ii=1,iie ; i = isb+ii-1
           VBF%Kd_ddiff_S(i,j,K) = KS_extra(i,K)
         enddo ; enddo ; endif
       enddo
@@ -693,56 +695,56 @@ subroutine set_diffusivity(u, v, h, u_h, v_h, tv, fluxes, optics, visc, dt, Kd_i
                                      prof_quad_2d, prof_itidal_2d, prof_froude_2d, &
                                      prof_slope_2d)
 
-        if (CS%id_kbbl > 0) then ; do i=isb,ieb
+        if (CS%id_kbbl > 0) then ; do ii=1,iie ; i = isb+ii-1
           dd%kbbl(i,j) = k_bot(i,j)
         enddo ; endif
-        if (CS%id_bbl_thick > 0) then ; do i=isb,ieb
+        if (CS%id_bbl_thick > 0) then ; do ii=1,iie ; i = isb+ii-1
           dd%bbl_thick(i,j) = h_bot(i,j)
         enddo ; endif
-        if (CS%id_Kd_leak > 0) then ; do K=1,nz+1 ; do i=isb,ieb
+        if (CS%id_Kd_leak > 0) then ; do K=1,nz+1 ; do ii=1,iie ; i = isb+ii-1
           dd%Kd_leak(i,j,K) = Kd_leak_2d(i,K)
         enddo ; enddo ; endif
-        if (CS%id_Kd_quad > 0) then ; do K=1,nz+1 ; do i=isb,ieb
+        if (CS%id_Kd_quad > 0) then ; do K=1,nz+1 ; do ii=1,iie ; i = isb+ii-1
           dd%Kd_quad(i,j,K) = Kd_quad_2d(i,K)
         enddo ; enddo ; endif
-        if (CS%id_Kd_itidal > 0) then ; do K=1,nz+1 ; do i=isb,ieb
+        if (CS%id_Kd_itidal > 0) then ; do K=1,nz+1 ; do ii=1,iie ; i = isb+ii-1
           dd%Kd_itidal(i,j,K) = Kd_itidal_2d(i,K)
         enddo ; enddo ; endif
-        if (CS%id_Kd_Froude > 0) then ; do K=1,nz+1 ; do i=isb,ieb
+        if (CS%id_Kd_Froude > 0) then ; do K=1,nz+1 ; do ii=1,iie ; i = isb+ii-1
           dd%Kd_Froude(i,j,K) = Kd_Froude_2d(i,K)
         enddo ; enddo ; endif
-        if (CS%id_Kd_slope > 0) then ; do K=1,nz+1 ; do i=isb,ieb
+        if (CS%id_Kd_slope > 0) then ; do K=1,nz+1 ; do ii=1,iie ; i = isb+ii-1
           dd%Kd_slope(i,j,K) = Kd_slope_2d(i,K)
         enddo ; enddo ; endif
-        if (associated (VBF%Kd_leak)) then ; do K=1,nz+1 ; do i=isb,ieb
+        if (associated (VBF%Kd_leak)) then ; do K=1,nz+1 ; do ii=1,iie ; i = isb+ii-1
           VBF%Kd_leak(i,j,K) = min(Kd_leak_2d(i,K), CS%Kd_max)
         enddo ; enddo ; endif
-        if (associated (VBF%Kd_quad)) then ; do K=1,nz+1 ; do i=isb,ieb
+        if (associated (VBF%Kd_quad)) then ; do K=1,nz+1 ; do ii=1,iie ; i = isb+ii-1
           VBF%Kd_quad(i,j,K) = min(Kd_quad_2d(i,K), CS%Kd_max)
         enddo ; enddo ; endif
-        if (associated (VBF%Kd_itidal)) then ; do K=1,nz+1 ; do i=isb,ieb
+        if (associated (VBF%Kd_itidal)) then ; do K=1,nz+1 ; do ii=1,iie ; i = isb+ii-1
           VBF%Kd_itidal(i,j,K) = min(Kd_itidal_2d(i,K), CS%Kd_max)
         enddo ; enddo ; endif
-        if (associated (VBF%Kd_Froude)) then ; do K=1,nz+1 ; do i=isb,ieb
+        if (associated (VBF%Kd_Froude)) then ; do K=1,nz+1 ; do ii=1,iie ; i = isb+ii-1
           VBF%Kd_Froude(i,j,K) = min(Kd_Froude_2d(i,K), CS%Kd_max)
         enddo ; enddo ; endif
-        if (associated (VBF%Kd_slope)) then ; do K=1,nz+1 ; do i=isb,ieb
+        if (associated (VBF%Kd_slope)) then ; do K=1,nz+1 ; do ii=1,iie ; i = isb+ii-1
           VBF%Kd_slope(i,j,K) = min(Kd_slope_2d(i,K), CS%Kd_max)
         enddo ; enddo ; endif
 
-        if (CS%id_prof_leak > 0) then ; do k=1,nz ; do i=isb,ieb
+        if (CS%id_prof_leak > 0) then ; do k=1,nz ; do ii=1,iie ; i = isb+ii-1
           dd%prof_leak(i,j,k) = prof_leak_2d(i,k)
         enddo ; enddo ; endif
-        if (CS%id_prof_quad > 0) then ; do k=1,nz ; do i=isb,ieb
+        if (CS%id_prof_quad > 0) then ; do k=1,nz ; do ii=1,iie ; i = isb+ii-1
           dd%prof_quad(i,j,k) = prof_quad_2d(i,k)
         enddo ; enddo ; endif
-        if (CS%id_prof_itidal > 0) then ; do k=1,nz ; do i=isb,ieb
+        if (CS%id_prof_itidal > 0) then ; do k=1,nz ; do ii=1,iie ; i = isb+ii-1
           dd%prof_itidal(i,j,k) = prof_itidal_2d(i,k)
         enddo ; enddo ; endif
-        if (CS%id_prof_Froude > 0) then ; do k=1,nz ; do i=isb,ieb
+        if (CS%id_prof_Froude > 0) then ; do k=1,nz ; do ii=1,iie ; i = isb+ii-1
           dd%prof_Froude(i,j,k) = prof_Froude_2d(i,k)
         enddo ; enddo ; endif
-        if (CS%id_prof_slope > 0) then ; do k=1,nz ; do i=isb,ieb
+        if (CS%id_prof_slope > 0) then ; do k=1,nz ; do ii=1,iie ; i = isb+ii-1
           dd%prof_slope(i,j,k) = prof_slope_2d(i,k)
         enddo ; enddo ; endif
       enddo
@@ -774,20 +776,20 @@ subroutine set_diffusivity(u, v, h, u_h, v_h, tv, fluxes, optics, visc, dt, Kd_i
                                   maxTKE, kb, rho_bot, G, GV, US, CS, &
                                   Kd_lay_2d, Kd_int_2d, dd%Kd_BBL)
       endif
-      ! TODO: tile/port BBL VBF diagnostic copy loop.
-      if (associated(VBF%Kd_BBL)) then ; do K=1,nz+1 ; do j=jsb,jeb ; do i=isb,ieb
+      if (associated(VBF%Kd_BBL)) then ; do K=1,nz+1 ; do jj=1,jje ; do ii=1,iie
+        j = jsb+jj-1 ; i = isb+ii-1
         VBF%Kd_BBL(i,j,K) = dd%Kd_BBL(i,j,K)
       enddo ; enddo ; enddo ; endif
     endif
 
-    ! TODO: tile/port interface dissipation floor loop.
     if (CS%limit_dissipation) then
       ! This calculates the dissipation ONLY from Kd calculated in this routine
       ! dissip has units of W/m3 (= kg/m3 * m2/s * 1/s2)
       !   1) a global constant,
       !   2) a dissipation proportional to N (aka Gargett) and
       !   3) dissipation corresponding to a (nearly) constant diffusivity.
-      do K=2,nz ; do j=jsb,jeb ; do i=isb,ieb
+      do K=2,nz ; do jj=1,jje ; do ii=1,iie
+        j = jsb+jj-1 ; i = isb+ii-1
         dissip = max( CS%dissip_min, &   ! Const. floor on dissip.
                       CS%dissip_N0 + CS%dissip_N1 * sqrt(N2_int(i,j,K)), & ! Floor aka Gargett
                       CS%dissip_N2 * N2_int(i,j,K)) ! Floor of Kd_min*rho0/F_Ri
@@ -797,9 +799,9 @@ subroutine set_diffusivity(u, v, h, u_h, v_h, tv, fluxes, optics, visc, dt, Kd_i
     endif
 
     ! Optionally add a uniform diffusivity at the interfaces.
-    ! TODO: tile/port interface Kd_add loop.
     if (CS%Kd_add > 0.0) then
-      do K=1,nz+1 ; do j=jsb,jeb ; do i=isb,ieb
+      do K=1,nz+1 ; do jj=1,jje ; do ii=1,iie
+        j = jsb+jj-1 ; i = isb+ii-1
         Kd_int_2d(i,j,K) = Kd_int_2d(i,j,K) + CS%Kd_add
       enddo ; enddo ; enddo
       VBF%Kd_add = CS%Kd_add
@@ -810,14 +812,14 @@ subroutine set_diffusivity(u, v, h, u_h, v_h, tv, fluxes, optics, visc, dt, Kd_i
       Kd_int(i,j,K) = Kd_int_2d(i,j,K)
     enddo
 
-    ! TODO: tile/port layer dissipation floor loop.
     if (CS%limit_dissipation) then
       ! This calculates the layer dissipation ONLY from Kd calculated in this routine
       ! dissip has units of W/m3 (= kg/m3 * m2/s * 1/s2)
       !   1) a global constant,
       !   2) a dissipation proportional to N (aka Gargett) and
       !   3) dissipation corresponding to a (nearly) constant diffusivity.
-      do k=2,nz-1 ; do j=jsb,jeb ; do i=isb,ieb
+      do k=2,nz-1 ; do jj=1,jje ; do ii=1,iie
+        j = jsb+jj-1 ; i = isb+ii-1
         dissip = max( CS%dissip_min, &   ! Const. floor on dissip.
                       CS%dissip_N0 + CS%dissip_N1 * sqrt(N2_lay(i,j,k)), & ! Floor aka Gargett
                       CS%dissip_N2 * N2_lay(i,j,k)) ! Floor of Kd_min*rho0/F_Ri
@@ -826,25 +828,25 @@ subroutine set_diffusivity(u, v, h, u_h, v_h, tv, fluxes, optics, visc, dt, Kd_i
       enddo ; enddo ; enddo
     endif
 
-    ! TODO: tile/port Kd work diagnostic loop.
     if (associated(dd%Kd_Work)) then
-      do k=1,nz ; do j=jsb,jeb ; do i=isb,ieb
+      do k=1,nz ; do jj=1,jje ; do ii=1,iie
+        j = jsb+jj-1 ; i = isb+ii-1
         ! Watt m-2 = kg s-3
         dd%Kd_Work(i,j,k) = GV%H_to_RZ * Kd_lay_2d(i,j,k) * N2_lay(i,j,k) * dz(i,j,k)
       enddo ; enddo ; enddo
     endif
 
     ! Optionally add a uniform diffusivity to the layers.
-    ! TODO: tile/port layer Kd_add loop.
     if ((CS%Kd_add > 0.0) .and. (present(Kd_lay))) then
-      do k=1,nz ; do j=jsb,jeb ; do i=isb,ieb
+      do k=1,nz ; do jj=1,jje ; do ii=1,iie
+        j = jsb+jj-1 ; i = isb+ii-1
         Kd_lay_2d(i,j,k) = Kd_lay_2d(i,j,k) + CS%Kd_add
       enddo ; enddo ; enddo
     endif
 
-    ! TODO: tile/port added-work diagnostic loop.
     if (associated(dd%Kd_Work_added)) then
-      do k=1,nz ; do j=jsb,jeb ; do i=isb,ieb
+      do k=1,nz ; do jj=1,jje ; do ii=1,iie
+        j = jsb+jj-1 ; i = isb+ii-1
         ! Watt m-2 = kg s-3
         dd%Kd_Work_added(i,j,k) = GV%H_to_RZ * CS%Kd_add * N2_lay(i,j,k) * dz(i,j,k)
       enddo ; enddo ; enddo
