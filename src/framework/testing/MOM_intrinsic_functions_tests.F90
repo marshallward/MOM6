@@ -394,26 +394,16 @@ subroutine test_exp_ulp_accuracy
   integer, parameter :: npts = 10000
   real, parameter :: xmin = -10.
   real, parameter :: xmax = 10.
-  real, parameter :: max_ulp_tol = 2.
 
   ! Input axis
   real :: x(npts)
   real :: I_npts
 
-  real :: val(npts)
-  real(real128) :: ref(npts)
+  real :: val(npts), val_vec(npts)
+  real :: val_exp(npts), val_exp_vec(npts)
+  real(real128) :: val_quad(npts), val_quad_vec(npts)
 
-  real(real128) :: err, rel_err, ulp_err
-  real :: ulp_val
-
-  real :: max_abs_err, max_rel_err, max_ulp
-  real :: sum_abs_err, sum_rel_err, sum_sq_err
-
-  real :: x_max_abs, x_max_rel, x_max_ulp
-  integer :: i, count_exact, count_half_ulp, count_one_ulp
-
-  ! Quad precision reference
-  real :: max_ulp_quad, ulp_err_quad, x_max_ulp_quad
+  integer :: i
 
   ! Generate test points
   I_npts = 1. / (npts - 1)
@@ -421,11 +411,72 @@ subroutine test_exp_ulp_accuracy
     x(i) = xmin + (i - 1) * ((xmax - xmin) * I_npts)
   enddo
 
-  ! Compute test and reference values
+  ! Several libraries have scalar and vector implementations, chosen at the
+  ! discretion of the compiler.  The following attempts to test each case.
+
+  ! Scalar evaluations
   do i = 1, npts
     val(i) = exp_repro(x(i))
-    ref(i) = exp(real(x(i), real128))
+    val_exp(i) = exp(x(i))
+    val_quad(i) = exp(real(x(i), real128))
+
+    ! Impossible branch to prevent vectorization
+    if (val(i) < 0.) exit
   enddo
+
+  ! Vector-favorable evaluation
+  val_vec(:) = exp_repro(x(:))
+  val_exp_vec(:) = exp(x(:))
+  val_quad_vec(:) = exp(real(x(:), real128))
+
+  ! Assert that exp_repro() is within 2 ULP.
+  print '(1x,a)', '=== scalar exp_repro() accuracy'
+  call check_ulp_accuracy(x, val, val_quad, max_ulp_tol=2.)
+
+  ! We expect scalar and vector implementations to agree.
+  call assert(all(val == val_vec), 'Scalar and vector exp_repro() do not agree')
+  print '(1x,a)', '=== exp_repro() scalar and vector agree'
+
+  ! exp() accuracy is provided for comparison.
+  print '(1x,a)', '=== scalar exp() accuracy'
+  call check_ulp_accuracy(x, val_exp, val_quad)
+
+  if (all(val_exp == val_exp_vec)) then
+    print '(1x,a)', '=== exp() scalar and vector agree'
+  else
+    print '(1x,a)', '=== vector exp() accuracy'
+    call check_ulp_accuracy(x, val_exp_vec, val_quad_vec)
+  endif
+end subroutine test_exp_ulp_accuracy
+
+
+!> Compute the function accuracy relative to a real128-precision reference.
+!! Absolute, relative, and ULP error is computed, as well as the number of
+!! points above 0.5 and 1 ULP.  An error is raised if any point exceeds the
+!! optionally prescribed maximum ULP tolerance.
+subroutine check_ulp_accuracy(x, val, ref, max_ulp_tol)
+  real, intent(in) :: x(:)
+    !< Input grid
+  real, intent(in) :: val(:)
+    !< Output estimates
+  real(kind=real128), intent(in) :: ref(:)
+    !< Reference estimates in real128 precision
+  real, optional, intent(in) :: max_ulp_tol
+    !< Maximum ULP tolerance
+
+  real(real128) :: err, rel_err, ulp_err
+    ! Absolute, relative, and ULP error of val relative to ref.
+
+  real :: max_abs_err, max_rel_err, max_ulp
+  real :: sum_abs_err, sum_rel_err, sum_sq_err
+  real :: x_max_abs, x_max_rel, x_max_ulp
+  real :: ulp_val
+
+  integer :: count_exact, count_half_ulp, count_one_ulp
+  real :: max_ulp_quad, ulp_err_quad, x_max_ulp_quad
+  integer :: i, npts
+
+  npts = size(x)
 
   ! Initialize statistics
   max_abs_err = 0.
@@ -439,10 +490,8 @@ subroutine test_exp_ulp_accuracy
   count_one_ulp = 0
   max_ulp_quad = 0.
 
-  ! Calculate statistics
   do i = 1, npts
     ! Absolute error
-
     err = abs(real(val(i), real128) - ref(i))
 
     sum_abs_err = sum_abs_err + err
@@ -482,28 +531,32 @@ subroutine test_exp_ulp_accuracy
     if (ulp_err >= 1.0) count_one_ulp = count_one_ulp + 1
   enddo
 
-  print '("Tested ", i0, " points in [-10, 10]")', npts
+  print '(2x,"Tested ", i0, " points in [-10, 10]")', npts
 
-  print '("max abs err:", t24, ES12.5, " at x = ", f10.4)', &
+  ! NOTE: Floats use t25 assuming a positive sign as blank
+  print '(2x,"max abs err:", t25, ES12.5, " at x = ", f10.4)', &
       max_abs_err, x_max_abs
-  print '("max rel err:", t24, ES12.5, " at x = ", f10.4)', &
+  print '(2x,"max rel err:", t25, ES12.5, " at x = ", f10.4)', &
       max_rel_err, x_max_rel
-  print '("max ULP err (vs quad):", t25, f12.10, " at x = ", f10.4)', &
+  print '(2x,"max ULP err (vs quad):", t26, f12.10, " at x = ", f10.4)', &
       max_ulp, x_max_ulp
-  print '("mean abs err:", t24, ES12.5)', sum_abs_err / npts
-  print '("mean rel err:", t24, ES12.5)', sum_rel_err / npts
-  print '("RMS err:", t24, ES12.5)', sqrt(sum_sq_err / npts)
+  print '(2x,"mean abs err:", t25, ES12.5)', sum_abs_err / npts
+  print '(2x,"mean rel err:", t25, ES12.5)', sum_rel_err / npts
+  print '(2x,"RMS err:", t25, ES12.5)', sqrt(sum_sq_err / npts)
 
-  print '("correct (<0.5 ULP):", t25, i0, 1x, "(", f6.2, "%)")', &
+  print '(2x,"correct (<0.5 ULP):", t25, i0, 1x, "(", f6.2, "%)")', &
       count_exact, 100. * count_exact / npts
-  print '("above 0.5 ULP:", t25, i0, 1x, "(", f6.2, "%)")', &
+  print '(2x,"above 0.5 ULP:", t26, i0, 1x, "(", f6.2, "%)")', &
       count_half_ulp, 100. * count_half_ulp / npts
-  print '("above 1 ULP:", t25, i0, 1x, "(", f6.2, "%)")', &
+  print '(2x,"above 1 ULP:", t26, i0, 1x, "(", f6.2, "%)")', &
       count_one_ulp, 100. * count_one_ulp / npts
 
   ! exp_repro should be within 2 ULP of the quad-precision reference.
-  call assert(max_ulp < max_ulp_tol, "exp_repro max ULP error exceeds 2 over [-10, 10]")
-end subroutine test_exp_ulp_accuracy
+  if (present(max_ulp_tol)) then
+    call assert(max_ulp < max_ulp_tol, &
+        "exp_repro max ULP error exceeds 2 over [-10, 10]")
+  endif
+end subroutine check_ulp_accuracy
 
 
 !> Test the exponential property: exp(r1) * exp(r2) = exp(r1 + r2)

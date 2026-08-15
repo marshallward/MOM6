@@ -10,7 +10,7 @@ use MOM_intrinsic_functions, only : exp_repro
 
 implicit none
 
-integer, parameter :: npts = 10000000
+integer, parameter :: npts = 100000
   !< Number of test points
 integer, parameter :: niter = 20
   !< Number of timing iterations
