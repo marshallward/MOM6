@@ -44,10 +44,12 @@ print *
 ! Warm-up and time intrinsic exp()
 do j = 1, 3
   val = exp(x)
+  if (val(1) < 0.) val(1) = 0.
 enddo
 call system_clock(count=c1)
 do j = 1, niter
   val = exp(x)
+  if (val(1) < 0.) val(1) = 0.
 enddo
 call system_clock(count=c2)
 time_intrinsic = real(c2 - c1, real64) / clock_rate / niter / npts * 1e9
@@ -58,10 +60,12 @@ print '("  sum (to prevent elision):", t30, ES12.5)', sum(val)
 ! Warm-up and time exp_repro()
 do j = 1, 3
   val = exp_repro(x)
+  if (val(1) < 0.) val(1) = 0.
 enddo
 call system_clock(count=c1)
 do j = 1, niter
   val = exp_repro(x)
+  if (val(1) < 0.) val(1) = 0.
 enddo
 call system_clock(count=c2)
 time_repro = real(c2 - c1, real64) / clock_rate / niter / npts * 1e9
