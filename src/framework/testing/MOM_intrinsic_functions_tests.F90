@@ -391,7 +391,7 @@ end subroutine test_exp_neg_nan
 !! We test against 2 ULP to allow for combined error from exp_repro and the
 !! quad-precision reference.
 subroutine test_exp_ulp_accuracy
-  integer, parameter :: npts = 10000
+  integer, parameter :: npts = 100000
   real, parameter :: xmin = -10.
   real, parameter :: xmax = 10.
 
@@ -416,8 +416,8 @@ subroutine test_exp_ulp_accuracy
 
   ! Scalar evaluations
   do i = 1, npts
-    val(i) = exp_repro(x(i))
     val_exp(i) = exp(x(i))
+    val(i) = exp_repro(x(i))
     val_quad(i) = exp(real(x(i), real128))
 
     ! Impossible branch to prevent vectorization
@@ -425,9 +425,9 @@ subroutine test_exp_ulp_accuracy
   enddo
 
   ! Vector-favorable evaluation
-  val_vec(:) = exp_repro(x(:))
-  val_exp_vec(:) = exp(x(:))
-  val_quad_vec(:) = exp(real(x(:), real128))
+  val_exp_vec = exp(x)
+  val_vec = exp_repro(x)
+  val_quad_vec = exp(real(x, real128))
 
   ! Assert that exp_repro() is within 2 ULP.
   print '(1x,a)', '=== scalar exp_repro() accuracy'
@@ -435,14 +435,14 @@ subroutine test_exp_ulp_accuracy
 
   ! We expect scalar and vector implementations to agree.
   call assert(all(val == val_vec), 'Scalar and vector exp_repro() do not agree')
-  print '(1x,a)', '=== exp_repro() scalar and vector agree'
+  print '(1x,a)', '=== vector exp_repro() matches scalar'
 
   ! exp() accuracy is provided for comparison.
   print '(1x,a)', '=== scalar exp() accuracy'
   call check_ulp_accuracy(x, val_exp, val_quad)
 
   if (all(val_exp == val_exp_vec)) then
-    print '(1x,a)', '=== exp() scalar and vector agree'
+    print '(1x,a)', '=== vector exp() matches scalar'
   else
     print '(1x,a)', '=== vector exp() accuracy'
     call check_ulp_accuracy(x, val_exp_vec, val_quad_vec)
