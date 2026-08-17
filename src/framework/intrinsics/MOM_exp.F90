@@ -50,39 +50,54 @@ real, parameter :: round_bias = 1.5 * 2_int_kind**(digits(real_mold) - 1)
 
 contains
 
+!> Reproducible exponential function
+!!
+!! Compute exp(x) with bitwise reproducibility across platforms.
 module procedure exp_repro
   ! ln2 estimates
   real, parameter :: ln2 = 0.693147180559945309417232121458176568
+    !< log(2): 0.693147180559945309417232... [nondim]
   real, parameter :: I_ln2 = 1.44269504088896340735992468100189214
+    !< 1 / ln2: 1.4426950408889634073599... [nondim]
 
+  ! The max and min x values between which x remains finite.
   real, parameter :: xmax &
       = real(maxexponent(real_mold) + 1, kind(real_mold)) * ln2
+    !< Largest x value before exp(x) overflow [nondim]
   real, parameter :: xmin &
       = real(minexponent(real_mold) - digits(real_mold) - 1, kind(real_mold)) * ln2
+    !< Smallest x value before exp(x) underflow [nondim]
 
-  ! Cody-Waite split
+  ! Double-real precision of ln2 used in Cody-Waite range reduction
+  ! NOTE: This split assumes real64 precision.
   real, parameter :: ln2_hi = 0.69314718036912381649017333984375
+    !< Upper 32 bits of ln2: 6.93147180369123816490e-01 [nondim]
   real, parameter :: ln2_lo = 1.90821492927058770002e-10
+    !< Lower precision bits of ln2: 1.90821492927058770002e-10 [nondim]
 
-  ! Table constants
-  integer, parameter :: NTABLE = 128
-  integer, parameter :: TABLE_BITS = 7
+  ! Table constants (may not be used)
+  ! Subdivide [-1/2 ln2, 1/2 ln2] to further reduce the approximation range.
+  ! This allows for a smaller polynomial at the cost of a lookup table.
+  integer, parameter :: ndiv = 128
+    !< Number of domain subdivisions
+  real, parameter :: I_ndiv = 1. / real(ndiv)
+    !< 1 / ndiv [nondim]
+  real, parameter :: n_ln2 = ndiv * I_ln2
+    !< ndiv / ln2 [nondim]
+  real, parameter :: ln2_ndiv_hi = I_ndiv * ln2_hi
+    !< Upper 32 bits of ln2 / ndiv [nondim]
+  real, parameter :: ln2_ndiv_lo = I_ndiv * ln2_lo
+    !< Lower precision bits of ln2 / ndiv [nondim]
+  integer(int_kind), parameter :: index_mask = int(ndiv - 1, int_kind)
+    ! TODO
 
-  real, parameter :: I_NTABLE = 1. / real(NTABLE)
-  real, parameter :: TABLE_INV_LN2 = NTABLE * I_ln2
-  real, parameter :: TABLE_LN2_HI = I_NTABLE * ln2_hi
-  real, parameter :: TABLE_LN2_LO = I_NTABLE * ln2_lo
+  ! The following lookup tables are used to reproducibily compute 2**(j/n),
+  ! where 2**(j/n) is split into real precision and a scaled residual.
+  !   2**(j/ndiv) = real(2**(j/N)) * (1 + residual)
 
-  integer(int_kind), parameter :: index_mask = int(NTABLE - 1, int_kind)
-
-  ! Integer bit pattern corresponding to round_bias itself.
-  integer(int_kind), parameter :: round_bias_bits = transfer(round_bias, int_mold)
-
-  integer :: i
-
-  !*!real, parameter :: exp2_table(0:NTABLE-1) &
-  !*!    = [(2.**(real(i) / real(NTABLE)), i=0,NTABLE-1)]
-  real, parameter :: exp2_table(0:NTABLE-1) = [ &
+  ! real, parameter :: exp2_table(0:ndiv-1) &
+  !     = [(2.**(real(i) / real(ndiv)), i=0,ndiv-1)]
+  real, parameter :: exp2_table(0:ndiv-1) = [ &
     1.00000000000000000e+00, 1.00542990111280273e+00, 1.01088928605170048e+00, 1.01637831491095310e+00, &
     1.02189714865411663e+00, 1.02744594911876375e+00, 1.03302487902122841e+00, 1.03863410196137873e+00, &
     1.04427378242741375e+00, 1.04994408580068721e+00, 1.05564517836055716e+00, 1.06137722728926209e+00, &
@@ -115,498 +130,183 @@ module procedure exp_repro
     1.87416763411029996e+00, 1.88434417903233453e+00, 1.89457598158696561e+00, 1.90486334181767414e+00, &
     1.91520656139714740e+00, 1.92560594363612503e+00, 1.93606179349229435e+00, 1.94657441757923322e+00, &
     1.95714412417540018e+00, 1.96777122323317588e+00, 1.97845602638795093e+00, 1.98919884696726634e+00  &
-  ]
+  ]   !< Lookup table of 2**(j/n)
 
-  !*!real, parameter :: exp2_table_tail(0:NTABLE-1) &
-  !*!    = [(2._real128**(real(i, real128) / real(NTABLE, real128)) &
-  !*!        / 2.**(real(i) / real(NTABLE)), i=0,NTABLE-1)] - 1.
-real, parameter :: exp2_table_tail(0:NTABLE-1) = [ &
-  0.00000000000000000e+00,  9.44788545172706630e-17, -1.50706697692603887e-17, -5.67915508282501219e-17, &
-  4.99974487227263259e-17, -4.82368359999489520e-17,  7.35784687124741823e-18,  5.77323022374195081e-17, &
-  8.18931763819551480e-17,  5.32689113998087777e-17,  1.66658814423267469e-18, -1.12811324546182800e-17, &
- -7.40282530942617744e-17, -3.57865976730956277e-18, -6.17065474560869496e-17,  2.91913999994927872e-17, &
- -2.79391148595157333e-17, -5.39928535518428500e-17,  4.77695942525622331e-17, -7.92770143233847309e-17, &
-  9.34171060990504558e-17, -5.53452067570747201e-17,  4.58567032666235109e-17,  2.85824304111161432e-17, &
-  7.82657325863607615e-17,  4.05362690676921607e-17,  2.82378442595106130e-17, -7.88280226248799127e-17, &
-  3.29047266460084165e-17, -1.57920947033478823e-18,  4.72136812117012811e-17,  1.30452770969196587e-17, &
-  3.34846233362515241e-17,  3.86111997749256638e-17,  5.52755004850524930e-17, -3.92718417244523391e-17, &
- -6.34655210672948264e-17, -8.68441761486594369e-17, -1.54563428193977334e-17, -8.70763476495455021e-17, &
-  3.75085420130312718e-17, -6.61685450352648820e-17, -5.34609900919875074e-18, -2.44372632101501814e-17, &
-  2.10230496752157140e-18,  7.77106793750106477e-17,  1.33575100888345415e-17,  6.93829169695920377e-17, &
-  1.95725852931120358e-17,  6.63225696167580396e-17, -5.47806912392677801e-17, -4.14083931039262377e-17, &
- -2.15714772512087524e-17, -3.82877665521205353e-17,  6.66380458923219517e-17,  2.39361874002852819e-17, &
-  5.68648095791173997e-17,  1.12645233545216843e-18,  7.00787504690699447e-17, -5.01192142783812542e-17, &
- -4.89230675135227563e-17, -3.52600899532694341e-17, -6.87230372090201806e-17,  5.00144666413353212e-18, &
- -6.83580865766192197e-17, -1.13073440929102116e-17, -8.41601163471715593e-18, -2.92479770354365663e-17, &
- -2.09230438184335296e-17, -3.97786458754271236e-17, -3.83346496865429512e-17,  5.76361116448089415e-17, &
- -2.35910947708500527e-17,  7.26007466109857455e-17,  9.50689710108795955e-18, -4.27295613383990616e-17, &
- -6.73521923237468289e-17, -2.83960444104309359e-17, -7.22663547210125660e-17,  5.78612100339591767e-17, &
-  5.15483011707867833e-17, -9.41625756887815240e-18,  2.42539857666898063e-17, -6.60431405170770719e-17, &
- -6.43213177542418901e-18, -1.22040076018639209e-17, -6.33616186340129307e-17, -3.78008792463738146e-17, &
-  1.53414100536037229e-17,  1.29328555804274517e-17, -4.12336733066114881e-17,  4.70308397446345575e-17, &
- -6.15260289155026467e-17,  5.82784932619527933e-17,  3.54094826264618290e-17, -3.27415713209387642e-17, &
-  4.87516052622706170e-17, -5.71856979007783759e-17, -4.71953966459097162e-18, -5.77345195880570602e-17, &
- -1.07724870789340559e-17, -6.22180861853391081e-17,  1.82140544036225897e-17, -6.15553654622763901e-17, &
-  1.68548729062897313e-17,  5.35812491776948158e-17,  3.62161593533689420e-17,  8.58837952757414421e-18, &
-  1.01562190116415007e-17, -2.86913488918724381e-17, -5.49511896612200476e-17, -5.56965572431627048e-17, &
-  1.79012690760451314e-17, -3.22117663462001635e-17,  5.26537076855627407e-17,  3.50898664024030334e-17, &
- -3.26692410090131783e-17, -4.36575930080793745e-17,  1.79639326598330223e-17,  3.43009252752141664e-17, &
- -5.54506561863942674e-17, -5.14900974545773279e-17,  5.33680587851415070e-17,  3.49897866119297325e-17, &
-  4.57849152770600949e-17, -5.24193457539389921e-17,  2.04142788975783032e-17,  4.12484284860648776e-18  &
-]
+  !real, parameter :: exp2_table_tail(0:ndiv-1) &
+  !    = [(2._real128**(real(i, real128) / real(ndiv, real128)) &
+  !        / 2.**(real(i) / real(ndiv)), i=0,ndiv-1)] - 1.
+  real, parameter :: exp2_table_tail(0:ndiv-1) = [ &
+    0.00000000000000000e+00,  9.44788545172706630e-17, -1.50706697692603887e-17, -5.67915508282501219e-17, &
+    4.99974487227263259e-17, -4.82368359999489520e-17,  7.35784687124741823e-18,  5.77323022374195081e-17, &
+    8.18931763819551480e-17,  5.32689113998087777e-17,  1.66658814423267469e-18, -1.12811324546182800e-17, &
+   -7.40282530942617744e-17, -3.57865976730956277e-18, -6.17065474560869496e-17,  2.91913999994927872e-17, &
+   -2.79391148595157333e-17, -5.39928535518428500e-17,  4.77695942525622331e-17, -7.92770143233847309e-17, &
+    9.34171060990504558e-17, -5.53452067570747201e-17,  4.58567032666235109e-17,  2.85824304111161432e-17, &
+    7.82657325863607615e-17,  4.05362690676921607e-17,  2.82378442595106130e-17, -7.88280226248799127e-17, &
+    3.29047266460084165e-17, -1.57920947033478823e-18,  4.72136812117012811e-17,  1.30452770969196587e-17, &
+    3.34846233362515241e-17,  3.86111997749256638e-17,  5.52755004850524930e-17, -3.92718417244523391e-17, &
+   -6.34655210672948264e-17, -8.68441761486594369e-17, -1.54563428193977334e-17, -8.70763476495455021e-17, &
+    3.75085420130312718e-17, -6.61685450352648820e-17, -5.34609900919875074e-18, -2.44372632101501814e-17, &
+    2.10230496752157140e-18,  7.77106793750106477e-17,  1.33575100888345415e-17,  6.93829169695920377e-17, &
+    1.95725852931120358e-17,  6.63225696167580396e-17, -5.47806912392677801e-17, -4.14083931039262377e-17, &
+   -2.15714772512087524e-17, -3.82877665521205353e-17,  6.66380458923219517e-17,  2.39361874002852819e-17, &
+    5.68648095791173997e-17,  1.12645233545216843e-18,  7.00787504690699447e-17, -5.01192142783812542e-17, &
+   -4.89230675135227563e-17, -3.52600899532694341e-17, -6.87230372090201806e-17,  5.00144666413353212e-18, &
+   -6.83580865766192197e-17, -1.13073440929102116e-17, -8.41601163471715593e-18, -2.92479770354365663e-17, &
+   -2.09230438184335296e-17, -3.97786458754271236e-17, -3.83346496865429512e-17,  5.76361116448089415e-17, &
+   -2.35910947708500527e-17,  7.26007466109857455e-17,  9.50689710108795955e-18, -4.27295613383990616e-17, &
+   -6.73521923237468289e-17, -2.83960444104309359e-17, -7.22663547210125660e-17,  5.78612100339591767e-17, &
+    5.15483011707867833e-17, -9.41625756887815240e-18,  2.42539857666898063e-17, -6.60431405170770719e-17, &
+   -6.43213177542418901e-18, -1.22040076018639209e-17, -6.33616186340129307e-17, -3.78008792463738146e-17, &
+    1.53414100536037229e-17,  1.29328555804274517e-17, -4.12336733066114881e-17,  4.70308397446345575e-17, &
+   -6.15260289155026467e-17,  5.82784932619527933e-17,  3.54094826264618290e-17, -3.27415713209387642e-17, &
+    4.87516052622706170e-17, -5.71856979007783759e-17, -4.71953966459097162e-18, -5.77345195880570602e-17, &
+   -1.07724870789340559e-17, -6.22180861853391081e-17,  1.82140544036225897e-17, -6.15553654622763901e-17, &
+    1.68548729062897313e-17,  5.35812491776948158e-17,  3.62161593533689420e-17,  8.58837952757414421e-18, &
+    1.01562190116415007e-17, -2.86913488918724381e-17, -5.49511896612200476e-17, -5.56965572431627048e-17, &
+    1.79012690760451314e-17, -3.22117663462001635e-17,  5.26537076855627407e-17,  3.50898664024030334e-17, &
+   -3.26692410090131783e-17, -4.36575930080793745e-17,  1.79639326598330223e-17,  3.43009252752141664e-17, &
+   -5.54506561863942674e-17, -5.14900974545773279e-17,  5.33680587851415070e-17,  3.49897866119297325e-17, &
+    4.57849152770600949e-17, -5.24193457539389921e-17,  2.04142788975783032e-17,  4.12484284860648776e-18  &
+  ]   !< Lookup table for residual of 2**(j/n) - real64(2**(j/n))
 
+  ! Range of K = nint(x / ln2) for which direct exponent scaling is safe.
+  ! Beyond this range, a bias is applied to handle subnormals and overflow.
+  ! NOTE: Fortran exponent is defined as one less than IEEE exponent.
+  integer, parameter :: Kmin = minexponent(real_mold) + 1
+    !< Minimum K before subnormal scaling is needed
+    !! Kmin = (minexponent() - 1) + 1 (min exp(r)) (+1 safety buffer)
+  integer, parameter :: Kmax = maxexponent(real_mold) - 2
+    !< Maximum K before overflow scaling is needed
+    !! Kmax = (maxexponent() - 1) - 0 (max exp(r)) (-1 safety buffer)
+  integer(kind=int_kind), parameter :: Kbias = maxexponent(real_mold) - 2
+    !< Exponent adjustment used for overflow and subnormal scaling
+    !! Any bias which rescales 2**K exp(r) to O(1) works here.
 
-  ! These can now be integer quantities.
-  integer(int_kind), parameter :: Kmin = minexponent(real_mold) + 1
-  integer(int_kind), parameter :: Kmax = maxexponent(real_mold) - 2
-
-  integer(int_kind), parameter :: Kbias = maxexponent(real_mold) - 2
-
-  real :: xc
-  real :: x_ln2
-  real :: Z
-  real :: r
-  real :: scale
-  real :: tail
-  real :: expm1_r
-  real :: e
-
-  integer(int_kind) :: xb
-  integer(int_kind) :: iz
-  integer(int_kind) :: Zi
-  integer(int_kind) :: K
-  integer(int_kind) :: j
-  integer(int_kind) :: eb
-  integer(int_kind) :: fb
-
+  ! More table stuff
+  integer(kind=int_kind) :: kz
   integer(int32) :: table_index
 
+  integer :: i
+
+  ! Range-reduction variables
+  real :: xc
+    ! x clamped between xmin and xmax [nondim]
+  integer(kind=int_kind) :: K
+    ! Nearest IEEE-rounded integer to (x / ln2) [nondim]
+  real :: Z
+    ! Nearest integer to N*K + j for N subdivisions
+    ! NOTE: Z is stored as real to avoid int/real type conversions
+  integer(kind=int_kind) :: Zi
+    ! Integer representation of Z
+  real :: r
+    ! Range-reduced input, r = x - Z ln2/N [nondim]
+  real :: e
+    ! Exponent of range-reduced input, e = 2**(table_index/ndiv) exp(r) [nondim]
+  real :: expm1_r
+    ! Approximation to exp(r) - 1 [nondim]
+  real :: scale
+    ! Table value for 2**(table_index/ndiv) [nondim]
+  real :: tail
+    ! Relative table correction for scale [nondim]
+
+  integer(kind=int_kind) :: xb, Kb, eb
+    ! Bit representations of x, K, e
+
+  integer(kind=int_kind) :: j
+    ! Bias added to K to compensate for exponent K beyond {-1022,..,+1023}.
+  integer(kind=int_kind) :: fb
+    ! Bit representation of the j-bias, 2**j
+
   logical :: nonfinite
+    ! True if input is a nonfinite float (+/-Inf, NaN)
+
+  ! testing
+  integer(int_kind), parameter :: round_bias_bits = transfer(round_bias,int_mold)
 
   ! 1. Nonfinite handling
+  ! ---------------------
+  ! Nonfinites must be handled first to prevent their appearance in
+  ! calculations, which may raise unwanted floating point signals.
+
   xb = transfer(x, int_mold)
   nonfinite = iand(xb, pos_inf_bits) == pos_inf_bits
 
   if (nonfinite) then
+    ! exp(-Inf) = 0, otherwise pass-through +Inf and +/-NaN values
+    ! Compute x + x to trigger `Invalid` for signaled NaNs.
     a = merge(0., x + x, xb == neg_inf_bits)
     return
   endif
 
-  ! 2. Range reduction
+  ! 2. Range Reduction
+  ! ------------------
+  ! Apply a range reduction of r = x - K ln2 - (j / N) ln2, so that
+  !     exp(x) = 2**K 2**(j/N) exp(r).
+  ! If K = nint(x / ln2) then r is in [-1/2N ln2, 1/2N ln2] and exp(r) can be
+  ! estimated by a sufficiently accurate polynomial.
+
+  ! First clamp x to the precision-based numerical range of exp().
+  ! This allows for safe detection of over/underflow in the subnormal handler.
   xc = min(max(x, xmin), xmax)
 
-  x_ln2 = xc * TABLE_INV_LN2
+  ! Compute Z = N K + j, where r = x - Z (ln 2 / N)
+  Z = NEAREST_INT(xc * n_ln2)
+  Zi = transfer(Z + round_bias, int_mold) - round_bias_bits
 
-  ! Z = nearest integer to NTABLE*x/ln2.
-  Z = NEAREST_INT(x_ln2)
+  table_index = iand(Zi, index_mask)
+  K = (Zi - int(table_index, int_kind)) / ndiv
 
-  ! Recover the integer Z directly from the round-bias encoding.
-  iz = transfer(Z + round_bias, int_mold)
-  Zi = iz - round_bias_bits
+  ! Since K ~ x/ln2, the terms in r = x - K ln2 will nearly cancel and there is
+  ! some expected loss of precision.  To compensate, we use a Cody-Waite
+  ! correction which separates ln2 into its upper 32 bits and a lower residual.
 
-  ! Zi = NTABLE*K + table_index.
-  !
-  ! Since NTABLE is a power of two, the low bits give the table index,
-  ! including for negative Zi.
-  table_index = int(iand(Zi, index_mask), int32)
+  r = (xc - Z * ln2_ndiv_hi) - Z * ln2_ndiv_lo
 
-  ! Arithmetic right shift implements floor(Zi / NTABLE), which is exactly
-  ! the K paired with table_index in [0,NTABLE-1].
-
-  ! TODO: Preprocess this?
-  K = shifta(Zi, TABLE_BITS)
-  !K = (Zi - int(table_index, int_kind)) / NTABLE
-
-  ! Cody-Waite range reduction still uses real Z.
-  r = (xc - Z * TABLE_LN2_HI) - Z * TABLE_LN2_LO
+  ! NOTE: Aggressive optimizers may reduce this to x - K * (ln2_hi + ln2_lo)
+  ! which is no better than x - K ln2.
 
   ! 3. Polynomial approximation
+  ! ---------------------------
+  ! Estimate exp(r) = 1 + r * P(r) where P(r) is a 10th order Remez minimax
+  ! polynomial of (exp(r) - 1)/r.  This form ensures that exp(0) = 1 exactly.
+
+  ! Table evaluation
   scale = exp2_table(table_index)
   tail = exp2_table_tail(table_index)
   expm1_r = exp_remez_expm1_estrin_4(r)
   ! Evaluate the small correction before the final addition to scale.
   e = scale + scale * (tail + expm1_r)
 
-  ! 4. Scaling
-  !
+  ! 4. Unscaling
+  ! ------------
   ! Compute exp(x) = 2**K e, an exact power-of-2 calculation.
   ! Adjust scaling to compensate for subnormal output.
 
-  ! Apply a large compensating bias near the exponent limits.
-  j = merge( Kbias, 0_int_kind, K < Kmin) &
-    + merge(-Kbias, 0_int_kind, K > Kmax)
+  ! exp(r) has range [0.707/ndiv, 1.414/ndiv], so K shifts by either 0 or -1.
+  ! A resolved exponent is in the range {-1022..1023}, so K must be in
+  ! {-1021,1023}.  (For safety, we reduce the range to {-1020,1022}.)
 
-  ! Get the bit representation of exp(r) and scale by 2^(K+j)
+  ! Determine if K is outside the supported exponent range.
+  ! If so, then apply a bias j to normalize the exponent.
+  ! Kbias is chosen so that the exponent is "something near 1".
+  j = merge(Kbias, 0_int_kind, K < Kmin) + merge(-Kbias, 0_int_kind, K > Kmax)
+
+  ! Get the bit representation of exp(r)
   eb = transfer(e, int_mold)
-  eb = eb + ishft(K + j, expbit)
+
+  ! Rescale to exp(r) to exp(x), possibly including the j bias.
+  eb = eb + ishft(k + j, expbit)
   a = transfer(eb, real_mold)
 
-  ! Undo the j bias.
-  !
-  ! For normal values j=0 and this is multiplication by exactly 1.
-  ! For the underflow path this performs the final floating-point scaling
-  ! needed to produce subnormals.
+  ! Undo the 2**j bias as floating point multiplication.
+  ! - For "normals", this has no effect.
+  ! - For subnormals, this will force subnormal estimation (if enabled).
+  ! - For resolvable K beyond this range, it triggers an over/underflow.
+  ! - Extreme values of K have already been filtered out by the min/max step.
   fb = ishft(int(expbias, int_kind) - j, expbit)
   a = a * transfer(fb, real_mold)
-
 end procedure exp_repro
-
-!*!!> Reproducible exponential function
-!*!!!
-!*!!! Compute exp(x) with bitwise reproducibility across platforms.
-!*!module procedure exp_repro
-!*!  ! ln2 estimates
-!*!  real, parameter :: ln2 = 0.693147180559945309417232121458176568
-!*!    !< log(2): 0.693147180559945309417232... [nondim]
-!*!  real, parameter :: I_ln2 = 1.44269504088896340735992468100189214
-!*!    !< 1 / ln2: 1.4426950408889634073599... [nondim]
-!*!
-!*!  ! The max and min x values between which x remains finite.
-!*!  real, parameter :: xmax &
-!*!      = real(maxexponent(real_mold) + 1, kind(real_mold)) * ln2
-!*!    !< Largest x value before exp(x) overflow [nondim]
-!*!  real, parameter :: xmin &
-!*!      = real(minexponent(real_mold) - digits(real_mold) - 1, kind(real_mold)) * ln2
-!*!    !< Smallest x value before exp(x) underflow [nondim]
-!*!
-!*!  ! Double-double precision of ln2 used in range reduction (Cody-Waite)
-!*!  ! NOTE: This split assumes double-precision.
-!*!  real, parameter :: ln2_hi = 0.69314718036912381649017333984375
-!*!    !< Upper 32 bits of ln2: 6.93147180369123816490e-01 [nondim]
-!*!  real, parameter :: ln2_lo = 1.90821492927058770002e-10
-!*!    !< Lower precision bits of ln2: 1.90821492927058770002e-10 [nondim]
-!*!
-!*!  ! Table constants (may not be used)
-!*!  integer, parameter :: NTABLE = 128
-!*!  real, parameter :: I_NTABLE = 1. / real(NTABLE)
-!*!  real, parameter :: TABLE_INV_LN2 = NTABLE * I_ln2
-!*!  real, parameter :: TABLE_LN2_HI = I_NTABLE * ln2_hi
-!*!  real, parameter :: TABLE_LN2_LO = I_NTABLE * ln2_lo
-!*!  integer(int_kind), parameter :: index_mask = int(NTABLE - 1, int_kind)
-!*!
-!*!  ! More table stuff
-!*!  real :: Z
-!*!  integer(kind=int_kind) :: iz, kz
-!*!  integer(int32) :: table_index
-!*!
-!*!  integer :: i
-!*!
-!*!  ! TODO: These are convenient for table generation but may not be reproducible
-!*!  !   and should be replaced in the final version.
-!*!
-!*!  ! Split 2**(i/N) into real precision and a scaled residual:
-!*!  !   2**(i/N) = [2**(i/N)] (1 + tail)
-!*!
-!*!  ! 2**(i/N)
-!*!  real, parameter :: exp2_table(0:NTABLE-1) &
-!*!      = [(2.**(real(i) / real(NTABLE)), i=0,NTABLE-1)]
-!*!
-!*!  ! tail = exact(2**(i/N)) - rounded(2**(i/N))
-!*!  real, parameter :: exp2_table_tail(0:NTABLE-1) &
-!*!      = [(2._real128**(real(i, real128) / real(NTABLE, real128)) &
-!*!          / 2.**(real(i) / real(NTABLE)), i=0,NTABLE-1)] - 1.
-!*!
-!*!  ! Range of K = nint(x / ln2) for which direct exponent scaling is safe.
-!*!  ! Beyond this range, a bias is applied to handle subnormals and overflow.
-!*!  ! NOTE: Fortran exponent is defined as one less than IEEE exponent.
-!*!  !*!real, parameter :: Kmin = real(minexponent(real_mold) + 1)
-!*!  !*!  !< Minimum K before subnormal scaling is needed
-!*!  !*!  !! Kmin = (minexponent() - 1) + 1 (for min exp(r)) + 1 (safety buffer)
-!*!  !*!real, parameter :: Kmax = real(maxexponent(real_mold) - 2)
-!*!  !*!  !< Maximum K before overflow scaling is needed
-!*!  !*!  !! Kmax = (maxexponent() - 1) - 0 (max exp(r)) - 1 (safety buffer)
-!*!  integer(kind=int_kind), parameter :: Kbias = maxexponent(real_mold) - 2
-!*!    !< Exponent adjustment used for overflow and subnormal scaling
-!*!    !! Any bias which rescales 2**K exp(r) to O(1) works here.
-!*!
-!*!  integer, parameter :: Kmin = minexponent(real_mold) + 1
-!*!    !< Minimum K before subnormal scaling is needed
-!*!    !! Kmin = (minexponent() - 1) + 1 (for min exp(r)) + 1 (safety buffer)
-!*!  integer, parameter :: Kmax = maxexponent(real_mold) - 2
-!*!    !< Maximum K before overflow scaling is needed
-!*!    !! Kmax = (maxexponent() - 1) - 0 (max exp(r)) - 1 (safety buffer)
-!*!
-!*!  ! Range-reduction variables
-!*!  real :: xc
-!*!    ! x after being bounded by xmin and xmax [nondim]
-!*!  real :: x_ln2
-!*!    ! Cached value of x / ln2 [nondim]
-!*!  !*!real :: K
-!*!    ! Nearest IEEE-rounded integer to (x / ln2) [nondim]
-!*!    ! NOTE: K is stored as real to avoid int/real type conversions
-!*!  real :: r
-!*!    ! Range-reduced input, r = x - K ln2 [nondim]
-!*!  real :: e
-!*!    ! Exponent of range-reduced input, e = 2**(table_index/NTABLE) exp(r) [nondim]
-!*!  real :: expm1_r
-!*!    ! Approximation to exp(r) - 1 [nondim]
-!*!  real :: scale
-!*!    ! Table value for 2**(table_index/NTABLE) [nondim]
-!*!  real :: tail
-!*!    ! Relative table correction for scale [nondim]
-!*!
-!*!  integer(kind=int_kind) :: xb, Kb, eb
-!*!    ! Bit representations of x, K, e
-!*!
-!*!  integer(kind=int_kind) :: j
-!*!    ! Bias added to K to compensate for exponent K beyond {-1022,..,+1023}.
-!*!  integer(kind=int_kind) :: fb
-!*!    ! Bit representation of the j-bias, 2**j
-!*!
-!*!  logical :: nonfinite
-!*!    ! True if input is a nonfinite float (+/-Inf, NaN)
-!*!
-!*!  ! testing
-!*!  integer(int_kind), parameter :: round_bias_bits = transfer(round_bias,int_mold)
-!*!  integer(int_kind) :: n, k
-!*!
-!*!  ! 1. Nonfinite handling
-!*!  ! ---------------------
-!*!  ! Nonfinites must be handled first to prevent their appearance in
-!*!  ! calculations, which may raise unwanted floating point signals.
-!*!
-!*!  xb = transfer(x, int_mold)
-!*!  nonfinite = iand(xb, pos_inf_bits) == pos_inf_bits
-!*!
-!*!  if (nonfinite) then
-!*!    ! exp(-Inf) = 0, otherwise pass-through +Inf and +/-NaN values
-!*!    ! Compute x + x to trigger `Invalid` for signaled NaNs.
-!*!    a = merge(0., x + x, xb == neg_inf_bits)
-!*!    return
-!*!  endif
-!*!
-!*!  ! 2. Range Reduction
-!*!  ! ------------------
-!*!  ! Apply a range reduction of r = x - K ln2, so that exp(x) = 2**K exp(r).
-!*!  ! If K = nint(x / ln2) then r is in [-1/2 ln2, 1/2 ln2] and exp(r) can be
-!*!  ! estimated by a highly accurate polynomial.
-!*!
-!*!  ! First clamp x to the precision-based numerical range of exp().
-!*!  ! This allows for safe detection of over/underflow in the subnormal handler.
-!*!  xc = min(max(x, xmin), xmax)
-!*!
-!*!  ! Compute K = nint(x / ln2)
-!*!
-!*!  ! Z = N*K + j
-!*!  !   N = table
-!*!  !   K = nint(x/ln2), the ln2 integral step
-!*!  !   j = the j'th (of N) ln2 integral substep
-!*!  x_ln2 = xc * TABLE_INV_LN2
-!*!
-!*!  !! This is slower?
-!*!  !Z = NEAREST_INT(x_ln2)
-!*!  !iz = transfer(Z + round_bias, int_mold)
-!*!
-!*!  !*!! Faster, and does not even require the NEAREST_INT() macro
-!*!  !*!Z = x_ln2 + round_bias
-!*!  !*!iz = transfer(Z, int_mold)
-!*!  !*!Z = Z - round_bias
-!*!
-!*!  !*!table_index = iand(iz, index_mask)
-!*!  !*!!table_index = modulo(iz, NTABLE)
-!*!
-!*!  !*!kz = iand(iz, not(index_mask))
-!*!  !*!K = (transfer(kz, real_mold) - round_bias) * I_NTABLE
-!*!
-!*!  !*!! version 3 (works)
-!*!  !*!Z = NEAREST_INT(x_ln2)
-!*!  !*!table_index = modulo(int(Z), NTABLE)
-!*!  !*!K = (Z - real(table_index)) * I_NTABLE
-!*!
-!*!  ! version 4
-!*!  Z = NEAREST_INT(x_ln2)
-!*!  iz = transfer(Z + round_bias, int_mold)
-!*!  !table_index = iand(iz, index_mask)
-!*!
-!*!  !! K = (Z - j)/N
-!*!  !kz = iand(iz, not(index_mask))
-!*!  !K = (transfer(kz, real_mold) - round_bias) * I_NTABLE
-!*!
-!*!  n = iz - round_bias_bits
-!*!  table_index = iand(n, index_mask)
-!*!  k = shifta(n, 7)
-!*!
-!*!  ! NOTE: Performance may degrade if NEAREST_INT is not inlined.
-!*!
-!*!  ! Since K ~ x/ln2, the terms in r = x - K ln2 will nearly cancel and there is
-!*!  ! some expected loss of precision.
-!*!
-!*!  ! To compensate, we use a Cody-Waite correction which separates ln2 into its
-!*!  ! upper 32 bits and a lower residual.
-!*!  r = (xc - Z * TABLE_LN2_HI) - Z * TABLE_LN2_LO
-!*!
-!*!  ! NOTE: Aggressive optimizers may reduce this to x - K * (ln2_hi + ln2_lo)
-!*!  ! which is no better than x - K ln2.
-!*!
-!*!  ! 3. Polynomial approximation
-!*!  ! ---------------------------
-!*!  ! Estimate exp(r) = 1 + r * P(r) where P(r) is a 10th order Remez minimax
-!*!  ! polynomial of (exp(r) - 1)/r.  This form ensures that exp(0) = 1 exactly.
-!*!
-!*!  !e = exp_remez_horner_10(r)
-!*!  !e = exp_remez_estrin_10(r)
-!*!  !e = exp_remez_estrin_full_10(r)
-!*!
-!*!  ! Non-tail table scaling
-!*!  !e = exp2_table(table_index) * exp_remez_estrin_10(r)
-!*!
-!*!  ! Table evaluation
-!*!  scale = exp2_table(table_index)
-!*!  tail = exp2_table_tail(table_index)
-!*!  expm1_r = exp_remez_expm1_estrin_4(r)
-!*!  ! Evaluate the small correction before the final addition to scale.
-!*!  e = scale + scale * (tail + expm1_r)
-!*!
-!*!  ! 4. Unscaling
-!*!  ! ------------
-!*!  ! Compute exp(x) = 2**K e, an exact power-of-2 calculation.
-!*!  ! Adjust scaling to compensate for subnormal output.
-!*!
-!*!  ! exp(r) has range [0.707, 1.414], so it shifts K by either 0 or -1.
-!*!  ! A resolved exponent is in the range {-1022,1023}, so K must be in
-!*!  ! {-1021,1023}.  (For safety, we further reduce the range by 1).
-!*!
-!*!  ! Determine if K is outside the supported exponent range.
-!*!  ! If so, then apply a bias j to normalize the exponent.
-!*!  ! Kbias is chosen so that the exponent is "something near 1".
-!*!  j = merge(Kbias, 0_int_kind, K < Kmin) + merge(-Kbias, 0_int_kind, K > Kmax)
-!*!
-!*!  ! Get the bit representation of exp(r)
-!*!  eb = transfer(e, int_mold)
-!*!
-!*!  ! This is a fast alternative to int(K), similar to fast_rint().
-!*!  ! Kb includes the biased 2**52 in its exponent field, but these are dropped
-!*!  ! during the later ishft() operation.
-!*!  !**!Kb = transfer(K + round_bias, int_mold)
-!*!
-!*!  !**!! Rescale to exp(r) to exp(x), possibly including the j bias.
-!*!  !**!eb = eb + ishft(Kb + j, expbit)
-!*!  !**!a = transfer(eb, real_mold)
-!*!
-!*!
-!*!  eb = eb + ishft(k + j, expbit)
-!*!  a = transfer(eb, real_mold)
-!*!
-!*!
-!*!  ! Undo the 2**j bias as floating point multiplication.
-!*!  ! - For "normals", this has no effect.
-!*!  ! - For subnormals, this will force subnormal estimation (if enabled).
-!*!  ! - For resolvable K beyond this range, it triggers an over/underflow.
-!*!  ! - Extreme values of K have already been filtered out by the min/max step.
-!*!  fb = ishft(int(expbias, int_kind) - j, expbit)
-!*!  a = a * transfer(fb, real_mold)
-!*!end procedure exp_repro
-
-
-!> Remez minimax polynomial for exp(x) over [-1/2 ln2, 1/2 ln2] in Horner form
-!!
-!! Approximate (exp(x) - 1) / x, then compute 1 + x * P(x).
-!! Coefficients generated by Sollya fpminimax.
-pure function exp_remez_horner_10(x) result(e)
-  real, intent(in) :: x
-    !< Input value; expected range is [-1/2 ln2, 1/2 ln2]
-  real :: e
-    !< Approximation of exp(x)
-
-  real :: p
-    !< Polynomial approximation to (exp(x) - 1) / x [nondim]
-
-  !> fpminimax coefficients for (exp(x) - 1) / x on [-1/2 ln2, 1/2 ln2]
-  real, parameter :: c(0:10) = [ &
-      1.0, &
-      0.50000000000000055511151231257827021181583404541015625, &
-      0.1666666666666660745477201999165117740631103515625, &
-      4.166666666657388440331288848028634674847126007080078125e-2, &
-      8.333333333377164475752607586400699801743030548095703125e-3, &
-      1.38888889322647565531532176663631616975180804729461669921875e-3, &
-      1.984126974698501824807828075591942251776345074176788330078125e-4, &
-      2.480150459644261430602885099006016389466822147369384765625e-5, &
-      2.755738179851631320657146320685093598967796424403786659240723e-6, &
-      2.76262647076892519593864332161370356288898619823157787322998e-7, &
-      2.506210200218863960750001593138364119894845316594000905752182e-8 &
-  ]
-
-  ! Horner evaluation: p(x) = c0 + x*(c1 + x*(c2 + x*(c3 + ...)))
-  p = c(10)
-  p = c(9) + x * p
-  p = c(8) + x * p
-  p = c(7) + x * p
-  p = c(6) + x * p
-  p = c(5) + x * p
-  p = c(4) + x * p
-  p = c(3) + x * p
-  p = c(2) + x * p
-  p = c(1) + x * p
-  p = c(0) + x * p
-
-  ! Final assembly: exp(x) = 1 + x * p(x)
-  e = 1 + x * p
-end function exp_remez_horner_10
-
-
-pure function exp_remez_estrin_10(x) result(e)
-  real, intent(in) :: x
-    !< Input value; expected range is [-1/2 ln2, 1/2 ln2]
-  real :: e
-    !< Approximation of exp(x)
-
-  e = 1 + exp_remez_expm1_estrin_10(x)
-end function exp_remez_estrin_10
-
-
-pure function exp_remez_expm1_estrin_10(x) result(e)
-  real, intent(in) :: x
-    !< Input value; expected range is [-1/2 ln2, 1/2 ln2]
-  real :: e
-    !< Approximation of exp(x) - 1 [nondim]
-
-  real :: po
-    !< Odd polynomial: c1 + c3*x² + c5*x⁴ + c7*x⁶ + c9*x⁸ [nondim]
-  real :: pe
-    !< Even polynomial: c0 + c2*x² + c4*x⁴ + c6*x⁶ + c8*x⁸ + c10*x¹⁰ [nondim]
-  real :: x2
-    !< x squared [nondim]
-  real :: p
-    !< Combined polynomial (exp(x) - 1) / x [nondim]
-
-  !> fpminimax coefficients for (exp(x) - 1) / x on [-1/2 ln2, 1/2 ln2]
-  real, parameter :: c(0:10) = [ &
-      1.0, &
-      0.50000000000000055511151231257827021181583404541015625, &
-      0.1666666666666660745477201999165117740631103515625, &
-      4.166666666657388440331288848028634674847126007080078125e-2, &
-      8.333333333377164475752607586400699801743030548095703125e-3, &
-      1.38888889322647565531532176663631616975180804729461669921875e-3, &
-      1.984126974698501824807828075591942251776345074176788330078125e-4, &
-      2.480150459644261430602885099006016389466822147369384765625e-5, &
-      2.755738179851631320657146320685093598967796424403786659240723e-6, &
-      2.76262647076892519593864332161370356288898619823157787322998e-7, &
-      2.506210200218863960750001593138364119894845316594000905752182e-8 &
-  ]
-
-  x2 = x * x
-
-  ! Odd coefficients: c1 + c3*x² + c5*x⁴ + c7*x⁶ + c9*x⁸
-  po = c(9)
-  po = c(7) + x2 * po
-  po = c(5) + x2 * po
-  po = c(3) + x2 * po
-  po = c(1) + x2 * po
-
-  ! Even coefficients: c0 + c2*x² + c4*x⁴ + c6*x⁶ + c8*x⁸ + c10*x¹⁰
-  pe = c(10)
-  pe = c(8) + x2 * pe
-  pe = c(6) + x2 * pe
-  pe = c(4) + x2 * pe
-  pe = c(2) + x2 * pe
-  pe = c(0) + x2 * pe
-
-  ! Combine: p = pe + x * po
-  p = pe + x * po
-
-  ! Final assembly: exp(x) - 1 = x * p(x)
-  e = x * p
-end function exp_remez_expm1_estrin_10
 
 
 pure function exp_remez_expm1_estrin_4(x) result(e)
@@ -639,64 +339,6 @@ pure function exp_remez_expm1_estrin_4(x) result(e)
   ! Final assembly: exp(x) - 1 = x * p(x)
   e = x * p
 end function exp_remez_expm1_estrin_4
-
-
-pure function exp_remez_estrin_full_10(x) result(e)
-  real, intent(in) :: x
-    !< Input value; expected range is [-1/2 ln2, 1/2 ln2]
-  real :: e
-    !< Approximation of exp(x)
-
-  real :: x2, x4, x8
-    !< Powers of x [nondim]
-  real :: p01, p23, p45, p67, p89
-    !< Paired terms [nondim]
-  real :: p03, p47, p8_10
-    !< Quad terms [nondim]
-  real :: p07, p
-    !< Combined polynomial [nondim]
-
-  !> fpminimax coefficients for (exp(x) - 1) / x on [-1/2 ln2, 1/2 ln2]
-  real, parameter :: c(0:10) = [ &
-      1.0, &
-      0.50000000000000055511151231257827021181583404541015625, &
-      0.1666666666666660745477201999165117740631103515625, &
-      4.166666666657388440331288848028634674847126007080078125e-2, &
-      8.333333333377164475752607586400699801743030548095703125e-3, &
-      1.38888889322647565531532176663631616975180804729461669921875e-3, &
-      1.984126974698501824807828075591942251776345074176788330078125e-4, &
-      2.480150459644261430602885099006016389466822147369384765625e-5, &
-      2.755738179851631320657146320685093598967796424403786659240723e-6, &
-      2.76262647076892519593864332161370356288898619823157787322998e-7, &
-      2.506210200218863960750001593138364119894845316594000905752182e-8 &
-  ]
-
-  ! Powers of x
-  x2 = x * x
-  x4 = x2 * x2
-  x8 = x4 * x4
-
-  ! Level 1: pairs (all independent)
-  p01 = c(0) + c(1) * x
-  p23 = c(2) + c(3) * x
-  p45 = c(4) + c(5) * x
-  p67 = c(6) + c(7) * x
-  p89 = c(8) + c(9) * x
-
-  ! Level 2: quads (all independent, depend on level 1)
-  p03 = p01 + x2 * p23
-  p47 = p45 + x2 * p67
-  p8_10 = p89 + x2 * c(10)
-
-  ! Level 3: octets
-  p07 = p03 + x4 * p47
-
-  ! Level 4: final combine
-  p = p07 + x8 * p8_10
-
-  ! Final assembly: exp(x) = 1 + x * p(x)
-  e = 1 + x * p
-end function exp_remez_estrin_full_10
 
 
 !> An optimized nearest-integer function for floating point reals.
