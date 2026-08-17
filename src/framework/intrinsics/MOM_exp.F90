@@ -82,7 +82,6 @@ module procedure exp_repro
   real, parameter :: TABLE_LN2_HI = I_NTABLE * ln2_hi
   real, parameter :: TABLE_LN2_LO = I_NTABLE * ln2_lo
   integer(int_kind), parameter :: index_mask = int(NTABLE - 1, int_kind)
-  integer(int_kind), parameter :: abs_mask = int(z'7FFFFFFFFFFFFFFF', int_kind)
 
   ! More table stuff
   real :: Z
@@ -101,7 +100,7 @@ module procedure exp_repro
   real, parameter :: exp2_table(0:NTABLE-1) &
       = [(2.**(real(i) / real(NTABLE)), i=0,NTABLE-1)]
 
-  ! tail
+  ! tail = exact(2**(i/N)) - rounded(2**(i/N))
   real, parameter :: exp2_table_tail(0:NTABLE-1) &
       = [(2._real128**(real(i, real128) / real(NTABLE, real128)) &
           / 2.**(real(i) / real(NTABLE)), i=0,NTABLE-1)] - 1.
@@ -170,36 +169,44 @@ module procedure exp_repro
   ! If K = nint(x / ln2) then r is in [-1/2 ln2, 1/2 ln2] and exp(r) can be
   ! estimated by a highly accurate polynomial.
 
-  ! First limit x to the precision-based numerical range of exp().
+  ! First clamp x to the precision-based numerical range of exp().
   ! This allows for safe detection of over/underflow in the subnormal handler.
   xc = min(max(x, xmin), xmax)
-  !xc = x
 
   ! Compute K = nint(x / ln2)
-  !*!x_ln2 = xc * I_ln2
-  !*!K = NEAREST_INT(x_ln2)
-  !*!!K = anint(x_ln2)
-
-  ! Table method
-  x_ln2 = xc * TABLE_INV_LN2
 
   ! Z = N*K + j
   !   N = table
   !   K = nint(x/ln2), the ln2 integral step
   !   j = the j'th (of N) ln2 integral substep
+  x_ln2 = xc * TABLE_INV_LN2
 
   !! This is slower?
   !Z = NEAREST_INT(x_ln2)
   !iz = transfer(Z + round_bias, int_mold)
 
-  ! Faster, and does not even require the NEAREST_INT() macro
-  Z = x_ln2 + round_bias
-  iz = transfer(Z, int_mold)
-  Z = Z - round_bias
+  !*!! Faster, and does not even require the NEAREST_INT() macro
+  !*!Z = x_ln2 + round_bias
+  !*!iz = transfer(Z, int_mold)
+  !*!Z = Z - round_bias
 
+  !*!table_index = iand(iz, index_mask)
+  !*!!table_index = modulo(iz, NTABLE)
+
+  !*!kz = iand(iz, not(index_mask))
+  !*!K = (transfer(kz, real_mold) - round_bias) * I_NTABLE
+
+  !*!! version 3 (works)
+  !*!Z = NEAREST_INT(x_ln2)
+  !*!table_index = modulo(int(Z), NTABLE)
+  !*!K = (Z - real(table_index)) * I_NTABLE
+
+  ! version 4
+  Z = NEAREST_INT(x_ln2)
+  iz = transfer(Z + round_bias, int_mold)
   table_index = iand(iz, index_mask)
-  !table_index = modulo(iz, NTABLE)
 
+  ! K = (Z - j)/N
   kz = iand(iz, not(index_mask))
   K = (transfer(kz, real_mold) - round_bias) * I_NTABLE
 
@@ -210,12 +217,6 @@ module procedure exp_repro
 
   ! To compensate, we use a Cody-Waite correction which separates ln2 into its
   ! upper 32 bits and a lower residual.
-  !r = (xc - K * ln2_hi) - K * ln2_lo
-
-  ! Non-cody-waite
-  !r = xc - K * ln2
-
-  ! Table Cody-waite
   r = (xc - Z * TABLE_LN2_HI) - Z * TABLE_LN2_LO
 
   ! NOTE: Aggressive optimizers may reduce this to x - K * (ln2_hi + ln2_lo)
@@ -229,6 +230,9 @@ module procedure exp_repro
   !e = exp_remez_horner_10(r)
   !e = exp_remez_estrin_10(r)
   !e = exp_remez_estrin_full_10(r)
+
+  ! Non-tail table scaling
+  !e = exp2_table(table_index) * exp_remez_estrin_10(r)
 
   ! Table evaluation
   scale = exp2_table(table_index)
