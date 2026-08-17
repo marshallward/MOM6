@@ -60,13 +60,13 @@ module procedure exp_repro
   real, parameter :: I_ln2 = 1.44269504088896340735992468100189214
     !< 1 / ln2: 1.4426950408889634073599... [nondim]
 
-  ! The max and min x values between which x remains finite.
-  real, parameter :: xmax &
-      = real(maxexponent(real_mold) + 1, kind(real_mold)) * ln2
-    !< Largest x value before exp(x) overflow [nondim]
-  real, parameter :: xmin &
-      = real(minexponent(real_mold) - digits(real_mold) - 1, kind(real_mold)) * ln2
-    !< Smallest x value before exp(x) underflow [nondim]
+  ! Threshold for special-case handling (nonfinite, overflow, underflow).
+  ! exp(x) overflows for x > ~709.78 and underflows for x < ~-745.13.
+  ! We use 1024.0 as the threshold (exponent = 10); any |x| >= 1024 will
+  ! definitely overflow or underflow, so we handle those specially.
+  ! Values in [512, 1024) are handled by the normal path with j-bias.
+  integer(int_kind), parameter :: exp_threshold = int(expbias + 10, int_kind)
+    !< Exponent of 1024.0 (2^10); values with larger exponent need special handling
 
   ! Double-real precision of ln2 used in Cody-Waite range reduction
   ! NOTE: This split assumes real64 precision.
@@ -184,14 +184,9 @@ module procedure exp_repro
     !! Any bias which rescales 2**K exp(r) to O(1) works here.
 
   ! More table stuff
-  integer(kind=int_kind) :: kz
   integer(int32) :: table_index
 
-  integer :: i
-
   ! Range-reduction variables
-  real :: xc
-    ! x clamped between xmin and xmax [nondim]
   integer(kind=int_kind) :: K
     ! Nearest IEEE-rounded integer to (x / ln2) [nondim]
   real :: Z
@@ -210,32 +205,41 @@ module procedure exp_repro
   real :: tail
     ! Relative table correction for scale [nondim]
 
-  integer(kind=int_kind) :: xb, Kb, eb
-    ! Bit representations of x, K, e
+  integer(kind=int_kind) :: xb, eb
+    ! Bit representations of x, e
+  integer(kind=int_kind) :: x_exp
+    ! Exponent bits of x
 
   integer(kind=int_kind) :: j
     ! Bias added to K to compensate for exponent K beyond {-1022,..,+1023}.
   integer(kind=int_kind) :: fb
     ! Bit representation of the j-bias, 2**j
 
-  logical :: nonfinite
-    ! True if input is a nonfinite float (+/-Inf, NaN)
-
   ! testing
   integer(int_kind), parameter :: round_bias_bits = transfer(round_bias,int_mold)
 
-  ! 1. Nonfinite handling
-  ! ---------------------
-  ! Nonfinites must be handled first to prevent their appearance in
-  ! calculations, which may raise unwanted floating point signals.
+  ! 1. Special case handling
+  ! ------------------------
+  ! Handle nonfinite inputs and extreme values that would overflow/underflow.
+  ! Extract exponent bits and check if |x| is too large or nonfinite.
 
   xb = transfer(x, int_mold)
-  nonfinite = iand(xb, pos_inf_bits) == pos_inf_bits
+  x_exp = iand(ishft(xb, -expbit), int(2**expwidth - 1, int_kind))
 
-  if (nonfinite) then
-    ! exp(-Inf) = 0, otherwise pass-through +Inf and +/-NaN values
-    ! Compute x + x to trigger `Invalid` for signaled NaNs.
-    a = merge(0., x + x, xb == neg_inf_bits)
+  if (x_exp >= exp_threshold) then
+    ! Either nonfinite (exp = 2047) or |x| >= 512
+    if (x_exp >= int(2**expwidth - 1, int_kind)) then
+      ! Nonfinite: +/-Inf or NaN
+      ! exp(-Inf) = 0, otherwise pass-through +Inf and +/-NaN values
+      ! Compute x + x to trigger `Invalid` for signaled NaNs.
+      a = merge(0., x + x, xb == neg_inf_bits)
+    elseif (xb >= 0) then
+      ! Large positive x -> overflow to +Inf
+      a = x * huge(x)
+    else
+      ! Large negative x -> underflow to 0
+      a = tiny(x) * tiny(x)
+    endif
     return
   endif
 
@@ -246,12 +250,8 @@ module procedure exp_repro
   ! If K = nint(x / ln2) then r is in [-1/2N ln2, 1/2N ln2] and exp(r) can be
   ! estimated by a sufficiently accurate polynomial.
 
-  ! First clamp x to the precision-based numerical range of exp().
-  ! This allows for safe detection of over/underflow in the subnormal handler.
-  xc = min(max(x, xmin), xmax)
-
   ! Compute Z = N K + j, where r = x - Z (ln 2 / N)
-  Z = NEAREST_INT(xc * n_ln2)
+  Z = NEAREST_INT(x * n_ln2)
   Zi = transfer(Z + round_bias, int_mold) - round_bias_bits
 
   table_index = iand(Zi, index_mask)
@@ -261,7 +261,7 @@ module procedure exp_repro
   ! some expected loss of precision.  To compensate, we use a Cody-Waite
   ! correction which separates ln2 into its upper 32 bits and a lower residual.
 
-  r = (xc - Z * ln2_ndiv_hi) - Z * ln2_ndiv_lo
+  r = (x - Z * ln2_ndiv_hi) - Z * ln2_ndiv_lo
 
   ! NOTE: Aggressive optimizers may reduce this to x - K * (ln2_hi + ln2_lo)
   ! which is no better than x - K ln2.
