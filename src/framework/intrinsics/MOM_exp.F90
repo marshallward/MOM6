@@ -50,231 +50,388 @@ real, parameter :: round_bias = 1.5 * 2_int_kind**(digits(real_mold) - 1)
 
 contains
 
-!> Reproducible exponential function
-!!
-!! Compute exp(x) with bitwise reproducibility across platforms.
 module procedure exp_repro
   ! ln2 estimates
   real, parameter :: ln2 = 0.693147180559945309417232121458176568
-    !< log(2): 0.693147180559945309417232... [nondim]
   real, parameter :: I_ln2 = 1.44269504088896340735992468100189214
-    !< 1 / ln2: 1.4426950408889634073599... [nondim]
 
-  ! The max and min x values between which x remains finite.
   real, parameter :: xmax &
       = real(maxexponent(real_mold) + 1, kind(real_mold)) * ln2
-    !< Largest x value before exp(x) overflow [nondim]
   real, parameter :: xmin &
       = real(minexponent(real_mold) - digits(real_mold) - 1, kind(real_mold)) * ln2
-    !< Smallest x value before exp(x) underflow [nondim]
 
-  ! Double-double precision of ln2 used in range reduction (Cody-Waite)
-  ! NOTE: This split assumes double-precision.
+  ! Cody-Waite split
   real, parameter :: ln2_hi = 0.69314718036912381649017333984375
-    !< Upper 32 bits of ln2: 6.93147180369123816490e-01 [nondim]
   real, parameter :: ln2_lo = 1.90821492927058770002e-10
-    !< Lower precision bits of ln2: 1.90821492927058770002e-10 [nondim]
 
-  ! Table constants (may not be used)
+  ! Table constants
   integer, parameter :: NTABLE = 128
+  integer, parameter :: TABLE_BITS = 7
+
   real, parameter :: I_NTABLE = 1. / real(NTABLE)
   real, parameter :: TABLE_INV_LN2 = NTABLE * I_ln2
   real, parameter :: TABLE_LN2_HI = I_NTABLE * ln2_hi
   real, parameter :: TABLE_LN2_LO = I_NTABLE * ln2_lo
+
   integer(int_kind), parameter :: index_mask = int(NTABLE - 1, int_kind)
 
-  ! More table stuff
-  real :: Z
-  integer(kind=int_kind) :: iz, kz
-  integer(int32) :: table_index
+  ! Integer bit pattern corresponding to round_bias itself.
+  integer(int_kind), parameter :: round_bias_bits = transfer(round_bias, int_mold)
 
   integer :: i
 
-  ! TODO: These are convenient for table generation but may not be reproducible
-  !   and should be replaced in the final version.
-
-  ! Split 2**(i/N) into real precision and a scaled residual:
-  !   2**(i/N) = [2**(i/N)] (1 + tail)
-
-  ! 2**(i/N)
   real, parameter :: exp2_table(0:NTABLE-1) &
       = [(2.**(real(i) / real(NTABLE)), i=0,NTABLE-1)]
 
-  ! tail = exact(2**(i/N)) - rounded(2**(i/N))
   real, parameter :: exp2_table_tail(0:NTABLE-1) &
       = [(2._real128**(real(i, real128) / real(NTABLE, real128)) &
           / 2.**(real(i) / real(NTABLE)), i=0,NTABLE-1)] - 1.
 
-  ! Range of K = nint(x / ln2) for which direct exponent scaling is safe.
-  ! Beyond this range, a bias is applied to handle subnormals and overflow.
-  ! NOTE: Fortran exponent is defined as one less than IEEE exponent.
-  real, parameter :: Kmin = real(minexponent(real_mold) + 1)
-    !< Minimum K before subnormal scaling is needed
-    !! Kmin = (minexponent() - 1) + 1 (for min exp(r)) + 1 (safety buffer)
-  real, parameter :: Kmax = real(maxexponent(real_mold) - 2)
-    !< Maximum K before overflow scaling is needed
-    !! Kmax = (maxexponent() - 1) - 0 (max exp(r)) - 1 (safety buffer)
-  integer(kind=int_kind), parameter :: Kbias = maxexponent(real_mold) - 2
-    !< Exponent adjustment used for overflow and subnormal scaling
-    !! Any bias which rescales 2**K exp(r) to O(1) works here.
+  ! These can now be integer quantities.
+  integer(int_kind), parameter :: Kmin = minexponent(real_mold) + 1
+  integer(int_kind), parameter :: Kmax = maxexponent(real_mold) - 2
 
-  ! Range-reduction variables
+  integer(int_kind), parameter :: Kbias = maxexponent(real_mold) - 2
+
   real :: xc
-    ! x after being bounded by xmin and xmax [nondim]
   real :: x_ln2
-    ! Cached value of x / ln2 [nondim]
-  real :: K
-    ! Nearest IEEE-rounded integer to (x / ln2) [nondim]
-    ! NOTE: K is stored as real to avoid int/real type conversions
+  real :: Z
   real :: r
-    ! Range-reduced input, r = x - K ln2 [nondim]
-  real :: e
-    ! Exponent of range-reduced input, e = 2**(table_index/NTABLE) exp(r) [nondim]
-  real :: expm1_r
-    ! Approximation to exp(r) - 1 [nondim]
   real :: scale
-    ! Table value for 2**(table_index/NTABLE) [nondim]
   real :: tail
-    ! Relative table correction for scale [nondim]
+  real :: expm1_r
 
-  integer(kind=int_kind) :: xb, Kb, eb
-    ! Bit representations of x, K, e
+  integer(int_kind) :: xb
+  integer(int_kind) :: iz
+  integer(int_kind) :: Zi
+  integer(int_kind) :: K
+  integer(int_kind) :: j
+  integer(int_kind) :: sb
+  integer(int_kind) :: fb
 
-  integer(kind=int_kind) :: j
-    ! Bias added to K to compensate for exponent K beyond {-1022,..,+1023}.
-  integer(kind=int_kind) :: fb
-    ! Bit representation of the j-bias, 2**j
+  integer(int32) :: table_index
 
   logical :: nonfinite
-    ! True if input is a nonfinite float (+/-Inf, NaN)
 
   ! 1. Nonfinite handling
-  ! ---------------------
-  ! Nonfinites must be handled first to prevent their appearance in
-  ! calculations, which may raise unwanted floating point signals.
-
   xb = transfer(x, int_mold)
   nonfinite = iand(xb, pos_inf_bits) == pos_inf_bits
 
   if (nonfinite) then
-    ! exp(-Inf) = 0, otherwise pass-through +Inf and +/-NaN values
-    ! Compute x + x to trigger `Invalid` for signaled NaNs.
     a = merge(0., x + x, xb == neg_inf_bits)
     return
   endif
 
-  ! 2. Range Reduction
-  ! ------------------
-  ! Apply a range reduction of r = x - K ln2, so that exp(x) = 2**K exp(r).
-  ! If K = nint(x / ln2) then r is in [-1/2 ln2, 1/2 ln2] and exp(r) can be
-  ! estimated by a highly accurate polynomial.
-
-  ! First clamp x to the precision-based numerical range of exp().
-  ! This allows for safe detection of over/underflow in the subnormal handler.
+  ! 2. Range reduction
   xc = min(max(x, xmin), xmax)
 
-  ! Compute K = nint(x / ln2)
-
-  ! Z = N*K + j
-  !   N = table
-  !   K = nint(x/ln2), the ln2 integral step
-  !   j = the j'th (of N) ln2 integral substep
   x_ln2 = xc * TABLE_INV_LN2
 
-  !! This is slower?
-  !Z = NEAREST_INT(x_ln2)
-  !iz = transfer(Z + round_bias, int_mold)
-
-  !*!! Faster, and does not even require the NEAREST_INT() macro
-  !*!Z = x_ln2 + round_bias
-  !*!iz = transfer(Z, int_mold)
-  !*!Z = Z - round_bias
-
-  !*!table_index = iand(iz, index_mask)
-  !*!!table_index = modulo(iz, NTABLE)
-
-  !*!kz = iand(iz, not(index_mask))
-  !*!K = (transfer(kz, real_mold) - round_bias) * I_NTABLE
-
-  !*!! version 3 (works)
-  !*!Z = NEAREST_INT(x_ln2)
-  !*!table_index = modulo(int(Z), NTABLE)
-  !*!K = (Z - real(table_index)) * I_NTABLE
-
-  ! version 4
+  ! Z = nearest integer to NTABLE*x/ln2.
   Z = NEAREST_INT(x_ln2)
+
+  ! Recover the integer Z directly from the round-bias encoding.
   iz = transfer(Z + round_bias, int_mold)
-  table_index = iand(iz, index_mask)
+  Zi = iz - round_bias_bits
 
-  ! K = (Z - j)/N
-  kz = iand(iz, not(index_mask))
-  K = (transfer(kz, real_mold) - round_bias) * I_NTABLE
+  ! Zi = NTABLE*K + table_index.
+  !
+  ! Since NTABLE is a power of two, the low bits give the table index,
+  ! including for negative Zi.
+  table_index = int(iand(Zi, index_mask), int32)
 
-  ! NOTE: Performance may degrade if NEAREST_INT is not inlined.
+  ! Arithmetic right shift implements floor(Zi / NTABLE), which is exactly
+  ! the K paired with table_index in [0,NTABLE-1].
+  K = shifta(Zi, TABLE_BITS)
 
-  ! Since K ~ x/ln2, the terms in r = x - K ln2 will nearly cancel and there is
-  ! some expected loss of precision.
-
-  ! To compensate, we use a Cody-Waite correction which separates ln2 into its
-  ! upper 32 bits and a lower residual.
+  ! Cody-Waite range reduction still uses real Z.
   r = (xc - Z * TABLE_LN2_HI) - Z * TABLE_LN2_LO
 
-  ! NOTE: Aggressive optimizers may reduce this to x - K * (ln2_hi + ln2_lo)
-  ! which is no better than x - K ln2.
-
   ! 3. Polynomial approximation
-  ! ---------------------------
-  ! Estimate exp(r) = 1 + r * P(r) where P(r) is a 10th order Remez minimax
-  ! polynomial of (exp(r) - 1)/r.  This form ensures that exp(0) = 1 exactly.
-
-  !e = exp_remez_horner_10(r)
-  !e = exp_remez_estrin_10(r)
-  !e = exp_remez_estrin_full_10(r)
-
-  ! Non-tail table scaling
-  !e = exp2_table(table_index) * exp_remez_estrin_10(r)
-
-  ! Table evaluation
-  scale = exp2_table(table_index)
   tail = exp2_table_tail(table_index)
   expm1_r = exp_remez_expm1_estrin_4(r)
-  ! Evaluate the small correction before the final addition to scale.
-  e = scale + (scale * (tail + expm1_r))
 
-  ! 4. Unscaling
-  ! ------------
-  ! Compute exp(x) = 2**K e, an exact power-of-2 calculation.
-  ! Adjust scaling to compensate for subnormal output.
+  ! 4. Scaling
+  !
+  ! Keep the exponent manipulation on the table head rather than constructing
+  ! e first and then modifying e's exponent.
 
-  ! exp(r) has range [0.707, 1.414], so it shifts K by either 0 or -1.
-  ! A resolved exponent is in the range {-1022,1023}, so K must be in
-  ! {-1021,1023}.  (For safety, we further reduce the range by 1).
+  ! Apply a large compensating bias near the exponent limits.
+  j = merge( Kbias, 0_int_kind, K < Kmin) &
+    + merge(-Kbias, 0_int_kind, K > Kmax)
 
-  ! Determine if K is outside the supported exponent range.
-  ! If so, then apply a bias j to normalize the exponent.
-  ! Kbias is chosen so that the exponent is "something near 1".
-  j = merge(Kbias, 0_int_kind, K < Kmin) + merge(-Kbias, 0_int_kind, K > Kmax)
+  ! Construct
+  !
+  !     scale = 2**(K+j) * 2**(table_index/NTABLE)
+  !
+  ! by directly modifying the exponent of the table head.
+  sb = transfer(exp2_table(table_index), int_mold)
+  sb = sb + ishft(K + j, expbit)
+  scale = transfer(sb, real_mold)
 
-  ! Get the bit representation of exp(r)
-  eb = transfer(e, int_mold)
+  ! exp(x), still carrying the j bias.
+  !
+  ! This retains your current evaluation ordering:
+  !
+  !     scale + scale*(tail + expm1_r)
+  !
+  a = scale + scale * (tail + expm1_r)
 
-  ! This is a fast alternative to int(K), similar to fast_rint().
-  ! Kb includes the biased 2**52 in its exponent field, but these are dropped
-  ! during the later ishft() operation.
-  Kb = transfer(K + round_bias, int_mold)
-
-  ! Rescale to exp(r) to exp(x), possibly including the j bias.
-  eb = eb + ishft(Kb + j, expbit)
-  a = transfer(eb, real_mold)
-
-  ! Undo the 2**j bias as floating point multiplication.
-  ! - For "normals", this has no effect.
-  ! - For subnormals, this will force subnormal estimation (if enabled).
-  ! - For resolvable K beyond this range, it triggers an over/underflow.
-  ! - Extreme values of K have already been filtered out by the min/max step.
+  ! Undo the j bias.
+  !
+  ! For normal values j=0 and this is multiplication by exactly 1.
+  ! For the underflow path this performs the final floating-point scaling
+  ! needed to produce subnormals.
   fb = ishft(int(expbias, int_kind) - j, expbit)
   a = a * transfer(fb, real_mold)
+
 end procedure exp_repro
+
+!*!!> Reproducible exponential function
+!*!!!
+!*!!! Compute exp(x) with bitwise reproducibility across platforms.
+!*!module procedure exp_repro
+!*!  ! ln2 estimates
+!*!  real, parameter :: ln2 = 0.693147180559945309417232121458176568
+!*!    !< log(2): 0.693147180559945309417232... [nondim]
+!*!  real, parameter :: I_ln2 = 1.44269504088896340735992468100189214
+!*!    !< 1 / ln2: 1.4426950408889634073599... [nondim]
+!*!
+!*!  ! The max and min x values between which x remains finite.
+!*!  real, parameter :: xmax &
+!*!      = real(maxexponent(real_mold) + 1, kind(real_mold)) * ln2
+!*!    !< Largest x value before exp(x) overflow [nondim]
+!*!  real, parameter :: xmin &
+!*!      = real(minexponent(real_mold) - digits(real_mold) - 1, kind(real_mold)) * ln2
+!*!    !< Smallest x value before exp(x) underflow [nondim]
+!*!
+!*!  ! Double-double precision of ln2 used in range reduction (Cody-Waite)
+!*!  ! NOTE: This split assumes double-precision.
+!*!  real, parameter :: ln2_hi = 0.69314718036912381649017333984375
+!*!    !< Upper 32 bits of ln2: 6.93147180369123816490e-01 [nondim]
+!*!  real, parameter :: ln2_lo = 1.90821492927058770002e-10
+!*!    !< Lower precision bits of ln2: 1.90821492927058770002e-10 [nondim]
+!*!
+!*!  ! Table constants (may not be used)
+!*!  integer, parameter :: NTABLE = 128
+!*!  real, parameter :: I_NTABLE = 1. / real(NTABLE)
+!*!  real, parameter :: TABLE_INV_LN2 = NTABLE * I_ln2
+!*!  real, parameter :: TABLE_LN2_HI = I_NTABLE * ln2_hi
+!*!  real, parameter :: TABLE_LN2_LO = I_NTABLE * ln2_lo
+!*!  integer(int_kind), parameter :: index_mask = int(NTABLE - 1, int_kind)
+!*!
+!*!  ! More table stuff
+!*!  real :: Z
+!*!  integer(kind=int_kind) :: iz, kz
+!*!  integer(int32) :: table_index
+!*!
+!*!  integer :: i
+!*!
+!*!  ! TODO: These are convenient for table generation but may not be reproducible
+!*!  !   and should be replaced in the final version.
+!*!
+!*!  ! Split 2**(i/N) into real precision and a scaled residual:
+!*!  !   2**(i/N) = [2**(i/N)] (1 + tail)
+!*!
+!*!  ! 2**(i/N)
+!*!  real, parameter :: exp2_table(0:NTABLE-1) &
+!*!      = [(2.**(real(i) / real(NTABLE)), i=0,NTABLE-1)]
+!*!
+!*!  ! tail = exact(2**(i/N)) - rounded(2**(i/N))
+!*!  real, parameter :: exp2_table_tail(0:NTABLE-1) &
+!*!      = [(2._real128**(real(i, real128) / real(NTABLE, real128)) &
+!*!          / 2.**(real(i) / real(NTABLE)), i=0,NTABLE-1)] - 1.
+!*!
+!*!  ! Range of K = nint(x / ln2) for which direct exponent scaling is safe.
+!*!  ! Beyond this range, a bias is applied to handle subnormals and overflow.
+!*!  ! NOTE: Fortran exponent is defined as one less than IEEE exponent.
+!*!  !*!real, parameter :: Kmin = real(minexponent(real_mold) + 1)
+!*!  !*!  !< Minimum K before subnormal scaling is needed
+!*!  !*!  !! Kmin = (minexponent() - 1) + 1 (for min exp(r)) + 1 (safety buffer)
+!*!  !*!real, parameter :: Kmax = real(maxexponent(real_mold) - 2)
+!*!  !*!  !< Maximum K before overflow scaling is needed
+!*!  !*!  !! Kmax = (maxexponent() - 1) - 0 (max exp(r)) - 1 (safety buffer)
+!*!  integer(kind=int_kind), parameter :: Kbias = maxexponent(real_mold) - 2
+!*!    !< Exponent adjustment used for overflow and subnormal scaling
+!*!    !! Any bias which rescales 2**K exp(r) to O(1) works here.
+!*!
+!*!  integer, parameter :: Kmin = minexponent(real_mold) + 1
+!*!    !< Minimum K before subnormal scaling is needed
+!*!    !! Kmin = (minexponent() - 1) + 1 (for min exp(r)) + 1 (safety buffer)
+!*!  integer, parameter :: Kmax = maxexponent(real_mold) - 2
+!*!    !< Maximum K before overflow scaling is needed
+!*!    !! Kmax = (maxexponent() - 1) - 0 (max exp(r)) - 1 (safety buffer)
+!*!
+!*!  ! Range-reduction variables
+!*!  real :: xc
+!*!    ! x after being bounded by xmin and xmax [nondim]
+!*!  real :: x_ln2
+!*!    ! Cached value of x / ln2 [nondim]
+!*!  !*!real :: K
+!*!    ! Nearest IEEE-rounded integer to (x / ln2) [nondim]
+!*!    ! NOTE: K is stored as real to avoid int/real type conversions
+!*!  real :: r
+!*!    ! Range-reduced input, r = x - K ln2 [nondim]
+!*!  real :: e
+!*!    ! Exponent of range-reduced input, e = 2**(table_index/NTABLE) exp(r) [nondim]
+!*!  real :: expm1_r
+!*!    ! Approximation to exp(r) - 1 [nondim]
+!*!  real :: scale
+!*!    ! Table value for 2**(table_index/NTABLE) [nondim]
+!*!  real :: tail
+!*!    ! Relative table correction for scale [nondim]
+!*!
+!*!  integer(kind=int_kind) :: xb, Kb, eb
+!*!    ! Bit representations of x, K, e
+!*!
+!*!  integer(kind=int_kind) :: j
+!*!    ! Bias added to K to compensate for exponent K beyond {-1022,..,+1023}.
+!*!  integer(kind=int_kind) :: fb
+!*!    ! Bit representation of the j-bias, 2**j
+!*!
+!*!  logical :: nonfinite
+!*!    ! True if input is a nonfinite float (+/-Inf, NaN)
+!*!
+!*!  ! testing
+!*!  integer(int_kind), parameter :: round_bias_bits = transfer(round_bias,int_mold)
+!*!  integer(int_kind) :: n, k
+!*!
+!*!  ! 1. Nonfinite handling
+!*!  ! ---------------------
+!*!  ! Nonfinites must be handled first to prevent their appearance in
+!*!  ! calculations, which may raise unwanted floating point signals.
+!*!
+!*!  xb = transfer(x, int_mold)
+!*!  nonfinite = iand(xb, pos_inf_bits) == pos_inf_bits
+!*!
+!*!  if (nonfinite) then
+!*!    ! exp(-Inf) = 0, otherwise pass-through +Inf and +/-NaN values
+!*!    ! Compute x + x to trigger `Invalid` for signaled NaNs.
+!*!    a = merge(0., x + x, xb == neg_inf_bits)
+!*!    return
+!*!  endif
+!*!
+!*!  ! 2. Range Reduction
+!*!  ! ------------------
+!*!  ! Apply a range reduction of r = x - K ln2, so that exp(x) = 2**K exp(r).
+!*!  ! If K = nint(x / ln2) then r is in [-1/2 ln2, 1/2 ln2] and exp(r) can be
+!*!  ! estimated by a highly accurate polynomial.
+!*!
+!*!  ! First clamp x to the precision-based numerical range of exp().
+!*!  ! This allows for safe detection of over/underflow in the subnormal handler.
+!*!  xc = min(max(x, xmin), xmax)
+!*!
+!*!  ! Compute K = nint(x / ln2)
+!*!
+!*!  ! Z = N*K + j
+!*!  !   N = table
+!*!  !   K = nint(x/ln2), the ln2 integral step
+!*!  !   j = the j'th (of N) ln2 integral substep
+!*!  x_ln2 = xc * TABLE_INV_LN2
+!*!
+!*!  !! This is slower?
+!*!  !Z = NEAREST_INT(x_ln2)
+!*!  !iz = transfer(Z + round_bias, int_mold)
+!*!
+!*!  !*!! Faster, and does not even require the NEAREST_INT() macro
+!*!  !*!Z = x_ln2 + round_bias
+!*!  !*!iz = transfer(Z, int_mold)
+!*!  !*!Z = Z - round_bias
+!*!
+!*!  !*!table_index = iand(iz, index_mask)
+!*!  !*!!table_index = modulo(iz, NTABLE)
+!*!
+!*!  !*!kz = iand(iz, not(index_mask))
+!*!  !*!K = (transfer(kz, real_mold) - round_bias) * I_NTABLE
+!*!
+!*!  !*!! version 3 (works)
+!*!  !*!Z = NEAREST_INT(x_ln2)
+!*!  !*!table_index = modulo(int(Z), NTABLE)
+!*!  !*!K = (Z - real(table_index)) * I_NTABLE
+!*!
+!*!  ! version 4
+!*!  Z = NEAREST_INT(x_ln2)
+!*!  iz = transfer(Z + round_bias, int_mold)
+!*!  !table_index = iand(iz, index_mask)
+!*!
+!*!  !! K = (Z - j)/N
+!*!  !kz = iand(iz, not(index_mask))
+!*!  !K = (transfer(kz, real_mold) - round_bias) * I_NTABLE
+!*!
+!*!  n = iz - round_bias_bits
+!*!  table_index = iand(n, index_mask)
+!*!  k = shifta(n, 7)
+!*!
+!*!  ! NOTE: Performance may degrade if NEAREST_INT is not inlined.
+!*!
+!*!  ! Since K ~ x/ln2, the terms in r = x - K ln2 will nearly cancel and there is
+!*!  ! some expected loss of precision.
+!*!
+!*!  ! To compensate, we use a Cody-Waite correction which separates ln2 into its
+!*!  ! upper 32 bits and a lower residual.
+!*!  r = (xc - Z * TABLE_LN2_HI) - Z * TABLE_LN2_LO
+!*!
+!*!  ! NOTE: Aggressive optimizers may reduce this to x - K * (ln2_hi + ln2_lo)
+!*!  ! which is no better than x - K ln2.
+!*!
+!*!  ! 3. Polynomial approximation
+!*!  ! ---------------------------
+!*!  ! Estimate exp(r) = 1 + r * P(r) where P(r) is a 10th order Remez minimax
+!*!  ! polynomial of (exp(r) - 1)/r.  This form ensures that exp(0) = 1 exactly.
+!*!
+!*!  !e = exp_remez_horner_10(r)
+!*!  !e = exp_remez_estrin_10(r)
+!*!  !e = exp_remez_estrin_full_10(r)
+!*!
+!*!  ! Non-tail table scaling
+!*!  !e = exp2_table(table_index) * exp_remez_estrin_10(r)
+!*!
+!*!  ! Table evaluation
+!*!  scale = exp2_table(table_index)
+!*!  tail = exp2_table_tail(table_index)
+!*!  expm1_r = exp_remez_expm1_estrin_4(r)
+!*!  ! Evaluate the small correction before the final addition to scale.
+!*!  e = scale + scale * (tail + expm1_r)
+!*!
+!*!  ! 4. Unscaling
+!*!  ! ------------
+!*!  ! Compute exp(x) = 2**K e, an exact power-of-2 calculation.
+!*!  ! Adjust scaling to compensate for subnormal output.
+!*!
+!*!  ! exp(r) has range [0.707, 1.414], so it shifts K by either 0 or -1.
+!*!  ! A resolved exponent is in the range {-1022,1023}, so K must be in
+!*!  ! {-1021,1023}.  (For safety, we further reduce the range by 1).
+!*!
+!*!  ! Determine if K is outside the supported exponent range.
+!*!  ! If so, then apply a bias j to normalize the exponent.
+!*!  ! Kbias is chosen so that the exponent is "something near 1".
+!*!  j = merge(Kbias, 0_int_kind, K < Kmin) + merge(-Kbias, 0_int_kind, K > Kmax)
+!*!
+!*!  ! Get the bit representation of exp(r)
+!*!  eb = transfer(e, int_mold)
+!*!
+!*!  ! This is a fast alternative to int(K), similar to fast_rint().
+!*!  ! Kb includes the biased 2**52 in its exponent field, but these are dropped
+!*!  ! during the later ishft() operation.
+!*!  !**!Kb = transfer(K + round_bias, int_mold)
+!*!
+!*!  !**!! Rescale to exp(r) to exp(x), possibly including the j bias.
+!*!  !**!eb = eb + ishft(Kb + j, expbit)
+!*!  !**!a = transfer(eb, real_mold)
+!*!
+!*!
+!*!  eb = eb + ishft(k + j, expbit)
+!*!  a = transfer(eb, real_mold)
+!*!
+!*!
+!*!  ! Undo the 2**j bias as floating point multiplication.
+!*!  ! - For "normals", this has no effect.
+!*!  ! - For subnormals, this will force subnormal estimation (if enabled).
+!*!  ! - For resolvable K beyond this range, it triggers an over/underflow.
+!*!  ! - Extreme values of K have already been filtered out by the min/max step.
+!*!  fb = ishft(int(expbias, int_kind) - j, expbit)
+!*!  a = a * transfer(fb, real_mold)
+!*!end procedure exp_repro
 
 
 !> Remez minimax polynomial for exp(x) over [-1/2 ln2, 1/2 ln2] in Horner form
