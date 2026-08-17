@@ -169,13 +169,14 @@ real, parameter :: exp2_table_tail(0:NTABLE-1) = [ &
   real :: scale
   real :: tail
   real :: expm1_r
+  real :: e
 
   integer(int_kind) :: xb
   integer(int_kind) :: iz
   integer(int_kind) :: Zi
   integer(int_kind) :: K
   integer(int_kind) :: j
-  integer(int_kind) :: sb
+  integer(int_kind) :: eb
   integer(int_kind) :: fb
 
   integer(int32) :: table_index
@@ -213,41 +214,32 @@ real, parameter :: exp2_table_tail(0:NTABLE-1) = [ &
   ! the K paired with table_index in [0,NTABLE-1].
 
   ! TODO: Preprocess this?
-  !K = shifta(Zi, TABLE_BITS)
-  K = (Zi - int(table_index, int_kind)) / NTABLE
+  K = shifta(Zi, TABLE_BITS)
+  !K = (Zi - int(table_index, int_kind)) / NTABLE
 
   ! Cody-Waite range reduction still uses real Z.
   r = (xc - Z * TABLE_LN2_HI) - Z * TABLE_LN2_LO
 
   ! 3. Polynomial approximation
+  scale = exp2_table(table_index)
   tail = exp2_table_tail(table_index)
   expm1_r = exp_remez_expm1_estrin_4(r)
+  ! Evaluate the small correction before the final addition to scale.
+  e = scale + scale * (tail + expm1_r)
 
   ! 4. Scaling
   !
-  ! Keep the exponent manipulation on the table head rather than constructing
-  ! e first and then modifying e's exponent.
+  ! Compute exp(x) = 2**K e, an exact power-of-2 calculation.
+  ! Adjust scaling to compensate for subnormal output.
 
   ! Apply a large compensating bias near the exponent limits.
   j = merge( Kbias, 0_int_kind, K < Kmin) &
     + merge(-Kbias, 0_int_kind, K > Kmax)
 
-  ! Construct
-  !
-  !     scale = 2**(K+j) * 2**(table_index/NTABLE)
-  !
-  ! by directly modifying the exponent of the table head.
-  sb = transfer(exp2_table(table_index), int_mold)
-  sb = sb + ishft(K + j, expbit)
-  scale = transfer(sb, real_mold)
-
-  ! exp(x), still carrying the j bias.
-  !
-  ! This retains your current evaluation ordering:
-  !
-  !     scale + scale*(tail + expm1_r)
-  !
-  a = scale + scale * (tail + expm1_r)
+  ! Get the bit representation of exp(r) and scale by 2^(K+j)
+  eb = transfer(e, int_mold)
+  eb = eb + ishft(K + j, expbit)
+  a = transfer(eb, real_mold)
 
   ! Undo the j bias.
   !

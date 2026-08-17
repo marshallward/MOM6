@@ -12,7 +12,7 @@ implicit none
 
 integer, parameter :: npts = 100000
   !< Number of test points
-integer, parameter :: niter = 20
+integer, parameter :: niter = 200
   !< Number of timing iterations
 real, parameter :: xmin = -10.
   !< Minimum x value
