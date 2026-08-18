@@ -454,6 +454,39 @@ subroutine test_exp_ulp_accuracy
 end subroutine test_exp_ulp_accuracy
 
 
+!> Write ULP error data to CSV file for analysis
+subroutine test_exp_ulp_csv
+  integer, parameter :: npts = 10000
+  real, parameter :: xmin = -10.
+  real, parameter :: xmax = 10.
+
+  real :: x, I_npts
+  real :: val
+  real(kind=realq) :: ref
+  real :: ulp_val, ulp_err
+  integer :: i, unit
+
+  I_npts = 1. / (npts - 1)
+
+  open(newunit=unit, file='exp_ulp_test.csv', status='replace')
+  write(unit, '(A)') 'x,ulp_err'
+
+  do i = 1, npts
+    x = xmin + (i - 1) * ((xmax - xmin) * I_npts)
+    val = exp_repro(x)
+    ref = exp(real(x, realq))
+
+    ulp_val = spacing(real(ref, kind(val)))
+    ulp_err = abs(val - real(ref)) / ulp_val
+
+    write(unit, '(ES24.17,",",ES24.17)') x, ulp_err
+  enddo
+
+  close(unit)
+  print '(1x,a,i0,a)', 'Wrote exp_ulp_test.csv with ', npts, ' samples'
+end subroutine test_exp_ulp_csv
+
+
 !> Compute the function accuracy relative to a real128-precision reference.
 !! Absolute, relative, and ULP error is computed, as well as the number of
 !! points above 0.5 and 1 ULP.  An error is raised if any point exceeds the
@@ -972,6 +1005,7 @@ subroutine run_intrinsic_functions_tests
   ! Evaluate error if quad precision is available
   if (realq >= 0) then
     call suite%add(test_exp_ulp_accuracy, "test_exp_ulp_accuracy")
+    call suite%add(test_exp_ulp_csv, "test_exp_ulp_csv")
   endif
 
   ! Property tests
