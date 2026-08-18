@@ -237,7 +237,7 @@ module procedure exp_repro
       a = x * huge(x)
     else
       ! Large negative x -> underflow to 0
-      a = tiny(x) * tiny(x)
+      a = -x * tiny(x) * tiny(x)
     endif
     return
   endif

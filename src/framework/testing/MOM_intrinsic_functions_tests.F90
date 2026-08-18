@@ -5,7 +5,6 @@
 !> Unit tests for MOM_intrinsic_functions
 module MOM_intrinsic_functions_tests
 
-!use, intrinsic :: iso_fortran_env, only : real128
 use, intrinsic :: ieee_arithmetic, only : ieee_value
 use, intrinsic :: ieee_arithmetic, only : ieee_quiet_nan, ieee_signaling_nan
 use, intrinsic :: ieee_arithmetic, only : ieee_positive_inf, ieee_negative_inf
@@ -25,9 +24,10 @@ implicit none ; private
 
 public :: run_intrinsic_functions_tests
 
-! testin
-integer, parameter :: realq = selected_real_kind(p=30, r=300)
-integer, parameter :: realx = merge(realq, kind(1.), realq >= 0.)
+integer, parameter :: realquad = selected_real_kind(p=30, r=300)
+  !< Potential real128 precision kind.  If unavailable, this will be negative.
+integer, parameter :: realq = merge(realquad, kind(1.), realquad >= 0.)
+  !< Placeholder real128 for declarations.  Unused if real128 is unavailable.
 
 real, parameter :: rmold = 0.
   !< Mold value for default real
@@ -405,7 +405,7 @@ subroutine test_exp_ulp_accuracy
 
   real :: val(npts), val_vec(npts)
   real :: val_exp(npts), val_exp_vec(npts)
-  real(kind=realx) :: val_quad(npts), val_quad_vec(npts)
+  real(kind=realq) :: val_quad(npts), val_quad_vec(npts)
 
   integer :: i
 
@@ -422,7 +422,7 @@ subroutine test_exp_ulp_accuracy
   do i = 1, npts
     val_exp(i) = exp(x(i))
     val(i) = exp_repro(x(i))
-    val_quad(i) = exp(real(x(i), realx))
+    val_quad(i) = exp(real(x(i), realq))
 
     ! Impossible branch to prevent vectorization
     if (val(i) < 0.) exit
@@ -431,7 +431,7 @@ subroutine test_exp_ulp_accuracy
   ! Vector-favorable evaluation
   val_exp_vec = exp(x)
   val_vec = exp_repro(x)
-  val_quad_vec = exp(real(x, realx))
+  val_quad_vec = exp(real(x, realq))
 
   ! Assert that exp_repro() is within 2 ULP.
   print '(1x,a)', '=== scalar exp_repro() accuracy'
@@ -463,12 +463,12 @@ subroutine check_ulp_accuracy(x, val, ref, max_ulp_tol)
     !< Input grid
   real, intent(in) :: val(:)
     !< Output estimates
-  real(kind=realx), intent(in) :: ref(:)
+  real(kind=realq), intent(in) :: ref(:)
     !< Reference estimates in real128 precision
   real, optional, intent(in) :: max_ulp_tol
     !< Maximum ULP tolerance
 
-  real(realx) :: err, rel_err, ulp_err
+  real(realq) :: err, rel_err, ulp_err
     ! Absolute, relative, and ULP error of val relative to ref.
 
   real :: max_abs_err, max_rel_err, max_ulp
@@ -496,7 +496,7 @@ subroutine check_ulp_accuracy(x, val, ref, max_ulp_tol)
 
   do i = 1, npts
     ! Absolute error
-    err = abs(real(val(i), realx) - ref(i))
+    err = abs(real(val(i), realq) - ref(i))
 
     sum_abs_err = sum_abs_err + err
     sum_sq_err = sum_sq_err + err * err
