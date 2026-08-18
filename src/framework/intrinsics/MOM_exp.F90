@@ -11,9 +11,6 @@ submodule (MOM_intrinsic_functions) MOM_exp
 use, intrinsic :: iso_fortran_env, only : int32, int64
 use, intrinsic :: ieee_arithmetic, only : ieee_rint
 
-! Temporarily used for table generation
-use, intrinsic :: iso_fortran_env, only : real128
-
 implicit none
 
 ! Molds for transfers and numerical format queries
@@ -47,6 +44,9 @@ integer(kind=int_kind), parameter :: neg_inf_bits &
 ! Fast integer rounding offset
 real, parameter :: round_bias = 1.5 * 2_int_kind**(digits(real_mold) - 1)
   !< Binary offset used to trigger rounding of fractional values
+integer(int_kind), parameter :: round_bias_bits &
+    = transfer(round_bias, int_mold)
+  !< Bit representation of rounding bias
 
 contains
 
@@ -95,9 +95,9 @@ module procedure exp_repro
   ! where 2**(j/n) is split into real precision and a scaled residual.
   !   2**(j/ndiv) = real(2**(j/N)) * (1 + residual)
 
-  ! real, parameter :: exp2_table(0:ndiv-1) &
+  ! real, parameter :: idiv_scale_lookup(0:ndiv-1) &
   !     = [(2.**(real(i) / real(ndiv)), i=0,ndiv-1)]
-  real, parameter :: exp2_table(0:ndiv-1) = [ &
+  real, parameter :: idiv_scale_lookup(0:ndiv-1) = [ &
     1.00000000000000000e+00, 1.00542990111280273e+00, 1.01088928605170048e+00, 1.01637831491095310e+00, &
     1.02189714865411663e+00, 1.02744594911876375e+00, 1.03302487902122841e+00, 1.03863410196137873e+00, &
     1.04427378242741375e+00, 1.04994408580068721e+00, 1.05564517836055716e+00, 1.06137722728926209e+00, &
@@ -132,10 +132,10 @@ module procedure exp_repro
     1.95714412417540018e+00, 1.96777122323317588e+00, 1.97845602638795093e+00, 1.98919884696726634e+00  &
   ]   !< Lookup table of 2**(j/n)
 
-  !real, parameter :: exp2_table_tail(0:ndiv-1) &
-  !    = [(2._real128**(real(i, real128) / real(ndiv, real128)) &
-  !        / 2.**(real(i) / real(ndiv)), i=0,ndiv-1)] - 1.
-  real, parameter :: exp2_table_tail(0:ndiv-1) = [ &
+  ! real, parameter :: idiv_tail_lookup(0:ndiv-1) &
+  !     = [(2._real128**(real(i, real128) / real(ndiv, real128)) &
+  !         / 2.**(real(i) / real(ndiv)), i=0,ndiv-1)] - 1.
+  real, parameter :: idiv_tail_lookup(0:ndiv-1) = [ &
     0.00000000000000000e+00,  9.44788545172706630e-17, -1.50706697692603887e-17, -5.67915508282501219e-17, &
     4.99974487227263259e-17, -4.82368359999489520e-17,  7.35784687124741823e-18,  5.77323022374195081e-17, &
     8.18931763819551480e-17,  5.32689113998087777e-17,  1.66658814423267469e-18, -1.12811324546182800e-17, &
@@ -168,7 +168,7 @@ module procedure exp_repro
    -3.26692410090131783e-17, -4.36575930080793745e-17,  1.79639326598330223e-17,  3.43009252752141664e-17, &
    -5.54506561863942674e-17, -5.14900974545773279e-17,  5.33680587851415070e-17,  3.49897866119297325e-17, &
     4.57849152770600949e-17, -5.24193457539389921e-17,  2.04142788975783032e-17,  4.12484284860648776e-18  &
-  ]   !< Lookup table for residual of 2**(j/n) - real64(2**(j/n))
+  ]   !< Lookup table of r, where 2^(j/N) = real64(2^(j/N)) * (1 + r)
 
   ! Range of K = nint(x / ln2) for which direct exponent scaling is safe.
   ! Beyond this range, a bias is applied to handle subnormals and overflow.
@@ -184,26 +184,27 @@ module procedure exp_repro
     !! Any bias which rescales 2**K exp(r) to O(1) works here.
 
   ! More table stuff
-  integer(int32) :: table_index
 
   ! Range-reduction variables
+  integer :: idiv
+    ! Subdivision index
   integer(kind=int_kind) :: K
-    ! Nearest IEEE-rounded integer to (x / ln2) [nondim]
+    ! Nearest IEEE-rounded integer to x/ln2 [nondim]
   real :: Z
-    ! Nearest integer to N*K + j for N subdivisions
-    ! NOTE: Z is stored as real to avoid int/real type conversions
+    ! Nearest integer to ndiv*K + idiv for ndiv subdivisions
+    ! NOTE: Z is stored as real to avoid int-real type conversions
   integer(kind=int_kind) :: Zi
     ! Integer representation of Z
   real :: r
     ! Range-reduced input, r = x - Z ln2/N [nondim]
   real :: e
-    ! Exponent of range-reduced input, e = 2**(table_index/ndiv) exp(r) [nondim]
+    ! Exponent of range-reduced input, e = 2**(idiv/ndiv) exp(r) [nondim]
   real :: expm1_r
     ! Approximation to exp(r) - 1 [nondim]
-  real :: scale
-    ! Table value for 2**(table_index/ndiv) [nondim]
-  real :: tail
-    ! Relative table correction for scale [nondim]
+  real :: idiv_scale
+    ! Table value for 2**(idiv/ndiv) [nondim]
+  real :: idiv_tail
+    ! Relative table correction for idiv_scale [nondim]
 
   integer(kind=int_kind) :: xb, eb
     ! Bit representations of x, e
@@ -213,10 +214,7 @@ module procedure exp_repro
   integer(kind=int_kind) :: j
     ! Bias added to K to compensate for exponent K beyond {-1022,..,+1023}.
   integer(kind=int_kind) :: fb
-    ! Bit representation of the j-bias, 2**j
-
-  ! testing
-  integer(int_kind), parameter :: round_bias_bits = transfer(round_bias,int_mold)
+    ! Bit representation 2**j, the K exponent rescale
 
   ! 1. Special case handling
   ! ------------------------
@@ -254,8 +252,8 @@ module procedure exp_repro
   Z = NEAREST_INT(x * n_ln2)
   Zi = transfer(Z + round_bias, int_mold) - round_bias_bits
 
-  table_index = iand(Zi, index_mask)
-  K = (Zi - int(table_index, int_kind)) / ndiv
+  idiv = iand(Zi, index_mask)
+  K = (Zi - int(idiv, int_kind)) / ndiv
 
   ! Since K ~ x/ln2, the terms in r = x - K ln2 will nearly cancel and there is
   ! some expected loss of precision.  To compensate, we use a Cody-Waite
@@ -272,11 +270,11 @@ module procedure exp_repro
   ! polynomial of (exp(r) - 1)/r.  This form ensures that exp(0) = 1 exactly.
 
   ! Table evaluation
-  scale = exp2_table(table_index)
-  tail = exp2_table_tail(table_index)
+  idiv_scale = idiv_scale_lookup(idiv)
+  idiv_tail = idiv_tail_lookup(idiv)
   expm1_r = exp_remez_expm1_estrin_4(r)
-  ! Evaluate the small correction before the final addition to scale.
-  e = scale + scale * (tail + expm1_r)
+  ! Evaluate the small correction before the final addition to idiv_scale
+  e = idiv_scale + idiv_scale * (idiv_tail + r * expm1_r)
 
   ! 4. Unscaling
   ! ------------
@@ -334,10 +332,9 @@ pure function exp_remez_expm1_estrin_4(x) result(e)
 
   p01 = c(0) + c(1) * x
   p23 = c(2) + c(3) * x
-  p = (p01 + x2 * p23) + x4 * c(4)
 
-  ! Final assembly: exp(x) - 1 = x * p(x)
-  e = x * p
+  ! Final assembly: (exp(x) - 1)/x = p(x)
+  e = (p01 + x2 * p23) + x4 * c(4)
 end function exp_remez_expm1_estrin_4
 
 
@@ -347,11 +344,11 @@ end function exp_remez_expm1_estrin_4
 !! causing the fractional part to be rounded according to the current IEEE
 !! settings.  In almost all cases, this is nearest ties-to-even.
 !!
-!! The behavior of this function does not match nint() or anint().  The nint()
-!! function always ties away from zero, e.g. nint(2.5) = 3.
-!!
 !! The +0.5 ensures that the biased exponent of negative numbers does not drop
 !! by one, which can cause half-value rounding.
+!!
+!! The behavior of this function does not match nint() or anint().  The nint()
+!! function always ties away from zero, e.g. nint(2.5) = 3.
 !!
 !! It is essential that compilers not reduce (x+b)-b to x.  This can typically
 !! be ensured as long as parentheses are respected.  This is managed by the
