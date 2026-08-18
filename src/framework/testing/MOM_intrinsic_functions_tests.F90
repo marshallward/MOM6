@@ -744,7 +744,8 @@ subroutine test_exp_flags_underflow
 
   if (.not. ieee_flags_supported) return
 
-  x = -1000.
+  !x = -1000.
+  x = -100000.
 
   call ieee_set_flag(ieee_all, .false.)
   val = exp_repro(x)

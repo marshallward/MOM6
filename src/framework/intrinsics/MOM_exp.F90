@@ -26,6 +26,7 @@ integer(kind=int_kind), parameter :: int_mold = 0
 ! Floating point layout
 integer, parameter :: expbit = digits(real_mold) - 1
   !< Position of lowest exponent bit
+  ! NOTE: digits() includes the implicit leading digit
 integer, parameter :: signbit = storage_size(real_mold) - 1
   !< Position of sign bit
 integer, parameter :: expwidth = signbit - expbit
@@ -56,7 +57,7 @@ contains
 module procedure exp_repro
   ! ln2 estimates
   real, parameter :: ln2 = 0.693147180559945309417232121458176568
-    !< log(2): 0.693147180559945309417232... [nondim]
+    !< ln2: 0.693147180559945309417232... [nondim]
   real, parameter :: I_ln2 = 1.44269504088896340735992468100189214
     !< 1 / ln2: 1.4426950408889634073599... [nondim]
 
@@ -65,7 +66,7 @@ module procedure exp_repro
   ! We use 1024.0 as the threshold (exponent = 10); any |x| >= 1024 will
   ! definitely overflow or underflow, so we handle those specially.
   ! Values in [512, 1024) are handled by the normal path with j-bias.
-  integer(int_kind), parameter :: exp_threshold = int(expbias + 10, int_kind)
+  integer(int_kind), parameter :: exp_threshold = 10
     !< Exponent of 1024.0 (2^10); values with larger exponent need special handling
 
   ! Double-real precision of ln2 used in Cody-Waite range reduction
@@ -206,8 +207,8 @@ module procedure exp_repro
 
   integer(kind=int_kind) :: xb, eb
     ! Bit representations of x, e
-  integer(kind=int_kind) :: x_exp
-    ! Exponent bits of x
+  integer(kind=int_kind) :: xe
+    ! Biased exponent of x
 
   integer(kind=int_kind) :: j
     ! Bias added to K to compensate for exponent K beyond {-1022,..,+1023}.
@@ -220,11 +221,13 @@ module procedure exp_repro
   ! Extract exponent bits and check if |x| is too large or nonfinite.
 
   xb = transfer(x, int_mold)
-  x_exp = iand(ishft(xb, -expbit), int(2**expwidth - 1, int_kind))
 
-  if (x_exp >= exp_threshold) then
-    ! Either nonfinite (exp = 2047) or |x| >= 512
-    if (x_exp >= int(2**expwidth - 1, int_kind)) then
+  ! Extract (biased) exponent and clear sign bit
+  xe = iand(ishft(xb, -expbit), int(2**expwidth - 1, int_kind))
+
+  if (xe >= exp_threshold + expbias) then
+    ! Either nonfinite (all bits set) or |x| >= 2**exp_threshold
+    if (xe >= int(2**expwidth - 1, int_kind)) then
       ! Nonfinite: +/-Inf or NaN
       ! exp(-Inf) = 0, otherwise pass-through +Inf and +/-NaN values
       ! Compute x + x to trigger `Invalid` for signaled NaNs.
