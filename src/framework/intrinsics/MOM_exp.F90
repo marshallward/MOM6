@@ -205,7 +205,6 @@ module procedure exp_repro
     ! Table value for 2**(idiv/ndiv) [nondim]
   real :: idiv_tail
     ! Relative table correction for idiv_scale [nondim]
-
   integer(kind=int_kind) :: xb, eb
     ! Bit representations of x, e
   integer(kind=int_kind) :: x_exp
@@ -236,7 +235,7 @@ module procedure exp_repro
       a = x * huge(x)
     else
       ! Large negative x -> underflow to 0
-      a = tiny(x) * tiny(x)
+      a = tiny(x) * (tiny(x) + 0. * x)
     endif
     return
   endif
@@ -274,7 +273,7 @@ module procedure exp_repro
   idiv_tail = idiv_tail_lookup(idiv)
   expm1_r = exp_remez_expm1_estrin_4(r)
   ! Evaluate the small correction before the final addition to idiv_scale
-  e = idiv_scale + idiv_scale * (idiv_tail + r * expm1_r)
+  e = idiv_scale + idiv_scale * (idiv_tail + expm1_r)
 
   ! 4. Unscaling
   ! ------------
@@ -319,8 +318,7 @@ pure function exp_remez_expm1_estrin_4(x) result(e)
     !< Polynomial partial sums [nondim]
 
   !> fpminimax coefficients for (exp(x) - 1) / x on [-ln2/256, ln2/256]
-  real, parameter :: c(0:4) = [ &
-      1., &
+  real, parameter :: c(0:3) = [ &
       0.4999999999999766853164828717126511037349700927734375, &
       0.166666666666670015839457619222230277955532073974609375, &
       4.1666679392304360740606483659576042555272579193115234375e-2, &
@@ -333,8 +331,9 @@ pure function exp_remez_expm1_estrin_4(x) result(e)
   p01 = c(0) + c(1) * x
   p23 = c(2) + c(3) * x
 
-  ! Final assembly: (exp(x) - 1)/x = p(x)
-  e = (p01 + x2 * p23) + x4 * c(4)
+  ! Final assembly: exp(x) - 1 = x + x2*(C2+x*C3) + x4*(C4+x*C5)
+  e = (x + x2 * p01) + x4 * p23
+
 end function exp_remez_expm1_estrin_4
 
 
