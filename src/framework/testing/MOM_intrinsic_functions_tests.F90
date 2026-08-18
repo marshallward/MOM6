@@ -775,6 +775,81 @@ subroutine test_exp_elemental
 end subroutine test_exp_elemental
 
 
+!> Test exp_repro with do concurrent (GPU-compatible)
+subroutine test_exp_do_concurrent
+  integer, parameter :: n = 1000
+  real, parameter :: xmin = -10.
+  real, parameter :: xmax = 10.
+  real, parameter :: tol = 1.e-14
+
+  real :: x(n), y(n), ref
+  real :: dx, err
+  integer :: i
+
+  ! Initialize x
+  dx = (xmax - xmin) / real(n - 1)
+  do i = 1, n
+    x(i) = xmin + (i - 1) * dx
+  enddo
+
+  ! Evaluate exp_repro using do concurrent
+  do concurrent (i = 1:n)
+    y(i) = exp_repro(x(i))
+  enddo
+
+  ! Verify results against scalar evaluation
+  do i = 1, n
+    ref = exp_repro(x(i))
+    if (ref /= 0.) then
+      err = abs(y(i) - ref) / abs(ref)
+      call assert(err < tol, "exp_repro do concurrent mismatch")
+    endif
+  enddo
+end subroutine test_exp_do_concurrent
+
+
+!> Write CSV output of exp_repro evaluated via do concurrent (for GPU testing)
+subroutine test_exp_do_concurrent_csv
+  integer, parameter :: npts = 10000
+  real, parameter :: xmin = -10.
+  real, parameter :: xmax = 10.
+
+  real :: x(npts), y(npts)
+  real(kind=realq) :: ref, err
+  real :: ulp_val, ulp_err
+  real :: I_npts
+  integer :: i, unit
+
+  I_npts = 1. / (npts - 1)
+
+  ! Initialize x
+  do i = 1, npts
+    x(i) = xmin + (i - 1) * ((xmax - xmin) * I_npts)
+  enddo
+
+  ! Evaluate exp_repro using do concurrent
+  do concurrent (i = 1:npts)
+    y(i) = exp_repro(x(i))
+  enddo
+
+  ! Write CSV output with ULP error
+  open(newunit=unit, file='exp_do_concurrent_ulp.csv', status='replace')
+  write(unit, '(A)') 'x,exp_repro,ulp_err'
+
+  do i = 1, npts
+    ref = exp(real(x(i), realq))
+    ulp_val = spacing(real(ref, kind(y)))
+    err = abs(real(y(i), realq) - ref)
+    ulp_err = real(err) / ulp_val
+
+    write(unit, '(ES24.17,",",ES24.17,",",ES24.17)') x(i), y(i), ulp_err
+  enddo
+
+  close(unit)
+  print '(1x,a,i0,a)', 'Wrote exp_do_concurrent_ulp.csv with ', npts, ' samples'
+end subroutine test_exp_do_concurrent_csv
+
+
 !> Test IEEE exception flags for normal input (should raise inexact only)
 subroutine test_exp_flags_normal
   real, volatile :: x, val
@@ -1065,6 +1140,10 @@ subroutine run_intrinsic_functions_tests
 
   ! Elemental test
   call suite%add(test_exp_elemental, "test_exp_elemental")
+
+  ! Do concurrent test (GPU-compatible)
+  call suite%add(test_exp_do_concurrent, "test_exp_do_concurrent")
+  call suite%add(test_exp_do_concurrent_csv, "test_exp_do_concurrent_csv")
 
   ! IEEE exception flag tests (skipped if not supported)
   call suite%add(test_exp_flags_normal, "test_exp_flags_normal")
