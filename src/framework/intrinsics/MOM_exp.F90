@@ -332,9 +332,9 @@ pure function exp_remez_expm1_estrin_4(x) result(e)
   x2 = x * x
   x4 = x2 * x2
 
-  p01 = c(0) + (c(1) * x)
-  p23 = c(2) + (c(3) * x)
-  p = (p01 + (x2 * p23)) + (x4 * c(4))
+  p01 = c(0) + c(1) * x
+  p23 = c(2) + c(3) * x
+  p = (p01 + x2 * p23) + x4 * c(4)
 
   ! Final assembly: exp(x) - 1 = x * p(x)
   e = x * p
