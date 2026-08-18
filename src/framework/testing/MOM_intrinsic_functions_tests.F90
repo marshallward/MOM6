@@ -454,37 +454,87 @@ subroutine test_exp_ulp_accuracy
 end subroutine test_exp_ulp_accuracy
 
 
-!> Write ULP error data to CSV file for analysis
+!> Write ULP error data to CSV files for analysis.
+!! Generates separate files for scalar and vector evaluation paths,
+!! for both exp_repro and intrinsic exp().
 subroutine test_exp_ulp_csv
   integer, parameter :: npts = 10000
   real, parameter :: xmin = -10.
   real, parameter :: xmax = 10.
 
-  real :: x, I_npts
-  real :: val
-  real(kind=realq) :: ref, err
+  real :: x(npts)
+  real :: val_scalar(npts), val_vector(npts)
+  real :: exp_scalar(npts), exp_vector(npts)
+  real(kind=realq) :: ref(npts), err
   real :: ulp_val, ulp_err
-  integer :: i, unit
+  real :: I_npts
+  integer :: i
+  integer :: u_repro_s, u_repro_v, u_exp_s, u_exp_v
 
   I_npts = 1. / (npts - 1)
 
-  open(newunit=unit, file='exp_ulp_test.csv', status='replace')
-  write(unit, '(A)') 'x,exp_repro,ulp_err'
-
+  ! Generate test points
   do i = 1, npts
-    x = xmin + (i - 1) * ((xmax - xmin) * I_npts)
-    val = exp_repro(x)
-    ref = exp(real(x, realq))
-
-    ulp_val = spacing(real(ref, kind(val)))
-    err = abs(real(val, realq) - ref)
-    ulp_err = real(err) / ulp_val
-
-    write(unit, '(ES24.17,",",ES24.17,",",ES24.17)') x, val, ulp_err
+    x(i) = xmin + (i - 1) * ((xmax - xmin) * I_npts)
   enddo
 
-  close(unit)
-  print '(1x,a,i0,a)', 'Wrote exp_ulp_test.csv with ', npts, ' samples'
+  ! Scalar evaluation (interrupted loop prevents vectorization)
+  do i = 1, npts
+    val_scalar(i) = exp_repro(x(i))
+    exp_scalar(i) = exp(x(i))
+    ref(i) = exp(real(x(i), realq))
+    ! Impossible branch to prevent vectorization
+    if (val_scalar(i) < 0.) exit
+  enddo
+
+  ! Vector evaluation (elemental on whole array)
+  val_vector = exp_repro(x)
+  exp_vector = exp(x)
+
+  ! Open output files
+  open(newunit=u_repro_s, file='exp_repro_scalar_ulp.csv', status='replace')
+  open(newunit=u_repro_v, file='exp_repro_vector_ulp.csv', status='replace')
+  open(newunit=u_exp_s, file='exp_scalar_ulp.csv', status='replace')
+  open(newunit=u_exp_v, file='exp_vector_ulp.csv', status='replace')
+
+  write(u_repro_s, '(A)') 'x,exp_repro,ulp_err'
+  write(u_repro_v, '(A)') 'x,exp_repro,ulp_err'
+  write(u_exp_s, '(A)') 'x,exp,ulp_err'
+  write(u_exp_v, '(A)') 'x,exp,ulp_err'
+
+  do i = 1, npts
+    ulp_val = spacing(real(ref(i), kind(x)))
+
+    ! exp_repro scalar
+    err = abs(real(val_scalar(i), realq) - ref(i))
+    ulp_err = real(err) / ulp_val
+    write(u_repro_s, '(ES24.17,",",ES24.17,",",ES24.17)') x(i), val_scalar(i), ulp_err
+
+    ! exp_repro vector
+    err = abs(real(val_vector(i), realq) - ref(i))
+    ulp_err = real(err) / ulp_val
+    write(u_repro_v, '(ES24.17,",",ES24.17,",",ES24.17)') x(i), val_vector(i), ulp_err
+
+    ! exp scalar
+    err = abs(real(exp_scalar(i), realq) - ref(i))
+    ulp_err = real(err) / ulp_val
+    write(u_exp_s, '(ES24.17,",",ES24.17,",",ES24.17)') x(i), exp_scalar(i), ulp_err
+
+    ! exp vector
+    err = abs(real(exp_vector(i), realq) - ref(i))
+    ulp_err = real(err) / ulp_val
+    write(u_exp_v, '(ES24.17,",",ES24.17,",",ES24.17)') x(i), exp_vector(i), ulp_err
+  enddo
+
+  close(u_repro_s)
+  close(u_repro_v)
+  close(u_exp_s)
+  close(u_exp_v)
+
+  print '(1x,a,i0,a)', 'Wrote exp_repro_scalar_ulp.csv with ', npts, ' samples'
+  print '(1x,a,i0,a)', 'Wrote exp_repro_vector_ulp.csv with ', npts, ' samples'
+  print '(1x,a,i0,a)', 'Wrote exp_scalar_ulp.csv with ', npts, ' samples'
+  print '(1x,a,i0,a)', 'Wrote exp_vector_ulp.csv with ', npts, ' samples'
 end subroutine test_exp_ulp_csv
 
 
