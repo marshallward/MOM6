@@ -5,7 +5,7 @@
 !> Timing tests for MOM_intrinsic_functions (exp_repro)
 program time_MOM_intrinsic_functions
 
-use, intrinsic :: iso_fortran_env, only : int64, real64, real128
+use, intrinsic :: iso_fortran_env, only : int64, real64
 use MOM_intrinsic_functions, only : exp_repro
 
 implicit none
