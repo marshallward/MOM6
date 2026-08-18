@@ -496,7 +496,7 @@ subroutine check_ulp_accuracy(x, val, ref, max_ulp_tol)
   real, optional, intent(in) :: max_ulp_tol
     !< Maximum ULP tolerance
 
-  real(realq) :: err, rel_err, ulp_err
+  real(kind=realq) :: err, rel_err, ulp_err
     ! Absolute, relative, and ULP error of val relative to ref.
 
   real :: max_abs_err, max_rel_err, max_ulp
@@ -505,7 +505,6 @@ subroutine check_ulp_accuracy(x, val, ref, max_ulp_tol)
   real :: ulp_val
 
   integer :: count_exact, count_half_ulp, count_one_ulp
-  real :: max_ulp_quad, ulp_err_quad, x_max_ulp_quad
   integer :: i, npts
 
   npts = size(x)
@@ -520,7 +519,6 @@ subroutine check_ulp_accuracy(x, val, ref, max_ulp_tol)
   count_exact = 0
   count_half_ulp = 0
   count_one_ulp = 0
-  max_ulp_quad = 0.
 
   do i = 1, npts
     ! Absolute error
@@ -542,7 +540,7 @@ subroutine check_ulp_accuracy(x, val, ref, max_ulp_tol)
 
       sum_rel_err = sum_rel_err + rel_err
 
-      if (err > max_rel_err) then
+      if (rel_err > max_rel_err) then
         max_rel_err = rel_err
         x_max_rel = x(i)
       endif
@@ -700,17 +698,11 @@ subroutine test_exp_elemental
   integer :: i
 
   x(:) = [-2., -1., 0., 1., 2.]
+  ref(:) = [exp_neg2, inv_e, 1., exp1, exp2]
 
-  do i = 1, 5
-    if (x(i) == -2.) ref(i) = exp_neg2
-    if (x(i) == -1.) ref(i) = inv_e
-    if (x(i) == 0.) ref(i) = 1.
-    if (x(i) == 1.) ref(i) = exp1
-    if (x(i) == 2.) ref(i) = exp2
-    val(i) = exp_repro(x(i))
-  enddo
+  val= exp_repro(x)
 
-  do i = 1, 5
+  do i=1,5
     if (ref(i) /= 0.) then
       err = abs(val(i) - ref(i)) / abs(ref(i))
       call assert(err < tol, "exp_repro elemental test failed")

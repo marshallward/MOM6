@@ -5,7 +5,7 @@
 !> Timing tests for MOM_intrinsic_functions (exp_repro)
 program time_MOM_intrinsic_functions
 
-use, intrinsic :: iso_fortran_env, only : int64, real64, real128
+use, intrinsic :: iso_fortran_env, only : int64, real64
 use MOM_intrinsic_functions, only : exp_repro
 
 implicit none
@@ -15,14 +15,14 @@ integer, parameter :: npts = 100000
 integer, parameter :: niter = 200
   !< Number of timing iterations
 real, parameter :: xmin = -10.
-  !< Minimum x value
+  !< Minimum x value [nondim]
 real, parameter :: xmax = 10.
-  !< Maximum x value
+  !< Maximum x value [nondim]
 
 real, allocatable :: x(:), val(:)
-integer(int64) :: count_rate, c1, c2
-real(real64) :: clock_rate, time_intrinsic, time_repro
-real(real64) :: time_scalar_baseline, time_scalar_intrinsic, time_scalar_repro
+integer(kind=int64) :: count_rate, c1, c2
+real(kind=real64) :: clock_rate, time_intrinsic, time_repro
+real(kind=real64) :: time_scalar_baseline, time_scalar_intrinsic, time_scalar_repro
 real :: I_npts
 real, volatile :: scalar_x, scalar_val
 integer :: i, j
@@ -157,11 +157,15 @@ print '("exp_repro() scalar time/call:", t30, f8.2, " ns")', time_scalar_repro
 print '("  final scalar value:", t30, ES12.5)', scalar_val
 
 print *
-print '("scalar slowdown factor:", t30, f8.2, "x")', time_scalar_repro / time_scalar_intrinsic
-print '("exp() minus baseline:", t30, f8.2, " ns")', time_scalar_intrinsic - time_scalar_baseline
-print '("exp_repro() minus baseline:", t30, f8.2, " ns")', time_scalar_repro - time_scalar_baseline
+print '("scalar slowdown factor:", t30, f8.2, "x")', &
+    time_scalar_repro / time_scalar_intrinsic
+print '("exp() minus baseline:", t30, f8.2, " ns")', &
+    time_scalar_intrinsic - time_scalar_baseline
+print '("exp_repro() minus baseline:", t30, f8.2, " ns")', &
+    time_scalar_repro - time_scalar_baseline
 print '("adjusted slowdown factor:", t30, f8.2, "x")', &
-    (time_scalar_repro - time_scalar_baseline) / (time_scalar_intrinsic - time_scalar_baseline)
+    (time_scalar_repro - time_scalar_baseline) &
+      / (time_scalar_intrinsic - time_scalar_baseline)
 
 deallocate(x, val)
 
