@@ -462,14 +462,14 @@ subroutine test_exp_ulp_csv
 
   real :: x, I_npts
   real :: val
-  real(kind=realq) :: ref
+  real(kind=realq) :: ref, err
   real :: ulp_val, ulp_err
   integer :: i, unit
 
   I_npts = 1. / (npts - 1)
 
   open(newunit=unit, file='exp_ulp_test.csv', status='replace')
-  write(unit, '(A)') 'x,ulp_err'
+  write(unit, '(A)') 'x,exp_repro,ulp_err'
 
   do i = 1, npts
     x = xmin + (i - 1) * ((xmax - xmin) * I_npts)
@@ -477,9 +477,10 @@ subroutine test_exp_ulp_csv
     ref = exp(real(x, realq))
 
     ulp_val = spacing(real(ref, kind(val)))
-    ulp_err = abs(val - real(ref)) / ulp_val
+    err = abs(real(val, realq) - ref)
+    ulp_err = real(err) / ulp_val
 
-    write(unit, '(ES24.17,",",ES24.17)') x, ulp_err
+    write(unit, '(ES24.17,",",ES24.17,",",ES24.17)') x, val, ulp_err
   enddo
 
   close(unit)
