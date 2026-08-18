@@ -2,7 +2,7 @@
 ! See the LICENSE file for licensing information.
 ! SPDX-License-Identifier: Apache-2.0
 
-!! This submodule provides a bitwise reproducible implementation of exp().
+!> This submodule provides a bitwise reproducible implementation of exp().
 
 #include "MOM_exp.h"
 
@@ -13,9 +13,8 @@ use, intrinsic :: ieee_arithmetic, only : ieee_rint
 
 implicit none
 
-! Molds for transfers and numerical format queries
 real, parameter :: real_mold = 0.
-  !< Real mold value
+  !< Real mold for transfers and numerical format queries
 
 integer, parameter :: int_kind &
     = merge(int64, int32, storage_size(real_mold) > storage_size(0_int32))
@@ -63,10 +62,10 @@ module procedure exp_repro
 
   ! The max and min x values between which exp(x) remains finite.
   real, parameter :: xmax &
-      = real(maxexponent(real_mold) + 1, kind(real_mold)) * ln2
+      = real(maxexponent(real_mold) + 1) * ln2
     !< Largest x value before exp(x) overflow [nondim]
   real, parameter :: xmin &
-      = real(minexponent(real_mold) - digits(real_mold) - 1, kind(real_mold)) * ln2
+      = real(minexponent(real_mold) - digits(real_mold) - 1) * ln2
     !< Smallest x value before exp(x) underflow [nondim]
 
   ! Double-real precision of ln2 used in Cody-Waite range reduction
@@ -76,7 +75,6 @@ module procedure exp_repro
   real, parameter :: ln2_lo = 1.90821492927058770002e-10
     !< Lower precision bits of ln2: 1.90821492927058770002e-10 [nondim]
 
-  ! Table constants (may not be used)
   ! Subdivide [-1/2 ln2, 1/2 ln2] to further reduce the approximation range.
   ! This allows for a smaller polynomial at the cost of a lookup table.
   integer, parameter :: ndiv = 128
@@ -92,12 +90,10 @@ module procedure exp_repro
   integer(int_kind), parameter :: idiv_mask = int(ndiv - 1, int_kind)
     !< Used for fast modulo of ndiv
 
-  ! The following lookup tables are used to reproducibily compute 2**(j/n),
-  ! where 2**(j/n) is split into real precision and a scaled residual.
-  !   2**(j/ndiv) = real(2**(j/N)) * (1 + residual)
+  ! The following lookup tables are used to reproducibily compute 2**(i/N),
+  ! where 2**(i/N) is split into real precision and a scaled residual,
+  ! 2**(i/N) = real(2**(i/N)) * (1 + residual)
 
-  ! real, parameter :: idiv_scale_lookup(0:ndiv-1) &
-  !     = [(2.**(real(i) / real(ndiv)), i=0,ndiv-1)]
   real, parameter :: idiv_scale_lookup(0:ndiv-1) = [ &
     1.00000000000000000e+00, 1.00542990111280273e+00, 1.01088928605170048e+00, 1.01637831491095310e+00, &
     1.02189714865411663e+00, 1.02744594911876375e+00, 1.03302487902122841e+00, 1.03863410196137873e+00, &
@@ -131,11 +127,8 @@ module procedure exp_repro
     1.87416763411029996e+00, 1.88434417903233453e+00, 1.89457598158696561e+00, 1.90486334181767414e+00, &
     1.91520656139714740e+00, 1.92560594363612503e+00, 1.93606179349229435e+00, 1.94657441757923322e+00, &
     1.95714412417540018e+00, 1.96777122323317588e+00, 1.97845602638795093e+00, 1.98919884696726634e+00  &
-  ]   !< Lookup table of 2**(j/n)
+  ]   !< Lookup table of 2**(i/N)
 
-  ! real, parameter :: idiv_residual_lookup(0:ndiv-1) &
-  !     = [(2._real128**(real(i, real128) / real(ndiv, real128)) &
-  !         / 2.**(real(i) / real(ndiv)), i=0,ndiv-1)] - 1.
   real, parameter :: idiv_residual_lookup(0:ndiv-1) = [ &
     0.00000000000000000e+00,  9.44788545172706630e-17, -1.50706697692603887e-17, -5.67915508282501219e-17, &
     4.99974487227263259e-17, -4.82368359999489520e-17,  7.35784687124741823e-18,  5.77323022374195081e-17, &
@@ -169,7 +162,7 @@ module procedure exp_repro
    -3.26692410090131783e-17, -4.36575930080793745e-17,  1.79639326598330223e-17,  3.43009252752141664e-17, &
    -5.54506561863942674e-17, -5.14900974545773279e-17,  5.33680587851415070e-17,  3.49897866119297325e-17, &
     4.57849152770600949e-17, -5.24193457539389921e-17,  2.04142788975783032e-17,  4.12484284860648776e-18  &
-  ]   !< Lookup table of r, where 2^(j/N) = real64(2^(j/N)) * (1 + r)
+  ]   !< Lookup table of r, where 2**(i/N) = real(2**(i/N)) * (1 + r)
 
   ! Range of K = nint(x / ln2) for which direct exponent scaling is safe.
   ! Beyond this range, a bias is applied to handle subnormals and overflow.
@@ -184,36 +177,43 @@ module procedure exp_repro
     !< Exponent adjustment used for overflow and subnormal scaling
     !! Any bias which rescales 2**K exp(r) to O(1) works here.
 
+  ! Nonfinite testing
+  logical :: nonfinite
+    ! True if input is a nonfinite float (+/-Inf, NaN)
+  integer(kind=int_kind) :: xb
+    ! Bit representation of x
+
   ! Range-reduction variables
-  integer :: idiv
-    ! Subdivision index
+
+  real :: xc
+    ! x clamped between xmin and xmax [nondim]
   integer(kind=int_kind) :: K
     ! Nearest IEEE-rounded integer to x/ln2 [nondim]
   real :: Z
-    ! Nearest integer to ndiv*K + idiv for ndiv subdivisions
+    ! Nearest integer to ndiv * K + idiv for ndiv subdivisions
     ! NOTE: Z is stored as real to avoid int-real type conversions.
   integer(kind=int_kind) :: Zi
     ! Integer representation of Z
+  integer :: idiv
+    ! Subdivision index
   real :: r
-    ! Range-reduced input, r = x - Z ln2/N [nondim]
+    ! Range-reduced input, r = x - Z ln2 / ndiv [nondim]
+
+  ! Polynomial estimation variables
+
   real :: e
     ! Exponent of range-reduced input, e = 2**(idiv/ndiv) exp(r) [nondim]
   real :: expm1_r
     ! Approximation to exp(r) - 1 [nondim]
   real :: idiv_scale
-    ! Table value for 2**(idiv/ndiv) [nondim]
+    ! Estimate of 2**(idiv/ndiv) [nondim]
   real :: idiv_residual
-    ! Relative table correction for idiv_scale [nondim]
+    ! Relative residual, 2**(j/N) = idiv_scale * (1 + idiv_residual) [nondim]
 
-  real :: xc
-    ! x clamped between xmin and xmax [nondim]
+  ! Descaling and subnormal handling
 
-  integer(kind=int_kind) :: xb, eb
-    ! Bit representations of x, e
-
-  logical :: nonfinite
-    ! True if input is a nonfinite float (+/-Inf, NaN)
-
+  integer(kind=int_kind) :: eb
+    ! Bit representations of e
   integer(kind=int_kind) :: j
     ! Bias added to K to compensate for exponent K beyond {-1022,..,+1023}.
   integer(kind=int_kind) :: fb
@@ -236,62 +236,56 @@ module procedure exp_repro
 
   ! 2. Range Reduction
   ! ------------------
-  ! Apply a range reduction of r = x - K ln2 - (j / N) ln2, so that
-  !     exp(x) = 2**K 2**(j/N) exp(r).
-  ! If K = nint(x / ln2) then r is in [-1/2N ln2, 1/2N ln2] and exp(r) can be
-  ! estimated by a sufficiently accurate polynomial.
+  ! Apply a range reduction of r = x - K ln2 - (idiv / ndiv) ln2, so that
+  !     exp(x) = 2**K 2**(idiv / ndiv) exp(r).
+  ! If K = nint(x / ln2) then r is in [-ln2/(2*ndiv), ln2/(2*ndiv)] and exp(r)
+  ! can be estimated by a sufficiently accurate polynomial.
 
-  ! First clamp x to the precision-based numerical range of exp().
-  ! This allows for safe detection of over/underflow in the subnormal handler.
+  ! Clamp x to [xmin,xmax] to avoid extreme exponents in subnormal handler.
   xc = min(max(x, xmin), xmax)
 
-  ! Compute Z = N K + j, where r = x - Z (ln 2 / N)
+  ! Compute Z = ndiv K + idiv, where r = x - Z (ln 2 / ndiv)
   Z = NEAREST_INT(xc * n_ln2)
   Zi = transfer(Z + round_bias, int_mold) - round_bias_bits
 
+  ! Compute the subdivision index and integer offset K
   idiv = iand(Zi, idiv_mask)
   K = (Zi - int(idiv, int_kind)) / ndiv
 
-  ! Since K ~ x/ln2, the terms in r = x - K ln2 will nearly cancel and there is
-  ! some expected loss of precision.  To compensate, we use a Cody-Waite
-  ! correction which separates ln2 into its upper 32 bits and a lower residual.
-
+  ! Since Z ~ x N / ln2, the terms in r will nearly cancel and there is some
+  ! expected loss of precision.  To compensate, we use a Cody-Waite correction.
   r = (xc - Z * ln2_ndiv_hi) - Z * ln2_ndiv_lo
-
-  ! NOTE: Aggressive optimizers may reduce this to x - K * (ln2_hi + ln2_lo)
-  ! which is no better than x - K ln2.
 
   ! 3. Polynomial approximation
   ! ---------------------------
-  ! Estimate exp(r) = 1 + r * P(r) where P(r) is a 10th order Remez minimax
-  ! polynomial of (exp(r) - 1)/r.  This form ensures that exp(0) = 1 exactly.
+  ! a = 2**K e where e = 2**(idiv/ndiv) exp(r), and exp(r) = 1 + P(r) where
+  ! P(r) is an order-5 Remez minimax polynomial of expm1(r).
 
-  ! Table evaluation
   idiv_scale = idiv_scale_lookup(idiv)
   idiv_residual = idiv_residual_lookup(idiv)
   expm1_r = exp_remez_expm1_estrin_4(r)
 
   ! Evaluate the small correction before the final addition to idiv_scale
-  e = idiv_scale + idiv_scale * (idiv_residual + r * expm1_r)
+  e = idiv_scale + idiv_scale * (idiv_residual + expm1_r)
 
   ! 4. Unscaling
   ! ------------
-  ! Compute exp(x) = 2**K e, an exact power-of-2 calculation.
+  ! Compute a = 2**K e, an exact power-of-2 calculation.
   ! Adjust scaling to compensate for subnormal output.
 
   ! exp(r) has range [0.707/ndiv, 1.414/ndiv], so K shifts by either 0 or -1.
-  ! A resolved exponent is in the range {-1022..1023}, so K must be in
-  ! {-1021,1023}.  (For safety, we reduce the range to {-1020,1022}.)
+  ! Resolved exponent are in the range {-1022..1023}, so for a to be resolved,
+  ! K must be in {-1021,1023}.  (For safety, we actually do {-1020,1022}.)
 
   ! Determine if K is outside the supported exponent range.
   ! If so, then apply a bias j to normalize the exponent.
   ! Kbias is chosen so that the exponent is "something near 1".
   j = merge(Kbias, 0_int_kind, K < Kmin) + merge(-Kbias, 0_int_kind, K > Kmax)
 
-  ! Get the bit representation of exp(r)
+  ! Get the bit representation of e
   eb = transfer(e, int_mold)
 
-  ! Rescale to exp(r) to exp(x), possibly including the j bias.
+  ! Rescale to e to exp(x), possibly including the j bias.
   eb = eb + ishft(k + j, expbit)
   a = transfer(eb, real_mold)
 
@@ -305,9 +299,11 @@ module procedure exp_repro
 end procedure exp_repro
 
 
+!> Remez polynomial estimate of (exp(x) - 1) over [-ln2/256, ln2/256].
+!! Coefficients are generated by Sollya 8, and evaluation is in Estrin form.
 pure function exp_remez_expm1_estrin_4(x) result(e)
   real, intent(in) :: x
-    !< Input value; expected range is [-ln2/256, ln2/256]
+    !< Input value; expected range is [-ln2/256, ln2/256] [nondim]
   real :: e
     !< Approximation of exp(x) - 1 [nondim]
 
@@ -316,9 +312,8 @@ pure function exp_remez_expm1_estrin_4(x) result(e)
   real :: p01, p23, p
     !< Polynomial partial sums [nondim]
 
-  !> fpminimax coefficients for (exp(x) - 1) / x on [-ln2/256, ln2/256]
-  real, parameter :: c(0:4) = [ &
-      1., &
+  !> fpminimax coefficients for (exp(x) - 1) on [-ln2/256, ln2/256] [nondim]
+  real, parameter :: c(4) = [ &
       0.4999999999999766853164828717126511037349700927734375, &
       0.166666666666670015839457619222230277955532073974609375, &
       4.1666679392304360740606483659576042555272579193115234375e-2, &
@@ -328,11 +323,11 @@ pure function exp_remez_expm1_estrin_4(x) result(e)
   x2 = x * x
   x4 = x2 * x2
 
-  p01 = c(0) + c(1) * x
-  p23 = c(2) + c(3) * x
+  p01 = c(1) + c(2) * x
+  p23 = c(3) + c(4) * x
 
-  ! Final assembly: (exp(x) - 1)/x = p(x)
-  e = (p01 + x2 * p23) + x4 * c(4)
+  ! exp(x) - 1
+  e = (x + p01 * x2) + p23 * x4
 end function exp_remez_expm1_estrin_4
 
 
