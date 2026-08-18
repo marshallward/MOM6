@@ -33,38 +33,38 @@ real, parameter :: rmold = 0.
   !< Mold value for default real
 
 ! Mathematical constants
-real, parameter :: ln2 = 0.693147180559945309417232121458176568
-  !< ln(2) = 0.6931471805599453094172321...
-real, parameter :: half_ln2 = 0.346573590279972654708616060729088284
-  !< ln(2)/2 = 0.3465735902799726547086160...
-real, parameter :: sqrt2 = 1.41421356237309504880168872420969808
-  !< sqrt(2) = 1.4142135623730950488016887...
-real, parameter :: exp1 = 2.71828182845904523536028747135266250
-  !< e = 2.7182818284590452353602874...
-real, parameter :: inv_e = 0.367879441171442321595523770161460867
-  !< 1/e = 0.3678794411714423215955237...
-real, parameter :: exp_033 = 1.39096812846378028786273560331663894
-  !< Correctly rounded exp(0.33) for nearest double precision value [nondim]
-real, parameter :: exp_tiny_pos = 1.00000000000000100000000000000057771
-  !< Correctly rounded exp(1e-15) for nearest double precision value [nondim]
-real, parameter :: exp_tiny_neg = 0.999999999999999000000000000000422295
-  !< Correctly rounded exp(-1e-15) for nearest double precision value [nondim]
-real, parameter :: exp_709_78 = 1.79282279439451562090841253934897711e+308
-  !< Correctly rounded exp(709.78) for nearest double precision value [nondim]
-real, parameter :: exp_neg_708_39 = 2.23940149888046784447996828327569305e-308
-  !< Correctly rounded exp(-708.39) for nearest double precision value [nondim]
-real, parameter :: exp_neg2 = 0.135335283236612691893999494972484403
-  !< Correctly rounded exp(-2) [nondim]
-real, parameter :: exp2 = 7.38905609893065022723042746057500781
-  !< Correctly rounded exp(2) [nondim]
-real, parameter :: log_huge = 709.782712893383973096206318587064743
-  !< Correctly rounded log(huge()) for double precision [nondim]
-real, parameter :: exp_log_huge = 1.79769313486227321783964963090004165e+308
-  !< Correctly rounded exp(log_huge) [nondim]
-real, parameter :: log_tiny = -708.396418532264078748994506895542145
-  !< Correctly rounded log(tiny()) for double precision [nondim]
-real, parameter :: exp_log_tiny = 2.22507385850726251792173072917790692e-308
-  !< Correctly rounded exp(log_tiny) [nondim]
+real, parameter :: ln2 = 0.69314718055994531
+  !< ln(2)
+real, parameter :: half_ln2 = 0.34657359027997265
+  !< ln(2)/2
+real, parameter :: sqrt2 = 1.4142135623730950
+  !< sqrt(2)
+real, parameter :: exp1 = 2.7182818284590452
+  !< e
+real, parameter :: inv_e = 0.36787944117144232
+  !< 1/e
+real, parameter :: exp_033 = 1.3909681284637803
+  !< exp(0.33)
+real, parameter :: exp_tiny_pos = 1.0000000000000010
+  !< exp(1e-15)
+real, parameter :: exp_tiny_neg = 0.99999999999999900
+  !< exp(-1e-15)
+real, parameter :: exp_709_78 = 1.7928227943945156e+308
+  !< exp(709.78)
+real, parameter :: exp_neg_708_39 = 2.2394014988804678e-308
+  !< exp(-708.39)
+real, parameter :: exp_neg2 = 0.13533528323661269
+  !< exp(-2)
+real, parameter :: exp2 = 7.3890560989306502
+  !< exp(2)
+real, parameter :: log_huge = 709.78271289338397
+  !< log(huge())
+real, parameter :: exp_log_huge = 1.7976931348622732e+308
+  !< exp(log_huge)
+real, parameter :: log_tiny = -708.39641853226408
+  !< log(tiny())
+real, parameter :: exp_log_tiny = 2.2250738585072625e-308
+  !< exp(log_tiny)
 
 ! Module-level flag to enable/disable IEEE exception tests
 logical :: ieee_flags_supported = .false.
@@ -238,6 +238,20 @@ subroutine test_exp_overflow
 end subroutine test_exp_overflow
 
 
+!> Test exp_repro extreme overflow behavior: exp(10000)
+subroutine test_exp_extreme_overflow
+  real :: x, val, ref
+
+  x = 10000.
+  ref = ieee_value(0., ieee_positive_inf)
+  val = exp_repro(x)
+
+  print '(2x, "exp_repro(10000) = ", ES22.15)', val
+
+  call assert(val == ref, "exp_repro(10000) should overflow to +Inf")
+end subroutine test_exp_extreme_overflow
+
+
 !> Test exp_repro underflow behavior: exp(-1000)
 subroutine test_exp_underflow
   real :: x, val, ref
@@ -250,6 +264,20 @@ subroutine test_exp_underflow
 
   call assert(val == ref, "exp_repro(-1000) should underflow to 0")
 end subroutine test_exp_underflow
+
+
+!> Test exp_repro extreme underflow behavior: exp(-10000)
+subroutine test_exp_extreme_underflow
+  real :: x, val, ref
+
+  x = -10000.
+  ref = 0.
+  val = exp_repro(x)
+
+  print '(2x, "exp_repro(-10000) = ", ES22.15)', val
+
+  call assert(val == ref, "exp_repro(-10000) should underflow to 0")
+end subroutine test_exp_extreme_underflow
 
 
 !> Test exp_repro near overflow boundary (709.78)
@@ -954,7 +982,9 @@ subroutine run_intrinsic_functions_tests
 
   ! Overflow/underflow tests
   call suite%add(test_exp_overflow, "test_exp_overflow")
+  call suite%add(test_exp_extreme_overflow, "test_exp_extreme_overflow")
   call suite%add(test_exp_underflow, "test_exp_underflow")
+  call suite%add(test_exp_extreme_underflow, "test_exp_extreme_underflow")
   call suite%add(test_exp_near_overflow, "test_exp_near_overflow")
   call suite%add(test_exp_near_underflow, "test_exp_near_underflow")
   call suite%add(test_exp_subnormal, "test_exp_subnormal")
