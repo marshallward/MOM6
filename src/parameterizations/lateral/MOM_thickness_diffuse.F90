@@ -241,14 +241,11 @@ subroutine thickness_diffuse(h, uhtr, vhtr, tv, dt, G, GV, US, MEKE, VarMix, CDp
   !$omp target exit data map(from: e)
 
   ! Set the diffusivities.
-  !$OMP parallel default(shared)
   if (.not. CS%read_khth) then
-    !$OMP do
     do j=js,je ; do I=is-1,ie
       Khth_loc_u(I,j) = CS%Khth
     enddo ; enddo
   else ! use 2d KHTH that was read in from file
-    !$OMP do
     do j=js,je ; do I=is-1,ie
       Khth_loc_u(I,j) = 0.5 * (CS%khth2d(i,j) + CS%khth2d(i+1,j))
     enddo ; enddo
@@ -257,7 +254,6 @@ subroutine thickness_diffuse(h, uhtr, vhtr, tv, dt, G, GV, US, MEKE, VarMix, CDp
   if (use_VarMix) then
     if (use_Visbeck) then
       !$omp target update from( VarMix%L2u, VarMix%SN_u)
-      !$OMP do
       do j=js,je ; do I=is-1,ie
         Khth_loc_u(I,j) = Khth_loc_u(I,j) + &
           CS%KHTH_Slope_Cff*VarMix%L2u(I,j) * VarMix%SN_u(I,j)
@@ -268,7 +264,6 @@ subroutine thickness_diffuse(h, uhtr, vhtr, tv, dt, G, GV, US, MEKE, VarMix, CDp
   if (allocated(MEKE%Kh)) then
     if (CS%MEKE_GEOMETRIC) then
       !$omp target update from( VarMix%SN_u)
-      !$OMP do
       do j=js,je ; do I=is-1,ie
         Khth_loc_u(I,j) = Khth_loc_u(I,j) + G%OBCmaskCu(I,j) * CS%MEKE_GEOMETRIC_alpha * &
                           0.5*(MEKE%MEKE(i,j)+MEKE%MEKE(i+1,j)) / &
@@ -283,7 +278,6 @@ subroutine thickness_diffuse(h, uhtr, vhtr, tv, dt, G, GV, US, MEKE, VarMix, CDp
 
   if (Resoln_scaled) then
     !$omp target update from( VarMix%Res_fn_u )
-    !$OMP do
     do j=js,je ; do I=is-1,ie
       Khth_loc_u(I,j) = Khth_loc_u(I,j) * VarMix%Res_fn_u(I,j)
     enddo ; enddo
@@ -291,43 +285,36 @@ subroutine thickness_diffuse(h, uhtr, vhtr, tv, dt, G, GV, US, MEKE, VarMix, CDp
 
   if (Depth_scaled) then
     !$omp target update from( VarMix%Depth_fn_u )
-    !$OMP do
     do j=js,je ; do I=is-1,ie
       Khth_loc_u(I,j) = Khth_loc_u(I,j) * VarMix%Depth_fn_u(I,j)
     enddo ; enddo
   endif
 
   if (CS%Khth_Max > 0) then
-    !$OMP do
     do j=js,je ; do I=is-1,ie
       Khth_loc_u(I,j) = max(CS%Khth_Min, min(Khth_loc_u(I,j), CS%Khth_Max))
     enddo ; enddo
   else
-    !$OMP do
     do j=js,je ; do I=is-1,ie
       Khth_loc_u(I,j) = max(CS%Khth_Min, Khth_loc_u(I,j))
     enddo ; enddo
   endif
-  !$OMP do
   do j=js,je ; do I=is-1,ie
     KH_u(I,j,1) = min(KH_u_CFL(I,j), Khth_loc_u(I,j))
   enddo ; enddo
 
   if (khth_use_vert_struct) then
     if (CS%full_depth_khth_min) then
-      !$OMP do
       do K=2,nz+1 ; do j=js,je ; do I=is-1,ie
         KH_u(I,j,K) = KH_u(I,j,1) * 0.5 * ( VarMix%khth_struct(i,j,k-1) + VarMix%khth_struct(i+1,j,k-1) )
         KH_u(I,j,K) = max(KH_u(I,j,K), CS%Khth_Min)
       enddo ; enddo ; enddo
     else
-      !$OMP do
       do K=2,nz+1 ; do j=js,je ; do I=is-1,ie
         KH_u(I,j,K) = KH_u(I,j,1) * 0.5 * ( VarMix%khth_struct(i,j,k-1) + VarMix%khth_struct(i+1,j,k-1) )
       enddo ; enddo ; enddo
     endif
   else
-    !$OMP do
     do K=2,nz+1 ; do j=js,je ; do I=is-1,ie
       KH_u(I,j,K) = KH_u(I,j,1)
     enddo ; enddo ; enddo
@@ -335,7 +322,6 @@ subroutine thickness_diffuse(h, uhtr, vhtr, tv, dt, G, GV, US, MEKE, VarMix, CDp
 
   if (use_VarMix) then
     if (use_QG_Leith) then
-      !$OMP do
       do k=1,nz ; do j=js,je ; do I=is-1,ie
         KH_u(I,j,k) = VarMix%KH_u_QG(I,j,k)
       enddo ; enddo ; enddo
@@ -343,19 +329,16 @@ subroutine thickness_diffuse(h, uhtr, vhtr, tv, dt, G, GV, US, MEKE, VarMix, CDp
   endif
 
   if (CS%use_GME_thickness_diffuse) then
-    !$OMP do
     do k=1,nz+1 ; do j=js,je ; do I=is-1,ie
       CS%KH_u_GME(I,j,k) = KH_u(I,j,k)
     enddo ; enddo ; enddo
   endif
 
   if (.not. CS%read_khth) then
-   !$OMP do
     do J=js-1,je ; do i=is,ie
       Khth_loc_v(i,J) = CS%Khth
     enddo ; enddo
   else ! read KHTH from file
-   !$OMP do
     do J=js-1,je ; do i=is,ie
       Khth_loc_v(i,J) = 0.5 * (CS%khth2d(i,j) + CS%khth2d(i,j+1))
     enddo ; enddo
@@ -364,7 +347,6 @@ subroutine thickness_diffuse(h, uhtr, vhtr, tv, dt, G, GV, US, MEKE, VarMix, CDp
   if (use_VarMix) then
     if (use_Visbeck) then
       !$omp target update from( VarMix%L2v, VarMix%SN_v )
-      !$OMP do
       do J=js-1,je ; do i=is,ie
         Khth_loc_v(i,J) = Khth_loc_v(i,J) + CS%KHTH_Slope_Cff*VarMix%L2v(i,J)*VarMix%SN_v(i,J)
       enddo ; enddo
@@ -373,7 +355,6 @@ subroutine thickness_diffuse(h, uhtr, vhtr, tv, dt, G, GV, US, MEKE, VarMix, CDp
   if (allocated(MEKE%Kh)) then
     if (CS%MEKE_GEOMETRIC) then
       !$omp target update from( VarMix%SN_v )
-      !$OMP do
       do J=js-1,je ; do i=is,ie
         Khth_loc_v(i,J) = Khth_loc_v(i,J) + G%OBCmaskCv(i,J) * CS%MEKE_GEOMETRIC_alpha * &
                         0.5*(MEKE%MEKE(i,j)+MEKE%MEKE(i,j+1)) / &
@@ -388,7 +369,6 @@ subroutine thickness_diffuse(h, uhtr, vhtr, tv, dt, G, GV, US, MEKE, VarMix, CDp
 
   if (Resoln_scaled) then
     !$omp target update from( VarMix%Res_fn_v )
-    !$OMP do
     do J=js-1,je ; do i=is,ie
       Khth_loc_v(i,J) = Khth_loc_v(i,J) * VarMix%Res_fn_v(i,J)
     enddo ; enddo
@@ -396,26 +376,22 @@ subroutine thickness_diffuse(h, uhtr, vhtr, tv, dt, G, GV, US, MEKE, VarMix, CDp
 
   if (Depth_scaled) then
     !$omp target update from( VarMix%Depth_fn_v )
-    !$OMP do
     do J=js-1,je ; do i=is,ie
       Khth_loc_v(i,J) = Khth_loc_v(i,J) * VarMix%Depth_fn_v(i,J)
     enddo ; enddo
   endif
 
   if (CS%Khth_Max > 0) then
-    !$OMP do
     do J=js-1,je ; do i=is,ie
       Khth_loc_v(i,J) = max(CS%Khth_Min, min(Khth_loc_v(i,J), CS%Khth_Max))
     enddo ; enddo
   else
-    !$OMP do
     do J=js-1,je ; do i=is,ie
       Khth_loc_v(i,J) = max(CS%Khth_Min, Khth_loc_v(i,J))
     enddo ; enddo
   endif
 
   if (CS%max_Khth_CFL > 0.0) then
-    !$OMP do
     do J=js-1,je ; do i=is,ie
       KH_v(i,J,1) = min(KH_v_CFL(i,J), Khth_loc_v(i,J))
     enddo ; enddo
@@ -423,19 +399,16 @@ subroutine thickness_diffuse(h, uhtr, vhtr, tv, dt, G, GV, US, MEKE, VarMix, CDp
 
   if (khth_use_vert_struct) then
       if (CS%full_depth_khth_min) then
-      !$OMP do
       do K=2,nz+1 ; do J=js-1,je ; do i=is,ie
         KH_v(i,J,K) = KH_v(i,J,1) * 0.5 * ( VarMix%khth_struct(i,j,k-1) + VarMix%khth_struct(i,j+1,k-1) )
         KH_v(i,J,K) = max(KH_v(i,J,K), CS%Khth_Min)
       enddo ; enddo ; enddo
     else
-      !$OMP do
       do K=2,nz+1 ; do J=js-1,je ; do i=is,ie
         KH_v(i,J,K) = KH_v(i,J,1) * 0.5 * ( VarMix%khth_struct(i,j,k-1) + VarMix%khth_struct(i,j+1,k-1) )
       enddo ; enddo ; enddo
     endif
   else
-    !$OMP do
     do K=2,nz+1 ; do J=js-1,je ; do i=is,ie
       KH_v(i,J,K) = KH_v(i,J,1)
     enddo ; enddo ; enddo
@@ -443,7 +416,6 @@ subroutine thickness_diffuse(h, uhtr, vhtr, tv, dt, G, GV, US, MEKE, VarMix, CDp
 
   if (use_VarMix) then
     if (use_QG_Leith) then
-      !$OMP do
       do k=1,nz ; do J=js-1,je ; do i=is,ie
         KH_v(i,J,k) = VarMix%KH_v_QG(i,J,k)
       enddo ; enddo ; enddo
@@ -451,7 +423,6 @@ subroutine thickness_diffuse(h, uhtr, vhtr, tv, dt, G, GV, US, MEKE, VarMix, CDp
   endif
 
   if (CS%use_GME_thickness_diffuse) then
-    !$OMP do
     do k=1,nz+1 ; do J=js-1,je ; do i=is,ie
       CS%KH_v_GME(i,J,k) = KH_v(i,J,k)
     enddo ; enddo ; enddo
@@ -461,7 +432,6 @@ subroutine thickness_diffuse(h, uhtr, vhtr, tv, dt, G, GV, US, MEKE, VarMix, CDp
     if (CS%MEKE_GEOMETRIC) then
       !$omp target update from( VarMix%SN_u, VarMix%SN_v )
       if (CS%MEKE_GEOM_answer_date < 20190101) then
-        !$OMP do
         do j=js,je ; do i=is,ie
           ! This does not give bitwise rotational symmetry.
           MEKE%Kh(i,j) = CS%MEKE_GEOMETRIC_alpha * MEKE%MEKE(i,j) / &
@@ -482,11 +452,8 @@ subroutine thickness_diffuse(h, uhtr, vhtr, tv, dt, G, GV, US, MEKE, VarMix, CDp
     endif
   endif
 
-  !$OMP do
   do K=1,nz+1 ; do j=js,je ; do I=is-1,ie ; int_slope_u(I,j,K) = 0.0 ; enddo ; enddo ; enddo
-  !$OMP do
   do K=1,nz+1 ; do J=js-1,je ; do i=is,ie ; int_slope_v(i,J,K) = 0.0 ; enddo ; enddo ; enddo
-  !$OMP end parallel
 
   if (CS%detangle_interfaces) then
     call add_detangling_Kh(h, e, Kh_u, Kh_v, KH_u_CFL, KH_v_CFL, tv, dt, G, GV, US, &

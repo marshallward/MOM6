@@ -2,6 +2,9 @@
 ! See the LICENSE file for licensing information.
 ! SPDX-License-Identifier: Apache-2.0
 
+#include <MOM_memory.h>
+#include "do_concurrent_compat.h"
+
 !> Variable mixing coefficients
 module MOM_lateral_mixing_coeffs
 
@@ -25,9 +28,6 @@ use MOM_open_boundary,     only : OBC_DIRECTION_E, OBC_DIRECTION_W, OBC_DIRECTIO
 use MOM_MEKE_types,        only : MEKE_type
 
 implicit none ; private
-
-#include <MOM_memory.h>
-#include "do_concurrent_compat.h"
 
 !> Variable mixing coefficients
 type, public :: VarMix_CS
@@ -270,8 +270,6 @@ subroutine calc_resoln_function(h, tv, G, GV, US, CS, MEKE, OBC, dt)
   is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec ; nz = GV%ke
   Isq = G%IscB ; Ieq = G%IecB ; Jsq = G%JscB ; Jeq = G%JecB
 
-  !$omp target enter data map(alloc: cg1_q, cg1_u, cg1_v, dx_term)
-
   if (.not. CS%initialized) call MOM_error(FATAL, "calc_resoln_function: "// &
          "Module must be initialized before it is used.")
 
@@ -367,6 +365,9 @@ subroutine calc_resoln_function(h, tv, G, GV, US, CS, MEKE, OBC, dt)
   endif
 
   if (.not. CS%calculate_res_fns) return
+  ! Allocation must occur after return to prevent present table errors
+  ! when calculate_res_fns is false.
+  !$omp target enter data map(alloc: cg1_q, cg1_u, cg1_v, dx_term)
 
   if (.not. allocated(CS%Res_fn_h)) call MOM_error(FATAL, &
     "calc_resoln_function: %Res_fn_h is not associated with Resoln_scaled_Kh.")
@@ -413,11 +414,17 @@ subroutine calc_resoln_function(h, tv, G, GV, US, CS, MEKE, OBC, dt)
         cg1_q(I,J) = 0.25 * ((CS%cg1(i,j) + CS%cg1(i+1,j+1)) + (CS%cg1(i+1,j) + CS%cg1(i,j+1)))
       endif
     enddo ; enddo
+    !$omp target update to(cg1_q)
   else
     do concurrent( J=js-1:Jeq, I=is-1:Ieq )
       cg1_q(I,J) = 0.25 * ((CS%cg1(i,j) + CS%cg1(i+1,j+1)) + (CS%cg1(i+1,j) + CS%cg1(i,j+1)))
     enddo
   endif
+
+  !   Every branch of the chain below except Res_fn_power_visc == 2 runs on the host, so
+  ! it needs cg1_q pulled back first and Res_fn_[hq] pushed back afterwards.
+  !$omp target update from(cg1_q) &
+  !$omp&       if ((.not.(apply_u_OBC .or. apply_v_OBC)) .and. (CS%Res_fn_power_visc /= 2))
 
   !   Do this calculation on the extent used in MOM_hor_visc.F90, and
   ! MOM_tracer.F90 so that no halo update is needed.
@@ -474,7 +481,10 @@ subroutine calc_resoln_function(h, tv, G, GV, US, CS, MEKE, OBC, dt)
     enddo ; enddo
   endif
 
+  !$omp target update to(CS%Res_fn_h, CS%Res_fn_q) if (CS%Res_fn_power_visc /= 2)
+
   if (CS%interpolate_Res_fn) then
+    !$omp target update from(CS%Res_fn_h)
     if (apply_u_OBC) then
       do j=js,je ; do I=is-1,Ieq
         CS%Res_fn_u(I,j) = 0.5*(CS%Res_fn_h(i,j) + CS%Res_fn_h(i+1,j))
@@ -499,6 +509,7 @@ subroutine calc_resoln_function(h, tv, G, GV, US, CS, MEKE, OBC, dt)
       enddo ; enddo
     endif
 
+    !$omp target update to(CS%Res_fn_u, CS%Res_fn_v)
   else ! .not.CS%interpolate_Res_fn
     if (apply_u_OBC) then
       do j=js,je ; do I=is-1,Ieq
@@ -506,6 +517,7 @@ subroutine calc_resoln_function(h, tv, G, GV, US, CS, MEKE, OBC, dt)
         if (OBC%segnum_u(I,j) > 0) cg1_u(I,j) = CS%cg1(i,j) ! Eastern OBC
         if (OBC%segnum_u(I,j) < 0) cg1_u(I,j) = CS%cg1(i+1,j) ! Western OBC
       enddo ; enddo
+      !$omp target update to(cg1_u)
     else
       do concurrent( j=js:je, I=is-1:Ieq )
         cg1_u(I,j) = 0.5 * (CS%cg1(i,j) + CS%cg1(i+1,j))
@@ -518,11 +530,13 @@ subroutine calc_resoln_function(h, tv, G, GV, US, CS, MEKE, OBC, dt)
         if (OBC%segnum_v(i,J) > 0) cg1_v(i,J) = CS%cg1(i,j) ! Northern OBC
         if (OBC%segnum_v(i,J) < 0) cg1_v(i,J) = CS%cg1(i,j+1) ! Southern OBC
       enddo ; enddo
+      !$omp target update to(cg1_v)
     else
       do concurrent( J=js-1:Jeq, i=is:ie )
         cg1_v(i,J) = 0.5 * (CS%cg1(i,j) + CS%cg1(i,j+1))
       enddo
     endif
+    !$omp target update from(cg1_u, cg1_v) if (CS%Res_fn_power_khth /= 2)
 
     if (CS%Res_fn_power_khth >= 100) then
       do j=js,je ; do I=is-1,Ieq
@@ -576,6 +590,7 @@ subroutine calc_resoln_function(h, tv, G, GV, US, CS, MEKE, OBC, dt)
             (dx_term + (CS%Res_coef_khth * US%L_T_to_m_s*cg1_v(i,J))**CS%Res_fn_power_khth)
       enddo ; enddo
     endif
+    !$omp target update to(CS%Res_fn_u, CS%Res_fn_v) if (CS%Res_fn_power_khth /= 2)
   endif
 
 
@@ -896,12 +911,16 @@ subroutine calc_Visbeck_coeffs_old(h, slope_x, slope_y, N2_u, N2_v, G, GV, US, C
                                  ! interface or the inward equivalent with OBCs [H4 ~> m4 or kg4 m-8]
   integer :: i, j, k, is, ie, js, je, nz
 
-  !$omp target enter data map(alloc: h4_u, h4_v,S2_u,S2_v,H_u, H_v, OBC_dir_u, OBC_dir_v)
-
   if (.not. CS%initialized) call MOM_error(FATAL, "calc_Visbeck_coeffs_old: "// &
          "Module must be initialized before it is used.")
 
   if (.not. CS%calculate_Eady_growth_rate) return
+  ! Allocations needs to happen after early return to prevent present-table
+  ! when calculate_Eady_growth_rate is false. Note that this routine will not
+  ! execute when calculate_Eady_growth_rate is false due to the gaurd in calc_slope_functions,
+  ! so this is mostly here just to match the pattern in calc_resoln functions above.
+  !$omp target enter data map(alloc: h4_u, h4_v,S2_u,S2_v,H_u, H_v, OBC_dir_u, OBC_dir_v)
+
   if (.not. allocated(CS%SN_u)) call MOM_error(FATAL, "calc_slope_function: "// &
          "%SN_u is not associated with use_variable_mixing.")
   if (.not. allocated(CS%SN_v)) call MOM_error(FATAL, "calc_slope_function: "// &
@@ -1348,6 +1367,7 @@ subroutine calc_slope_functions_using_just_e(h, G, GV, US, CS, e)
     enddo
   enddo
 
+  ! NOTE: Using nested do concurrents in this loop changed answers with nvfortran 26.3
   !$omp target teams loop
   do j=js,je
     !$omp loop
@@ -2244,6 +2264,12 @@ subroutine VarMix_init(Time, G, GV, US, param_file, diag, CS)
                   (((G%CoriolisBu(I-1,J)-G%CoriolisBu(I-1,J-1)) * G%IdyCu(I-1,j))**2)) ) ))
     enddo
 
+    ! The Res_fn_power /= 2 paths in Calc_resoln_function need these on the arrays on the host
+    ! TODO: Remove these transfers once those paths are ported.
+    !$omp target update from(CS%f2_dx2_q, CS%beta_dx2_q) if (CS%Res_fn_power_visc /= 2)
+    !$omp target update from(CS%f2_dx2_u, CS%beta_dx2_u, &
+    !$omp&                   CS%f2_dx2_v, CS%beta_dx2_v) if (CS%Res_fn_power_khth /= 2)
+
   endif
 
   if (CS%Depth_scaled_KhTh) then
@@ -2271,6 +2297,13 @@ subroutine VarMix_init(Time, G, GV, US, param_file, diag, CS)
             ((((G%CoriolisBu(I,J)-G%CoriolisBu(I,J-1)) * G%IdyCu(I,j))**2) + &
              (((G%CoriolisBu(I-1,J)-G%CoriolisBu(I-1,J-1)) * G%IdyCu(I-1,j))**2)) ) ))
     enddo
+
+    ! As above, these are static after this point and the host reads them directly.
+    ! Although this is only read on the CPU if Res_fn_power_visc /= 2, this transfer is unguarded
+    ! since Res_fn_power_visc may be unset if Resoln_scaling_used is false, which can happen
+    ! even if calculate_Rd_dx is true.
+    ! TODO: Remove once the rest of calc_resoln_funcs is ported
+    !$omp target update from(CS%f2_dx2_h, CS%beta_dx2_h)
   endif
 
   if (CS%calculate_cg1) then
