@@ -18,6 +18,7 @@ use MOM_io, only : MOM_infra_file, MOM_field
 use MOM_io, only : MOM_read_data, MOM_read_vector, read_variable, stdout
 use MOM_io, only : open_file_to_read, close_file_to_read, SINGLE_FILE, MULTIPLE
 use MOM_io, only : slasher, vardesc, MOM_write_field, var_desc
+use MOM_io, only : insert_ensemble_appendix
 use MOM_string_functions, only : uppercase
 use MOM_unit_scaling, only : unit_scale_type
 
@@ -872,15 +873,12 @@ subroutine reset_face_lengths_list(G, param_file, US)
   real    :: lon_p, lon_m ! The longitude of a point shifted by 360 degrees [degrees_E].
   logical :: check_360    ! If true, check for longitudes that are shifted by
                           ! +/- 360 degrees from the specified range of values.
-  logical :: found_u, found_v
   logical :: unit_in_use
   logical :: fatal_unused_lengths
   integer :: unused
-  integer :: ios, iounit, isu, isv
+  integer :: ios, iounit, isu, isv, isu_por, isv_por
   integer :: num_lines, nl_read, ln, npt, u_pt, v_pt
   integer :: i, j, isd, ied, jsd, jed, IsdB, IedB, JsdB, JedB
-  integer :: isu_por, isv_por
-  logical :: found_u_por, found_v_por
 
   isd = G%isd ; ied = G%ied ; jsd = G%jsd ; jed = G%jed
   IsdB = G%IsdB ; IedB = G%IedB ; JsdB = G%JsdB ; JedB = G%JedB
@@ -970,19 +968,17 @@ subroutine reset_face_lengths_list(G, param_file, US)
     do ln=1,num_lines
       line = lines(ln)
       ! Detect keywords
-      found_u = .false. ; found_v = .false.
-      found_u_por = .false. ; found_v_por = .false.
-      isu = index(uppercase(line), "U_WIDTH") ; if (isu > 0) found_u = .true.
-      isv = index(uppercase(line), "V_WIDTH") ; if (isv > 0) found_v = .true.
-      isu_por = index(uppercase(line), "U_WIDTH_POR") ; if (isu_por > 0) found_u_por = .true.
-      isv_por = index(uppercase(line), "V_WIDTH_POR") ; if (isv_por > 0) found_v_por = .true.
+      isu = index(uppercase(line), "U_WIDTH")
+      isv = index(uppercase(line), "V_WIDTH")
+      isu_por = index(uppercase(line), "U_WIDTH_POR")
+      isv_por = index(uppercase(line), "V_WIDTH_POR")
 
       ! Store and check the relevant values.
-      if (found_u) then
+      if (isu > 0) then  ! This line includes "U_WIDTH".
         u_pt = u_pt + 1
-        if (found_u_por .eqv. .false.) then
+        if (isu_por <= 0) then  ! This line sets "U_WIDTH"
           read(line(isu+8:),*) u_lon(1:2,u_pt), u_lat(1:2,u_pt), u_width(u_pt)
-        elseif (found_u_por) then
+        else  ! This line sets "U_WIDTH_POR"
           read(line(isu_por+12:),*) u_lon(1:2,u_pt), u_lat(1:2,u_pt), u_width(u_pt), &
                 Dmin_u(u_pt), Dmax_u(u_pt), Davg_u(u_pt)
         endif
@@ -1019,12 +1015,12 @@ subroutine reset_face_lengths_list(G, param_file, US)
                "topographical min/max found when reading line "//trim(line)//" from file "//&
                trim(filename))
         endif
-      elseif (found_v) then
+      elseif (isv > 0) then  ! This line includes "V_WIDTH".
         v_pt = v_pt + 1
-        if (found_v_por .eqv. .false.) then
+        if (isv_por <= 0) then  ! This line sets "V_WIDTH"
           read(line(isv+8:),*) v_lon(1:2,v_pt), v_lat(1:2,v_pt), v_width(v_pt)
-        elseif (found_v_por) then
-          read(line(isv+12:),*) v_lon(1:2,v_pt), v_lat(1:2,v_pt), v_width(v_pt), &
+        else  ! This line sets "V_WIDTH_POR"
+          read(line(isv_por+12:),*) v_lon(1:2,v_pt), v_lat(1:2,v_pt), v_width(v_pt), &
                 Dmin_v(v_pt), Dmax_v(v_pt), Davg_v(v_pt)
         endif
         v_width(v_pt) = US%m_to_L*v_width(v_pt) ! Rescale units equivalently to scale=US%m_to_L during read.
@@ -1185,7 +1181,7 @@ subroutine read_face_length_list(iounit, filename, num_lines, lines)
   ! list file, after removing comments.
   character(len=120) :: line, line_up
   logical :: found_u, found_v
-  integer :: isu, isv, icom
+  integer :: icom
   integer :: last
 
   num_lines = 0
@@ -1202,9 +1198,8 @@ subroutine read_face_length_list(iounit, filename, num_lines, lines)
 
     ! Detect keywords
     line_up = uppercase(line)
-    found_u = .false. ; found_v = .false.
-    isu = index(line_up(:last), "U_WIDTH") ; if (isu > 0) found_u = .true.
-    isv = index(line_up(:last), "V_WIDTH") ; if (isv > 0) found_v = .true.
+    found_u = (index(line_up(:last), "U_WIDTH") > 0)
+    found_v = (index(line_up(:last), "V_WIDTH") > 0)
 
     if (found_u .and. found_v) call MOM_error(FATAL, &
       "read_face_length_list : both U_WIDTH and V_WIDTH found when "//&
@@ -1382,6 +1377,7 @@ subroutine write_ocean_geometry_file(G, param_file, directory, US, geom_file)
   character(len=240) :: filepath  ! The full path to the file to write
   character(len=40)  :: mdl = "write_ocean_geometry_file"
   character(len=32)  :: filename_appendix = '' ! Appendix to geom filename for ensemble runs
+  character(len=32)  :: ensemble_appendix_prefix ! The prefix after which the ensemble id appendix is added
   type(vardesc),   dimension(:), allocatable :: &
     vars     ! Types with metadata about the variables and their staggering
   type(MOM_field), dimension(:), allocatable :: &
@@ -1394,7 +1390,7 @@ subroutine write_ocean_geometry_file(G, param_file, directory, US, geom_file)
 
   call callTree_enter('write_ocean_geometry_file()')
 
-  nFlds = 19 ; if (G%bathymetry_at_vel) nFlds = 23
+  nFlds = 23 ; if (G%bathymetry_at_vel) nFlds = 27
 
   allocate(vars(nFlds))
   allocate(fields(nFlds))
@@ -1413,28 +1409,32 @@ subroutine write_ocean_geometry_file(G, param_file, directory, US, geom_file)
   vars(2) = var_desc("geolonb","degree","longitude at corner (Bu) points",'q','1','1')
   vars(3) = var_desc("geolat","degree", "latitude at tracer (T) points", 'h','1','1')
   vars(4) = var_desc("geolon","degree","longitude at tracer (T) points",'h','1','1')
-  vars(5) = var_desc("D","meter","Basin Depth",'h','1','1')
-  vars(6) = var_desc("f","s-1","Coriolis Parameter",'q','1','1')
-  vars(7) = var_desc("dxCv","m","Zonal grid spacing at v points",'v','1','1')
-  vars(8) = var_desc("dyCu","m","Meridional grid spacing at u points",'u','1','1')
-  vars(9) = var_desc("dxCu","m","Zonal grid spacing at u points",'u','1','1')
-  vars(10)= var_desc("dyCv","m","Meridional grid spacing at v points",'v','1','1')
-  vars(11)= var_desc("dxT","m","Zonal grid spacing at h points",'h','1','1')
-  vars(12)= var_desc("dyT","m","Meridional grid spacing at h points",'h','1','1')
-  vars(13)= var_desc("dxBu","m","Zonal grid spacing at q points",'q','1','1')
-  vars(14)= var_desc("dyBu","m","Meridional grid spacing at q points",'q','1','1')
-  vars(15)= var_desc("Ah","m2","Area of h cells",'h','1','1')
-  vars(16)= var_desc("Aq","m2","Area of q cells",'q','1','1')
+  vars(5) = var_desc("geolatu","degree","latitude at zonal velocity (Cu) points",'u','1','1')
+  vars(6) = var_desc("geolonu","degree","longitude at zonal velocity (Cu) points",'u','1','1')
+  vars(7) = var_desc("geolatv","degree","latitude at meridional velocity (Cv) points",'v','1','1')
+  vars(8) = var_desc("geolonv","degree","longitude at meridional velocity (Cv) points",'v','1','1')
+  vars(9) = var_desc("D","meter","Basin Depth",'h','1','1')
+  vars(10)= var_desc("f","s-1","Coriolis Parameter",'q','1','1')
+  vars(11)= var_desc("dxCv","m","Zonal grid spacing at v points",'v','1','1')
+  vars(12)= var_desc("dyCu","m","Meridional grid spacing at u points",'u','1','1')
+  vars(13)= var_desc("dxCu","m","Zonal grid spacing at u points",'u','1','1')
+  vars(14)= var_desc("dyCv","m","Meridional grid spacing at v points",'v','1','1')
+  vars(15)= var_desc("dxT","m","Zonal grid spacing at h points",'h','1','1')
+  vars(16)= var_desc("dyT","m","Meridional grid spacing at h points",'h','1','1')
+  vars(17)= var_desc("dxBu","m","Zonal grid spacing at q points",'q','1','1')
+  vars(18)= var_desc("dyBu","m","Meridional grid spacing at q points",'q','1','1')
+  vars(19)= var_desc("Ah","m2","Area of h cells",'h','1','1')
+  vars(20)= var_desc("Aq","m2","Area of q cells",'q','1','1')
 
-  vars(17)= var_desc("dxCvo","m","Open zonal grid spacing at v points",'v','1','1')
-  vars(18)= var_desc("dyCuo","m","Open meridional grid spacing at u points",'u','1','1')
-  vars(19)= var_desc("wet", "nondim", "land or ocean?", 'h','1','1')
+  vars(21)= var_desc("dxCvo","m","Open zonal grid spacing at v points",'v','1','1')
+  vars(22)= var_desc("dyCuo","m","Open meridional grid spacing at u points",'u','1','1')
+  vars(23)= var_desc("wet", "nondim", "land or ocean?", 'h','1','1')
 
   if (G%bathymetry_at_vel) then
-    vars(20) = var_desc("Dblock_u","m","Blocked depth at u points",'u','1','1')
-    vars(21) = var_desc("Dopen_u","m","Open depth at u points",'u','1','1')
-    vars(22) = var_desc("Dblock_v","m","Blocked depth at v points",'v','1','1')
-    vars(23) = var_desc("Dopen_v","m","Open depth at v points",'v','1','1')
+    vars(24) = var_desc("Dblock_u","m","Blocked depth at u points",'u','1','1')
+    vars(25) = var_desc("Dopen_u","m","Open depth at u points",'u','1','1')
+    vars(26) = var_desc("Dblock_v","m","Blocked depth at v points",'v','1','1')
+    vars(27) = var_desc("Dopen_v","m","Open depth at v points",'v','1','1')
   endif
 
   if (present(geom_file)) then
@@ -1443,16 +1443,13 @@ subroutine write_ocean_geometry_file(G, param_file, directory, US, geom_file)
     filepath = trim(directory) // "ocean_geometry"
   endif
 
-  ! Append ensemble run number to filename if it is an ensemble run
-  call get_filename_appendix(filename_appendix)
-  if (len_trim(filename_appendix) > 0) then
-    geom_file_len = len_trim(filepath)
-    if (filepath(geom_file_len-2:geom_file_len) == ".nc") then
-      filepath = filepath(1:geom_file_len-3) // '.' // trim(filename_appendix) // ".nc"
-    else
-      filepath = filepath // '.' // trim(filename_appendix)
-    endif
-  endif
+  call get_param(param_file, mdl, "ENSEMBLE_APPENDIX_PREFIX", ensemble_appendix_prefix, &
+                 "If set to a non-empty string, this value specifies the substring after which "//&
+                 "the ensemble appendix is inserted in restart, initial conditions, and ocean "//&
+                 "geometry file names. If the specified substring is not found in any of those "//&
+                 "output file names, the model terminates with an error.", &
+                 default="", do_not_log=.true.)
+  call insert_ensemble_appendix(filepath, ensemble_appendix_prefix)
 
   call get_param(param_file, mdl, "PARALLEL_RESTARTFILES", multiple_files, &
                  "If true, the IO layout is used to group processors that write to the same "//&
@@ -1469,31 +1466,35 @@ subroutine write_ocean_geometry_file(G, param_file, directory, US, geom_file)
   call MOM_write_field(IO_handle, fields(2), G%Domain, G%geoLonBu)
   call MOM_write_field(IO_handle, fields(3), G%Domain, G%geoLatT)
   call MOM_write_field(IO_handle, fields(4), G%Domain, G%geoLonT)
+  call MOM_write_field(IO_handle, fields(5), G%Domain, G%geoLatCu)
+  call MOM_write_field(IO_handle, fields(6), G%Domain, G%geoLonCu)
+  call MOM_write_field(IO_handle, fields(7), G%Domain, G%geoLatCv)
+  call MOM_write_field(IO_handle, fields(8), G%Domain, G%geoLonCv)
 
-  call MOM_write_field(IO_handle, fields(5), G%Domain, G%bathyT, unscale=US%Z_to_m)
-  call MOM_write_field(IO_handle, fields(6), G%Domain, G%CoriolisBu, unscale=US%s_to_T)
+  call MOM_write_field(IO_handle, fields(9),  G%Domain, G%bathyT, unscale=US%Z_to_m)
+  call MOM_write_field(IO_handle, fields(10), G%Domain, G%CoriolisBu, unscale=US%s_to_T)
 
-  call MOM_write_field(IO_handle, fields(7),  G%Domain, G%dxCv, unscale=US%L_to_m)
-  call MOM_write_field(IO_handle, fields(8),  G%Domain, G%dyCu, unscale=US%L_to_m)
-  call MOM_write_field(IO_handle, fields(9),  G%Domain, G%dxCu, unscale=US%L_to_m)
-  call MOM_write_field(IO_handle, fields(10), G%Domain, G%dyCv, unscale=US%L_to_m)
-  call MOM_write_field(IO_handle, fields(11), G%Domain, G%dxT, unscale=US%L_to_m)
-  call MOM_write_field(IO_handle, fields(12), G%Domain, G%dyT, unscale=US%L_to_m)
-  call MOM_write_field(IO_handle, fields(13), G%Domain, G%dxBu, unscale=US%L_to_m)
-  call MOM_write_field(IO_handle, fields(14), G%Domain, G%dyBu, unscale=US%L_to_m)
+  call MOM_write_field(IO_handle, fields(11), G%Domain, G%dxCv, unscale=US%L_to_m)
+  call MOM_write_field(IO_handle, fields(12), G%Domain, G%dyCu, unscale=US%L_to_m)
+  call MOM_write_field(IO_handle, fields(13), G%Domain, G%dxCu, unscale=US%L_to_m)
+  call MOM_write_field(IO_handle, fields(14), G%Domain, G%dyCv, unscale=US%L_to_m)
+  call MOM_write_field(IO_handle, fields(15), G%Domain, G%dxT, unscale=US%L_to_m)
+  call MOM_write_field(IO_handle, fields(16), G%Domain, G%dyT, unscale=US%L_to_m)
+  call MOM_write_field(IO_handle, fields(17), G%Domain, G%dxBu, unscale=US%L_to_m)
+  call MOM_write_field(IO_handle, fields(18), G%Domain, G%dyBu, unscale=US%L_to_m)
 
-  call MOM_write_field(IO_handle, fields(15), G%Domain, G%areaT, unscale=US%L_to_m**2)
-  call MOM_write_field(IO_handle, fields(16), G%Domain, G%areaBu, unscale=US%L_to_m**2)
+  call MOM_write_field(IO_handle, fields(19), G%Domain, G%areaT, unscale=US%L_to_m**2)
+  call MOM_write_field(IO_handle, fields(20), G%Domain, G%areaBu, unscale=US%L_to_m**2)
 
-  call MOM_write_field(IO_handle, fields(17), G%Domain, G%dx_Cv, unscale=US%L_to_m)
-  call MOM_write_field(IO_handle, fields(18), G%Domain, G%dy_Cu, unscale=US%L_to_m)
-  call MOM_write_field(IO_handle, fields(19), G%Domain, G%mask2dT)
+  call MOM_write_field(IO_handle, fields(21), G%Domain, G%dx_Cv, unscale=US%L_to_m)
+  call MOM_write_field(IO_handle, fields(22), G%Domain, G%dy_Cu, unscale=US%L_to_m)
+  call MOM_write_field(IO_handle, fields(23), G%Domain, G%mask2dT)
 
   if (G%bathymetry_at_vel) then
-    call MOM_write_field(IO_handle, fields(20), G%Domain, G%Dblock_u, unscale=US%Z_to_m)
-    call MOM_write_field(IO_handle, fields(21), G%Domain, G%Dopen_u, unscale=US%Z_to_m)
-    call MOM_write_field(IO_handle, fields(22), G%Domain, G%Dblock_v, unscale=US%Z_to_m)
-    call MOM_write_field(IO_handle, fields(23), G%Domain, G%Dopen_v, unscale=US%Z_to_m)
+    call MOM_write_field(IO_handle, fields(24), G%Domain, G%Dblock_u, unscale=US%Z_to_m)
+    call MOM_write_field(IO_handle, fields(25), G%Domain, G%Dopen_u, unscale=US%Z_to_m)
+    call MOM_write_field(IO_handle, fields(26), G%Domain, G%Dblock_v, unscale=US%Z_to_m)
+    call MOM_write_field(IO_handle, fields(27), G%Domain, G%Dopen_v, unscale=US%Z_to_m)
   endif
 
   call IO_handle%close()

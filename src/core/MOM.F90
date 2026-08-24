@@ -16,7 +16,7 @@ use MOM_cpu_clock,            only : cpu_clock_id, cpu_clock_begin, cpu_clock_en
 use MOM_cpu_clock,            only : CLOCK_COMPONENT, CLOCK_SUBCOMPONENT
 use MOM_cpu_clock,            only : CLOCK_MODULE_DRIVER, CLOCK_MODULE, CLOCK_ROUTINE
 use MOM_diag_mediator,        only : diag_mediator_init, enable_averaging, enable_averages
-use MOM_diag_mediator,        only : diag_mediator_infrastructure_init
+use MOM_diag_mediator,        only : diag_mediator_infrastructure_init, diag_mediator_set_OBC_info
 use MOM_diag_mediator,        only : diag_set_state_ptrs, diag_update_remap_grids
 use MOM_diag_mediator,        only : disable_averaging, post_data, safe_alloc_ptr
 use MOM_diag_mediator,        only : register_diag_field, register_cell_measure
@@ -36,6 +36,7 @@ use MOM_error_handler,        only : MOM_error, MOM_mesg, FATAL, WARNING, is_roo
 use MOM_error_handler,        only : MOM_set_verbosity, callTree_showQuery
 use MOM_error_handler,        only : callTree_enter, callTree_leave, callTree_waypoint
 use MOM_file_parser,          only : read_param, get_param, log_version, param_file_type
+use MOM_file_parser,          only : openParameterBlock, closeParameterBlock
 use MOM_forcing_type,         only : forcing, mech_forcing, find_ustar
 use MOM_forcing_type,         only : MOM_forcing_chksum, MOM_mech_forcing_chksum
 use MOM_get_input,            only : Get_MOM_Input, directories
@@ -116,14 +117,18 @@ use MOM_mixed_layer_restrat,   only : mixedlayer_restrat_register_restarts
 use MOM_obsolete_diagnostics,  only : register_obsolete_diagnostics
 use MOM_open_boundary,         only : ocean_OBC_type, open_boundary_end
 use MOM_open_boundary,         only : register_temp_salt_segments, update_segment_tracer_reservoirs
-use MOM_open_boundary,         only : read_OBC_segment_data, initialize_OBC_segment_reservoirs
+use MOM_open_boundary,         only : read_OBC_dynamics_data, read_OBC_tracer_data
+use MOM_open_boundary,         only : initialize_OBC_segment_reservoirs
 use MOM_open_boundary,         only : setup_OBC_tracer_reservoirs
 use MOM_open_boundary,         only : setup_OBC_thickness_reservoirs
 use MOM_open_boundary,         only : open_boundary_register_restarts, remap_OBC_fields
 use MOM_open_boundary,         only : open_boundary_setup_vert, initialize_segment_data
-use MOM_open_boundary,         only : update_OBC_segment_data, rotate_OBC_config
+use MOM_open_boundary,         only : update_OBC_dynamics_data, update_OBC_tracer_data
+use MOM_open_boundary,         only : rotate_OBC_config
 use MOM_open_boundary,         only : open_boundary_halo_update, write_OBC_info, chksum_OBC_segments
 use MOM_open_boundary,         only : segment_thickness_reservoir_init
+use MOM_open_boundary,         only : copy_OBC_radiation_coefs
+use MOM_open_boundary,         only : copy_OBC_tracer_reservoirs, copy_OBC_thickness_reservoirs
 use MOM_porous_barriers,       only : porous_widths_layer, porous_widths_interface, porous_barriers_init
 use MOM_porous_barriers,       only : porous_barrier_CS
 use MOM_set_visc,              only : set_viscous_BBL, set_viscous_ML, set_visc_CS
@@ -147,6 +152,7 @@ use MOM_tracer_hor_diff,       only : tracer_hor_diff_end, tracer_hor_diff_CS
 use MOM_tracer_registry,       only : tracer_registry_type, register_tracer, tracer_registry_init
 use MOM_tracer_registry,       only : register_tracer_diagnostics, post_tracer_diagnostics_at_sync
 use MOM_tracer_registry,       only : post_tracer_transport_diagnostics, MOM_tracer_chksum
+use MOM_tracer_registry,       only : post_tracer_integral_diagnostics
 use MOM_tracer_registry,       only : preALE_tracer_diagnostics, postALE_tracer_diagnostics
 use MOM_tracer_registry,       only : lock_tracer_registry, tracer_registry_end
 use MOM_tracer_flow_control,   only : call_tracer_register, tracer_flow_control_CS
@@ -322,6 +328,10 @@ type, public :: MOM_control_struct ; private
   logical :: useMEKE                 !< If true, call the MEKE parameterization.
   logical :: use_stochastic_EOS      !< If true, use the stochastic EOS parameterizations.
   logical :: useWaves                !< If true, update Stokes drift
+  logical :: StokesMOST              !< If true, use Stokes Similarity package. Needed to decide if Lam2 should
+                                     !! be passed to mixedlayer_restrat.
+  logical :: wave_enhanced_ustar     !< If true, enhance ustar in Bodner23. Needed to decide if Lam2 should
+                                     !! be passed to mixedlayer_restrat.
   real :: dtbt_reset_period          !< The time interval between dynamic recalculation of the
                                      !! barotropic time step [T ~> s]. If this is negative dtbt is never
                                      !! calculated, and if it is 0, dtbt is calculated every step.
@@ -330,7 +340,7 @@ type, public :: MOM_control_struct ; private
   real            :: dt_obc_seg_period   !< The time interval between OBC segment updates for OBGC
                                          !! tracers [T ~> s], or a negative value if the segment
                                          !! data are time-invarant, or zero to update the OBGC
-                                         !! segment data with every call to update_OBC_segment_data.
+                                         !! segment data with every call to update_OBC_tracer_data.
   type(time_type) :: dt_obc_seg_interval !< A time_time representation of dt_obc_seg_period.
   type(time_type) :: dt_obc_seg_time     !< The next time OBC segment update is applied to OBGC tracers.
 
@@ -397,6 +407,15 @@ type, public :: MOM_control_struct ; private
   type(surface_diag_IDs)   :: sfc_IDs  !< Handles used for surface diagnostics.
   type(diag_grid_storage)  :: diag_pre_sync !< The grid (thicknesses) before remapping
   type(diag_grid_storage)  :: diag_pre_dyn  !< The grid (thicknesses) before dynamics
+
+  logical :: accumulate_resolved_flux = .false. !< If true, accumulate resolved flux for tracers for diagnostics
+                                                !! separating the tracer flux due to resolved and parameterized flow
+  logical :: do_resolved_advection = .false.    !< If true, calculate advection by resolved flow
+  logical :: do_param_advection = .false.       !< If true, calculate advection by parameterized flow
+  real, allocatable, dimension(:,:,:) :: &
+    uhtr_resolved   !< accumulated zonal thickness fluxes due to resolved flow to advect tracers [H L2 ~> m3 or kg]
+  real, allocatable, dimension(:,:,:) :: &
+    vhtr_resolved   !< accumulated meridional thickness fluxes due to resolved flow to advect tracers [H L2 ~> m3 or kg]
 
   ! The remainder of this type provides pointers to child module control structures.
 
@@ -1097,6 +1116,8 @@ subroutine step_MOM(forces_in, fluxes_in, sfc_state, Time_start, time_int_in, CS
                           CS%CDp, p_surf, CS%t_dyn_rel_diag, CS%diag_pre_sync,&
                           G, GV, US, CS%diagnostics_CSp)
       call post_tracer_diagnostics_at_sync(CS%Tracer_reg, h, CS%diag_pre_sync, CS%diag, G, GV, CS%t_dyn_rel_diag)
+      call post_tracer_integral_diagnostics(G, GV, US, CS%Tracer_reg, h, CS%tv, CS%diag)
+
       call diag_copy_diag_to_storage(CS%diag_pre_sync, h, CS%diag)
       if (showCallTree) call callTree_waypoint("finished calculate_diagnostic_fields (step_MOM)")
       call disable_averaging(CS%diag)
@@ -1308,7 +1329,7 @@ subroutine step_MOM_dynamics(forces, p_surf_begin, p_surf_end, dt, dt_tr_adv, &
 
       call thickness_diffuse(h, CS%uhtr, CS%vhtr, CS%tv, dt_tr_adv, G, GV, US, &
                              CS%MEKE, CS%VarMix, CS%CDp, CS%thickness_diffuse_CSp, &
-                             CS%stoch_CS)
+                             CS%stoch_CS, u, v)
 
       call cpu_clock_end(id_clock_thick_diff)
       call pass_var(h, G%Domain, clock=id_clock_pass, halo=CS%dyn_h_stencil)
@@ -1434,6 +1455,19 @@ subroutine step_MOM_dynamics(forces, p_surf_begin, p_surf_end, dt, dt_tr_adv, &
     if (showCallTree) call callTree_waypoint("finished step_MOM_dyn_unsplit (step_MOM)")
   endif
 
+  ! Accumulate resolved flux for tracer diagnostics
+  if (CS%accumulate_resolved_flux) then
+    !$OMP parallel do default(shared)
+    do k=1,nz
+      do j=js-2,je+2 ; do I=Isq-2,Ieq+2
+        CS%uhtr_resolved(I,j,k) = CS%uhtr_resolved(I,j,k) + CS%uh(I,j,k)*dt
+      enddo ; enddo
+      do J=Jsq-2,Jeq+2 ; do i=is-2,ie+2
+        CS%vhtr_resolved(i,J,k) = CS%vhtr_resolved(i,J,k) + CS%vh(i,J,k)*dt
+      enddo ; enddo
+    enddo
+  endif
+
   if (CS%use_particles .and. CS%do_dynamics .and. (.not. CS%use_uh_particles)) then
     if (CS%thickness_diffuse_first) call MOM_error(WARNING,"particles_run: "//&
       "Thickness_diffuse_first is true and use_uh_particles is false. "//&
@@ -1484,8 +1518,8 @@ subroutine step_MOM_dynamics(forces, p_surf_begin, p_surf_end, dt, dt_tr_adv, &
         call calc_slope_functions(h, CS%tv, dt, G, GV, US, CS%VarMix, OBC=CS%OBC)
 
       call thickness_diffuse(h, CS%uhtr, CS%vhtr, CS%tv, dt, G, GV, US, &
-                             CS%MEKE, CS%VarMix, CS%CDp, CS%thickness_diffuse_CSp, CS%stoch_CS)
-
+                             CS%MEKE, CS%VarMix, CS%CDp, CS%thickness_diffuse_CSp, &
+                             CS%stoch_CS, u, v)
       call cpu_clock_end(id_clock_thick_diff)
       call pass_var(h, G%Domain, clock=id_clock_pass, halo=CS%dyn_h_stencil)
       if (CS%debug) call hchksum(h,"Post-thickness_diffuse h", G%HI, haloshift=1, unscale=GV%H_to_MKS)
@@ -1521,8 +1555,17 @@ subroutine step_MOM_dynamics(forces, p_surf_begin, p_surf_end, dt, dt_tr_adv, &
                     CS%uhtr, CS%vhtr, G%HI, haloshift=0, unscale=GV%H_to_MKS*US%L_to_m**2)
     endif
     call cpu_clock_begin(id_clock_ml_restrat)
-    call mixedlayer_restrat(h, CS%uhtr, CS%vhtr, CS%tv, forces, dt, CS%visc%MLD, CS%visc%h_ML, &
-                            CS%visc%sfc_buoy_flx, CS%VarMix, G, GV, US, CS%mixedlayer_restrat_CSp)
+    if (CS%wave_enhanced_ustar .and. CS%StokesMOST) then
+      if (associated(CS%visc%Lam2)) then
+        call mixedlayer_restrat(h, CS%uhtr, CS%vhtr, CS%tv, forces, dt, CS%visc%MLD, CS%visc%h_ML, &
+                    CS%visc%sfc_buoy_flx, CS%VarMix, G, GV, US, CS%mixedlayer_restrat_CSp, CS%visc%Lam2)
+      else
+        call MOM_error(FATAL,'step_MOM_dynamics:CS%visc%Lam2 not associated')
+      endif
+    else
+      call mixedlayer_restrat(h, CS%uhtr, CS%vhtr, CS%tv, forces, dt, CS%visc%MLD, CS%visc%h_ML, &
+                  CS%visc%sfc_buoy_flx, CS%VarMix, G, GV, US, CS%mixedlayer_restrat_CSp)
+    endif
     call cpu_clock_end(id_clock_ml_restrat)
     call pass_var(h, G%Domain, clock=id_clock_pass, halo=CS%dyn_h_stencil)
     !$omp target update to(h, CS%uhtr, CS%vhtr)
@@ -1616,10 +1659,18 @@ subroutine step_MOM_tracer_dyn(CS, G, GV, US, h, Time_local)
   type(group_pass_type) :: pass_T_S
   integer :: halo_sz ! The size of a halo where data must be valid.
   logical :: x_first ! If true, advect tracers first in the x-direction, then y.
+  real, dimension(SZIB_(G),SZJ_(G),SZK_(GV)) :: &
+    uhtr_tmp             ! Temp. variable for advecting with alternate volume fluxes [H L2 ~> m3 or kg]
+  real, dimension(SZI_(G),SZJB_(G),SZK_(GV)) :: &
+    vhtr_tmp             ! Temp. variable for advecting with alternate volume fluxes[H L2 ~> m3 or kg]
+  integer :: i, j, k, m, is, ie, js, je, Isq, Ieq, Jsq, Jeq, nz
+  integer :: IsdB, IedB, JsdB, JedB
   logical :: showCallTree
-  integer :: i, j, k
 
   showCallTree = callTree_showQuery()
+
+  is  = G%isc ; ie  = G%iec ; js  = G%jsc ; je  = G%jec ; nz = GV%ke
+  Isq = G%IscB ; Ieq = G%IecB ; Jsq = G%JscB ; Jeq = G%JecB
 
   if (CS%debug) then
     !$omp target update from(h, CS%uhtr, CS%vhtr)
@@ -1647,6 +1698,21 @@ subroutine step_MOM_tracer_dyn(CS, G, GV, US, h, Time_local)
                        CS%tv, CS%t_dyn_rel_adv, CS%use_uh_particles)
   endif
 
+  ! Tracer-step OBC path: active when DT_OBC_SEG_UPDATE_OBGC is ignored (i.e. DT_OBC_SEG_UPDATE_OBGC = DT_TRACER)
+  ! or when the bug fix is enabled (OBC_TRACER_DZ_BUG=F). OBC_TRACER_DZ_BUG controls whether dz is recomputed
+  ! from the current layer thicknesses before reading.
+  if (associated(CS%OBC)) then
+    if (CS%OBC%ignore_dt_obc_bgc .or. (.not. CS%OBC%tracer_dz_bug)) then
+      if (CS%OBC%tracer_dz_bug) then
+        call read_OBC_tracer_data(G, GV, US, CS%OBC, Time_local)
+      else
+        ! NOTE: Assumes thickness_to_dz() is on CPU
+        call read_OBC_tracer_data(G, GV, US, CS%OBC, Time_local, h=h, tv=CS%tv)
+      endif
+      call update_OBC_tracer_data(CS%OBC)
+    endif
+  endif
+
   if (CS%alternate_first_direction) then
     ! This calculation of the value of G%first_direction from the start of the accumulation of
     ! mass transports for use by the tracers is the equivalent to adding 2*n_dyn_steps before
@@ -1657,7 +1723,27 @@ subroutine step_MOM_tracer_dyn(CS, G, GV, US, h, Time_local)
   endif
   if (CS%debug) call MOM_tracer_chksum("Pre-advect ", CS%tracer_Reg, G)
   call advect_tracer(h, CS%uhtr, CS%vhtr, CS%OBC, CS%t_dyn_rel_adv, G, GV, US, &
-                     CS%tracer_adv_CSp, CS%tracer_Reg, x_first_in=x_first)
+                     CS%tracer_adv_CSp, CS%tracer_Reg, x_first_in=x_first, flux_type=0)
+
+  if (CS%do_resolved_advection) then
+    call advect_tracer(h, CS%uhtr_resolved, CS%vhtr_resolved, CS%OBC, CS%t_dyn_rel_adv, G, GV, US, &
+                       CS%tracer_adv_CSp, CS%tracer_Reg, x_first_in=x_first, flux_type=1)
+  endif
+
+  if (CS%do_param_advection) then
+    !$OMP parallel do default(shared)
+    do k=1,nz
+      do j=js-2,je+2 ; do I=Isq-2,Ieq+2
+        uhtr_tmp(I,j,k) = CS%uhtr(I,j,k) - CS%uhtr_resolved(I,j,k)
+      enddo ; enddo
+      do J=Jsq-2,Jeq+2 ; do i=is-2,ie+2
+        vhtr_tmp(i,J,k) = CS%vhtr(i,J,k) - CS%vhtr_resolved(i,J,k)
+      enddo ; enddo
+    enddo
+    call advect_tracer(h, uhtr_tmp, vhtr_tmp, CS%OBC, CS%t_dyn_rel_adv, G, GV, US, &
+                       CS%tracer_adv_CSp, CS%tracer_Reg, x_first_in=x_first, flux_type=2)
+  endif
+
   if (CS%debug) call MOM_tracer_chksum("Post-advect ", CS%tracer_Reg, G)
   call tracer_hordiff(h, CS%t_dyn_rel_adv, CS%MEKE, CS%VarMix, CS%visc, G, GV, US, &
                       CS%tracer_diff_CSp, CS%tracer_Reg, CS%tv)
@@ -1692,6 +1778,11 @@ subroutine step_MOM_tracer_dyn(CS, G, GV, US, h, Time_local)
   do concurrent (k=1:GV%ke, J=G%JsdB:G%JedB, i=G%isd:G%ied)
     CS%vhtr(i,J,k) = 0.
   enddo
+
+  if (CS%accumulate_resolved_flux) then
+    CS%uhtr_resolved(:,:,:) = 0.0
+    CS%vhtr_resolved(:,:,:) = 0.0
+  endif
 
   CS%n_dyn_steps_in_adv = 0
   CS%t_dyn_rel_adv = 0.0
@@ -1840,7 +1931,7 @@ subroutine step_MOM_thermo(CS, G, GV, US, u, v, h, tv, fluxes, dtdia, &
     fluxes%fluxes_used = .true.
 
     if (CS%stoch_CS%do_skeb) then
-       call apply_skeb(CS%G,CS%GV,CS%stoch_CS,CS%u,CS%v,CS%h,CS%tv,dtdia,Time_end_thermo)
+       call apply_skeb(G, GV, US, CS%stoch_CS, u, v, h, tv, dtdia, Time_end_thermo)
     endif
 
     if (showCallTree) call callTree_waypoint("finished diabatic (step_MOM_thermo)")
@@ -2016,11 +2107,13 @@ subroutine ALE_regridding_and_remapping(CS, G, GV, US, u, v, h, tv, dtdia, Time_
       call remap_dyn_split_RK2_aux_vars(G, GV, CS%dyn_split_RK2_CSp, h_old_u, h_old_v, h_new_u, h_new_v, CS%ALE_CSp)
     endif
 
-    if (associated(CS%OBC)) then
+    if (associated(CS%OBC) .or. associated(CS%visc%Kv_shear_Bu)) then
       call pass_var(h, G%Domain, complete=.false.)
       call pass_var(h_new, G%Domain, complete=.true.)
-      call remap_OBC_fields(G, GV, h, h_new, CS%OBC, PCM_cell=PCM_cell)
     endif
+
+    if (associated(CS%OBC)) &
+      call remap_OBC_fields(G, GV, h, h_new, CS%OBC, PCM_cell=PCM_cell)
 
     call remap_vertvisc_aux_vars(G, GV, CS%visc, h, h_new, CS%ALE_CSp, CS%OBC)
     if (associated(CS%visc%Kv_shear)) &
@@ -2418,7 +2511,7 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, &
   ! This include declares and sets the variable "version".
 # include "version_variable.h"
 
-  integer :: i, j, k, is, ie, js, je, isd, ied, jsd, jed, nz
+  integer :: i, j, k, m, is, ie, js, je, isd, ied, jsd, jed, nz
   integer :: IsdB, IedB, JsdB, JedB
   real    :: dtbt              ! If negative, this specifies the barotropic timestep as a fraction
                                ! of the maximum stable value [nondim].
@@ -2487,6 +2580,8 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, &
   logical :: use_KPP           ! If true, diabatic is using KPP vertical mixing
   logical :: MLE_use_PBL_MLD   ! If true, use stored boundary layer depths for submesoscale restratification.
   logical :: OBC_reservoir_init_bug
+  logical :: OBC_bgc_time_ref_bug  ! If true, use the start of the current run (not the overall
+                               ! start time) as the reference for OBC BGC tracer update schedule.
   integer :: nkml, nkbl, verbosity, write_geom, number_of_OBC_segments
   integer :: dynamics_stencil  ! The computational stencil for the calculations
                                ! in the dynamic core.
@@ -2517,7 +2612,7 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, &
   call get_MOM_input(param_file, dirs, default_input_filename=input_restart_file, ensemble_num=ensemble_num)
 
   verbosity = 2 ; call read_param(param_file, "VERBOSITY", verbosity)
-  call MOM_set_verbosity(verbosity)
+  call MOM_set_verbosity(verbosity, .true.)
   call callTree_enter("initialize_MOM(), MOM.F90")
 
   call find_obsolete_params(param_file)
@@ -2533,6 +2628,7 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, &
                  "Integer controlling level of messaging\n" // &
                  "\t0 = Only FATAL messages\n" // &
                  "\t2 = Only FATAL, WARNING, NOTE [default]\n" // &
+                 "\t6 = Above plus call tree messages\n" //&
                  "\t9 = All)", default=2, debuggingParam=.true.)
   call get_param(param_file, "MOM", "DO_UNIT_TESTS", do_unit_tests, &
                  "If True, exercises unit tests at model start up.", &
@@ -2563,7 +2659,6 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, &
   call get_param(param_file, '', "FPMIX", fpmix, &
                  "If true, add non-local momentum flux increments and diffuse down the Eulerian gradient.", &
                  default=.false., do_not_log=.true.)
-
   if (fpmix .and. .not. CS%split)  then
     call MOM_error(FATAL, "initialize_MOM: "//&
        "FPMIX=True only works when SPLIT=True.")
@@ -2572,6 +2667,15 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, &
   ! NOTE: tv is used, even if there is no thermodynamics
   allocate(CS%tv)
 
+  call openParameterBlock(param_file, 'KPP', do_not_log=.true.)
+  call get_param(param_file, '', 'STOKES_MOST', CS%StokesMOST, &
+                 'If True, use Stokes Similarity package.', &
+                 default=.False., do_not_log=.true.)
+  call closeParameterBlock(param_file)
+  call openParameterBlock(param_file,'MLE', do_not_log=.true.)
+  call get_param(param_file, '', "WAVE_ENHANCED_USTAR", CS%wave_enhanced_ustar, &
+             "If true, enhance ustar in Bodner23.", default=.false., do_not_log=.true.)
+  call closeParameterBlock(param_file)
   call get_param(param_file, "MOM", "BOUSSINESQ", Boussinesq, &
                  "If true, make the Boussinesq approximation.", default=.true., do_not_log=.true.)
   call get_param(param_file, "MOM", "SEMI_BOUSSINESQ", semi_Boussinesq, &
@@ -2775,19 +2879,13 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, &
     default_val = US%T_to_s*CS%dt_therm ; if (dtbt > 0.0) default_val = -1.0
     CS%dtbt_reset_period = -1.0
     call get_param(param_file, "MOM", "DTBT_RESET_PERIOD", CS%dtbt_reset_period, &
-                 "The period between recalculations of DTBT (if DTBT <= 0). "//&
-                 "If DTBT_RESET_PERIOD is negative, DTBT is set based "//&
-                 "only on information available at initialization.  If 0, "//&
-                 "DTBT will be set every dynamics time step. The default "//&
-                 "is set by DT_THERM.  This is only used if SPLIT is true.", &
-                 units="s", default=default_val, scale=US%s_to_T, do_not_read=(dtbt > 0.0))
+                   "The period between recalculations of DTBT (if DTBT <= 0). If "//&
+                   "DTBT_RESET_PERIOD is negative, DTBT is set based only on information "//&
+                   "available at initialization.  If 0, DTBT will be set every dynamics time "//&
+                   "step. Values between 0 and DT are treated as 0.  The default is set by "//&
+                   "DT_THERM. This is only used if SPLIT is true.", &
+                   units="s", default=default_val, scale=US%s_to_T, do_not_read=(dtbt > 0.0))
   endif
-
-  call get_param(param_file, "MOM", "DT_OBC_SEG_UPDATE_OBGC", CS%dt_obc_seg_period, &
-               "The time between OBC segment data updates for OBGC tracers. "//&
-               "This must be an integer multiple of DT and DT_THERM. "//&
-               "The default is set to DT.", &
-               units="s", default=US%T_to_s*CS%dt, scale=US%s_to_T, do_not_log=.not.associated(OBC_in))
 
   ! This is here in case these values are used inappropriately.
   use_frazil = .false. ; bound_salinity = .false. ; use_p_surf_in_EOS = .false.
@@ -3036,6 +3134,16 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, &
 
   ! Allocate initialize time-invariant MOM variables.
   call MOM_initialize_fixed(dG_in, US, OBC_in, param_file)
+
+  call get_param(param_file, "MOM", "DT_OBC_SEG_UPDATE_OBGC", CS%dt_obc_seg_period, &
+                 "The time between OBC segment data updates for OBGC tracers.  This must be an "//&
+                 "integer multiple of DT and DT_THERM.  The default is set to DT.", units="s", &
+                 default=US%T_to_s*CS%dt, scale=US%s_to_T, do_not_log=.not.associated(OBC_in))
+  call get_param(param_file, "MOM", "OBC_BGC_TIME_REF_BUG", OBC_bgc_time_ref_bug, &
+                 "If true, recover a bug that the BGC OBC segment update schedule is "//&
+                 "referenced to the start of the current run rather than the overall start "//&
+                 "time, which can lead to restart reproducibility failures.", &
+                 default=enable_bugs, do_not_log=.not.associated(OBC_in))
 
   ! Copy the grid metrics and bathymetry to the ocean_grid_type
   call copy_dyngrid_to_MOM_grid(dG_in, G_in, US)
@@ -3515,8 +3623,11 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, &
     call calc_derived_thermo(CS%tv, CS%h, G, GV, US)
 
     ! Call this during initialization to fill boundary arrays from fixed values
-    call read_OBC_segment_data(G, GV, US, CS%OBC, CS%tv, CS%h, Time)
-    call update_OBC_segment_data(G, GV, US, CS%OBC, CS%h, Time)
+    call read_OBC_dynamics_data(G, GV, US, CS%OBC, CS%tv, CS%h, Time)
+    call update_OBC_dynamics_data(G, GV, US, CS%OBC, CS%h, Time)
+    ! BGC data is not read/updated at initialization since OBC%update_OBC_seg_data is false.
+    call read_OBC_tracer_data(G, GV, US, CS%OBC, Time, include_bgc=.false.)
+    call update_OBC_tracer_data(CS%OBC, include_bgc=.false.)
     call initialize_OBC_segment_reservoirs(GV, CS%OBC)
   endif
 
@@ -3661,6 +3772,9 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, &
   diag => CS%diag
   ! Initialize the diag mediator.
   call diag_mediator_init(G, GV, US, GV%ke, param_file, diag, doc_file_dir=dirs%output_directory)
+  if (associated(CS%OBC)) then
+    call diag_mediator_set_OBC_info(G, CS%OBC%segnum_u, CS%OBC%segnum_v, diag)
+  endif
   if (present(diag_ptr)) diag_ptr => CS%diag
 
   ! Initialize the diagnostics masks for native arrays.
@@ -3750,16 +3864,22 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, &
               CS%visc, dirs, CS%ntrunc, CS%pbv, calc_dtbt=calc_dtbt, &
               cont_stencil=CS%cont_stencil, dyn_h_stencil=CS%dyn_h_stencil)
     endif
+    ! A reset period no longer than dt is equivalent to recalculating every step.
+    if (CS%dtbt_reset_period > 0.0 .and. CS%dtbt_reset_period <= CS%dt) &
+        CS%dtbt_reset_period = 0.0
     if (CS%dtbt_reset_period > 0.0) then
       CS%dtbt_reset_interval = real_to_time(CS%dtbt_reset_period, unscale=US%T_to_s)
-      ! Set dtbt_reset_time to be the next even multiple of dtbt_reset_interval.
-      CS%dtbt_reset_time = Time_init + CS%dtbt_reset_interval * &
-                                 ((Time - Time_init) / CS%dtbt_reset_interval)
-      if ((CS%dtbt_reset_time > Time) .and. calc_dtbt) then
-        ! Back up dtbt_reset_time one interval to force dtbt to be calculated,
-        ! because the restart was not aligned with the interval to recalculate
-        ! dtbt, and dtbt was not read from a restart file.
-        CS%dtbt_reset_time = CS%dtbt_reset_time - CS%dtbt_reset_interval
+      if (calc_dtbt) then
+        ! No restart DTBT (not found or new run) or DTBT_RESTART_BUG=True: set to the most recent
+        ! multiple of the interval before or equal to current time, so the set_dtbt is called on
+        ! the first step.
+        CS%dtbt_reset_time = Time_init + CS%dtbt_reset_interval * &
+                                   ((Time - Time_init) / CS%dtbt_reset_interval)
+      else
+        ! Restart DTBT available: defer to the next multiple after current time so the first step
+        ! uses the restart value unless a reset is naturally due.
+        CS%dtbt_reset_time = Time_init + CS%dtbt_reset_interval * &
+                                   ((Time - Time_init) / CS%dtbt_reset_interval + 1)
       endif
     endif
   elseif (CS%use_RK2) then
@@ -3777,10 +3897,36 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, &
   endif
   CS%dyn_h_stencil = max(2, CS%dyn_h_stencil)
 
-  !Set OBC segment data update period
-  if (associated(CS%OBC) .and. CS%dt_obc_seg_period > 0.0) then
+  ! When IGNORE_DT_OBC_SEG_UPDATE_OBGC is true, BGC OBC updates happen every tracer advection step.
+  if (associated(CS%OBC)) then
+    if (CS%OBC%ignore_dt_obc_bgc) CS%dt_obc_seg_period = 0.0
+  endif
+
+  ! Set the next time to update OBC segment BGC tracer data
+  if (associated(CS%OBC) .and. (CS%dt_obc_seg_period > 0.0)) then
+    if (CS%dt_obc_seg_period > CS%dt_tr_adv) then
+      if (new_sim) then
+        call MOM_error(WARNING, "DT_OBC_SEG_UPDATE_OBGC > DT_TRACER_ADVECT: this run will "//&
+            "proceed normally, but any restart from it will fail with a FATAL error because "//&
+            "BGC OBC external data is not saved in restart files. "//&
+            "Set DT_OBC_SEG_UPDATE_OBGC = DT_TRACER_ADVECT or 0 until this is fixed.")
+      else
+        call MOM_error(FATAL, "DT_OBC_SEG_UPDATE_OBGC > DT_TRACER_ADVECT is not supported "//&
+            "for restart runs: BGC OBC external data is not saved in restart files, so the "//&
+            "first tracer advection step after restart may use incorrect boundary data. "//&
+            "Set DT_OBC_SEG_UPDATE_OBGC = DT_TRACER_ADVECT or 0 until this is fixed.")
+      endif
+    endif
     CS%dt_obc_seg_interval = real_to_time(CS%dt_obc_seg_period, unscale=US%T_to_s)
-    CS%dt_obc_seg_time = Time + CS%dt_obc_seg_interval
+    if (OBC_bgc_time_ref_bug) then
+      CS%dt_obc_seg_time = Time + CS%dt_obc_seg_interval
+    else
+      ! Set to the next update point after current time, so that %t read from initialization is
+      ! not overwritten.  Note that even though this line by itself is correct, there are still
+      ! issue with restart runs, as external data %t is not saved in restart files.
+      CS%dt_obc_seg_time = Time_init + CS%dt_obc_seg_interval * &
+                           ((Time - Time_init) / CS%dt_obc_seg_interval + 1)
+    endif
   endif
 
   call callTree_waypoint("dynamics initialized (initialize_MOM)")
@@ -3853,6 +3999,25 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, &
     call ALE_register_diags(Time, G, GV, US, diag, CS%ALE_CSp)
   endif
 
+  ! determine if we need to accumulate resolved transports for tracer advection diagnostics
+  do m = 1,CS%tracer_Reg%ntr
+    if (CS%tracer_Reg%Tr(m)%id_adx_resolved > 0 .or. &
+        CS%tracer_Reg%Tr(m)%id_ady_resolved > 0) then
+      CS%accumulate_resolved_flux = .true.
+      CS%do_resolved_advection = .true.
+    endif
+    if (CS%tracer_Reg%Tr(m)%id_adx_param    > 0 .or. &
+        CS%tracer_Reg%Tr(m)%id_ady_param    > 0) then
+      CS%accumulate_resolved_flux = .true.
+      CS%do_param_advection = .true.
+    endif
+  enddo
+  if (CS%accumulate_resolved_flux) then
+    allocate(CS%uhtr_resolved(IsdB:IedB,jsd:jed,nz), source=0.0)
+    allocate(CS%vhtr_resolved(isd:ied,JsdB:JedB,nz), source=0.0)
+  endif
+
+
   ! Do any necessary halo updates on any auxiliary variables that have been initialized.
   call cpu_clock_begin(id_clock_pass_init)
   if (associated(CS%visc%Kv_shear)) &
@@ -3892,6 +4057,12 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, &
     call setup_OBC_tracer_reservoirs(G, GV, CS%OBC, restart_CSp)
     call setup_OBC_thickness_reservoirs(G, GV, CS%OBC, restart_CSp)
     call open_boundary_halo_update(G, CS%OBC)
+    call copy_OBC_radiation_coefs(CS%OBC)
+    if (.not. (CS%OBC%reservoir_init_bug .and. new_sim .and. CS%diabatic_first)) &
+      ! The if-guard is needed to preserve old answers with OBC_RESERVOIR_INIT_BUG=True, in which case
+      ! segment T/S reservoir %tres and global restart arrays OBC%tres_x/y have diverged at this point.
+      call copy_OBC_tracer_reservoirs(CS%OBC)
+    call copy_OBC_thickness_reservoirs(CS%OBC, G, GV)
   endif
 
   call register_obsolete_diagnostics(param_file, CS%diag)
@@ -3940,7 +4111,7 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, &
   endif
 
   ! initialize stochastic physics
-  call stochastics_init(CS%dt_therm, CS%G, CS%GV, CS%stoch_CS, param_file, diag, Time)
+  call stochastics_init(CS%dt_therm, CS%G, CS%GV, US, CS%stoch_CS, param_file, diag, Time)
 
   call callTree_leave("initialize_MOM()")
   call cpu_clock_end(id_clock_init) ; call cpu_clock_end(id_clock_ocean)
@@ -4872,6 +5043,9 @@ subroutine MOM_end(CS)
 
   DEALLOC_(CS%uhtr) ; DEALLOC_(CS%vhtr)
   !$omp target exit data map(delete: CS%uhtr, CS%vhtr)
+
+  if (allocated(CS%uhtr_resolved)) deallocate(CS%uhtr_resolved)
+  if (allocated(CS%vhtr_resolved)) deallocate(CS%vhtr_resolved)
 
   if (associated(CS%Hml)) deallocate(CS%Hml)
   if (associated(CS%tv%salt_deficit)) deallocate(CS%tv%salt_deficit)

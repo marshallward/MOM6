@@ -33,7 +33,7 @@ contains
 !! and dz*S^2*g-prime used, or calculable from factors used, during the calculation.
 subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stanley, slope_x, slope_y, &
                                   niblock, njblock, nkblock, N2_u, N2_v, dzu, dzv, dzSxN, dzSyN, halo, &
-                                  OBC, OBC_N2)
+                                  OBC, OBC_N2, drdx_u, drdy_v, drdz_u, drdz_v)
   integer,                                     intent(in)    :: niblock !< Blocksize in i direction
   integer,                                     intent(in)    :: njblock !< Blocksize in j direction
   integer,                                     intent(in)    :: nkblock !< Blocksize in k direction
@@ -71,6 +71,22 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
   logical,                           optional, intent(in)    :: OBC_N2 !< If present and true, use interior data
                                                                      !! to calculate stratification at open boundary
                                                                      !! condition faces.
+  real, dimension(SZIB_(G),SZJ_(G),SZK_(GV)+1), &
+                                     optional, intent(inout) :: drdx_u !< Zonal density gradient at u
+                                                                       !! along surfaces of constant z
+                                                                       !! (not along isopycnals or
+                                                                       !! model interfaces) [R L-1 ~> kg m-4]
+  real, dimension(SZI_(G),SZJB_(G),SZK_(GV)+1), &
+                                     optional, intent(inout) :: drdy_v !< Meridional density gradient at v
+                                                                       !! along surfaces of constant z
+                                                                       !! (not along isopycnals or
+                                                                       !! model interfaces) [R L-1 ~> kg m-4]
+  real, dimension(SZIB_(G),SZJ_(G),SZK_(GV)+1), &
+                                     optional, intent(inout) :: drdz_u !< Vertical density gradient
+                                                                       !! at u [R Z-1 ~> kg m-4]
+  real, dimension(SZI_(G),SZJB_(G),SZK_(GV)+1), &
+                                     optional, intent(inout) :: drdz_v !< Vertical density gradient
+                                                                       !! at v [R Z-1 ~> kg m-4]
 
   ! Local variables
   real, dimension(SZI_(G), SZJ_(G), SZK_(GV)) :: &
@@ -117,6 +133,7 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
   real :: G_Rho0        ! The gravitational acceleration divided by density [L2 Z-1 T-2 R-1 ~> m4 s-2 kg-1]
 
   logical :: present_N2_u, present_N2_v
+  logical :: present_drdx_u, present_drdy_v
   logical :: local_open_u_BC, local_open_v_BC ! True if u- or v-face OBCs exist anywhere in the global domain.
   logical :: OBC_friendly  ! If true, open boundary conditions are in use and only interior data should
                         ! be used to calculate N2 at OBC faces.
@@ -163,6 +180,8 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
 
   use_EOS = associated(tv%eqn_of_state)
 
+  present_drdx_u = PRESENT(drdx_u)
+  present_drdy_v = PRESENT(drdy_v)
   present_N2_u = PRESENT(N2_u)
   present_N2_v = PRESENT(N2_v)
   G_Rho0 = GV%g_Earth / GV%Rho0
@@ -201,6 +220,24 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
       dzSyN(i,J,1) = 0.
       dzSyN(i,J,nz+1) = 0.
     enddo
+  endif
+  ! Set boundary values to zero, since they will be at places
+  ! where streamfunction would be zero.
+  if (present_drdx_u) then
+    do j=js,je ; do I=is-1,ie
+      drdx_u(I,j,1) = 0.
+      drdx_u(I,j,nz+1) = 0.
+      drdz_u(I,j,1) = 0.
+      drdz_u(I,j,nz+1) = 0.
+    enddo ; enddo
+  endif
+  if (present_drdy_v) then
+    do J=js-1,je ; do i=is,ie
+      drdy_v(i,J,1) = 0.
+      drdy_v(i,J,nz+1) = 0.
+      drdz_v(i,J,1) = 0.
+      drdz_v(i,J,nz+1) = 0.
+    enddo ; enddo
   endif
 
   if (use_EOS) then
@@ -469,6 +506,10 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
       endif
 
       slope_x(I,j,K) = slope
+      if (present_drdx_u) then
+        drdx_u(I,j,K) = drdx
+        drdz_u(I,j,K) = drdz
+      endif
       if (present(dzSxN)) &
         dzSxN(I,j,K) = sqrt( GxSpV_uvh(ii,jj,kk) * max(0., (wtL * ( dzaL * drdkL )) &
                                                 + (wtR * ( dzaR * drdkR ))) / (wtL + wtR) ) &
@@ -691,6 +732,10 @@ subroutine calc_isoneutral_slopes(G, GV, US, h, e, tv, dt_kappa_smooth, use_stan
         slope = slope * max(G%mask2dT(i,j), G%mask2dT(i,j+1))
       endif
       slope_y(i,J,K) = slope
+      if (present_drdy_v) then
+        drdy_v(i,J,K) = drdy
+        drdz_v(i,J,K) = drdz
+      endif
       if (present(dzSyN)) &
         dzSyN(i,J,K) = sqrt( GxSpV_uvh(ii,jj,kk) * max(0., (wtL * ( dzaL * drdkL )) &
                                                 + (wtR * ( dzaR * drdkR ))) / (wtL + wtR) ) &

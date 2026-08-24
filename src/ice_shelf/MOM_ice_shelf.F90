@@ -83,6 +83,8 @@ public ice_shelf_save_restart, solo_step_ice_shelf, add_shelf_forces
 public initialize_ice_shelf_fluxes, initialize_ice_shelf_forces
 public ice_sheet_calving_to_ocean_sfc
 public adjust_ice_sheet_frazil
+public initialize_ice_SMB
+public update_ice_smb
 
 ! A note on unit descriptions in comments: MOM6 uses units that can be rescaled for dimensional
 ! consistency testing. These are noted in comments with units like Z, H, L, and T, along with
@@ -233,6 +235,10 @@ type, public :: ice_shelf_CS ; private
              id_Gr_t_area = -1, id_Gr_g_area = -1, id_Gr_f_area = -1
   !>@}
 
+  type(external_field) :: smb_file
+  !< Handle for reading the time interpolated smb from a file
+  logical :: time_varying_smb
+  !< logical flag set true if reading time-varying smb
   type(external_field) :: mass_handle
     !< Handle for reading the time interpolated ice shelf mass from a file
   type(external_field) :: area_handle
@@ -1569,6 +1575,8 @@ subroutine initialize_ice_shelf(param_file, ocn_grid, Time, CS, diag, Time_init,
   logical :: showCallTree
   logical :: read_TideAmp, debug
   logical :: global_indexing
+  logical :: enable_bugs  ! If true, the defaults for recently added bug-fix flags are set to
+                          ! recreate the bugs, or if false bugs are only used if actively selected.
   character(len=240) :: Tideamp_file  ! Input file names
   character(len=80)  :: tideamp_var ! Input file variable names
   real    :: utide  ! A tidal velocity [L T-1 ~> m s-1]
@@ -1877,9 +1885,11 @@ subroutine initialize_ice_shelf(param_file, ocn_grid, Time, CS, diag, Time_init,
   call get_param(param_file, mdl, "ICE_SHELF_RC", CS%Rc, &
                  "Critical flux Richardson number for ice melt ", &
                  units="nondim", default=0.20)
+  call get_param(param_file, mdl, "ENABLE_BUGS_BY_DEFAULT", enable_bugs, &
+                 default=.true., do_not_log=.true.)  ! This is logged from MOM.F90.
   call get_param(param_file, mdl, "ICE_SHELF_USTAR_FROM_VEL_BUGFIX", CS%ustar_from_vel_bugfix, &
                  "Bug fix for ice-area weighting of squared ocean velocities "//&
-                 "used to calculate friction velocity under ice shelves", default=.false.)
+                 "used to calculate friction velocity under ice shelves", default=.not.enable_bugs)
   call get_param(param_file, mdl, "ICE_SHELF_BUOYANCY_FLUX_ITT_BUGFIX", CS%buoy_flux_itt_bugfix, &
                  "Bug fix of buoyancy iteration", default=.true., old_name="ICE_SHELF_BUOYANCY_FLUX_ITT_BUG")
   call get_param(param_file, mdl, "ICE_SHELF_SALT_FLUX_ITT_BUGFIX", CS%salt_flux_itt_bugfix, &
@@ -2655,6 +2665,25 @@ subroutine update_shelf_mass(G, US, CS, ISS, Time)
 
 end subroutine update_shelf_mass
 
+!> Update the ice-shelf surface mass balance (SMB) field
+subroutine update_ice_SMB(CS, G, SMB, Time)
+  type(ice_shelf_CS), pointer :: CS !< A pointer to the control structure returned
+                                    !! by a previous call to initialize_ice_shelf.
+  type(ocean_grid_type), intent(in)    :: G    !< The ocean's grid structure
+  real, dimension(SZDI_(G),SZDJ_(G)), &
+       intent(inout) :: SMB !< Ice surface mass balance parameter, often in [R Z T-1 ~> kg m-2 s-1]
+  type(time_type), intent(in) :: Time !< Current model time
+
+
+  if (CS%time_varying_smb) then
+     call time_interp_external(CS%smb_file, Time, SMB)
+     if (CS%debug) call hchksum(SMB, "update_ice_SMB", CS%Grid_in%HI, haloshift=0)
+  endif
+
+
+end subroutine update_ice_SMB
+
+
 !> Save the ice shelf restart file
 subroutine ice_shelf_query(CS, G, frac_shelf_h, mass_shelf, data_override_shelf_fluxes)
   type(ice_shelf_CS),         pointer    :: CS !< ice shelf control structure
@@ -2801,7 +2830,6 @@ subroutine solo_step_ice_shelf(CS, time_interval, nsteps, Time, min_time_step_in
     call change_thickness_using_precip(CS, ISS, G, US, fluxes_in, time_step, Time)
     if (CS%smb_diag) dh_adott_sum(is:ie,js:je) = dh_adott_sum(is:ie,js:je) + &
                                              (ISS%h_shelf(is:ie,js:je) - dh_adott(is:ie,js:je))
-
     remaining_time = remaining_time - time_step
 
     ! If the last mini-timestep is a day or less, we cannot expect velocities to change by much.
@@ -2825,6 +2853,7 @@ subroutine solo_step_ice_shelf(CS, time_interval, nsteps, Time, min_time_step_in
   if (CS%id_h_shelf > 0)      call post_data(CS%id_h_shelf      ,ISS%h_shelf     ,CS%diag)
   if (CS%id_dhdt_shelf > 0)   call post_data(CS%id_dhdt_shelf   ,ISS%dhdt_shelf  ,CS%diag)
   if (CS%id_h_mask > 0)       call post_data(CS%id_h_mask       ,ISS%hmask       ,CS%diag)
+  if (CS%id_shelf_sfc_mass_flux > 0) call post_data(CS%id_shelf_sfc_mass_flux, fluxes_in%shelf_sfc_mass_flux, CS%diag)
   call process_and_post_scalar_data(CS, vaf0, vaf0_A, vaf0_G, Ifull_time_step, dh_adott, dh_adott*0.0)
   call disable_averaging(CS%diag)
 
@@ -3050,6 +3079,63 @@ subroutine process_and_post_scalar_data(CS, vaf0, vaf0_A, vaf0_G, Itime_step, dh
     endif
   endif
 end subroutine process_and_post_scalar_data
+
+!> Initialize ice surface mass balance field that is held constant over time
+subroutine initialize_ice_SMB(CS, SMB, G, US, PF)
+  type(ice_shelf_CS), pointer  :: CS !< A pointer to the control structure returned
+                                     !! by a previous call to initialize_ice_shelf.
+  type(ocean_grid_type), intent(in)    :: G    !< The ocean's grid structure
+  real, dimension(SZDI_(G),SZDJ_(G)), &
+                         intent(inout) :: SMB !< Ice surface mass balance parameter, often in [R Z T-1 ~> kg m-2 s-1]
+  type(unit_scale_type), intent(in)    :: US !< A structure containing unit conversion factors
+  type(param_file_type), intent(in)    :: PF !< A structure to parse for run-time parameters
+
+  real :: SMB_val  ! Constant ice surface mass balance parameter, often in [R Z T-1 ~> kg m-2 s-1]
+  character(len=40)  :: mdl = "initialize_ice_SMB" ! This subroutine's name.
+  character(len=200) :: config
+  character(len=200) :: varname
+  character(len=200) :: inputdir, filename, SMB_file
+  logical :: smb_file_has_time
+
+  call get_param(PF, mdl, "ICE_SMB_CONFIG", config, &
+                 "This specifies how the initial ice surface mass balance parameter is specified. "//&
+                 "Valid values are: CONSTANT and FILE.", &
+                 default="CONSTANT")
+
+  if (trim(config)=="CONSTANT") then
+    call get_param(PF, mdl, "SMB", SMB_val, &
+                 "Surface mass balance.", units="kg m-2 s-1", default=0.0, scale=US%kg_m2s_to_RZ_T)
+
+    SMB(:,:) = SMB_val
+
+  elseif (trim(config)=="FILE") then
+    call MOM_mesg("  MOM_ice_shelf.F90, initialize_ice_shelf: reading SMB parameter")
+    call get_param(PF, mdl, "INPUTDIR", inputdir, default=".")
+    inputdir = slasher(inputdir)
+
+    call get_param(PF, mdl, "ICE_SMB_FILE", SMB_file, &
+                 "The file from which the ice surface mass balance is read.", &
+                 default="ice_SMB.nc")
+    filename = trim(inputdir)//trim(SMB_file)
+    call log_param(PF, mdl, "INPUTDIR/ICE_SMB_FILE", filename)
+    call get_param(PF, mdl, "ICE_SMB_VARNAME", varname, &
+                   "The variable to use as surface mass balance.", &
+                   default="SMB")
+    call get_param(PF, mdl, "ICE_SMB_TIME_VARYING", SMB_file_has_time, &
+                 "The file from which the ice surface mass balance is read has a time axis.", &
+                 default=.false.)
+    call log_param(PF, mdl, "ICE_SMB_TIME_VARYING", SMB_file_has_time)
+    if (.not.file_exists(filename, G%Domain)) call MOM_error(FATAL, &
+       " initialize_ice_SMV_from_file: Unable to open "//trim(filename))
+    if (SMB_file_has_time) then
+       CS%smb_file = init_external_field(filename, varname, MOM_domain=G%Domain,correct_leap_year_inconsistency=.true.)
+       CS%time_varying_smb = .true.
+    else
+       call MOM_read_data(filename,trim(varname), SMB, G%Domain, scale=US%kg_m2s_to_RZ_T)
+       CS%time_varying_smb = .false.
+    endif
+  endif
+end subroutine initialize_ice_SMB
 
 !> \namespace mom_ice_shelf
 !!
