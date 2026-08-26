@@ -40,7 +40,7 @@ end interface dz_to_thickness
 !> Converts layer thickness in thickness units into the vertical distance between the
 !! interfaces around a layer in height units.
 interface thickness_to_dz
-  module procedure thickness_to_dz_3d, thickness_to_dz_jslice
+  module procedure thickness_to_dz_3d, thickness_to_dz_block, thickness_to_dz_jslice
 end interface thickness_to_dz
 
 !> Finds the near-bottom density using either a single row or a j-range.
@@ -1205,6 +1205,69 @@ subroutine thickness_to_dz_3d(h, tv, dz, G, GV, US, is, ie, js, je, halo_size, d
   endif
 
 end subroutine thickness_to_dz_3d
+
+!> Converts layer thicknesses in thickness units to the vertical distance between edges in height
+!! units over a single block of a blocked i-j loop, perhaps by multiplication by the
+!! precomputed layer-mean specific volume stored in an array in the thermo_var_ptrs type when in
+!! non-Boussinesq mode.
+subroutine thickness_to_dz_block(h, tv, dz, G, GV, US, niB, njB, i_lo, i_hi, j_lo, j_hi, do_offload)
+  type(ocean_grid_type),   intent(in)    :: G  !< The ocean's grid structure
+  type(verticalGrid_type), intent(in)    :: GV !< The ocean's vertical grid structure
+  type(unit_scale_type),   intent(in)    :: US !< A dimensional unit scaling type
+  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)), &
+                           intent(in)    :: h  !< Input thicknesses in thickness units [H ~> m or kg m-2].
+  type(thermo_var_ptrs),   intent(in)    :: tv !< A structure pointing to various
+                                               !! thermodynamic variables
+  integer,                 intent(in)    :: niB !< The i-size of the block-local dz array.
+  integer,                 intent(in)    :: njB !< The j-size of the block-local dz array.
+  real, dimension(niB,njB,SZK_(GV)), &
+                           intent(inout) :: dz !< Block-local geometric layer thicknesses in height
+                                               !! units [Z ~> m], indexed starting at (1,1,1).
+                                               !! This is essentially intent out, but declared as intent
+                                               !! inout to preserve any initialized values in unfilled points.
+  integer,                 intent(in)    :: i_lo !< The global lower i-bound of the block to work over.
+  integer,                 intent(in)    :: i_hi !< The global upper i-bound of the block to work over.
+  integer,                 intent(in)    :: j_lo !< The global lower j-bound of the block to work over.
+  integer,                 intent(in)    :: j_hi !< The global upper j-bound of the block to work over.
+  logical,       optional, intent(in)    :: do_offload !< If .true., only uses data calculates dz
+                                               !! on GPU (default .false.)
+  ! Local variables
+  integer :: i, j, k, ii, jj, iie, jje, nz
+  logical :: use_doconcurrent
+
+  ! guard to allow turning off/on do concurrent
+  use_doconcurrent = .false.
+  if (present(do_offload)) use_doconcurrent = do_offload
+
+  nz = GV%ke ; iie = i_hi - i_lo + 1 ; jje = j_hi - j_lo + 1
+
+  if ((.not.GV%Boussinesq) .and. allocated(tv%SpV_avg))  then
+    if (tv%valid_SpV_halo < 0) &
+      call MOM_error(FATAL, "thickness_to_dz_block called in fully non-Boussinesq mode with "//&
+                             "invalid values of SpV_avg.")
+    if (use_doconcurrent) then
+      do concurrent (k=1:nz, jj=1:jje, ii=1:iie)
+        dz(ii,jj,k) = GV%H_to_RZ * h(i_lo+ii-1,j_lo+jj-1,k) * tv%SpV_avg(i_lo+ii-1,j_lo+jj-1,k)
+      enddo
+    else
+      do k=1,nz ; do jj=1,jje ; do ii=1,iie
+        i = i_lo+ii-1 ; j = j_lo+jj-1
+        dz(ii,jj,k) = GV%H_to_RZ * h(i,j,k) * tv%SpV_avg(i,j,k)
+      enddo ; enddo ; enddo
+    endif
+  else
+    if (use_doconcurrent) then
+      do concurrent (k=1:nz, jj=1:jje, ii=1:iie)
+        dz(ii,jj,k) = GV%H_to_Z * h(i_lo+ii-1,j_lo+jj-1,k)
+      enddo
+    else
+      do k=1,nz ; do jj=1,jje ; do ii=1,iie
+        dz(ii,jj,k) = GV%H_to_Z * h(i_lo+ii-1,j_lo+jj-1,k)
+      enddo ; enddo ; enddo
+    endif
+  endif
+
+end subroutine thickness_to_dz_block
 
 
 !> Converts a vertical i- / k- slice of layer thicknesses in thickness units to the vertical
