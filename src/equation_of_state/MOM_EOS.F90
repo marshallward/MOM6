@@ -1052,7 +1052,7 @@ end subroutine calculate_density_derivs_2d
 
 
 !> Calls the appropriate subroutine to calculate density derivatives for 3-D array inputs.
-subroutine calculate_density_derivs_3d(T, S, pressure, drho_dT, drho_dS, EOS, dom)
+subroutine calculate_density_derivs_3d(T, S, pressure, drho_dT, drho_dS, EOS, dom, scale)
   real, intent(in) :: T(:,:,:)
     !< Potential temperature referenced to the surface [degC]
   real, intent(in) :: S(:,:,:)
@@ -1071,6 +1071,9 @@ subroutine calculate_density_derivs_3d(T, S, pressure, drho_dT, drho_dS, EOS, do
     !< The domain of indices to work on, taking into account that arrays start
     !! at 1.  The first index is the rank (i, j, k) and the second is the bound
     !! (1 = lower, 2 = upper).
+  real, optional, intent(in) :: scale
+    !< A multiplicative factor by which to scale density derivatives in
+    !! combination with scaling stored in EOS [various]
 
   ! Local variables
   real :: Ta(size(T,1), size(T,2), size(T,3))
@@ -1079,7 +1082,11 @@ subroutine calculate_density_derivs_3d(T, S, pressure, drho_dT, drho_dS, EOS, do
     ! Salinity converted to [ppt]
   real :: press(size(pressure,1), size(pressure,2), size(pressure,3))
     ! Pressure converted to [Pa]
+  real :: rho_scale  ! A factor to convert density from kg m-3 to the desired units [R m3 kg-1 ~> 1]
+  real :: dRdT_scale ! A factor to convert drho_dT to the desired units [R degC m3 C-1 kg-1 ~> 1]
+  real :: dRdS_scale ! A factor to convert drho_dS to the desired units [R ppt m3 S-1 kg-1 ~> 1]
   integer :: is, ie, js, je, ks, ke
+  integer :: i, j, k
   integer :: domain(3,2)
 
   if (present(dom)) then
@@ -1099,17 +1106,29 @@ subroutine calculate_density_derivs_3d(T, S, pressure, drho_dT, drho_dS, EOS, do
   if (all([EOS%RL2_T2_to_Pa, EOS%C_to_degC, EOS%S_to_ppt] == 1.)) then
     call EOS%type%calculate_density_derivs_3d(T, S, pressure, drho_dT, drho_dS, domain)
   else
-    press(is:ie, js:je, ks:ke) = EOS%RL2_T2_to_Pa * pressure(is:ie, js:je, ks:ke)
-    Ta(is:ie, js:je, ks:ke) = EOS%C_to_degC * T(is:ie, js:je, ks:ke)
-    Sa(is:ie, js:je, ks:ke) = EOS%S_to_ppt * S(is:ie, js:je, ks:ke)
+    do concurrent (k=ks:ke, j=js:je, i=is:ie)
+      press(i,j,k) = EOS%RL2_T2_to_Pa * pressure(i,j,k)
+      Ta(i,j,k) = EOS%C_to_degC * T(i,j,k)
+      Sa(i,j,k) = EOS%S_to_ppt * S(i,j,k)
+    enddo
 
     call EOS%type%calculate_density_derivs_3d(Ta, Sa, press, drho_dT, drho_dS, domain)
   endif
 
-  if (EOS%kg_m3_to_R * EOS%C_to_degC /= 1.) &
-    drho_dT(is:ie, js:je, ks:ke) = EOS%kg_m3_to_R * EOS%C_to_degC * drho_dT(is:ie, js:je, ks:ke)
-  if (EOS%kg_m3_to_R * EOS%S_to_ppt /= 1.) &
-    drho_dS(is:ie, js:je, ks:ke) = EOS%kg_m3_to_R * EOS%S_to_ppt * drho_dS(is:ie, js:je, ks:ke)
+  rho_scale = EOS%kg_m3_to_R
+  if (present(scale)) rho_scale = rho_scale * scale
+  dRdT_scale = rho_scale * EOS%C_to_degC
+  dRdS_scale = rho_scale * EOS%S_to_ppt
+  if (dRdT_scale /= 1.) then
+    do concurrent (k=ks:ke, j=js:je, i=is:ie)
+      drho_dT(i,j,k) = dRdT_scale * drho_dT(i,j,k)
+    enddo
+  endif
+  if (dRdS_scale /= 1.) then
+    do concurrent (k=ks:ke, j=js:je, i=is:ie)
+      drho_dS(i,j,k) = dRdS_scale * drho_dS(i,j,k)
+    enddo
+  endif
 end subroutine calculate_density_derivs_3d
 
 
