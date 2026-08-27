@@ -1645,6 +1645,7 @@ subroutine VarMix_init(Time, G, GV, US, param_file, diag, CS)
   logical :: mixing_coefs_OBC_bug ! If false, use only interior data for thickness weighting in
                            ! lateral mixing coefficient calculations and to calculate stratification
                            ! and other fields at open boundary condition faces.
+  logical :: stoch_eos     ! Can't use Stanley param here unless stoch_eos is true
   ! This include declares and sets the variable "version".
 # include "version_variable.h"
   character(len=40)  :: mdl = "MOM_lateral_mixing_coeffs" ! This module's name.
@@ -1807,23 +1808,31 @@ subroutine VarMix_init(Time, G, GV, US, param_file, diag, CS)
   call get_param(param_file, mdl, "USE_STANLEY_ISO", CS%use_stanley_iso, &
                  "If true, turn on Stanley SGS T variance parameterization "// &
                  "in isopycnal slope code.", default=.false.)
-  if (CS%use_stanley_iso) then
+
+  if (CS%use_Stanley_iso) then
+    call get_param(param_file, mdl, "STOCH_EOS", stoch_eos, &
+                   default=.false., do_not_log=.true.)
+
+    if (.not. stoch_eos) &
+      call MOM_error(FATAL, "VarMix_init: USE_STANLEY_ISO requires STOCH_EOS")
+
     call get_param(param_file, mdl, "STANLEY_COEFF", Stanley_coeff, &
                  "Coefficient correlating the temperature gradient and SGS T variance.", &
                  units="nondim", default=-1.0, do_not_log=.true.)
     if (Stanley_coeff < 0.0) call MOM_error(FATAL, &
                  "STANLEY_COEFF must be set >= 0 if USE_STANLEY_ISO is true.")
-    if (CS%njblock == 1) then
-      call MOM_error(WARNING, "ISOPYCNAL_NJBLOCK must be >= 2 or 0 if USE_STANLEY_ISO is true."//&
-                    " Changing block size from 1 to 2 for this run.")
-      CS%njblock = 2
-    endif
     if (CS%niblock == 1) then
       call MOM_error(WARNING, "ISOPYCNAL_NIBLOCK must be >= 2 or 0 if USE_STANLEY_ISO is true."//&
                     " Changing block size from 1 to 2 for this run.")
       CS%niblock = 2
     endif
+    if (CS%njblock == 1) then
+      call MOM_error(WARNING, "ISOPYCNAL_NJBLOCK must be >= 2 or 0 if USE_STANLEY_ISO is true."//&
+                    " Changing block size from 1 to 2 for this run.")
+      CS%njblock = 2
+    endif
   endif
+
   call get_param(param_file, mdl, "OBC_NUMBER_OF_SEGMENTS", number_of_OBC_segments, &
                  default=0, do_not_log=.true.)
   call get_param(param_file, mdl, "ENABLE_BUGS_BY_DEFAULT", enable_bugs, &

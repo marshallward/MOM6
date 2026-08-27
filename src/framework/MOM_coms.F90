@@ -700,8 +700,7 @@ subroutine increment_block_ints(array, is, ie, js, je, descale, ints_sum, &
   ! Abort if the number of blocks also exceeds the carry-bit summation limit.
   ! For default settings, this would be over 17 billion points per PE.
   if (nblocks > max_sum_count) call MOM_error(FATAL, &
-      "reproducing sum: Number of blocks exceeds summmation carry limit." &
-  )
+      "reproducing sum: Number of blocks exceeds summmation carry limit.")
 
   array_sum(:) = 0
 
