@@ -147,8 +147,9 @@ subroutine advect_tracer(h_end, uhtr, vhtr, OBC, dt, G, GV, US, CS, Reg, x_first
        "register_tracer must be called before advect_tracer.")
   if (Reg%ntr==0) return
 
-  !$omp target enter data map(to: OBC, Reg, Reg%Tr(:)) map(alloc: domore_u, domore_v, uhr, vhr, uh_neglect, &
-  !$omp   vh_neglect, hprev, local_advect_scheme)
+  !$omp target enter data map(to: OBC, Reg, Reg%Tr(:))
+  !$omp target enter data map(alloc: domore_u, domore_v, uhr, vhr, &
+  !$omp   uh_neglect, vh_neglect, hprev, local_advect_scheme, advect_this_tracer)
 
   do concurrent (k=1:nz, j=jsd:jed)
     domore_u(j,k) = .false.
@@ -350,6 +351,10 @@ subroutine advect_tracer(h_end, uhtr, vhtr, OBC, dt, G, GV, US, CS, Reg, x_first
           "Inconsistent flux type in advect_tracer. Must be of 0 (residual), 1 (resolved), or 2 (parameterized)")
   endif
 
+  !$ if (associated(OBC)) then ; if (OBC%OBC_pe) then
+    !$omp target update from(advect_this_tracer)
+  !$ endif ; endif
+
   isv = is ; iev = ie ; jsv = js ; jev = je
   nsten_halo = min(is - isd, ied - ie, js - jsd, jed - je) / stencil
 
@@ -523,8 +528,9 @@ subroutine advect_tracer(h_end, uhtr, vhtr, OBC, dt, G, GV, US, CS, Reg, x_first
     endif
   endif
 
-  !$omp target exit data map(release: hprev, uhr, vhr, uh_neglect, vh_neglect, domore_u, &
-  !$omp   domore_v, local_advect_scheme, OBC, Reg, Reg%Tr(:))
+  !$omp target exit data map(release: hprev, uhr, vhr, uh_neglect, &
+  !$omp   vh_neglect, domore_u, domore_v, local_advect_scheme, OBC, Reg, &
+  !$omp   Reg%Tr(:), advect_this_tracer)
 
   call cpu_clock_end(id_clock_advect)
 
