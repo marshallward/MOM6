@@ -651,8 +651,8 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
   !$omp target enter data map(alloc: Del2u, Del2v) if (CS%biharmonic)
   !$omp target enter data map(alloc: dDel2vdx, dDel2udy) if (CS%biharmonic)
   !$omp target enter data map(alloc: Shear_mag) if (use_Smag)
-  !$omp target enter data map(alloc: Kh) if (CS%Laplacian .or. CS%biharmonic)
-  !$omp target enter data map(alloc: Kh_BS) if (CS%use_Leithy)
+  !$omp target enter data map(alloc: Kh, Kh_BS) if (CS%Laplacian .or. CS%biharmonic)
+  ! NOTE: Kh_BS is only needed by Leithy, but is inside more general kernels
   !$omp target enter data map(alloc: Ah) if (CS%biharmonic)
   ! TODO: Only needed if FrictWork_bh is true, and currently only used on CPU,
   !   but I do not yet see any benefit to breaking up the calculation.
@@ -2053,8 +2053,7 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
   !$omp target exit data map(delete: Del2u, Del2v) if (CS%biharmonic)
   !$omp target exit data map(delete: dDel2vdx, dDel2udy) if (CS%biharmonic)
   !$omp target exit data map(delete: Shear_mag) if (use_Smag)
-  !$omp target exit data map(delete: Kh) if (CS%Laplacian .or. CS%biharmonic)
-  !$omp target exit data map(delete: Kh_BS) if (CS%use_Leithy)
+  !$omp target exit data map(delete: Kh, Kh_BS) if (CS%Laplacian .or. CS%biharmonic)
   !$omp target exit data map(delete: Ah) if (CS%biharmonic)
   !$omp target exit data map(delete: bhstr_xx, bhstr_xy) if (CS%biharmonic)
 
