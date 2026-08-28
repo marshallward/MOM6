@@ -807,6 +807,8 @@ subroutine calc_slope_functions(h, tv, dt, G, GV, US, CS, OBC)
   if (.not. CS%initialized) call MOM_error(FATAL, "MOM_lateral_mixing_coeffs.F90, calc_slope_functions: "//&
          "Module must be initialized before it is used.")
 
+  !$omp target enter data map(alloc: e, N2_u, N2_v, dzu, dzv, dzSxN, dzSyN)
+
   niblock = CS%niblock
   njblock = CS%njblock
   nkblock = CS%nkblock
@@ -816,53 +818,80 @@ subroutine calc_slope_functions(h, tv, dt, G, GV, US, CS, OBC)
   if (nkblock == 0) nkblock = GV%ke
 
   if (CS%calculate_Eady_growth_rate) then
-    !$omp target enter data map(alloc: e)
     call find_eta(h, tv, G, GV, US, e, halo_size=2)
 
     if (CS%use_simpler_Eady_growth_rate) then
       !$omp target enter data map(to: tv, tv%T, tv%S)
       !$omp target enter data map(to: tv%SpV_avg) if (allocated(tv%SpV_avg))
       !$omp target enter data map(to: tv%p_surf) if (associated(tv%p_surf))
-      !$omp target enter data map(alloc: N2_u, N2_v, dzu, dzv, dzSxN, dzSyN)
       call calc_isoneutral_slopes(G, GV, US, h, e, tv, dt*CS%kappa_smooth, CS%use_stanley_iso, &
                                   CS%slope_x, CS%slope_y, niblock, njblock, nkblock, N2_u=N2_u, &
                                   N2_v=N2_v, dzu=dzu, dzv=dzv, dzSxN=dzSxN, dzSyN=dzSyN, halo=1, &
                                   OBC=OBC, OBC_N2=CS%OBC_friendly)
       call calc_Eady_growth_rate_2D(CS, G, GV, US, h, e, dzu, dzv, dzSxN, dzSyN, CS%SN_u, CS%SN_v)
+      !$omp target update to(CS%SN_u, CS%SN_v)
       !$omp target exit data map(release: tv%SpV_avg) if (allocated(tv%SpV_avg))
       !$omp target exit data map(release: tv%p_surf) if (associated(tv%p_surf))
       !$omp target exit data map(release: tv, tv%T, tv%S)
-      !$omp target exit data map(delete: N2_u, N2_v, dzu, dzv, dzSxN, dzSyN)
     elseif (CS%use_stored_slopes) then
       !$omp target enter data map(to: tv, tv%T, tv%S)
       !$omp target enter data map(to: tv%SpV_avg) if (allocated(tv%SpV_avg))
       !$omp target enter data map(to: tv%p_surf) if (associated(tv%p_surf))
-      !$omp target enter data map(alloc: N2_u, N2_v)
       call calc_isoneutral_slopes(G, GV, US, h, e, tv, dt*CS%kappa_smooth, CS%use_stanley_iso, &
                                   CS%slope_x, CS%slope_y, niblock, njblock, nkblock, N2_u=N2_u, &
                                   N2_v=N2_v, halo=1, OBC=OBC, OBC_N2=CS%OBC_friendly)
       call calc_Visbeck_coeffs_old(h, CS%slope_x, CS%slope_y, N2_u, N2_v, G, GV, US, CS, OBC)
       !$omp target exit data map(release: tv%T, tv%S, tv)
       !$omp target exit data map(release: tv%p_surf) if (associated(tv%p_surf))
-      !$omp target exit data map(delete: N2_u, N2_v )
     else
       call calc_slope_functions_using_just_e(h, G, GV, US, CS, e)
     endif
-    !$omp target exit data map(delete: e)
   endif
 
   if (query_averaging_enabled(CS%diag)) then
-    if (CS%id_dzu > 0) call post_data(CS%id_dzu, dzu, CS%diag)
-    if (CS%id_dzv > 0) call post_data(CS%id_dzv, dzv, CS%diag)
-    if (CS%id_dzSxN > 0) call post_data(CS%id_dzSxN, dzSxN, CS%diag)
-    if (CS%id_dzSyN > 0) call post_data(CS%id_dzSyN, dzSyN, CS%diag)
-    if (CS%id_SN_u > 0) call post_data(CS%id_SN_u, CS%SN_u, CS%diag)
-    if (CS%id_SN_v > 0) call post_data(CS%id_SN_v, CS%SN_v, CS%diag)
-    if (CS%id_L2u > 0)  call post_data(CS%id_L2u, CS%L2u, CS%diag)
-    if (CS%id_L2v > 0)  call post_data(CS%id_L2v, CS%L2v, CS%diag)
-    if (CS%id_N2_u > 0) call post_data(CS%id_N2_u, N2_u, CS%diag)
-    if (CS%id_N2_v > 0) call post_data(CS%id_N2_v, N2_v, CS%diag)
+    if (CS%id_dzu > 0) then
+      !$omp target update from(dzu)
+      call post_data(CS%id_dzu, dzu, CS%diag)
+    endif
+    if (CS%id_dzv > 0) then
+      !$omp target update from(dzv)
+      call post_data(CS%id_dzv, dzv, CS%diag)
+    endif
+    if (CS%id_dzSxN > 0) then
+      !$omp target update from(dzSxN)
+      call post_data(CS%id_dzSxN, dzSxN, CS%diag)
+    endif
+    if (CS%id_dzSyN > 0) then
+      !$omp target update from(dzSyN)
+      call post_data(CS%id_dzSyN, dzSyN, CS%diag)
+    endif
+    if (CS%id_SN_u > 0) then
+      !$omp target update from(CS%SN_u)
+      call post_data(CS%id_SN_u, CS%SN_u, CS%diag)
+    endif
+    if (CS%id_SN_v > 0) then
+      !$omp target update from(CS%SN_v)
+      call post_data(CS%id_SN_v, CS%SN_v, CS%diag)
+    endif
+    if (CS%id_L2u > 0) then
+      !$omp target update from(CS%L2u)
+      call post_data(CS%id_L2u, CS%L2u, CS%diag)
+    endif
+    if (CS%id_L2v > 0) then
+      !$omp target update from(CS%L2v)
+      call post_data(CS%id_L2v, CS%L2v, CS%diag)
+    endif
+    if (CS%id_N2_u > 0) then
+      !$omp target update from(N2_u)
+      call post_data(CS%id_N2_u, N2_u, CS%diag)
+    endif
+    if (CS%id_N2_v > 0) then
+      !$omp target update from(N2_v)
+      call post_data(CS%id_N2_v, N2_v, CS%diag)
+    endif
   endif
+
+  !$omp target exit data map(delete: e, N2_u, N2_v, dzu, dzv, dzSxN, dzSyN)
 
 end subroutine calc_slope_functions
 
@@ -2189,9 +2218,7 @@ subroutine VarMix_init(Time, G, GV, US, param_file, diag, CS)
     !$omp target enter data map(alloc: CS%L2u, CS%L2v)
 
     if (CS%Visbeck_L_scale<0) then
-      ! Undo the rescaling of CS%Visbeck_L_scale. This do-concurrent kernel fills CS%L2u/L2v
-      ! directly on the device, so no host->device update is needed (or wanted -- the host
-      ! copy is never touched here and pushing it would overwrite the values just computed).
+      ! Undo the rescaling of CS%Visbeck_L_scale.
       do concurrent( j=js:je, I=is-1:Ieq)
         CS%L2u(I,j) = (US%L_to_m*CS%Visbeck_L_scale)**2 * G%areaCu(I,j)
       enddo
