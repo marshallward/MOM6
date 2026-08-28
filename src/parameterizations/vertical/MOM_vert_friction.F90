@@ -3322,7 +3322,7 @@ subroutine vertvisc_init(MIS, Time, G, GV, US, param_file, diag, ADp, dirs, &
   type(accel_diag_ptrs),   intent(inout) :: ADp    !< Acceleration diagnostic pointers
   type(directories),       intent(in)    :: dirs   !< Relevant directory paths
   integer, target,         intent(inout) :: ntrunc !< Number of velocity truncations
-  type(vertvisc_CS),       pointer       :: CS     !< Vertical viscosity control structure
+  type(vertvisc_CS),       intent(inout) :: CS     !< Vertical viscosity control structure
   logical, optional,       intent(in)    :: fpmix  !< Nonlocal momentum mixing
 
   ! Local variables
