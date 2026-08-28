@@ -34,6 +34,7 @@ Parameter names must be constructed from the characters `[A-Za-z0-9_]` and by so
 Parameters that are not specified in the parameter files may assume a default value. It is not an error to specify a parameter more than once with the same value. It is an error to specify different values.
 
 The keyword \#override indicates that this parameter specification takes precedence over other specifications. It is **not** an error to have two \#override specifications for a single parameter with the same values. It is an error to have two \#override statements with different values.
+The syntax \#override absent indicates that a parameter should be treated as absent, regardless of earlier specifications.
 
 Some illustrations:
 \code{.unparsed}
@@ -47,6 +48,7 @@ NAMES = 'abc','xyz'	! Set the strings NAMES to 'abc','xyz'
 #override DO_THIS = False	! Set the Boolean to .FALSE., ignoring the above specification
 #override HALF = 0.25	! Set the value of HALF to 0.25, ignoring the above value
 #override HALF = 0.25	! Same as the above value of HALF to 0.25 so is accepted
+#override absent HALF	! Treat HALF as absent, ignoring the above values
 \endcode
 
 \subsection param_logging Logging of parameters

@@ -335,8 +335,8 @@ subroutine close_param_file(CS, quiet_close, component)
 
   num_unused = 0
   if (is_root_pe() .and. (CS%report_unused .or. CS%unused_params_fatal)) then
-    ! Set line_used to true for lines that match parameters with override_unset lines.
-    call label_unset_lines_as_used(CS, last_unused_line)
+    ! Set line_used to true for lines that match parameters with #override absent lines.
+    call label_absent_lines_as_used(CS, last_unused_line)
 
     ! Check for unused lines.
     do i = 1, CS%nfiles
@@ -1045,14 +1045,14 @@ subroutine get_variable_line(CS, varname, found, defined, value_string, paramIsL
   character(len=CS%max_line_len) :: val_str, lname, origLine
   character(len=CS%max_line_len) :: line, continuationBuffer
   character(len=240) :: blockName
-  character(len=FILENAME_LENGTH) :: filename, unset_filename
+  character(len=FILENAME_LENGTH) :: filename, absent_filename
   integer            :: is, id, isd, isu, ise, iso, ipf
   integer            :: last, last1, ival, oval, max_vals, count, contBufSize
   integer            :: start_line_num
   character(len=52)  :: set
-  logical            :: found_override, found_unset, found_equals  ! True for patterns found on a line
+  logical            :: found_override, found_absent, found_equals ! True for patterns found on a line
   logical            :: found_define, found_undef   ! True for patterns found on a line
-  logical            :: has_been_unset       ! True if an #override_unset has been found for varname
+  logical            :: has_been_absent      ! True if #override absent has been found for varname
   logical            :: force_cycle, defined_in_line, continuedLine
   logical            :: variableKindIsLogical, valueIsSame
   logical            :: inWrongBlock, fullPathParameter
@@ -1069,7 +1069,7 @@ subroutine get_variable_line(CS, varname, found, defined, value_string, paramIsL
   ! return variables indicating whether this variable is defined and the string
   ! that contains the value of this variable.
   found = .false.
-  oval = 0 ; ival = 0 ; has_been_unset = .false.
+  oval = 0 ; ival = 0 ; has_been_absent = .false.
   max_vals = SIZE(value_string)
   do is=1,max_vals ; value_string(is) = " " ; enddo
 
@@ -1118,26 +1118,21 @@ subroutine get_variable_line(CS, varname, found, defined, value_string, paramIsL
       origLine = trim(line) ! Keep original for error messages
 
       ! Check for '#override' at start of line
-      found_override = .false. ; found_define = .false. ; found_undef = .false.
+      found_override = .false. ; found_define = .false. ; found_undef = .false. ; found_absent = .false.
       iso = index(line(:last), "#override " )! ; if (iso > 0) found_override = .true.
-      if (iso>1) call MOM_error(FATAL, "MOM_file_parser : #override was found "// &
+      if (iso > 1) call MOM_error(FATAL, "MOM_file_parser : #override was found "// &
                  " but was not the first keyword."// &
                  " Line: '"//trim(line(:last))//"' in file "//trim(filename)//".")
-      if (iso==1) then
+      if (iso == 1) then
         found_override = .true.
-        if (index(line(:last), "#override define ")==1) found_define = .true.
-        if (index(line(:last), "#override undef ")==1) found_undef = .true.
-        line = trim(adjustl(line(iso+10:last))) ; last = len_trim(line)
-      endif
-
-      ! Check for '#override_unset' at start of line
-      found_unset = .false.
-      iso = index(line(:last), "#override_unset " )
-      if (iso>1) call MOM_error(FATAL, "MOM_file_parser : #override_unset was found but was not the "//&
-                 'first keyword.  Line: "'//trim(line(:last))//'" in file "'//trim(filename)//'".')
-      if (iso==1) then
-        found_unset = .true.
-        line = trim(adjustl(line(iso+16:last))) ; last = len_trim(line)
+        if (index(line(:last), "#override absent ") == 1) then
+          found_absent = .true.
+          line = trim(adjustl(line(18:last))) ; last = len_trim(line)
+        else
+          if (index(line(:last), "#override define ") == 1) found_define = .true.
+          if (index(line(:last), "#override undef ") == 1) found_undef = .true.
+          line = trim(adjustl(line(iso+10:last))) ; last = len_trim(line)
+        endif
       endif
 
       ! Newer form of parameter block, block%, %block or block%param or
@@ -1192,24 +1187,25 @@ subroutine get_variable_line(CS, varname, found, defined, value_string, paramIsL
       isd = index(line(:last), "define" )! ; if (isd > 0) found_define = .true.
       isu = index(line(:last), "undef" )! ; if (isu > 0) found_undef = .true.
       ise = index(line(:last), " = " ) ; if (ise > 1) found_equals = .true.
-      if (index(line(:last), "#define ")==1) found_define = .true.
-      if (index(line(:last), "#undef ")==1) found_undef = .true.
+      if (index(line(:last), "#define ") == 1) found_define = .true.
+      if (index(line(:last), "#undef ") == 1) found_undef = .true.
 
-      ! Handle the case when '#override_unset' is at the start of the line
-      if (found_unset) then
+      ! Handle the case when #override absent is at the start of the line
+      if (found_absent) then
         ! Set a flag to discard any other values specified for this parameter.
-        has_been_unset = .true.
-        unset_filename = filename
+        has_been_absent = .true.
+        absent_filename = filename
         CS%param_data(ipf)%line_used(start_line_num) = .true.
-        if (oval > 0) call MOM_error(FATAL, 'MOM_file_parser : Both an #override and an #override_unset '//&
-                'line occur for the parameter "'//trim(varname)//'", with the latter occurring in line "'//&
-                trim(CS%param_data(ipf)%fln(count)%line) // '" in file "' // trim(filename) // '".')
+        if (oval > 0) call MOM_error(FATAL, 'MOM_file_parser : Both an #override assignment and an '//&
+                '#override absent line occur for the parameter "'//trim(varname)//'", with the latter occurring '//&
+                'in line "'//trim(CS%param_data(ipf)%fln(count)%line) // '" in file "' // &
+                trim(filename) // '".')
         cycle
       endif
-      if (found_override .and. has_been_unset) then
+      if (found_override .and. has_been_absent) then
         call MOM_error(FATAL, 'MOM_file_parser : An #override was found for the parameter "'//&
               trim(varname) //'" on line "'//trim(CS%param_data(ipf)%fln(count)%line)// '" in file "' //&
-              trim(filename) // '", but it had a previous #override_unset in file "'//trim(unset_filename)//'".')
+              trim(filename) // '", but it had a previous #override absent in file "'//trim(absent_filename)//'".')
       endif
 
       ! Check for missing, mutually exclusive or incomplete keywords
@@ -1352,19 +1348,19 @@ subroutine get_variable_line(CS, varname, found, defined, value_string, paramIsL
 
   enddo paramfile_loop
 
-  if (has_been_unset) then
+  if (has_been_absent) then
     if (found) call MOM_error(WARNING, 'MOM_file_parser : the value of the parameter "'//&
-          trim(varname) // '" was set but discarded due to an #override_unset line in "'//&
-          trim(unset_filename) //'".')
+          trim(varname) // '" was set but discarded due to a #override absent line in "'//&
+          trim(absent_filename) //'".')
     found = .false.
     do is=1,max_vals ; value_string(is) = " " ; enddo
   endif
 
 end subroutine get_variable_line
 
-!> Set line_used to true for lines that match parameters with \#override_unset lines and
+!> Set line_used to true for lines that match parameters with \#override absent lines and
 !! return an array with the last unused line in each of the input files.
-subroutine label_unset_lines_as_used(CS, last_unused_line)
+subroutine label_absent_lines_as_used(CS, last_unused_line)
   type(param_file_type),         intent(inout) :: CS   !< The control structure for the file_parser module,
                                                        !! it is also a structure to parse for run-time parameters
   integer, dimension(CS%nfiles), intent(out)   :: last_unused_line !< The last line in each file that
@@ -1373,9 +1369,9 @@ subroutine label_unset_lines_as_used(CS, last_unused_line)
   ! Local variables
   character(len=CS%max_line_len) :: line
   character(len=240) :: blockName, param_block, varname
-  integer :: iso, is_unset, last, varlen
+  integer :: iso, is_absent, last, varlen
   integer :: n, pfn, ipf, last_unused_before
-  logical :: seek_unset_in_file(CS%nfiles)
+  logical :: seek_absent_in_file(CS%nfiles)
 
   do ipf = 1, CS%nfiles
     ! Check for unused lines in each file and record the last one.
@@ -1388,14 +1384,14 @@ subroutine label_unset_lines_as_used(CS, last_unused_line)
     enddo
   enddo
 
-  ! Because #override_unset can impact settings from earlier files in the list, we need to look
-  ! for #override_unset lines in files that come after the first unset line.
-  seek_unset_in_file(1) = (last_unused_line(1) > 0)
+  ! Because #override absent can impact settings from earlier files in the list, we need to look
+  ! for #override absent lines in files that come after the first absent line.
+  seek_absent_in_file(1) = (last_unused_line(1) > 0)
   do ipf = 2, CS%nfiles
-    seek_unset_in_file(ipf) = (seek_unset_in_file(ipf-1) .or. (last_unused_line(ipf) > 0))
+    seek_absent_in_file(ipf) = (seek_absent_in_file(ipf-1) .or. (last_unused_line(ipf) > 0))
   enddo
 
-  ! Look for any #override_unset lines that could lead to lines being relabeled as used.
+  ! Look for any #override absent lines that could lead to lines being relabeled as used.
   do ipf = 1, CS%nfiles
     blockName = ''  ! This resets the block stack.
     do n = 1, CS%param_data(ipf)%num_lines
@@ -1411,24 +1407,25 @@ subroutine label_unset_lines_as_used(CS, last_unused_line)
         blockName = pushBlockLevel(blockName, line(:iso-1))
       endif
 
-      ! Find all lines with #override_unset varname
-      is_unset = index(line(:last), "#override_unset " )
-      if (is_unset > 1) call MOM_error(FATAL, "MOM_file_parser : #override_unset was found but was not the "//&
+      ! Find all lines with #override absent varname
+      is_absent = index(line(:last), "#override absent " )
+      if (is_absent > 1) call MOM_error(FATAL, &
+                 "MOM_file_parser : #override absent was found but was not the "//&
                  'first keyword in "'//trim(CS%filename(ipf))//'" : "'// trim(CS%param_data(ipf)%fln(n)%line)//'".' )
-      if (is_unset==1) then
+      if (is_absent == 1) then
         CS%param_data(ipf)%line_used(n) = .true.
-        line = trim(adjustl(line(17:last)//" ")) ; last = len_trim(line)
+        line = trim(adjustl(line(18:last)//" ")) ; last = len_trim(line)
 
         iso = index(line(:last), '%', .true.)
         if (iso > 0) then
           ! Parse the block and name for full path parameters
           if (iso == 1) then
             call MOM_error(FATAL, "close_param_file: A parameter block can not be closed on "//&
-                  'an #override_unset line, as is done in "'//trim(CS%filename(ipf))//'" : "'// &
+                  'a #override absent line, as is done in "'//trim(CS%filename(ipf))//'" : "'// &
                   trim(CS%param_data(ipf)%fln(n)%line)//'".' )
           elseif (iso == last) then
             call MOM_error(FATAL, "close_param_file: A parameter block can not be opened on "//&
-                  'an #override_unset line, as is done in "'//trim(CS%filename(ipf))//'" : "'// &
+                  'a #override absent line, as is done in "'//trim(CS%filename(ipf))//'" : "'// &
                   trim(CS%param_data(ipf)%fln(n)%line)//'".' )
           else
             ! This is a line with the form param_block%param, where param_block is the full block
@@ -1449,7 +1446,7 @@ subroutine label_unset_lines_as_used(CS, last_unused_line)
             call label_param_lines_as_used(CS, varname, param_block, pfn, last_unused_line(pfn))
         enddo
 
-      endif  ! End of block handling a line with #override_unset
+      endif  ! End of block handling a line with #override absent
     enddo
   enddo
 
@@ -1466,7 +1463,7 @@ subroutine label_unset_lines_as_used(CS, last_unused_line)
     enddo
   enddo
 
-end subroutine label_unset_lines_as_used
+end subroutine label_absent_lines_as_used
 
 !> This subroutine sets the lines in the param_file_type that refer to
 !! a named parameter as though they had been used.
@@ -1517,7 +1514,6 @@ subroutine label_param_lines_as_used(CS, varname, set_block_Name, ipf, max_line)
     if (iso > 0) then
       ! This is a parameter in the form block%parameter = ... (full path parameter)
       line_block = trim(line(:iso-1))
-      if (len_trim(blockName) > 0) line_block = trim(blockName)//'%'//trim(line_block)
       ! Strip out the block, so that line starts with the parameter name
       line = trim(adjustl(line(iso+1:last))) ; last = len_trim(line)
     else
@@ -2653,7 +2649,7 @@ end function popBlockLevel
 !!    VAR = 999         ! To set the real or integer VAR to 999.
 !!    \#override VAR = 888 ! To override a previously set value.
 !!    VAR = 1.1, 2.2, 3.3  ! To set an array of real values.
-!!    \#override_unset VAR ! To ignore the presence of a previous line setting VAR.
+!!    \#override absent VAR ! To ignore the presence of a previous line setting VAR.
   ! Note that in the comments above, dOxygen translates \# to # .
 !!
 !!  In addition, when set by the get_param interface, the values of

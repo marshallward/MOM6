@@ -719,20 +719,20 @@ subroutine test_read_param_unused_fatal
 end subroutine test_read_param_unused_fatal
 
 
-subroutine test_read_param_unused_fatal_unset
+subroutine test_read_param_unused_fatal_absent
   type(param_file_type) :: param
   type(string) :: lines(3)
 
   lines = [ &
       string('FATAL_UNUSED_PARAMS = True'), &
       string(sample_param_name // ' = 1'), &
-      string('#override_unset '//sample_param_name) &
+      string('#override absent '//sample_param_name) &
   ]
   call create_test_file(param_filename, lines)
 
   call open_param_file(param_filename, param)
   call close_param_file(param)
-end subroutine test_read_param_unused_fatal_unset
+end subroutine test_read_param_unused_fatal_absent
 
 
 subroutine test_read_param_replace_tabs
@@ -957,7 +957,7 @@ subroutine test_read_param_override_twice
 end subroutine test_read_param_override_twice
 
 
-subroutine test_read_param_override_twice_unset
+subroutine test_read_param_override_twice_absent
   type(param_file_type) :: param
   integer :: sample
   type(string) :: lines(3)
@@ -966,14 +966,14 @@ subroutine test_read_param_override_twice_unset
   lines = [ &
       string(sample_param_name // ' = 1'), &
       string('#override ' // sample_param_name // ' = 2'), &
-      string('#override_unset '//sample_param_name) &
+      string('#override absent '//sample_param_name) &
   ]
   call create_test_file(param_filename, lines)
 
   call open_param_file(param_filename, param)
   call read_param(param, sample_param_name, sample)
   ! FATAL; return to program
-end subroutine test_read_param_override_twice_unset
+end subroutine test_read_param_override_twice_absent
 
 
 subroutine test_read_param_override_repeat
@@ -1137,32 +1137,40 @@ subroutine test_read_param_block
 end subroutine test_read_param_block
 
 
-subroutine test_read_param_block_unset
+subroutine test_read_param_block_absent
   type(param_file_type) :: param
   integer :: sample
+  logical :: param_was_set
   type(string) :: lines(10)
   integer, parameter :: sample_result = 123
 
   ! Test that all 4 combinations of block formats for
-  ! setting and unsetting parameters work.
+  ! setting parameters and marking them absent work.
   lines = [ &
       string('ABC%SAMPLE_PARAMETER_1 = 1'), &
       string('ABC%'), &
       string('ABC%SAMPLE_PARAMETER_2 = 2'), &
       string('SAMPLE_PARAMETER_3 = 3'), &
       string('SAMPLE_PARAMETER_4 = 4'), &
-      string('#override_unset ABC%SAMPLE_PARAMETER_1'), &
-      string('#override_unset SAMPLE_PARAMETER_2'), &
-      string('#override_unset SAMPLE_PARAMETER_3'), &
+      string('#override absent ABC%SAMPLE_PARAMETER_1'), &
+      string('#override absent SAMPLE_PARAMETER_2'), &
+      string('#override absent SAMPLE_PARAMETER_3'), &
       string('%ABC'), &
-      string('#override_unset ABC%SAMPLE_PARAMETER_4') &
+      string('#override absent ABC%SAMPLE_PARAMETER_4') &
   ]
   call create_test_file(param_filename, lines)
 
+  sample = sample_result
   call open_param_file(param_filename, param)
+  call openParameterBlock(param, 'ABC')
+  call read_param(param, 'SAMPLE_PARAMETER_2', sample, set=param_was_set)
+  call closeParameterBlock(param)
+  call clearParameterBlock(param)
   call close_param_file(param)
 
-end subroutine test_read_param_block_unset
+  call assert(.not.param_was_set, 'Parameter should be absent')
+  call assert(sample == sample_result, 'Absent parameter changed value')
+end subroutine test_read_param_block_absent
 
 
 ! TODO: This test fails due to an implementation issue.
@@ -1850,8 +1858,8 @@ subroutine run_file_parser_tests
   call suite%add(test_read_param_unused_fatal, &
       "test_read_param_unused_fatal", fatal=.true.)
 
-  call suite%add(test_read_param_unused_fatal_unset, &
-      "test_read_param_unused_fatal_unset")
+  call suite%add(test_read_param_unused_fatal_absent, &
+      "test_read_param_unused_fatal_absent")
 
   call suite%add(test_read_param_multiline_comment, &
       "test_read_param_multiline_comment")
@@ -1888,8 +1896,8 @@ subroutine run_file_parser_tests
   call suite%add(test_read_param_override_twice, &
       "test_read_param_override_twice", fatal=.true.)
 
-  call suite%add(test_read_param_override_twice_unset, &
-      "test_read_param_override_twice_unset", fatal=.true.)
+  call suite%add(test_read_param_override_twice_absent, &
+      "test_read_param_override_twice_absent", fatal=.true.)
 
   call suite%add(test_read_param_override_repeat, &
       "test_read_param_override_repeat", fatal=.true.)
@@ -1917,7 +1925,7 @@ subroutine run_file_parser_tests
 
   call suite%add(test_read_param_block, "test_read_param_block")
 
-  call suite%add(test_read_param_block_unset, "test_read_param_block_unset")
+  call suite%add(test_read_param_block_absent, "test_read_param_block_absent")
 
   ! FIXME: Test does not pass
   !call suite%add(test_read_param_block_stack, "test_read_param_block_stack")
