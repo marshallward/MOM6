@@ -1064,6 +1064,7 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
 
       if (rescale_Kh) then
         !$omp target update from(Kh)
+        !$omp target update from(VarMix%Res_fn_h)
         do kk=1,kmax ; do j=js_Kh,je_Kh ; do i=is_Kh,ie_Kh
           Kh(i,j,kk) = VarMix%Res_fn_h(i,j) * Kh(i,j,kk)
         enddo ; enddo ; enddo
@@ -1080,6 +1081,7 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
         ! *Add* the MEKE contribution (which might be negative)
         if (use_kh_struct) then
           if (CS%res_scale_MEKE) then
+            !$omp target update from(VarMix%Res_fn_h)
             do kk=1,kmax ; do j=js_Kh,je_Kh ; do i=is_Kh,ie_Kh
               k = kstart + kk - 1
               Kh(i,j,kk) = Kh(i,j,kk) + MEKE%Ku(i,j) * VarMix%Res_fn_h(i,j) * VarMix%BS_struct(i,j,k)
@@ -1092,6 +1094,7 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
           endif
         else
           if (CS%res_scale_MEKE) then
+            !$omp target update from(VarMix%Res_fn_h)
             do kk=1,kmax ; do j=js_Kh,je_Kh ; do i=is_Kh,ie_Kh
               Kh(i,j,kk) = Kh(i,j,kk) + MEKE%Ku(i,j) * VarMix%Res_fn_h(i,j)
             enddo ; enddo ; enddo
@@ -1455,6 +1458,7 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
 
       if (rescale_Kh) then
         !$omp target update from(Kh)
+        !$omp target update from(VarMix%Res_fn_q)
         do kk=1,kmax ; do J=js-1,Jeq ; do I=is-1,Ieq
           Kh(I,J,kk) = VarMix%Res_fn_q(I,J) * Kh(I,J,kk)
         enddo ; enddo ; enddo
@@ -1467,6 +1471,7 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
 
       if (use_MEKE_Ku .and. .not. CS%EY24_EBT_BS) then
         !$omp target update from(Kh)
+        !$omp target update from(VarMix%Res_fn_q) if (CS%res_scale_MEKE)
         if (use_kh_struct) then
           do kk=1,kmax ; do J=js-1,Jeq ; do I=is-1,Ieq
             k = kstart + kk - 1

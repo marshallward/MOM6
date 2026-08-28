@@ -250,8 +250,7 @@ subroutine tracer_hordiff(h, dt, MEKE, VarMix, visc, G, GV, US, CS, Reg, tv, do_
   if (do_online) then
     if (use_VarMix) then
       MEKE_KhTr_fac = MEKE%KhTr_fac
-      !$omp target enter data map(to: VarMix, VarMix%SN_u, VarMix%L2u, VarMix%Res_fn_h, &
-      !$omp   VarMix%Rd_dx_h, MEKE, MEKE%Kh)
+      !$omp target enter data map(to: MEKE, MEKE%Kh)
       do concurrent (j=js:je, I=is-1:ie)
         Kh_loc = CS%KhTr
         if (use_Eady) Kh_loc = Kh_loc + CS%KhTr_Slope_Cff*VarMix%L2u(I,j)*VarMix%SN_u(I,j)
@@ -284,8 +283,7 @@ subroutine tracer_hordiff(h, dt, MEKE, VarMix, visc, G, GV, US, CS, Reg, tv, do_
           Kh_v(i,J,1) = max(Kh_loc, CS%KhTr_min) ! Re-apply min
         endif
       enddo
-      !$omp target exit data map(release: VarMix, VarMix%SN_u, VarMix%L2u, VarMix%SN_v, &
-      !$omp   VarMix%L2v, VarMix%Res_fn_h, VarMix%Rd_dx_h, MEKE, MEKE%Kh)
+      !$omp target exit data map(release: MEKE, MEKE%Kh)
 
       do concurrent (j=js:je, I=is-1:ie)
         khdt_x(I,j) = dt*(Kh_u(I,j,1)*(G%dy_Cu(I,j)*G%IdxCu(I,j)))
@@ -294,6 +292,7 @@ subroutine tracer_hordiff(h, dt, MEKE, VarMix, visc, G, GV, US, CS, Reg, tv, do_
         khdt_y(i,J) = dt*(Kh_v(i,J,1)*(G%dx_Cv(i,J)*G%IdyCv(i,J)))
       enddo
     elseif (Resoln_scaled) then
+      !$omp target update from(VarMix%Res_fn_h)
       !$OMP parallel do default(shared) private(Res_fn)
       do j=js,je ; do I=is-1,ie
         Res_fn = 0.5 * (VarMix%Res_fn_h(i,j) + VarMix%Res_fn_h(i+1,j))
