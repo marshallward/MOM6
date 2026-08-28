@@ -1291,12 +1291,12 @@ subroutine step_MOM_dynamics(forces, p_surf_begin, p_surf_end, dt, dt_tr_adv, &
     Time_end_diag = Time_local + real_to_time(dt_tr_adv - dt, unscale=US%T_to_s)
     call enable_averages(dt_tr_adv, Time_end_diag, CS%diag)
     if (CS%thickness_diffuse) then
-      !$omp target update from(h, CS%uhtr, CS%vhtr)
       call cpu_clock_begin(id_clock_thick_diff)
 
       if (CS%VarMix%use_variable_mixing) &
         call calc_slope_functions(h, CS%tv, dt, G, GV, US, CS%VarMix, OBC=CS%OBC)
 
+      !$omp target update from(h, CS%uhtr, CS%vhtr)
       call thickness_diffuse(h, CS%uhtr, CS%vhtr, CS%tv, dt_tr_adv, G, GV, US, &
                              CS%MEKE, CS%VarMix, CS%CDp, CS%thickness_diffuse_CSp, &
                              CS%stoch_CS)
@@ -1468,12 +1468,12 @@ subroutine step_MOM_dynamics(forces, p_surf_begin, p_surf_end, dt, dt_tr_adv, &
     if (CS%debug) call hchksum(h,"Pre-thickness_diffuse h", G%HI, haloshift=0, unscale=GV%H_to_MKS)
 
     if (CS%thickness_diffuse) then
-      !$omp target update from(h, CS%uhtr, CS%vhtr)
       call cpu_clock_begin(id_clock_thick_diff)
 
       if (CS%VarMix%use_variable_mixing) &
         call calc_slope_functions(h, CS%tv, dt, G, GV, US, CS%VarMix, OBC=CS%OBC)
 
+      !$omp target update from(h, CS%uhtr, CS%vhtr)
       call thickness_diffuse(h, CS%uhtr, CS%vhtr, CS%tv, dt, G, GV, US, &
                              CS%MEKE, CS%VarMix, CS%CDp, CS%thickness_diffuse_CSp, CS%stoch_CS)
 
@@ -4745,6 +4745,7 @@ subroutine MOM_end(CS)
   call thickness_diffuse_end(CS%thickness_diffuse_CSp, CS%CDp)
   if (CS%interface_filter) call interface_filter_end(CS%interface_filter_CSp, CS%CDp)
   call VarMix_end(CS%VarMix)
+  !$omp target exit data map(delete: CS%VarMix)
 
   call set_visc_end(CS%visc, CS%set_visc_CSp)
   !$omp target exit data map(delete: CS%visc, CS%set_visc_CSp)
