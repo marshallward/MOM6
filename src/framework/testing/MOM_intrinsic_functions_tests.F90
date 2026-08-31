@@ -82,236 +82,6 @@ subroutine check_ieee_support
 end subroutine check_ieee_support
 
 
-!> Test that exp_repro(0) = 1 exactly
-subroutine test_exp_zero
-  real :: val
-
-  val = exp_repro(0.)
-
-  print '(2x, "exp_repro(0) = ", ES22.15)', val
-
-  call assert(val == 1., "exp_repro(0) should equal 1 exactly")
-end subroutine test_exp_zero
-
-
-!> Test that exp_repro(-0) = 1 exactly
-subroutine test_exp_neg_zero
-  real :: val
-
-  val = exp_repro(-0.)
-
-  print '(2x, "exp_repro(-0) = ", ES22.15)', val
-
-  call assert(val == 1., "exp_repro(-0) should equal 1 exactly")
-end subroutine test_exp_neg_zero
-
-
-!> Test exp_repro(1) against reference value
-subroutine test_exp_one
-  real :: val, err
-  real, parameter :: tol = 1.e-15
-
-  val = exp_repro(1.)
-  err = abs(val - exp1) / exp1
-
-  print '(2x, "exp_repro(1) = ", ES22.15, ", rel err = ", ES9.2)', val, err
-
-  call assert(err < tol, "exp_repro(1) relative error exceeds tolerance")
-end subroutine test_exp_one
-
-
-!> Test exp_repro(-1) against reference value
-subroutine test_exp_neg_one
-  real :: val, err
-  real, parameter :: tol = 1.e-15
-
-  val = exp_repro(-1.)
-  err = abs(val - inv_e) / inv_e
-
-  print '(2x, "exp_repro(-1) = ", ES22.15, ", rel err = ", ES9.2)', val, err
-
-  call assert(err < tol, "exp_repro(-1) relative error exceeds tolerance")
-end subroutine test_exp_neg_one
-
-
-!> Test exp_repro at a general value (0.33)
-subroutine test_exp_general
-  real :: x, val, ref, err
-  real, parameter :: tol = 1.e-15
-
-  x = 0.33
-  ref = exp_033
-  val = exp_repro(x)
-  err = abs(val - ref) / ref
-
-  print '(2x, "exp_repro(0.33) = ", ES22.15, ", rel err = ", ES9.2)', val, err
-
-  call assert(err < tol, "exp_repro(0.33) relative error exceeds tolerance")
-end subroutine test_exp_general
-
-
-!> Test exp_repro at range reduction boundary: ln(2)
-subroutine test_exp_ln2
-  real :: val, err
-  real, parameter :: tol = 1.e-15
-
-  val = exp_repro(ln2)
-  err = abs(val - 2.0) / 2.0
-
-  print '(2x, "exp_repro(ln2) = ", ES22.15, ", rel err = ", ES9.2)', val, err
-
-  call assert(err < tol, "exp_repro(ln(2)) should be close to 2")
-end subroutine test_exp_ln2
-
-
-!> Test exp_repro at range reduction boundary: -ln(2)
-subroutine test_exp_neg_ln2
-  real :: val, err
-  real, parameter :: tol = 1.e-15
-
-  val = exp_repro(-ln2)
-  err = abs(val - 0.5) / 0.5
-
-  print '(2x, "exp_repro(-ln2) = ", ES22.15, ", rel err = ", ES9.2)', val, err
-
-  call assert(err < tol, "exp_repro(-ln(2)) should be close to 0.5")
-end subroutine test_exp_neg_ln2
-
-
-!> Test exp_repro at half the range reduction boundary: 0.5*ln(2)
-subroutine test_exp_half_ln2
-  real :: val, err
-  real, parameter :: tol = 1.e-15
-
-  val = exp_repro(half_ln2)
-  err = abs(val - sqrt2) / sqrt2
-
-  print '(2x, "exp_repro(ln2/2) = ", ES22.15, ", rel err = ", ES9.2)', val, err
-
-  call assert(err < tol, "exp_repro(0.5*ln(2)) should be close to sqrt(2)")
-end subroutine test_exp_half_ln2
-
-
-!> Test exp_repro with tiny argument (tests 1 + x accuracy)
-subroutine test_exp_tiny_pos
-  real :: x, val, ref, err
-  real, parameter :: tol = 1.e-15
-
-  x = 1.0e-15
-  ref = exp_tiny_pos
-  val = exp_repro(x)
-  err = abs(val - ref) / ref
-
-  print '(2x, "exp_repro(1e-15) = ", ES22.15, ", rel err = ", ES9.2)', val, err
-
-  call assert(err < tol, "exp_repro(1e-15) relative error exceeds tolerance")
-end subroutine test_exp_tiny_pos
-
-
-!> Test exp_repro with tiny negative argument
-subroutine test_exp_tiny_neg
-  real :: x, val, ref, err
-  real, parameter :: tol = 1.e-15
-
-  x = -1.0e-15
-  ref = exp_tiny_neg
-  val = exp_repro(x)
-  err = abs(val - ref) / ref
-
-  print '(2x, "exp_repro(-1e-15) = ", ES22.15, ", rel err = ", ES9.2)', val, err
-
-  call assert(err < tol, "exp_repro(-1e-15) relative error exceeds tolerance")
-end subroutine test_exp_tiny_neg
-
-
-!> Test exp_repro overflow behavior: exp(1000)
-subroutine test_exp_overflow
-  real :: x, val, ref
-
-  x = 1000.
-  ref = ieee_value(0., ieee_positive_inf)
-  val = exp_repro(x)
-
-  print '(2x, "exp_repro(1000) = ", ES22.15)', val
-
-  call assert(val == ref, "exp_repro(1000) should overflow to +Inf")
-end subroutine test_exp_overflow
-
-
-!> Test exp_repro extreme overflow behavior: exp(10000)
-subroutine test_exp_extreme_overflow
-  real :: x, val, ref
-
-  x = 10000.
-  ref = ieee_value(0., ieee_positive_inf)
-  val = exp_repro(x)
-
-  print '(2x, "exp_repro(10000) = ", ES22.15)', val
-
-  call assert(val == ref, "exp_repro(10000) should overflow to +Inf")
-end subroutine test_exp_extreme_overflow
-
-
-!> Test exp_repro underflow behavior: exp(-1000)
-subroutine test_exp_underflow
-  real :: x, val, ref
-
-  x = -1000.
-  ref = 0.
-  val = exp_repro(x)
-
-  print '(2x, "exp_repro(-1000) = ", ES22.15)', val
-
-  call assert(val == ref, "exp_repro(-1000) should underflow to 0")
-end subroutine test_exp_underflow
-
-
-!> Test exp_repro extreme underflow behavior: exp(-10000)
-subroutine test_exp_extreme_underflow
-  real :: x, val, ref
-
-  x = -10000.
-  ref = 0.
-  val = exp_repro(x)
-
-  print '(2x, "exp_repro(-10000) = ", ES22.15)', val
-
-  call assert(val == ref, "exp_repro(-10000) should underflow to 0")
-end subroutine test_exp_extreme_underflow
-
-
-!> Test exp_repro near overflow boundary (709.78)
-subroutine test_exp_near_overflow
-  real :: x, val, ref, err
-  real, parameter :: tol = 1.e-14
-
-  x = 709.78
-  ref = exp_709_78
-  val = exp_repro(x)
-  err = abs(val - ref) / ref
-
-  print '(2x, "exp_repro(709.78) = ", ES22.15, ", rel err = ", ES9.2)', val, err
-
-  call assert(err < tol, "exp_repro(709.78) relative error exceeds tolerance")
-end subroutine test_exp_near_overflow
-
-
-!> Test exp_repro near underflow boundary (-708.39)
-subroutine test_exp_near_underflow
-  real :: x, val, ref, err
-  real, parameter :: tol = 1.e-14
-
-  x = -708.39
-  ref = exp_neg_708_39
-  val = exp_repro(x)
-  err = abs(val - ref) / ref
-
-  print '(2x, "exp_repro(-708.39) = ", ES22.15, ", rel err = ", ES9.2)', val, err
-
-  call assert(err < tol, "exp_repro(-708.39) relative error exceeds tolerance")
-end subroutine test_exp_near_underflow
-
-
 !> Test exp_repro in subnormal region (-745.13)
 subroutine test_exp_subnormal
   real :: x, val, ref, err
@@ -331,64 +101,6 @@ subroutine test_exp_subnormal
     call assert(val == 0., "exp_repro(-745.13) should be zero or subnormal")
   endif
 end subroutine test_exp_subnormal
-
-
-!> Test exp_repro at largest representable float boundary
-subroutine test_exp_largest_float
-  real :: x, val, ref, err
-  real, parameter :: tol = 1.e-13  ! Relaxed due to log/exp round-trip error
-
-  x = log_huge
-  ref = exp_log_huge
-  val = exp_repro(x)
-  err = abs(val - ref) / ref
-
-  print '(2x, "exp_repro(log(huge)) = ", ES22.15, ", rel err = ", ES9.2)', val, err
-
-  call assert(err < tol, "exp_repro(log(huge)) relative error exceeds tolerance")
-end subroutine test_exp_largest_float
-
-
-!> Test exp_repro at smallest normal float boundary
-subroutine test_exp_smallest_float
-  real :: val, ref, err
-  real, parameter :: tol = 5.e-14
-
-  ref = exp_log_tiny
-  val = exp_repro(log_tiny)
-  err = abs(val - ref) / ref
-
-  print '(2x, "exp_repro(log(tiny)) = ", ES22.15, ", rel err = ", ES9.2)', val, err
-
-  call assert(err < tol, "exp_repro(log(tiny)) relative error exceeds tolerance")
-end subroutine test_exp_smallest_float
-
-
-!> Test exp_repro(+Inf) = +Inf
-subroutine test_exp_pos_inf
-  real :: x, val, ref
-
-  x = ieee_value(0., ieee_positive_inf)
-  ref = ieee_value(0., ieee_positive_inf)
-  val = exp_repro(x)
-
-  print '(2x, "exp_repro(+Inf) = ", ES22.15)', val
-
-  call assert(val == ref, "exp_repro(+Inf) should equal +Inf")
-end subroutine test_exp_pos_inf
-
-
-!> Test exp_repro(-Inf) = 0
-subroutine test_exp_neg_inf
-  real :: x, val
-
-  x = ieee_value(0., ieee_negative_inf)
-  val = exp_repro(x)
-
-  print '(2x, "exp_repro(-Inf) = ", ES22.15)', val
-
-  call assert(val == 0., "exp_repro(-Inf) should equal 0")
-end subroutine test_exp_neg_inf
 
 
 !> Test exp_repro(NaN) = NaN
@@ -957,37 +669,53 @@ subroutine run_intrinsic_functions_tests
   suite = TestSuite()
 
   ! Basic value tests
-  call suite%add(test_exp_zero, "test_exp_zero")
-  call suite%add(test_exp_neg_zero, "test_exp_neg_zero")
-  call suite%add(test_exp_one, "test_exp_one")
-  call suite%add(test_exp_neg_one, "test_exp_neg_one")
-  call suite%add(test_exp_general, "test_exp_general")
+  call suite%add_scalar(exp_repro(0.), 1., "exp_repro(0)")
+  call suite%add_scalar(exp_repro(-0.), 1., "exp_repro(-0)")
+  call suite%add_scalar(exp_repro(1.), exp1, "exp_repro(1)", &
+      tolerance=1.e-15*exp1)
+  call suite%add_scalar(exp_repro(-1.), inv_e, "exp_repro(-1)", &
+      tolerance=1.e-15*inv_e)
+  call suite%add_scalar(exp_repro(0.33), exp_033, "exp_repro(0.33)", &
+      tolerance=1.e-15*exp_033)
 
   ! Range reduction boundary tests
-  call suite%add(test_exp_ln2, "test_exp_ln2")
-  call suite%add(test_exp_neg_ln2, "test_exp_neg_ln2")
-  call suite%add(test_exp_half_ln2, "test_exp_half_ln2")
+  call suite%add_scalar(exp_repro(ln2), 2., "exp_repro(ln2)", &
+      tolerance=1.e-15*2.)
+  call suite%add_scalar(exp_repro(-ln2), 0.5, "exp_repro(-ln2)", &
+      tolerance=1.e-15*0.5)
+  call suite%add_scalar(exp_repro(half_ln2), sqrt2, "exp_repro(ln2/2)", &
+      tolerance=1.e-15*sqrt2)
 
   ! Tiny argument tests
-  call suite%add(test_exp_tiny_pos, "test_exp_tiny_pos")
-  call suite%add(test_exp_tiny_neg, "test_exp_tiny_neg")
+  call suite%add_scalar(exp_repro(1.e-15), exp_tiny_pos, "exp_repro(1e-15)", &
+      tolerance=1.e-15*exp_tiny_pos)
+  call suite%add_scalar(exp_repro(-1.e-15), exp_tiny_neg, "exp_repro(-1e-15)", &
+      tolerance=1.e-15*exp_tiny_neg)
 
   ! Overflow/underflow tests
-  call suite%add(test_exp_overflow, "test_exp_overflow")
-  call suite%add(test_exp_extreme_overflow, "test_exp_extreme_overflow")
-  call suite%add(test_exp_underflow, "test_exp_underflow")
-  call suite%add(test_exp_extreme_underflow, "test_exp_extreme_underflow")
-  call suite%add(test_exp_near_overflow, "test_exp_near_overflow")
-  call suite%add(test_exp_near_underflow, "test_exp_near_underflow")
+  call suite%add_scalar(exp_repro(1000.), ieee_value(0., ieee_positive_inf), &
+      "exp_repro(1000)")
+  call suite%add_scalar(exp_repro(10000.), ieee_value(0., ieee_positive_inf), &
+      "exp_repro(10000)")
+  call suite%add_scalar(exp_repro(-1000.), 0., "exp_repro(-1000)")
+  call suite%add_scalar(exp_repro(-10000.), 0., "exp_repro(-10000)")
+  call suite%add_scalar(exp_repro(709.78), exp_709_78, "exp_repro(709.78)", &
+      tolerance=1.e-14*exp_709_78)
+  call suite%add_scalar(exp_repro(-708.39), exp_neg_708_39, "exp_repro(-708.39)", &
+      tolerance=1.e-14*exp_neg_708_39)
   call suite%add(test_exp_subnormal, "test_exp_subnormal")
 
   ! Boundary tests
-  call suite%add(test_exp_largest_float, "test_exp_largest_float")
-  call suite%add(test_exp_smallest_float, "test_exp_smallest_float")
+  call suite%add_scalar(exp_repro(log_huge), exp_log_huge, "exp_repro(log(huge))", &
+      tolerance=1.e-13*exp_log_huge)
+  call suite%add_scalar(exp_repro(log_tiny), exp_log_tiny, "exp_repro(log(tiny))", &
+      tolerance=5.e-14*exp_log_tiny)
 
   ! Special value tests
-  call suite%add(test_exp_pos_inf, "test_exp_pos_inf")
-  call suite%add(test_exp_neg_inf, "test_exp_neg_inf")
+  call suite%add_scalar(exp_repro(ieee_value(0., ieee_positive_inf)), &
+      ieee_value(0., ieee_positive_inf), "exp_repro(+Inf)")
+  call suite%add_scalar(exp_repro(ieee_value(0., ieee_negative_inf)), 0., &
+      "exp_repro(-Inf)")
   call suite%add(test_exp_nan, "test_exp_nan")
   call suite%add(test_exp_neg_nan, "test_exp_neg_nan")
 

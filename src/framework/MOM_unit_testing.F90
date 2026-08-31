@@ -13,6 +13,7 @@ use MOM_error_handler, only : is_root_pe
 use MOM_error_handler, only : disable_fatal_errors
 use MOM_error_handler, only : enable_fatal_errors
 use MOM_error_handler, only : query_skip_mpi
+use MOM_error_handler, only : assert
 
 implicit none ; private
 
@@ -36,27 +37,54 @@ interface string
 end interface string
 
 
-!> A generalized instance of a unit test function
-type :: UnitTest
+!> A generalized instance of a unit test.
+type, abstract :: UnitTest
   private
-  procedure(), nopass, pointer :: proc => null()
-    !< Unit test function/subroutine
   procedure(), nopass, pointer :: cleanup => null()
     !< Cleanup function to be run after proc
   character(len=:), allocatable :: name
     !< Unit test name (usually set to name of proc)
+contains
+  procedure :: run => run_unit_test_base
+    !< Run the unit test
+end type UnitTest
+
+
+!> A unit test defined by a procedure.
+type, extends(UnitTest) :: ProcedureUnitTest
+  private
+  procedure(), nopass, pointer :: proc => null()
+    !< Unit test function/subroutine
   logical :: is_fatal
     !< True if proc() is expected to fail
 contains
-  procedure :: run => run_unit_test
+  procedure :: run => run_procedure_unit_test
     !< Run the unit test function, proc
-end type UnitTest
+end type ProcedureUnitTest
+
+
+!> A unit test defined by a scalar value comparison.
+type, extends(UnitTest) :: ScalarUnitTest
+  private
+  real :: result_value
+    !< Scalar value being tested [arbitrary]
+  real :: reference
+    !< Reference scalar value [arbitrary]
+  real :: tolerance
+    !< Absolute comparison tolerance [arbitrary]
+  logical :: has_tolerance = .false.
+    !< True if scalar comparison uses an absolute tolerance
+contains
+  procedure :: run => run_scalar_unit_test
+    !< Run the scalar value comparison test
+end type ScalarUnitTest
 
 
 !> Unit test constructor
 interface UnitTest
-  module procedure create_unit_test_basic
-  module procedure create_unit_test_full
+  module procedure create_procedure_unit_test_basic
+  module procedure create_procedure_unit_test_full
+  module procedure create_scalar_unit_test
 end interface UnitTest
 
 
@@ -79,6 +107,8 @@ contains
     !< Add a unit test with an explicit cleanup function
   generic, public :: add => add_basic, add_full
     !< Add a unit test to the test suite
+  procedure, public :: add_scalar => add_unit_test_scalar
+    !< Add a scalar value comparison test to the test suite
   procedure, public :: run => run_test_suite
     !< Run all unit tests in the suite
 end type TestSuite
@@ -93,7 +123,7 @@ end interface TestSuite
 !> UnitTest node of TestSuite's linked list
 type :: UnitTestNode
   private
-  type(UnitTest), pointer :: test => null()
+  class(UnitTest), pointer :: test => null()
     !< Node contents
   type(UnitTestNode), pointer :: next => null()
     !< Pointer to next node in list
@@ -101,25 +131,26 @@ end type UnitTestNode
 
 contains
 
-!> Return a new unit test without a cleanup function
-function create_unit_test_basic(proc, name, fatal) result(test)
+!> Return a new procedure unit test without a cleanup function.
+function create_procedure_unit_test_basic(proc, name, fatal) result(test)
   procedure() :: proc
     !< Subroutine which defines the unit test
   character(len=*), intent(in) :: name
     !< Name of the unit test
   logical, intent(in), optional :: fatal
     !< True if the test is expected to raise a FATAL error
-  type(UnitTest) :: test
+  type(ProcedureUnitTest) :: test
 
   procedure(), pointer :: cleanup
   cleanup => null()
 
-  test = create_unit_test_full(proc, name, fatal, cleanup)
-end function create_unit_test_basic
+  test = create_procedure_unit_test_full(proc, name, fatal, cleanup)
+end function create_procedure_unit_test_basic
 
 
-!> Return a new unit test with an explicit cleanup function
-function create_unit_test_full(proc, name, fatal, cleanup) result(test)
+!> Return a new procedure unit test with an explicit cleanup function.
+function create_procedure_unit_test_full(proc, name, fatal, cleanup) &
+    result(test)
   procedure() :: proc
     !< Subroutine which defines the unit test
   character(len=*), intent(in) :: name
@@ -128,19 +159,53 @@ function create_unit_test_full(proc, name, fatal, cleanup) result(test)
     !< True if the test is expected to raise a FATAL error
   procedure() :: cleanup
     !< Cleanup subroutine, called after test
-  type(UnitTest) :: test
+  type(ProcedureUnitTest) :: test
 
   test%proc => proc
   test%name = name
   test%is_fatal = .false.
   if (present(fatal)) test%is_fatal = fatal
   test%cleanup => cleanup
-end function create_unit_test_full
+end function create_procedure_unit_test_full
 
 
-!> Launch a unit test with a custom cleanup procedure
-subroutine run_unit_test(test)
+!> Return a new scalar value comparison unit test.
+function create_scalar_unit_test(result_value, reference, name, tolerance, &
+    cleanup) result(test)
+  real, intent(in) :: result_value
+    !< Scalar value being tested [arbitrary]
+  real, intent(in) :: reference
+    !< Reference scalar value [arbitrary]
+  character(len=*), intent(in) :: name
+    !< Name of the test
+  real, optional, intent(in) :: tolerance
+    !< Absolute comparison tolerance [arbitrary]
+  procedure() :: cleanup
+    !< Cleanup subroutine, called after test
+  type(ScalarUnitTest) :: test
+
+  test%cleanup => cleanup
+  test%name = name
+  test%result_value = result_value
+  test%reference = reference
+  test%tolerance = 0.
+  test%has_tolerance = present(tolerance)
+  if (present(tolerance)) test%tolerance = tolerance
+end function create_scalar_unit_test
+
+
+!> Base unit test run method.  Concrete unit test types override this method.
+subroutine run_unit_test_base(test)
   class(UnitTest), intent(in) :: test
+
+  call assert(.false., "MOM_unit_testing: run_unit_test_base called for " &
+      // test%name)
+end subroutine run_unit_test_base
+
+
+!> Launch a procedure unit test with a custom cleanup procedure.
+subroutine run_procedure_unit_test(test)
+  class(ProcedureUnitTest), intent(in) :: test
 
   type(sigjmp_buf) :: env
   integer :: rc
@@ -148,8 +213,8 @@ subroutine run_unit_test(test)
   if (.not. query_skip_mpi()) then
     call sync_PEs
 
-    ! FIXME: Some FATAL tests under MPI are unable to recover after jumpback, so
-    !   we disable these tests for now.
+    ! FIXME: Some FATAL tests under MPI are unable to recover after jumpback,
+    !   so we disable these tests for now.
     if (test%is_fatal .and. num_PEs() > 1) return
   endif
 
@@ -165,7 +230,32 @@ subroutine run_unit_test(test)
   endif
 
   if (associated(test%cleanup)) call test%cleanup
-end subroutine run_unit_test
+end subroutine run_procedure_unit_test
+
+
+!> Run a scalar value comparison test.
+subroutine run_scalar_unit_test(test)
+  class(ScalarUnitTest), intent(in) :: test
+
+  real :: err
+    !< Absolute difference between test value and reference value [arbitrary]
+
+  if (test%has_tolerance) then
+    err = abs(test%result_value - test%reference)
+    print '(2x, a, " = ", ES22.15, ", ref = ", ES22.15, ", abs err = ", &
+        ES9.2, ", tol = ", ES9.2)', &
+        test%name, test%result_value, test%reference, err, test%tolerance
+    call assert(err <= test%tolerance, trim(test%name) &
+        // " exceeds scalar tolerance")
+  else
+    print '(2x, a, " = ", ES22.15, ", ref = ", ES22.15)', &
+        test%name, test%result_value, test%reference
+    call assert(test%result_value == test%reference, trim(test%name) &
+        // " differs from scalar reference")
+  endif
+
+  if (associated(test%cleanup)) call test%cleanup
+end subroutine run_scalar_unit_test
 
 
 !> Return a new test suite
@@ -200,19 +290,50 @@ subroutine add_unit_test_full(suite, test, name, fatal, cleanup)
   procedure() :: cleanup
   logical, intent(in), optional :: fatal
 
-  type(UnitTest), pointer :: utest
-  type(UnitTestNode), pointer :: node
+  type(ProcedureUnitTest), pointer :: utest
 
-  ! Populate the current tail
   allocate(utest)
   utest = UnitTest(test, name, fatal, cleanup)
-  suite%tail%test => utest
+  call append_unit_test(suite, utest)
+end subroutine add_unit_test_full
 
-  ! Create and append the new (empty) node, and update the tail
+
+subroutine add_unit_test_scalar(suite, result_value, reference, name, tolerance)
+  class(TestSuite), intent(inout) :: suite
+  real, intent(in) :: result_value
+    !< Scalar value being tested [arbitrary]
+  real, intent(in) :: reference
+    !< Reference scalar value [arbitrary]
+  character(len=*), intent(in) :: name
+    !< Name of the test
+  real, optional, intent(in) :: tolerance
+    !< Absolute comparison tolerance [arbitrary]
+
+  type(ScalarUnitTest), pointer :: utest
+  procedure(), pointer :: cleanup
+
+  cleanup => null()
+  if (associated(suite%cleanup)) cleanup => suite%cleanup
+
+  allocate(utest)
+  utest = UnitTest(result_value, reference, name, tolerance, cleanup)
+  call append_unit_test(suite, utest)
+end subroutine add_unit_test_scalar
+
+
+!> Append a unit test to a test suite.
+subroutine append_unit_test(suite, test)
+  class(TestSuite), intent(inout) :: suite
+  class(UnitTest), pointer, intent(in) :: test
+    !< Unit test to append
+
+  type(UnitTestNode), pointer :: node
+
+  suite%tail%test => test
   allocate(node)
   suite%tail%next => node
   suite%tail => node
-end subroutine add_unit_test_full
+end subroutine append_unit_test
 
 
 subroutine run_test_suite(suite)
@@ -226,7 +347,6 @@ subroutine run_test_suite(suite)
     print '(/a)', "=== "//node%test%name
 
     call node%test%run
-    if (associated(node%test%cleanup)) call node%test%cleanup
 
     node => node%next
   enddo
