@@ -419,7 +419,7 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
   integer :: cont_stencil, obc_stencil, vel_stencil
   real, dimension(SZI_(G),SZJ_(G),SZK_(GV)) :: h_tmp ! temporary copy of Layer thickness [H ~> m or kg m-2]
   integer :: cor_stencil
-  integer :: niblock, njblock  ! Block sizes for the viscous mixed layer solver [nondim].
+  integer :: nIIB, nJJB  ! Block sizes for the viscous mixed layer solver [nondim].
 
   is  = G%isc  ; ie  = G%iec  ; js  = G%jsc  ; je  = G%jec ; nz = GV%ke
   Isq = G%IscB ; Ieq = G%IecB ; Jsq = G%JscB ; Jeq = G%JecB
@@ -635,9 +635,9 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
   enddo
 
   call enable_averages(dt, Time_local, CS%diag)
-  call viscous_ML_block_sizes(CS%set_visc_CSp, G, niblock, njblock)
+  call viscous_ML_block_sizes(CS%set_visc_CSp, G, nIIB, nJJB)
   call set_viscous_ML(u_inst, v_inst, h, tv, forces, visc, dt, G, GV, US, CS%set_visc_CSp, &
-                      niblock, njblock)
+                      nIIB, nJJB)
   call disable_averaging(CS%diag)
 
   if (CS%debug) then

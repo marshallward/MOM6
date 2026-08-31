@@ -242,7 +242,7 @@ subroutine step_MOM_dyn_unsplit(u, v, h, tv, visc, Time_local, dt, forces, &
   real :: dt_visc   ! The time step for a part of the update due to viscosity [T ~> s].
   logical :: dyn_p_surf
   integer :: i, j, k, is, ie, js, je, Isq, Ieq, Jsq, Jeq, nz
-  integer :: niblock, njblock  ! Block sizes for the viscous mixed layer solver [nondim].
+  integer :: nIIB, nJJB  ! Block sizes for the viscous mixed layer solver [nondim].
   integer :: cor_stencil  ! Stencil size for Coriolis schemes [nondim]
   is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec ; nz = GV%ke
   Isq = G%IscB ; Ieq = G%IecB ; Jsq = G%JscB ; Jeq = G%JecB
@@ -355,9 +355,9 @@ subroutine step_MOM_dyn_unsplit(u, v, h, tv, visc, Time_local, dt, forces, &
   call cpu_clock_begin(id_clock_vertvisc)
   call enable_averages(dt, Time_local, CS%diag)
   dt_visc = dt ; if (CS%dt_visc_bug) dt_visc = 0.5*dt
-  call viscous_ML_block_sizes(CS%set_visc_CSp, G, niblock, njblock)
+  call viscous_ML_block_sizes(CS%set_visc_CSp, G, nIIB, nJJB)
   call set_viscous_ML(u, v, h_av, tv, forces, visc, dt_visc, G, GV, US, CS%set_visc_CSp, &
-      niblock, njblock)
+      nIIB, nJJB)
   call disable_averaging(CS%diag)
 
   dt_visc = dt_pred ; if (CS%dt_visc_bug) dt_visc = 0.5*dt
