@@ -2403,7 +2403,7 @@ subroutine set_viscous_ML(u, v, h, tv, forces, visc, dt, G, GV, US, CS, nIIB, nJ
             !$omp target update from(T_EOS,S_EOS,press)
             do jj=1,jje
               call calculate_specific_vol_derivs(T_EOS(:,jj), S_EOS(:,jj), press(:,jj), &
-                                                  dSpV_dT(:,jj), dSpV_dS(:,jj), tv%eqn_of_state)
+                                                  dSpV_dT(:,jj), dSpV_dS(:,jj), tv%eqn_of_state, EOSdom(1,:))
             enddo
             !$omp target update to(dSpV_dT,dSpV_dS)
           endif
@@ -2601,7 +2601,7 @@ subroutine set_viscous_ML(u, v, h, tv, forces, visc, dt, G, GV, US, CS, nIIB, nJ
         do jj=1,jje
           j = jsb + jj - 1
           call calculate_density_derivs(T_EOS(:,jj), S_EOS(:,jj), forces%p_surf(IsbB:IebB,j), &
-                                        dR_dT(:,jj), dR_dS(:,jj), tv%eqn_of_state)
+                                        dR_dT(:,jj), dR_dS(:,jj), tv%eqn_of_state, EOSdom(1,:))
         enddo
       endif
 
@@ -2775,7 +2775,7 @@ subroutine set_viscous_ML(u, v, h, tv, forces, visc, dt, G, GV, US, CS, nIIB, nJ
             !$omp target update from(T_EOS,S_EOS,press)
             do JJ=1,JJe
               call calculate_specific_vol_derivs(T_EOS(:,JJ), S_EOS(:,JJ), press(:,JJ), &
-                                                  dSpV_dT(:,JJ), dSpV_dS(:,JJ), tv%eqn_of_state)
+                                                  dSpV_dT(:,JJ), dSpV_dS(:,JJ), tv%eqn_of_state, EOSdom(1,:))
             enddo
             !$omp target update to(dSpV_dT,dSpV_dS)
           endif
@@ -2977,7 +2977,7 @@ subroutine set_viscous_ML(u, v, h, tv, forces, visc, dt, G, GV, US, CS, nIIB, nJ
         do JJ=1,JJe
           J = JsbB + JJ - 1
           call calculate_density_derivs(T_EOS(:,JJ), S_EOS(:,JJ), forces%p_surf(isb:ieb,j), &
-                                        dR_dT(:,JJ), dR_dS(:,JJ), tv%eqn_of_state)
+                                        dR_dT(:,JJ), dR_dS(:,JJ), tv%eqn_of_state, EOSdom(1,:))
         enddo
       endif
 
