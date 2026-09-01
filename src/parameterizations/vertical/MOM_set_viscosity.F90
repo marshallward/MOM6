@@ -2409,13 +2409,13 @@ subroutine set_viscous_ML(u, v, h, tv, forces, visc, dt, G, GV, US, CS, nIIB, nJ
           endif
         endif
 
-        !$omp target
+        !$omp target teams
         do k=nkml+1,nz
 #ifndef __NVCOMPILER_OPENMP_GPU
           do_any = .false.
 #endif
 
-          !$omp loop collapse(2) &
+          !$omp loop bind(teams,parallel) collapse(2) &
           !$omp   private(i,j,hlay,I_2hlay,v_at_u,Uh2,T_lay,S_lay,gHprime,RiBulk)
           do jj=1,jje ; do II=1,IIe
             I = IsbB + II - 1
@@ -2469,7 +2469,7 @@ subroutine set_viscous_ML(u, v, h, tv, forces, visc, dt, G, GV, US, CS, nIIB, nJ
           if (.not.do_any) exit ! All columns are done.
 #endif
 
-          !$omp loop collapse(2) private(i,j)
+          !$omp loop bind(teams,parallel) collapse(2) private(i,j)
           do jj=1,jje ; do II=1,IIe
             I = IsbB + II - 1
             j = jsb + jj - 1
@@ -2490,7 +2490,7 @@ subroutine set_viscous_ML(u, v, h, tv, forces, visc, dt, G, GV, US, CS, nIIB, nJ
             endif
           enddo ; enddo
         enddo
-        !$omp end target
+        !$omp end target teams
       endif
 
       if (do_any) then
@@ -2782,14 +2782,14 @@ subroutine set_viscous_ML(u, v, h, tv, forces, visc, dt, G, GV, US, CS, nIIB, nJ
         endif
 
         ! do remaining iterations
-        !$omp target
+        !$omp target teams
         do k=nkml+1,nz
 ! no tracking of early exit on GPU
 #ifndef __NVCOMPILER_OPENMP_GPU
           do_any = .false.
 #endif
 
-          !$omp loop collapse(2) &
+          !$omp loop bind(teams,parallel) collapse(2) &
           !$omp   private(i,j,hlay,I_2hlay,u_at_v,Uh2,T_lay,S_lay,gHprime,RiBulk)
           do JJ=1,JJe ; do ii=1,iie
             i = isb + ii - 1
@@ -2844,7 +2844,7 @@ subroutine set_viscous_ML(u, v, h, tv, forces, visc, dt, G, GV, US, CS, nIIB, nJ
 #ifndef __NVCOMPILER_OPENMP_GPU
           if (.not.do_any) exit ! All columns are done.
 #endif
-          !$omp loop collapse(2) private(i,j)
+          !$omp loop bind(teams,parallel) collapse(2) private(i,j)
           do JJ=1,JJe ; do ii=1,iie
             i = isb + ii - 1
             J = JsbB + JJ - 1
@@ -2866,7 +2866,7 @@ subroutine set_viscous_ML(u, v, h, tv, forces, visc, dt, G, GV, US, CS, nIIB, nJ
           enddo ; enddo
 
         enddo
-        !$omp end target
+        !$omp end target teams
       endif
 
       if (do_any) then
