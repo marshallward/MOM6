@@ -2701,8 +2701,10 @@ subroutine set_viscous_ML(u, v, h, tv, forces, visc, dt, G, GV, US, CS, nIIB, nJ
     EOSdom(2,1) = 1 ; EOSdom(2, 2) = JJe
     if (CS%dynamic_viscous_ML) then
       do_any = .false.
-      do concurrent (J=JsbB:JebB, i=isb:ieb) DO_LOCALITY(reduce(.or.:do_any))
-        JJ=J-JsbB+1 ; ii=i-isb+1
+      do concurrent (JJ=1:JJe, ii=1:iie) DO_LOCALITY(local(i,j) reduce(.or.:do_any))
+        i = isb + ii - 1
+        J = JsbB + JJ - 1
+
         htot(ii,JJ) = 0.0
         if (G%mask2dCv(i,J) < 0.5) then
           do_ij(ii,JJ) = .false. ; visc%nkml_visc_v(i,J) = nkml
@@ -2729,9 +2731,11 @@ subroutine set_viscous_ML(u, v, h, tv, forces, visc, dt, G, GV, US, CS, nIIB, nJ
       if (do_any) then
         !$omp target
         do k=1,nkml
-          !$omp loop collapse(2) private(JJ,ii)
-          do J=JsbB,JebB ; do i=isb,ieb
-            JJ=J-JsbB+1 ; ii=i-isb+1
+          !$omp loop collapse(2) private(i,j)
+          do JJ=1,JJe ; do ii=1,iie
+            i = isb + ii - 1
+            J = JsbB + JJ - 1
+
             if (do_ij(ii,JJ)) then
               htot(ii,JJ) = htot(ii,JJ) + 0.5 * (h(i,J,k) + h(i,j+1,k))
               vhtot(ii,JJ) = vhtot(ii,JJ) + 0.5 * (h(i,j,k) + h(i,j+1,k)) * v(i,J,k)
@@ -2753,8 +2757,10 @@ subroutine set_viscous_ML(u, v, h, tv, forces, visc, dt, G, GV, US, CS, nIIB, nJ
         if (use_EOS .and. (nz > nkml)) then
           k2 = max(1,nkml)
           ! Find dRho/dT and dRho_dS.
-          do concurrent (J=JsbB:JebB, i=isb:ieb)
-            JJ=J-JsbB+1 ; ii=i-isb+1
+          do concurrent (JJ=1:JJe, ii=1:iie) DO_LOCALITY(local(i,j))
+            i = isb + ii - 1
+            J = JsbB + JJ - 1
+
             press(ii,JJ) = (GV%H_to_RZ * GV%g_Earth) * htot(ii,JJ)
             if (associated(tv%p_surf)) press(ii,JJ) = press(ii,JJ) + &
               0.5*(tv%p_surf(i,j)+tv%p_surf(i,j+1))
@@ -2767,10 +2773,9 @@ subroutine set_viscous_ML(u, v, h, tv, forces, visc, dt, G, GV, US, CS, nIIB, nJ
                                         tv%eqn_of_state, EOSdom)
           if (nonBous_ML) then
             !$omp target update from(T_EOS,S_EOS,press)
-            do J=JsbB,JebB
-            JJ=J-JsbB+1
-            call calculate_specific_vol_derivs(T_EOS(:,JJ), S_EOS(:,JJ), press(:,JJ), &
-                                                dSpV_dT(:,JJ), dSpV_dS(:,JJ), tv%eqn_of_state)
+            do JJ=1,JJe
+              call calculate_specific_vol_derivs(T_EOS(:,JJ), S_EOS(:,JJ), press(:,JJ), &
+                                                  dSpV_dT(:,JJ), dSpV_dS(:,JJ), tv%eqn_of_state)
             enddo
             !$omp target update to(dSpV_dT,dSpV_dS)
           endif
@@ -2785,9 +2790,11 @@ subroutine set_viscous_ML(u, v, h, tv, forces, visc, dt, G, GV, US, CS, nIIB, nJ
 #endif
 
           !$omp loop collapse(2) &
-          !$omp   private(JJ,ii,hlay,I_2hlay,u_at_v,Uh2,T_lay,S_lay,gHprime,RiBulk)
-          do J=JsbB,JebB ; do i=isb,ieb
-            JJ=J-JsbB+1 ; ii=i-isb+1
+          !$omp   private(i,j,hlay,I_2hlay,u_at_v,Uh2,T_lay,S_lay,gHprime,RiBulk)
+          do JJ=1,JJe ; do ii=1,iie
+            i = isb + ii - 1
+            J = JsbB + JJ - 1
+
             if (do_ij(ii,JJ)) then
               hlay = 0.5*(h(i,j,k) + h(i,j+1,k))
               if (hlay > h_tiny) then ! Only consider non-vanished layers.
@@ -2837,9 +2844,11 @@ subroutine set_viscous_ML(u, v, h, tv, forces, visc, dt, G, GV, US, CS, nIIB, nJ
 #ifndef __NVCOMPILER_OPENMP_GPU
           if (.not.do_any) exit ! All columns are done.
 #endif
-          !$omp loop collapse(2) private(ii,JJ)
-          do J=JsbB,JebB ; do i=isb,ieb
-            JJ=J-JsbB+1 ; ii=i-isb+1
+          !$omp loop collapse(2) private(i,j)
+          do JJ=1,JJe ; do ii=1,iie
+            i = isb + ii - 1
+            J = JsbB + JJ - 1
+
             if (do_ij(ii,JJ)) then
               htot(ii,JJ) = htot(ii,JJ) + 0.5 * (h(i,J,k) + h(i,j+1,k))
               vhtot(ii,JJ) = vhtot(ii,JJ) + 0.5 * (h(i,j,k) + h(i,j+1,k)) * v(i,J,k)
@@ -2861,8 +2870,10 @@ subroutine set_viscous_ML(u, v, h, tv, forces, visc, dt, G, GV, US, CS, nIIB, nJ
       endif
 
       if (do_any) then
-        do concurrent (J=JsbB:JebB, i=isb:ieb)
-          JJ=J-JsbB+1 ; ii=i-isb+1
+        do concurrent (JJ=1:JJe, ii=1:iie) DO_LOCALITY(local(i,j))
+          i = isb + ii - 1
+          J = JsbB + JJ - 1
+
           if (do_ij(ii,JJ)) then
             visc%nkml_visc_v(i,J) = k_massive(ii,JJ)
           endif
@@ -2873,8 +2884,10 @@ subroutine set_viscous_ML(u, v, h, tv, forces, visc, dt, G, GV, US, CS, nIIB, nJ
 
     do_any_shelf = .false.
     if (associated(forces%frac_shelf_v)) then
-      do J=JsbB,JebB ; do i=isb,ieb
-        JJ=J-JsbB+1 ; ii=i-isb+1
+      do JJ=1,JJe ; do ii=1,iie
+        i = isb + ii - 1
+        J = JsbB + JJ - 1
+
         if (forces%frac_shelf_v(i,J)*G%mask2dCv(i,J) == 0.0) then
           do_ij(ii,JJ) = .false.
           visc%tbl_thick_shelf_v(i,J) = 0.0 ; visc%kv_tbl_shelf_v(i,J) = 0.0
@@ -2885,8 +2898,10 @@ subroutine set_viscous_ML(u, v, h, tv, forces, visc, dt, G, GV, US, CS, nIIB, nJ
     endif
 
     if (do_any_shelf) then
-      do k=1,nz ; do J=JsbB,JebB ; do i=isb,ieb
-        JJ=J-JsbB+1 ; ii=i-isb+1
+      do k=1,nz ; do JJ=1,JJe ; do ii=1,iie
+        i = isb + ii - 1
+        J = JsbB + JJ - 1
+
         if (do_ij(ii,JJ)) then
           if (v(i,J,k) * (h(i,j+1,k) - h(i,j,k)) >= 0) then
             h_at_vel(ii,JJ,k) = 2.0*h(i,j,k)*h(i,j+1,k) / &
@@ -2904,8 +2919,10 @@ subroutine set_viscous_ML(u, v, h, tv, forces, visc, dt, G, GV, US, CS, nIIB, nJ
         endif
       enddo ; enddo ; enddo
 
-      do J=JsbB,JebB ; do i=isb,ieb
-        JJ=J-JsbB+1 ; ii=i-isb+1
+      do JJ=1,JJe ; do ii=1,iie
+        i = isb + ii - 1
+        J = JsbB + JJ - 1
+
         if (do_ij(ii,JJ)) then
           htot_vel = 0.0 ; hwtot = 0.0 ; hutot = 0.0
           Thtot(ii,JJ) = 0.0 ; Shtot(ii,JJ) = 0.0 ; Shtot(ii,JJ) = 0.0
@@ -2957,15 +2974,17 @@ subroutine set_viscous_ML(u, v, h, tv, forces, visc, dt, G, GV, US, CS, nIIB, nJ
       enddo ; enddo ! I-loop
 
       if (use_EOS) then
-        do J=JsbB,JebB
-        JJ=J-JsbB+1
-        call calculate_density_derivs(T_EOS(:,JJ), S_EOS(:,JJ), forces%p_surf(isb:ieb,j), &
-                                      dR_dT(:,JJ), dR_dS(:,JJ), tv%eqn_of_state)
+        do JJ=1,JJe
+          J = JsbB + JJ - 1
+          call calculate_density_derivs(T_EOS(:,JJ), S_EOS(:,JJ), forces%p_surf(isb:ieb,j), &
+                                        dR_dT(:,JJ), dR_dS(:,JJ), tv%eqn_of_state)
         enddo
       endif
 
-      do J=JsbB,JebB ; do i=isb,ieb
-        JJ=J-JsbB+1 ; ii=i-isb+1
+      do JJ=1,JJe ; do ii=1,iie
+        i = isb + ii - 1
+        J = JsbB + JJ - 1
+
         if (do_ij(ii,JJ)) then
   !  The 400.0 in this expression is the square of a constant proposed
   !  by Killworth and Edwards, 1999, in equation (2.20).
@@ -2998,12 +3017,12 @@ subroutine set_viscous_ML(u, v, h, tv, forces, visc, dt, G, GV, US, CS, nIIB, nJ
               dztot(ii,JJ) = dztot(ii,JJ) + Ddz
               Thtot(ii,JJ) = Thtot(ii,JJ) + T_Lay*Dh ; Shtot(ii,JJ) = Shtot(ii,JJ) + S_Lay*Dh
             enddo
-            if ((oldfn < ustarsq) .and. (h_at_vel(II,jj,nz) > 0.0)) then
+            if ((oldfn < ustarsq) .and. (h_at_vel(ii,JJ,nz) > 0.0)) then
               T_Lay = 0.5*(tv%T(i,j,nz) + tv%T(i,j+1,nz))
               S_Lay = 0.5*(tv%S(i,j,nz) + tv%S(i,j+1,nz))
               if (dR_dT(ii,JJ)*(T_Lay*htot(ii,JJ) - Thtot(ii,JJ)) + &
                   dR_dS(ii,JJ)*(S_Lay*htot(ii,JJ) - Shtot(ii,JJ)) < ustarsq) then
-                htot(ii,JJ) = htot(ii,JJ) + h_at_vel(II,jj,nz)
+                htot(ii,JJ) = htot(ii,JJ) + h_at_vel(ii,JJ,nz)
                 dztot(ii,JJ) = dztot(ii,JJ) + dz_at_vel(ii,JJ,nz)
               endif
             endif ! Examination of layer nz.
@@ -3030,7 +3049,7 @@ subroutine set_viscous_ML(u, v, h, tv, forces, visc, dt, G, GV, US, CS, nIIB, nJ
               Rhtot(ii,JJ) = Rhtot(ii,JJ) + Rlay*Dh
             enddo
             if (GV%Rlay(nz)*htot(ii,JJ) - Rhtot(ii,JJ) < ustarsq) then
-              htot(ii,JJ) = htot(ii,JJ) + h_at_vel(II,jj,nz)
+              htot(ii,JJ) = htot(ii,JJ) + h_at_vel(ii,JJ,nz)
               dztot(ii,JJ) = dztot(ii,JJ) + dz_at_vel(ii,JJ,nz)
             endif
           endif ! use_EOS
