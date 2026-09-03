@@ -495,9 +495,11 @@ subroutine thickness_diffuse(h, uhtr, vhtr, tv, dt, G, GV, US, MEKE, VarMix, CDp
     call add_interface_Kh(G, GV, US, CS, Kh_u, Kh_v, KH_u_CFL, KH_v_CFL, int_slope_u, int_slope_v)
   endif
 
+  !$omp target enter data map(alloc: Sfn_unlim_u_3D, Sfn_unlim_v_3D)
   if (CS%use_meso_sfn_ANN) then
     call meso_sfn_ANN_compute(h, e, Sfn_unlim_u_3D, Sfn_unlim_v_3D, G, GV, US, tv, &
                               CS%meso_sfn_ANN_CS, dt, u, v)
+    !$omp target update to(Sfn_unlim_u_3D, Sfn_unlim_v_3D)
   endif
 
   !$omp target update to(Kh_u, Kh_v, int_slope_u, int_slope_v) &
@@ -668,7 +670,7 @@ subroutine thickness_diffuse(h, uhtr, vhtr, tv, dt, G, GV, US, MEKE, VarMix, CDp
   endif
 
   !$omp target exit data map(release: KH_u_CFL, KH_v_CFL, Khth_Loc_u, Khth_Loc_v, int_slope_u, int_slope_v, &
-  !$omp                    e, KH_u, KH_v, uhD, vhD, VarMix, VarMix%res_fn_u, VarMix%res_fn_v)
+  !$omp   e, KH_u, KH_v, uhD, vhD, VarMix, VarMix%res_fn_u, VarMix%res_fn_v, Sfn_unlim_u_3D, Sfn_unlim_v_3D)
   !$omp target exit data map(from: MEKE%GM_src) if(allocated(MEKE%GM_src))
   !$omp target exit data map(from: MEKE%Kh) if(allocated(MEKE%Kh))
 
