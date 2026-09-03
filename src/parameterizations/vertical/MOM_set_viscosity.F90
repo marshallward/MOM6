@@ -3,6 +3,7 @@
 ! SPDX-License-Identifier: Apache-2.0
 
 #include "do_concurrent_compat.h"
+#include "omp_loop_bind_compat.h"
 
 !> Calculates various values related to the bottom boundary layer, such as the viscosity and
 !! thickness of the BBL (set_viscous_BBL).
@@ -2415,7 +2416,7 @@ subroutine set_viscous_ML(u, v, h, tv, forces, visc, dt, G, GV, US, CS, nIIB, nJ
           do_any = .false.
 #endif
 
-          !$omp loop bind(teams,parallel) collapse(2) &
+          !$omp loop LOOP_BIND_TEAMS_PARALLEL collapse(2) &
           !$omp   private(i,j,hlay,I_2hlay,v_at_u,Uh2,T_lay,S_lay,gHprime,RiBulk)
           do jj=1,jje ; do II=1,IIe
             I = IsbB + II - 1
@@ -2469,7 +2470,7 @@ subroutine set_viscous_ML(u, v, h, tv, forces, visc, dt, G, GV, US, CS, nIIB, nJ
           if (.not.do_any) exit ! All columns are done.
 #endif
 
-          !$omp loop bind(teams,parallel) collapse(2) private(i,j)
+          !$omp loop LOOP_BIND_TEAMS_PARALLEL collapse(2) private(i,j)
           do jj=1,jje ; do II=1,IIe
             I = IsbB + II - 1
             j = jsb + jj - 1
@@ -2789,7 +2790,7 @@ subroutine set_viscous_ML(u, v, h, tv, forces, visc, dt, G, GV, US, CS, nIIB, nJ
           do_any = .false.
 #endif
 
-          !$omp loop bind(teams,parallel) collapse(2) &
+          !$omp loop LOOP_BIND_TEAMS_PARALLEL collapse(2) &
           !$omp   private(i,j,hlay,I_2hlay,u_at_v,Uh2,T_lay,S_lay,gHprime,RiBulk)
           do JJ=1,JJe ; do ii=1,iie
             i = isb + ii - 1
@@ -2844,7 +2845,7 @@ subroutine set_viscous_ML(u, v, h, tv, forces, visc, dt, G, GV, US, CS, nIIB, nJ
 #ifndef __NVCOMPILER_OPENMP_GPU
           if (.not.do_any) exit ! All columns are done.
 #endif
-          !$omp loop bind(teams,parallel) collapse(2) private(i,j)
+          !$omp loop LOOP_BIND_TEAMS_PARALLEL collapse(2) private(i,j)
           do JJ=1,JJe ; do ii=1,iie
             i = isb + ii - 1
             J = JsbB + JJ - 1

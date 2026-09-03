@@ -212,6 +212,9 @@ AS_IF(
   LDFLAGS="$LDFLAGS $OPENMP_FCFLAGS"
 ])
 
+# Check for support of the OpenMP loop construct's bind clause
+MOM6_FC_OMP_LOOP_BIND
+
 
 # FMS support
 
