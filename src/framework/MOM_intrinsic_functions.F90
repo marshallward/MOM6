@@ -24,6 +24,7 @@ interface
       !< Input value
     real :: a
       !< exp(x)
+    !$omp declare target
   end function exp_repro
 end interface
 

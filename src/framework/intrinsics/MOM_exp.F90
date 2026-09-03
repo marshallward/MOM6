@@ -145,6 +145,8 @@ module procedure exp_repro
   integer(kind=int_kind) :: fb
     ! Bit representation 2**j, the K exponent rescale
 
+  !$omp declare target
+
   ! 1. Nonfinite handling
   ! ---------------------
   ! Nonfinites must be handled first to prevent their appearance in
