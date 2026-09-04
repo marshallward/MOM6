@@ -29,7 +29,7 @@ use MOM_full_convection,     only : full_convection
 use MOM_grid,                only : ocean_grid_type
 use MOM_interface_heights,   only : thickness_to_dz, find_rho_bottom
 use MOM_internal_tides,      only : int_tide_CS, get_lowmode_loss, get_lowmode_diffusivity
-use MOM_intrinsic_functions, only : invcosh
+use MOM_intrinsic_functions, only : invcosh, exp_repro
 use MOM_io,                  only : slasher, MOM_read_data
 use MOM_isopycnal_slopes,    only : vert_fill_TS
 use MOM_kappa_shear,         only : calculate_kappa_shear, kappa_shear_init, Kappa_shear_CS
@@ -1738,14 +1738,14 @@ subroutine add_drag_diffusivity(h, u, v, tv, fluxes, visc, isb, ieb, jsb, jeb, n
       I2decay(ii,jj) = 0.5*CS%IMax_decay
     endif
     if (CS%drag_diff_answer_date <= 20250301) then
-      TKE(ii,jj) = ((CS%BBL_effic * cdrag_sqrt) * exp(-I2decay(ii,jj)*h(i,j,nz)) ) * visc%BBL_meanKE_loss_sqrtCd(i,j)
+      TKE(ii,jj) = ((CS%BBL_effic * cdrag_sqrt) * exp_repro(-I2decay(ii,jj)*h(i,j,nz)) ) * visc%BBL_meanKE_loss_sqrtCd(i,j)
     else
-      TKE(ii,jj) = (CS%BBL_effic * exp(-I2decay(ii,jj)*h(i,j,nz)) ) * visc%BBL_meanKE_loss(i,j)
+      TKE(ii,jj) = (CS%BBL_effic * exp_repro(-I2decay(ii,jj)*h(i,j,nz)) ) * visc%BBL_meanKE_loss(i,j)
     endif
 
     if (associated(fluxes%BBL_tidal_dis)) &
       TKE(ii,jj) = TKE(ii,jj) + fluxes%BBL_tidal_dis(i,j) * GV%RZ_to_H * &
-           (CS%BBL_effic * exp(-I2decay(ii,jj)*h(i,j,nz)))
+           (CS%BBL_effic * exp_repro(-I2decay(ii,jj)*h(i,j,nz)))
 
     ! Distribute the work over a BBL of depth 20^2 ustar^2 / g' following
     ! Killworth & Edwards (1999) and Zilitikevich & Mironov (1996).
@@ -1798,7 +1798,7 @@ subroutine add_drag_diffusivity(h, u, v, tv, fluxes, visc, isb, ieb, jsb, jeb, n
       i_rem = i_rem + 1  ! Count the i-rows that are still being worked on.
       !   Apply vertical decay of the turbulent energy.  This energy is
       ! simply lost.
-      TKE(ii,jj) = TKE(ii,jj) * exp(-I2decay(ii,jj) * (h(i,j,k) + h(i,j,k+1)))
+      TKE(ii,jj) = TKE(ii,jj) * exp_repro(-I2decay(ii,jj) * (h(i,j,k) + h(i,j,k+1)))
 
       if (maxTKE(ii,jj,k) <= 0.0) cycle
 
@@ -2030,7 +2030,7 @@ subroutine add_LOTW_BBL_diffusivity(h, u, v, tv, fluxes, visc, isb, ieb, jsb, je
 
       ! Exponentially decay TKE across the thickness of the layer.
       ! This is energy loss in addition to work done as mixing, apparently to Joule heating.
-      TKE_remaining = exp(-Idecay*h(i,j,k)) * TKE_remaining
+      TKE_remaining = exp_repro(-Idecay*h(i,j,k)) * TKE_remaining
 
       z_bot = z_bot + dz(i,j,k)  ! Distance between the upper interface of the layer and the bottom [Z ~> m].
       h_bot = h_bot + h(i,j,k) ! Thickness between upper interface of layer and the bottom [H ~> m or kg m-2].
