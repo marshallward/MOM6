@@ -3,6 +3,7 @@
 ! SPDX-License-Identifier: Apache-2.0
 
 #include "do_concurrent_compat.h"
+#include "omp_loop_bind_compat.h"
 
 !> Calculate vertical diffusivity from all mixing processes
 module MOM_set_diffusivity
@@ -500,11 +501,7 @@ subroutine set_diffusivity(u, v, h, u_h, v_h, tv, fluxes, optics, visc, dt, Kd_i
       call hchksum(tv%S, "before vert_fill_TS tv%S", G%HI, unscale=US%S_to_ppt)
       call hchksum(h, "before vert_fill_TS h",G%HI, unscale=GV%H_to_m)
     endif
-    !$omp target enter data map(to: tv%T, tv%S, h)
-    !$omp target enter data map(alloc: T_f, S_f)
     call vert_fill_TS(h, tv%T, tv%S, kappa_dt_fill, T_f, S_f, G, GV, US, larger_h_denom=.true.)
-    !$omp target exit data map(from: T_f, S_f)
-    !$omp target exit data map(release: tv%T, tv%S, h)
     if (CS%debug) then
       call hchksum(tv%T, "after vert_fill_TS tv%T", G%HI, unscale=US%C_to_degC)
       call hchksum(tv%S, "after vert_fill_TS tv%S", G%HI, unscale=US%S_to_ppt)
@@ -523,8 +520,7 @@ subroutine set_diffusivity(u, v, h, u_h, v_h, tv, fluxes, optics, visc, dt, Kd_i
 
     call thickness_to_dz(h, tv, dz, G, GV, US, is=isb, ie=ieb, js=jsb, je=jeb, do_offload=.true.)
     !$omp target update from(dz) &
-    !$omp   if (CS%ML_radiation .or. CS%use_tidal_mixing .or. associated(dd%Kd_Work) &
-    !$omp       .or. CS%use_LOTW_BBL_diffusivity)
+    !$omp   if (CS%ML_radiation .or. CS%use_tidal_mixing .or. associated(dd%Kd_Work))
 
     ! Set up variables related to the stratification.
     call find_N2(h, tv, T_f, S_f, fluxes, isb, ieb, jsb, jeb, nii, njj, dz, G, GV, US, CS, &
@@ -748,26 +744,12 @@ subroutine set_diffusivity(u, v, h, u_h, v_h, tv, fluxes, optics, visc, dt, Kd_i
       enddo
     endif
 
-    !$omp target update from(Kd_lay_2d, Kd_int_2d)
-    !$omp target update from(rho_bot) if (CS%bottomdraglaw .and. (CS%BBL_effic > 0.0))
-    !$omp target update from(N2_int) &
-    !$omp   if (CS%limit_dissipation .or. (CS%bottomdraglaw .and. (CS%BBL_effic > 0.0) &
-    !$omp       .and. CS%use_LOTW_BBL_diffusivity))
-    !$omp target update from(N2_lay) &
-    !$omp   if (CS%limit_dissipation .or. associated(dd%Kd_Work) &
-    !$omp       .or. associated(dd%Kd_Work_added))
-    !$omp target update from(TKE_to_Kd, maxTKE, kb) &
-    !$omp   if (CS%bottomdraglaw .and. (CS%BBL_effic > 0.0) &
-    !$omp       .and. .not. CS%use_LOTW_BBL_diffusivity)
-
     ! This adds the diffusion sustained by the energy extracted from the flow by the bottom drag.
     if (CS%bottomdraglaw .and. (CS%BBL_effic > 0.0)) then
       if (CS%use_LOTW_BBL_diffusivity) then
-        ! TODO: tile/port - exp with answer change
         call add_LOTW_BBL_diffusivity(h, u, v, tv, fluxes, visc, isb, ieb, jsb, jeb, nii, njj, &
                                       dz, N2_int, Rho_bot, Kd_int_2d, &
                                       G, GV, US, CS, dd%Kd_BBL, Kd_lay_2d)
-        !$omp target update to(Kd_lay_2d, Kd_int_2d)
       else
         call add_drag_diffusivity(h, u, v,  tv, fluxes, visc, isb, ieb, jsb, jeb, nii, njj, TKE_to_Kd, &
                                   maxTKE, kb, rho_bot, G, GV, US, CS, Kd_lay_2d, Kd_int_2d, dd%Kd_BBL)
@@ -784,20 +766,20 @@ subroutine set_diffusivity(u, v, h, u_h, v_h, tv, fluxes, optics, visc, dt, Kd_i
       !   1) a global constant,
       !   2) a dissipation proportional to N (aka Gargett) and
       !   3) dissipation corresponding to a (nearly) constant diffusivity.
-      do K=2,nz ; do jj=1,jje ; do ii=1,iie
+      do concurrent (K=2:nz, jj=1:jje, ii=1:iie)
         dissip = max( CS%dissip_min, &   ! Const. floor on dissip.
                       CS%dissip_N0 + CS%dissip_N1 * sqrt(N2_int(ii,jj,K)), & ! Floor aka Gargett
                       CS%dissip_N2 * N2_int(ii,jj,K)) ! Floor of Kd_min*rho0/F_Ri
         Kd_int_2d(ii,jj,K) = max(Kd_int_2d(ii,jj,K) , &  ! Apply floor to Kd
                             dissip * (CS%FluxRi_max / (GV%H_to_RZ * (N2_int(ii,jj,K) + Omega2))))
-      enddo ; enddo ; enddo
+      enddo
     endif
 
     ! Optionally add a uniform diffusivity at the interfaces.
     if (CS%Kd_add > 0.0) then
-      do K=1,nz+1 ; do jj=1,jje ; do ii=1,iie
+      do concurrent (K=1:nz+1, jj=1:jje, ii=1:iie)
         Kd_int_2d(ii,jj,K) = Kd_int_2d(ii,jj,K) + CS%Kd_add
-      enddo ; enddo ; enddo
+      enddo
       VBF%Kd_add = CS%Kd_add
     endif
 
@@ -813,27 +795,27 @@ subroutine set_diffusivity(u, v, h, u_h, v_h, tv, fluxes, optics, visc, dt, Kd_i
       !   1) a global constant,
       !   2) a dissipation proportional to N (aka Gargett) and
       !   3) dissipation corresponding to a (nearly) constant diffusivity.
-      do k=2,nz-1 ; do jj=1,jje ; do ii=1,iie
+      do concurrent (k=2:nz-1, jj=1:jje, ii=1:iie)
         dissip = max( CS%dissip_min, &   ! Const. floor on dissip.
                       CS%dissip_N0 + CS%dissip_N1 * sqrt(N2_lay(ii,jj,k)), & ! Floor aka Gargett
                       CS%dissip_N2 * N2_lay(ii,jj,k)) ! Floor of Kd_min*rho0/F_Ri
         Kd_lay_2d(ii,jj,k) = max(Kd_lay_2d(ii,jj,k) , &  ! Apply floor to Kd
                             dissip * (CS%FluxRi_max / (GV%H_to_RZ * (N2_lay(ii,jj,k) + Omega2))))
-      enddo ; enddo ; enddo
+      enddo
     endif
 
     if (associated(dd%Kd_Work)) then
-      do k=1,nz ; do jj=1,jje ; do ii=1,iie
+      do concurrent (k=1:nz, jj=1:jje, ii=1:iie)
         j = jsb+jj-1 ; i = isb+ii-1
         dd%Kd_Work(i,j,k) = GV%H_to_RZ * Kd_lay_2d(ii,jj,k) * N2_lay(ii,jj,k) * dz(i,j,k)  ! Watt m-2 = kg s-3
-      enddo ; enddo ; enddo
+      enddo
     endif
 
     ! Optionally add a uniform diffusivity to the layers.
     if ((CS%Kd_add > 0.0) .and. (present(Kd_lay))) then
-      do k=1,nz ; do jj=1,jje ; do ii=1,iie
+      do concurrent (k=1:nz, jj=1:jje, ii=1:iie)
         Kd_lay_2d(ii,jj,k) = Kd_lay_2d(ii,jj,k) + CS%Kd_add
-      enddo ; enddo ; enddo
+      enddo
     endif
 
     if (associated(dd%Kd_Work_added)) then
@@ -845,11 +827,13 @@ subroutine set_diffusivity(u, v, h, u_h, v_h, tv, fluxes, optics, visc, dt, Kd_i
 
     ! Copy the 2-d slices into the 3-d array that is exported; this was done above for Kd_int.
     ! TODO: tile/port Kd_lay export copy loop.
-    if (present(Kd_lay)) then ; do k=1,nz ; do jj=1,jje ; do ii=1,iie
+    if (present(Kd_lay)) then ; do concurrent (k=1:nz, jj=1:jje, ii=1:iie)
       j = jsb+jj-1 ; i = isb+ii-1
       Kd_lay(i,j,k) = Kd_lay_2d(ii,jj,k)
-    enddo ; enddo ; enddo ; endif
+    enddo ; endif
   enddo ; enddo ! ij-loop
+
+  !$omp target update from(Kd_lay)
 
   if (CS%user_change_diff) then
     !$omp target update from(Kd_int)
@@ -1364,7 +1348,7 @@ subroutine find_N2(h, tv, T_f, S_f, fluxes, isb, ieb, jsb, jeb, nii, njj, dz, G,
         pres(ii,jj,1) = 0.0
       enddo
     endif
-    ! TODO: tile/port EOS derivative loop for full device coverage.
+    ! TODO: block k loop for better performance on GPU.
     do K=2,nz
       do concurrent (jj=1:jje, ii=1:iie) DO_LOCALITY(local(i,j))
         j = jsb+jj-1 ; i = isb+ii-1
@@ -1706,7 +1690,7 @@ subroutine add_drag_diffusivity(h, u, v, tv, fluxes, visc, isb, ieb, jsb, jeb, n
   if (.not.(CS%bottomdraglaw .and. (CS%BBL_effic > 0.0))) return
 
   cdrag_sqrt = sqrt(CS%cdrag)
-  TKE_Ray = 0.0 ; Rayleigh_drag = .false.
+  Rayleigh_drag = .false.
   if (allocated(visc%Ray_u) .and. allocated(visc%Ray_v)) Rayleigh_drag = .true.
 
   R0_g = GV%H_to_RZ / GV%g_Earth_Z_T2
@@ -1738,7 +1722,8 @@ subroutine add_drag_diffusivity(h, u, v, tv, fluxes, visc, isb, ieb, jsb, jeb, n
       I2decay(ii,jj) = 0.5*CS%IMax_decay
     endif
     if (CS%drag_diff_answer_date <= 20250301) then
-      TKE(ii,jj) = ((CS%BBL_effic * cdrag_sqrt) * exp_repro(-I2decay(ii,jj)*h(i,j,nz)) ) * visc%BBL_meanKE_loss_sqrtCd(i,j)
+      TKE(ii,jj) = ((CS%BBL_effic * cdrag_sqrt) * exp_repro(-I2decay(ii,jj)*h(i,j,nz)) ) * &
+                   visc%BBL_meanKE_loss_sqrtCd(i,j)
     else
       TKE(ii,jj) = (CS%BBL_effic * exp_repro(-I2decay(ii,jj)*h(i,j,nz)) ) * visc%BBL_meanKE_loss(i,j)
     endif
@@ -1790,12 +1775,19 @@ subroutine add_drag_diffusivity(h, u, v, tv, fluxes, visc, isb, ieb, jsb, jeb, n
 
   ! TODO: tile/port remaining host-side BBL redistribution loops.
   ! Left unported because of exp changing answers on GPU.
-  do jj=1,jje ; do ii=1,iie ; j = jsb+jj-1 ; i = isb+ii-1 ; do_i(ii,jj) = (G%mask2dT(i,j) > 0.0) ; enddo ; enddo
+  do concurrent (jj=1:jje, ii=1:iie) ; j = jsb+jj-1 ; i = isb+ii-1 ; do_i(ii,jj) = (G%mask2dT(i,j) > 0.0) ; enddo
+  !$omp target teams
   do k=nz-1,kb_min,-1
+#ifndef __NVCOMPILER_OPENMP_GPU
     i_rem = 0
+#endif
+    !$omp loop LOOP_BIND_TEAMS_PARALLEL collapse(2) &
+    !$omp   private(i, j, TKE_to_layer, dRl, dRbot, delta_Kd, TKE_here, TKE_Ray)
     do jj=1,jje ; do ii=1,iie ; j = jsb+jj-1 ; i = isb+ii-1 ; if (do_i(ii,jj)) then
       if (k<kb(ii,jj)) then ; do_i(ii,jj) = .false. ; cycle ; endif
+#ifndef __NVCOMPILER_OPENMP_GPU
       i_rem = i_rem + 1  ! Count the i-rows that are still being worked on.
+#endif
       !   Apply vertical decay of the turbulent energy.  This energy is
       ! simply lost.
       TKE(ii,jj) = TKE(ii,jj) * exp_repro(-I2decay(ii,jj) * (h(i,j,k) + h(i,j,k+1)))
@@ -1815,6 +1807,7 @@ subroutine add_drag_diffusivity(h, u, v, tv, fluxes, visc, isb, ieb, jsb, jeb, n
       else ; TKE_to_layer = 0.0 ; endif
 
       ! TKE_Ray has been initialized to 0 above.
+      TKE_Ray = 0.0
       if (Rayleigh_drag) TKE_Ray = 0.5*CS%BBL_effic * G%IareaT(i,j) * &
             (((G%areaCu(I-1,j) * visc%Ray_u(I-1,j,k) * u(I-1,j,k)**2) + &
               (G%areaCu(I,j)   * visc%Ray_u(I,j,k)   * u(I,j,k)**2)) + &
@@ -1876,12 +1869,18 @@ subroutine add_drag_diffusivity(h, u, v, tv, fluxes, visc, isb, ieb, jsb, jeb, n
       ! above the iterations would stop too soon. I don't see how this
       ! could happen in practice. RWH
       if ((TKE(ii,jj)<= 0.0) .and. (TKE_Ray == 0.0)) then
-        do_i(ii,jj) = .false. ; i_rem = i_rem - 1
+        do_i(ii,jj) = .false.
+#ifndef __NVCOMPILER_OPENMP_GPU
+        i_rem = i_rem - 1
+#endif
       endif
 
     endif ; enddo ; enddo
+#ifndef __NVCOMPILER_OPENMP_GPU
     if (i_rem == 0) exit
+#endif
   enddo ! k-loop
+  !$omp end target teams
 
 end subroutine add_drag_diffusivity
 
@@ -1965,6 +1964,13 @@ subroutine add_LOTW_BBL_diffusivity(h, u, v, tv, fluxes, visc, isb, ieb, jsb, je
   cdrag_sqrt = sqrt(CS%cdrag)
 
   ! TODO: tile/port single-row LOTW BBL routine and column temporaries.
+  !$omp target enter data map(to: CS, visc%ustar_BBL, visc%BBL_meanKE_loss)
+  !$omp target enter data map(to: visc%Ray_u, visc%Ray_v) if (Rayleigh_drag)
+  !$omp target teams loop LOOP_BIND_TEAMS_PARALLEL collapse(2) private( &
+  !$omp   dz_above, TKE_column, BBL_meanKE_dis, TKE_remaining, TKE_consumed, &
+  !$omp   TKE_Kd_wall, ustar, ustar2, absf, dz_int, z_bot, h_bot, D_minus_z, &
+  !$omp   total_depth, Idecay, Kd_wall, Kd_lower, ustar_D, i, j, k &
+  !$omp )
   do jj=1,jje ; do ii=1,iie ! Developed in single-column mode
     j = jsb+jj-1 ; i = isb+ii-1
 
@@ -2077,6 +2083,8 @@ subroutine add_LOTW_BBL_diffusivity(h, u, v, tv, fluxes, visc, isb, ieb, jsb, je
       if (do_diag_Kd_BBL) Kd_BBL(i,j,K) = Kd_wall
     enddo ! k
   enddo ; enddo ! ij
+  !$omp target exit data map(release: CS, visc%ustar_BBL, visc%BBL_meanKE_loss)
+  !$omp target exit data map(release: visc%Ray_u, visc%Ray_v) if (Rayleigh_drag)
 
 end subroutine add_LOTW_BBL_diffusivity
 
