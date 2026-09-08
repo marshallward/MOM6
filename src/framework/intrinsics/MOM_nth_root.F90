@@ -20,8 +20,10 @@ contains
 module procedure nth_root
   integer, parameter :: max_nth_root = 32
     !< Largest root degree supported by nth_root [nondim]
-  integer, parameter :: halley_iterations = 8
-    !< Number of Halley iterations used in nth_root [nondim]
+  integer, parameter :: halley_iterations_by_n(max_nth_root) = [ &
+      0, 3, 3, 3, 3, 4, 4, 4, 4, 4, 4, 5, 5, 5, 5, 5, &
+      5, 6, 6, 6, 6, 6, 7, 7, 7, 7, 7, 7, 8, 8, 8, 8]
+    !< Number of Halley iterations used by each supported root degree [nondim]
 
   real :: xr
     !< The rescaled value of x in the range [2**(-n), 1) [B^n]
@@ -63,7 +65,7 @@ module procedure nth_root
     rn_minus = real(n - 1)
     rn_plus = real(n + 1)
 
-    do itt=1,halley_iterations
+    do itt=1,halley_iterations_by_n(n)
       root_n = integer_power(root_xr, n)
       num = (rn_minus * root_n) + (rn_plus * xr)
       den = (rn_plus * root_n) + (rn_minus * xr)
@@ -174,28 +176,28 @@ pure function select_best_root(root, x, n) result(best_root)
   real :: best_root
     !< The adjacent root estimate with the smallest residual [A]
 
-  real :: lower_root
-    !< The next representable estimate below root [A]
-  real :: upper_root
-    !< The next representable estimate above root [A]
+  real :: trial_root
+    !< The adjacent root estimate being tested [A]
+  real :: resid
+    !< Signed residual of the initial estimate [A^n]
   real :: best_resid
     !< The smallest residual found so far [A^n]
   real :: trial_resid
     !< The residual for a trial root estimate [A^n]
 
   best_root = root
-  best_resid = abs(power_residual(x, best_root, n))
+  resid = power_residual(x, best_root, n)
+  best_resid = abs(resid)
 
-  lower_root = nearest(root, -1.0)
-  trial_resid = abs(power_residual(x, lower_root, n))
-  if (trial_resid < best_resid) then
-    best_root = lower_root
-    best_resid = trial_resid
+  ! Since root**n is monotonic for positive root, only one adjacent float can
+  ! have a smaller residual than root.
+  if (resid > 0.0) then
+    trial_root = nearest(root, 1.0)
+  else
+    trial_root = nearest(root, -1.0)
   endif
-
-  upper_root = nearest(root, 1.0)
-  trial_resid = abs(power_residual(x, upper_root, n))
-  if (trial_resid < best_resid) best_root = upper_root
+  trial_resid = abs(power_residual(x, trial_root, n))
+  if (trial_resid < best_resid) best_root = trial_root
 end function select_best_root
 
 
@@ -246,10 +248,25 @@ pure function integer_power(x, n) result(xn)
   integer :: m
     !< Power counter [nondim]
 
-  xn = 1.0
-  do m=1,n
-    xn = xn * x
-  enddo
+  select case (n)
+  case (0)
+    xn = 1.0
+  case (1)
+    xn = x
+  case (2)
+    xn = x * x
+  case (3)
+    xn = x * x * x
+  case (4)
+    xn = (x * x) * (x * x)
+  case (5)
+    xn = ((x * x) * (x * x)) * x
+  case default
+    xn = 1.0
+    do m=1,n
+      xn = xn * x
+    enddo
+  end select
 end function integer_power
 
 end submodule MOM_nth_root
