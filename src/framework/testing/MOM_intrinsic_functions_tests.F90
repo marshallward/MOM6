@@ -19,6 +19,7 @@ use, intrinsic :: ieee_exceptions, only : ieee_divide_by_zero
 use MOM_error_handler, only : assert
 use MOM_unit_testing, only : TestSuite
 use MOM_intrinsic_functions, only : exp_repro
+use MOM_nth_root_tests, only : add_nth_root_tests
 
 implicit none ; private
 
@@ -1004,6 +1005,8 @@ subroutine run_intrinsic_functions_tests
 
   ! Elemental test
   call suite%add(test_exp_elemental, "test_exp_elemental")
+
+  call add_nth_root_tests(suite)
 
   ! IEEE exception flag tests (skipped if not supported)
   call suite%add(test_exp_flags_normal, "test_exp_flags_normal")

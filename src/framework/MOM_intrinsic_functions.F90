@@ -11,7 +11,7 @@ use iso_fortran_env, only : int64
 
 implicit none ; private
 
-public :: invcosh, cuberoot, exp_repro
+public :: invcosh, cuberoot, nth_root, exp_repro
 public :: intrinsic_functions_unit_tests
 
 interface
@@ -25,6 +25,19 @@ interface
     real :: a
       !< exp(x)
   end function exp_repro
+
+  !> Reproducible nth root function for positive arguments
+  !!
+  !! Compute x**(1/n) with bitwise reproducibility across platforms.
+  !! Implemented in submodule MOM_nth_root
+  elemental module function nth_root(x, n) result(root)
+    real, intent(in) :: x
+      !< Input value in arbitrary units raised to the nth power [A^n]
+    integer, intent(in) :: n
+      !< The degree of the root [nondim]
+    real :: root
+      !< nth root of x in arbitrary units [A]
+  end function nth_root
 end interface
 
 real, parameter :: real_mold = 0.
