@@ -184,17 +184,17 @@ pure function select_best_root(root, x, n) result(best_root)
     !< The residual for a trial root estimate [A^n]
 
   best_root = root
-  best_resid = abs(integer_power(best_root, n) - x)
+  best_resid = abs(power_residual(x, best_root, n))
 
   lower_root = nearest(root, -1.0)
-  trial_resid = abs(integer_power(lower_root, n) - x)
+  trial_resid = abs(power_residual(x, lower_root, n))
   if (trial_resid < best_resid) then
     best_root = lower_root
     best_resid = trial_resid
   endif
 
   upper_root = nearest(root, 1.0)
-  trial_resid = abs(integer_power(upper_root, n) - x)
+  trial_resid = abs(power_residual(x, upper_root, n))
   if (trial_resid < best_resid) best_root = upper_root
 end function select_best_root
 

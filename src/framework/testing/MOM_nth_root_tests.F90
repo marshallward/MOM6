@@ -143,7 +143,7 @@ subroutine test_nth_root_ulp_accuracy
     val_pow_vec = x**(1.0 / real(n))
 
     print '(1x,a,i0,a)', '=== scalar nth_root(x,', n, ') accuracy'
-    call check_nth_root_ulp_accuracy(x, val, val_quad, max_ulp_tol=2.)
+    call check_nth_root_ulp_accuracy(x, val, val_quad, max_ulp_tol=0.5)
     call assert(all(val == val_vec), "Scalar and vector nth_root() do not agree")
 
     print '(1x,a,i0,a)', '=== scalar x**(1/', n, ') accuracy'
@@ -224,9 +224,9 @@ subroutine check_nth_root_ulp_accuracy(x, val, ref, max_ulp_tol)
 
   print '(2x,"Tested ", i0, " points in [", ES10.3, ", ", ES10.3, "]")', &
       npts, minval(x), maxval(x)
-  print '(2x,"max abs err:", t25, ES12.5, " at x = ", f10.4)', max_abs_err, x_max_abs
-  print '(2x,"max rel err:", t25, ES12.5, " at x = ", f10.4)', max_rel_err, x_max_rel
-  print '(2x,"max ULP err (vs quad):", t26, f12.10, " at x = ", f10.4)', max_ulp, x_max_ulp
+  print '(2x,"max abs err:", t25, ES12.5, " at x = ", ES12.5)', max_abs_err, x_max_abs
+  print '(2x,"max rel err:", t25, ES12.5, " at x = ", ES12.5)', max_rel_err, x_max_rel
+  print '(2x,"max ULP err (vs quad):", t26, f12.10, " at x = ", ES12.5)', max_ulp, x_max_ulp
   print '(2x,"mean abs err:", t25, ES12.5)', sum_abs_err / npts
   print '(2x,"mean rel err:", t25, ES12.5)', sum_rel_err / npts
   print '(2x,"RMS err:", t25, ES12.5)', sqrt(sum_sq_err / npts)
