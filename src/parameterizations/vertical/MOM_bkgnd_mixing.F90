@@ -487,27 +487,26 @@ subroutine calculate_bkgnd_mixing(h, tv, N2_lay, Kd_lay, Kd_int, Kv_bkgnd, &
       ! This is a crude way to put in a diffusive boundary layer without an explicit boundary
       ! layer turbulence scheme.  It should not be used for any realistic ocean models.
       I_Hmix = 1.0 / (CS%Hmix + GV%H_subroundoff)
-      !$omp target
-      !$omp loop collapse(2)
-      do jj=1,jje ; do ii=1,iie
-        depth(ii,jj) = 0.0
-      enddo ; enddo
-      do k=1,nz
-        !$omp loop collapse(2) private(depth_c,i,j)
-        do jj=1,jje ; do ii=1,iie
-          j = jsb+jj-1 ; i = isb+ii-1
-          depth_c = depth(ii,jj) + 0.5*h(i,j,k)
-          if (depth_c <= CS%Hmix) then ; Kd_lay(ii,jj,k) = CS%Kd_tot_ml
-          elseif (depth_c >= 2.0*CS%Hmix) then ; Kd_lay(ii,jj,k) = Kd_sfc(ii,jj)
-          else
-            Kd_lay(ii,jj,k) = ((Kd_sfc(ii,jj) - CS%Kd_tot_ml) * I_Hmix) * depth_c + &
-                            (2.0*CS%Kd_tot_ml - Kd_sfc(ii,jj))
-          endif
+      do concurrent (jj=1:jje)
+        j = jsb+jj-1
+        do concurrent (ii=1:iie)
+          depth(ii,jj) = 0.0
+        enddo
+        do k=1,nz
+          do concurrent (ii=1:iie)
+            i = isb+ii-1
+            depth_c = depth(ii,jj) + 0.5*h(i,j,k)
+            if (depth_c <= CS%Hmix) then ; Kd_lay(ii,jj,k) = CS%Kd_tot_ml
+            elseif (depth_c >= 2.0*CS%Hmix) then ; Kd_lay(ii,jj,k) = Kd_sfc(ii,jj)
+            else
+              Kd_lay(ii,jj,k) = ((Kd_sfc(ii,jj) - CS%Kd_tot_ml) * I_Hmix) * depth_c + &
+                              (2.0*CS%Kd_tot_ml - Kd_sfc(ii,jj))
+            endif
 
-          depth(ii,jj) = depth(ii,jj) + h(i,j,k)
-        enddo ; enddo
+            depth(ii,jj) = depth(ii,jj) + h(i,j,k)
+          enddo
+        enddo
       enddo
-      !$omp end target
     else ! There is no vertical structure to the background diffusivity.
       do concurrent (k=1:nz, jj=1:jje, ii=1:iie)
         Kd_lay(ii,jj,k) = Kd_sfc(ii,jj)
