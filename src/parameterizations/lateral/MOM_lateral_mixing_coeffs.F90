@@ -659,6 +659,7 @@ subroutine calc_sqg_struct(h, tv, G, GV, US, CS, dt, MEKE, OBC)
   integer, dimension(2) :: EOSdom ! The i-computational domain for the equation of state
   integer :: i, j, k, is, ie, js, je, nz
   integer :: niblock, njblock, nkblock
+  integer, parameter :: isoneutral_halo = 1
 
   niblock = CS%niblock
   njblock = CS%njblock
@@ -697,8 +698,9 @@ subroutine calc_sqg_struct(h, tv, G, GV, US, CS, dt, MEKE, OBC)
       !$omp target enter data map(alloc: e)
       call find_eta(h, tv, G, GV, US, e, halo_size=2)  !### Could be halo_size=1?
 
-      if (niblock == 0) niblock = ie - is + 1
-      if (njblock == 0) njblock = je - js + 1
+      ! +2 needed because loops in calc_isoneutral slopes run from is-1 to ie and js-1 to je
+      if (niblock == 0) niblock = ie - is + 2 + 2*isoneutral_halo
+      if (njblock == 0) njblock = je - js + 2 + 2*isoneutral_halo
       if (nkblock == 0) nkblock = nz
 
       !$omp target enter data map(to: tv, tv%T, tv%S)
@@ -707,8 +709,8 @@ subroutine calc_sqg_struct(h, tv, G, GV, US, CS, dt, MEKE, OBC)
       !$omp target enter data map(alloc: N2_u, N2_v, dzu, dzv, dzSxN, dzSyN)
       call calc_isoneutral_slopes(G, GV, US, h, e, tv, dt*CS%kappa_smooth, CS%use_stanley_iso, &
                                   CS%slope_x, CS%slope_y, niblock, njblock, nkblock, N2_u=N2_u, &
-                                  N2_v=N2_v, dzu=dzu, dzv=dzv, dzSxN=dzSxN, dzSyN=dzSyN, halo=1, &
-                                  OBC=OBC, OBC_N2=CS%OBC_friendly)
+                                  N2_v=N2_v, dzu=dzu, dzv=dzv, dzSxN=dzSxN, dzSyN=dzSyN, &
+                                  halo=isoneutral_halo, OBC=OBC, OBC_N2=CS%OBC_friendly)
       !$omp target exit data map(release: tv%T, tv%S, tv)
       !$omp target exit data map(delete: e)
       !$omp target exit data map(release: tv%SpV_avg) if (allocated(tv%SpV_avg))
@@ -803,6 +805,7 @@ subroutine calc_slope_functions(h, tv, dt, G, GV, US, CS, OBC)
   real, dimension(SZIB_(G),SZJ_(G),SZK_(GV)+1) :: dzSxN ! |Sx| N times dz at u-points [Z T-1 ~> m s-1]
   real, dimension(SZI_(G),SZJB_(G),SZK_(GV)+1) :: dzSyN ! |Sy| N times dz at v-points [Z T-1 ~> m s-1]
   integer :: niblock, njblock, nkblock
+  integer, parameter :: isoneutral_halo = 1
 
   if (.not. CS%initialized) call MOM_error(FATAL, "MOM_lateral_mixing_coeffs.F90, calc_slope_functions: "//&
          "Module must be initialized before it is used.")
@@ -813,8 +816,9 @@ subroutine calc_slope_functions(h, tv, dt, G, GV, US, CS, OBC)
   njblock = CS%njblock
   nkblock = CS%nkblock
 
-  if (niblock == 0) niblock = G%iec - G%isc + 1
-  if (njblock == 0) njblock = G%jec - G%jsc + 1
+  ! +2 needed because loops in calc_isoneutral slopes run from is-1 to ie and js-1 to je
+  if (niblock == 0) niblock = G%iec - G%isc + 2 + 2*isoneutral_halo
+  if (njblock == 0) njblock = G%jec - G%jsc + 2 + 2*isoneutral_halo
   if (nkblock == 0) nkblock = GV%ke
 
   if (CS%calculate_Eady_growth_rate) then
@@ -826,8 +830,9 @@ subroutine calc_slope_functions(h, tv, dt, G, GV, US, CS, OBC)
       !$omp target enter data map(to: tv%p_surf) if (associated(tv%p_surf))
       call calc_isoneutral_slopes(G, GV, US, h, e, tv, dt*CS%kappa_smooth, CS%use_stanley_iso, &
                                   CS%slope_x, CS%slope_y, niblock, njblock, nkblock, N2_u=N2_u, &
-                                  N2_v=N2_v, dzu=dzu, dzv=dzv, dzSxN=dzSxN, dzSyN=dzSyN, halo=1, &
-                                  OBC=OBC, OBC_N2=CS%OBC_friendly)
+                                  N2_v=N2_v, dzu=dzu, dzv=dzv, dzSxN=dzSxN, dzSyN=dzSyN, &
+                                  halo=isoneutral_halo, OBC=OBC, OBC_N2=CS%OBC_friendly)
+      !$omp target update from(e, dzu, dzv, dzSxN, dzSyN)
       call calc_Eady_growth_rate_2D(CS, G, GV, US, h, e, dzu, dzv, dzSxN, dzSyN, CS%SN_u, CS%SN_v)
       !$omp target update to(CS%SN_u, CS%SN_v)
       !$omp target exit data map(release: tv%SpV_avg) if (allocated(tv%SpV_avg))
@@ -839,7 +844,8 @@ subroutine calc_slope_functions(h, tv, dt, G, GV, US, CS, OBC)
       !$omp target enter data map(to: tv%p_surf) if (associated(tv%p_surf))
       call calc_isoneutral_slopes(G, GV, US, h, e, tv, dt*CS%kappa_smooth, CS%use_stanley_iso, &
                                   CS%slope_x, CS%slope_y, niblock, njblock, nkblock, N2_u=N2_u, &
-                                  N2_v=N2_v, halo=1, OBC=OBC, OBC_N2=CS%OBC_friendly)
+                                  N2_v=N2_v, halo=isoneutral_halo, OBC=OBC, OBC_N2=CS%OBC_friendly)
+      !$omp target exit data map(from: CS%slope_x, CS%slope_y, N2_u, N2_v)
       call calc_Visbeck_coeffs_old(h, CS%slope_x, CS%slope_y, N2_u, N2_v, G, GV, US, CS, OBC)
       !$omp target exit data map(release: tv%T, tv%S, tv)
       !$omp target exit data map(release: tv%p_surf) if (associated(tv%p_surf))
@@ -1484,6 +1490,7 @@ subroutine calc_QG_slopes(h, tv, dt, G, GV, US, slope_x, slope_y, CS, OBC)
   ! Local variables
   real, dimension(SZI_(G),SZJ_(G),SZK_(GV)+1)  :: e    ! The interface heights relative to mean sea level [Z ~> m]
   integer :: niblock, njblock, nkblock
+  integer, parameter :: isoneutral_halo = 2
 
   if (.not. CS%initialized) call MOM_error(FATAL, "MOM_lateral_mixing_coeffs.F90, calc_QG_slopes: "//&
          "Module must be initialized before it is used.")
@@ -1492,8 +1499,9 @@ subroutine calc_QG_slopes(h, tv, dt, G, GV, US, slope_x, slope_y, CS, OBC)
   njblock = CS%njblock
   nkblock = CS%nkblock
 
-  if (niblock == 0) niblock = G%iec - G%isc + 1
-  if (njblock == 0) njblock = G%jec - G%jsc + 1
+  ! +2 needed because loops in calc_isoneutral slopes run from is-1 to ie and js-1 to je
+  if (niblock == 0) niblock = G%iec - G%isc + 2 + 2*isoneutral_halo
+  if (njblock == 0) njblock = G%jec - G%jsc + 2 + 2*isoneutral_halo
   if (nkblock == 0) nkblock = GV%ke
 
   !$omp target update to(h)
@@ -1503,8 +1511,8 @@ subroutine calc_QG_slopes(h, tv, dt, G, GV, US, slope_x, slope_y, CS, OBC)
   !$omp target enter data map(to: tv%SpV_avg) if (allocated(tv%SpV_avg))
   !$omp target enter data map(to: tv%p_surf) if (associated(tv%p_surf))
   call calc_isoneutral_slopes(G, GV, US, h, e, tv, dt*CS%kappa_smooth, CS%use_stanley_iso, &
-                              slope_x, slope_y, niblock, njblock, nkblock, halo=2, OBC=OBC, &
-                              OBC_N2=CS%OBC_friendly)
+                              slope_x, slope_y, niblock, njblock, nkblock, halo=isoneutral_halo, &
+                              OBC=OBC, OBC_N2=CS%OBC_friendly)
   !$omp target exit data map(release: tv%T, tv%S)
   !$omp target exit data map(delete: e)
   !$omp target exit data map(release: tv%SpV_avg) if (allocated(tv%SpV_avg))
