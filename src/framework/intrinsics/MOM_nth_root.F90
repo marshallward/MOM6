@@ -76,56 +76,58 @@ module procedure nth_root
     ! after Halley convergence.
     root_nm1 = integer_power(root_xr, n - 1)
     root_xr = root_xr + (power_residual(xr, root_xr, n) / (real(n) * root_nm1))
-    root_xr = select_best_root(root_xr, xr, n)
 
     root = descale_nth_root(root_xr, e_x)
   endif
 end procedure nth_root
 
 
-!> Rescale `a` to the range [2**(-n), 1) and compute its nth-root exponent.
-pure subroutine rescale_nth_root(a, n, x, e_r)
-  real, intent(in) :: a
+!> Rescale x to the range [2**(-n), 1) and compute its nth-root exponent.
+pure subroutine rescale_nth_root(x, n, r, e_a)
+  real, intent(in) :: x
     !< The number to be rescaled for nth-root computation [A^n]
   integer, intent(in) :: n
     !< The degree of the root [nondim]
-  real, intent(out) :: x
-    !< The rescaled value of `a` in the range [2**(-n), 1) [B^n]
-  integer(kind=int64), intent(out) :: e_r
-    !< The integral component of the nth-root exponent of `a` [nondim]
+  real, intent(out) :: r
+    !< The rescaled value of x in the range [2**(-n), 1) [B^n]
+  integer(kind=int64), intent(out) :: e_a
+    !< The integral component of the nth-root exponent of x [nondim]
 
   integer(kind=int64) :: xb
-    !< Floating point integer representation of `a` [nondim]
-  integer(kind=int64) :: e_a
-    !< Exponent of `a` [nondim]
+    !< Floating point integer representation of x [nondim]
   integer(kind=int64) :: e_x
+    !< Exponent of `a` [nondim]
+  integer(kind=int64) :: e_r
     !< Exponent of `x` [nondim]
   integer(kind=int64) :: e_shift
     !< Normalizing exponent shift applied to subnormal inputs [nondim]
   integer(kind=int64) :: n64
     !< The root degree promoted to the exponent integer kind [nondim]
 
-  xb = transfer(a, 1_int64)
+  xb = transfer(x, 1_int64)
   e_shift = 0_int64
+
+  !! Rescale subnormal inputs to normal form
   if (ibits(xb, expbit, expwidth) == 0_int64) then
     e_shift = int(digits(real_mold), int64)
-    xb = transfer(scale(a, int(e_shift)), 1_int64)
+    xb = transfer(scale(x, int(e_shift)), 1_int64)
   endif
-  e_a = ibits(xb, expbit, expwidth) - expbias
-  e_a = e_a - e_shift
+
+  e_x = ibits(xb, expbit, expwidth) - expbias
+  !e_x = e_x - e_shift
   n64 = int(n, int64)
 
-  ! Use floor(e_a/n) + 1 so that the residual exponent is in {-n,...,-1}.
-  if (e_a >= 0_int64) then
-    e_r = (e_a + n64) / n64
+  ! Use floor(e_x/n) + 1 so that the residual exponent is in {-n,...,-1}.
+  if (e_x >= 0_int64) then
+    e_a = (e_x + n64) / n64
   else
-    e_r = (e_a + 1_int64) / n64
+    e_a = (e_x + 1_int64) / n64
   endif
-  e_x = e_a - e_r * n64
+  e_r = e_x - e_a * n64
 
   ! Insert the new exponent and clear the sign bit so x is positive.
-  call mvbits(e_x + expbias, 0, expwidth + 1, xb, expbit)
-  x = transfer(xb, 1.)
+  call mvbits(e_r + expbias, 0, expwidth + 1, xb, expbit)
+  r = transfer(xb, 1.)
 end subroutine rescale_nth_root
 
 
@@ -163,42 +165,6 @@ pure function is_nonfinite(x) result(nonfinite)
   xb = transfer(x, 1_int64)
   nonfinite = (ibits(xb, expbit, expwidth) == (ishft(1_int64, expwidth) - 1_int64))
 end function is_nonfinite
-
-
-!> Select the root estimate with the smallest residual from three adjacent floats.
-pure function select_best_root(root, x, n) result(best_root)
-  real, intent(in) :: root
-    !< Initial root estimate [A]
-  real, intent(in) :: x
-    !< Value whose nth root is being estimated [A^n]
-  integer, intent(in) :: n
-    !< The degree of the root [nondim]
-  real :: best_root
-    !< The adjacent root estimate with the smallest residual [A]
-
-  real :: trial_root
-    !< The adjacent root estimate being tested [A]
-  real :: resid
-    !< Signed residual of the initial estimate [A^n]
-  real :: best_resid
-    !< The smallest residual found so far [A^n]
-  real :: trial_resid
-    !< The residual for a trial root estimate [A^n]
-
-  best_root = root
-  resid = power_residual(x, best_root, n)
-  best_resid = abs(resid)
-
-  ! Since root**n is monotonic for positive root, only one adjacent float can
-  ! have a smaller residual than root.
-  if (resid > 0.0) then
-    trial_root = nearest(root, 1.0)
-  else
-    trial_root = nearest(root, -1.0)
-  endif
-  trial_resid = abs(power_residual(x, trial_root, n))
-  if (trial_resid < best_resid) best_root = trial_root
-end function select_best_root
 
 
 !> Compute x - root**n with a compensated product for root**n.
