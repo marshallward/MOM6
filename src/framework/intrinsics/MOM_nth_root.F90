@@ -107,14 +107,14 @@ pure subroutine rescale_nth_root(x, n, r, e_a)
   xb = transfer(x, 1_int64)
   e_shift = 0_int64
 
-  !! Rescale subnormal inputs to normal form
+  ! Rescale subnormal inputs to normal form
   if (ibits(xb, expbit, expwidth) == 0_int64) then
     e_shift = int(digits(real_mold), int64)
     xb = transfer(scale(x, int(e_shift)), 1_int64)
   endif
 
   e_x = ibits(xb, expbit, expwidth) - expbias
-  !e_x = e_x - e_shift
+  e_x = e_x - e_shift
   n64 = int(n, int64)
 
   ! Use floor(e_x/n) + 1 so that the residual exponent is in {-n,...,-1}.
