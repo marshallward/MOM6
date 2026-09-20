@@ -1233,6 +1233,8 @@ subroutine thickness_to_dz_block(h, tv, dz, G, GV, US, niB, njB, i_lo, i_hi, j_l
                                                !! on GPU (default .false.)
   ! Local variables
   integer :: i, j, k, ii, jj, iie, jje, nz
+  integer :: max_halo
+  character(len=128) :: mesg    ! A string for error messages
   logical :: use_doconcurrent
 
   ! guard to allow turning off/on do concurrent
@@ -1240,11 +1242,20 @@ subroutine thickness_to_dz_block(h, tv, dz, G, GV, US, niB, njB, i_lo, i_hi, j_l
   if (present(do_offload)) use_doconcurrent = do_offload
 
   nz = GV%ke ; iie = i_hi - i_lo + 1 ; jje = j_hi - j_lo + 1
+  ! Since this routine does not recieve info about halo size, calculate biggest
+  ! halo to ensure we do not access out-of-bounds elements when indexing SpV_avg.
+  max_halo = max( G%isc-i_lo, i_hi-G%iec, G%jsc-j_lo, j_hi-G%jec )
 
   if ((.not.GV%Boussinesq) .and. allocated(tv%SpV_avg))  then
-    if (tv%valid_SpV_halo < 0) &
-      call MOM_error(FATAL, "thickness_to_dz_block called in fully non-Boussinesq mode with "//&
-                             "invalid values of SpV_avg.")
+    if (tv%valid_SpV_halo < max_halo) then
+      if (tv%valid_SpV_halo < 0) then
+        mesg = "invalid values of SpV_avg."
+      else
+        write(mesg, '("insufficiently large SpV_avg halos of width ", i2, " but ", i2," is needed.")') &
+                     tv%valid_SpV_halo, max_halo
+      endif
+      call MOM_error(FATAL, "thickness_to_dz_block called in fully non-Boussinesq mode with "//trim(mesg))
+    endif
     if (use_doconcurrent) then
       do concurrent (k=1:nz, jj=1:jje, ii=1:iie)
         dz(ii,jj,k) = GV%H_to_RZ * h(i_lo+ii-1,j_lo+jj-1,k) * tv%SpV_avg(i_lo+ii-1,j_lo+jj-1,k)

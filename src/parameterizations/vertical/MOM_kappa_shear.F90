@@ -615,19 +615,37 @@ subroutine Calculate_kappa_shear(u_in, v_in, h, tv, p_surf, kappa_io, tke_io, &
     call hchksum(tke_io, "tke", G%HI, unscale=US%Z_to_m**2*US%s_to_T**2)
   endif
 
+  if (CS%id_Kd_shear > 0) then
+    !$omp target update from(kappa_io)
+    call post_data(CS%id_Kd_shear, kappa_io, CS%diag)
+  endif
+  if (CS%id_TKE > 0) then
+    !$omp target update from(tke_io)
+    call post_data(CS%id_TKE, tke_io, CS%diag)
+  endif
+  if (CS%id_N2_init > 0) then
+    !$omp target update from(diag_N2_init)
+    call post_data(CS%id_N2_init, diag_N2_init, CS%diag)
+  endif
+  if (CS%id_S2_init > 0) then
+    !$omp target update from(diag_S2_init)
+    call post_data(CS%id_S2_init, diag_S2_init, CS%diag)
+  endif
+  if (CS%id_N2_mean > 0) then
+    !$omp target update from(diag_N2_mean)
+    call post_data(CS%id_N2_mean, diag_N2_mean, CS%diag)
+  endif
+  if (CS%id_S2_mean > 0) then
+    !$omp target update from(diag_S2_mean)
+    call post_data(CS%id_S2_mean, diag_S2_mean, CS%diag)
+  endif
+
   !$omp target exit data map(delete: h_lay, dz_3d, dz_lay, u0xdz, v0xdz, T0xdz, S0xdz, kf, kc, kappa, Idz, &
   !$omp &                            tke, kappa_avg, tke_avg, N2_init, S2_init, N2_mean, S2_mean, &
   !$omp &                            diag_N2_init, diag_S2_init, diag_N2_mean, diag_S2_mean, &
   !$omp &                            dbuoy_dT, dbuoy_dS, dSpV_dT, dSpV_dS, rho_int, T_int, Sal_int, &
   !$omp &                            pressure, I_dz_int, u, v, T, Sal, a1_col, c1_col, nzc_2d, &
   !$omp &                            kappa_full, tke_full )
-
-  if (CS%id_Kd_shear > 0) call post_data(CS%id_Kd_shear, kappa_io, CS%diag)
-  if (CS%id_TKE > 0) call post_data(CS%id_TKE, tke_io, CS%diag)
-  if (CS%id_N2_init > 0) call post_data(CS%id_N2_init, diag_N2_init, CS%diag)
-  if (CS%id_S2_init > 0) call post_data(CS%id_S2_init, diag_S2_init, CS%diag)
-  if (CS%id_N2_mean > 0) call post_data(CS%id_N2_mean, diag_N2_mean, CS%diag)
-  if (CS%id_S2_mean > 0) call post_data(CS%id_S2_mean, diag_S2_mean, CS%diag)
 
 end subroutine Calculate_kappa_shear
 
