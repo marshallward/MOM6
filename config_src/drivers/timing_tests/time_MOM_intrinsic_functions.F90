@@ -29,6 +29,7 @@ real(kind=real64) :: clock_rate, time_intrinsic, time_repro
 real(kind=real64) :: time_scalar_baseline, time_scalar_intrinsic, time_scalar_repro
 real(kind=real64) :: time_sqrt_sqrt, time_pow_quarter, time_nth4
 real(kind=real64) :: time_cuberoot, time_pow_fifth, time_nth5
+real(kind=real64) :: time_scalar_pow_quarter, time_scalar_pow_fifth
 real(kind=real64) :: time_scalar_nth4, time_scalar_nth5
 real :: I_npts
 real, volatile :: scalar_x, scalar_val
@@ -287,6 +288,31 @@ print '("nth_root(x,5) / cuberoot(x):", t38, f8.2, "x")', time_nth5 / time_cuber
 print *
 print '("=== scalar root timing ===")'
 
+! Warm-up and time x**0.25 in a scalar loop with a carried dependency.
+do j = 1, 3
+  scalar_x = 0.125
+  do i = 1, npts
+    scalar_val = scalar_x**0.25
+    scalar_x = scalar_x + (1.e-7 * scalar_val)
+    if (scalar_x > 0.5) scalar_x = scalar_x - 0.375
+  enddo
+enddo
+
+call system_clock(count=c1)
+do j = 1, niter
+  scalar_x = 0.125
+  do i = 1, npts
+    scalar_val = scalar_x**0.25
+    scalar_x = scalar_x + (1.e-7 * scalar_val)
+    if (scalar_x > 0.5) scalar_x = scalar_x - 0.375
+  enddo
+enddo
+call system_clock(count=c2)
+time_scalar_pow_quarter = real(c2 - c1, real64) / clock_rate / niter / npts * 1e9
+
+print '("x**0.25 scalar time:", t30, f8.2, " ns")', time_scalar_pow_quarter
+print '("  final scalar value:", t30, ES12.5)', scalar_val
+
 ! Warm-up and time nth_root(x,4) in a scalar loop with a carried dependency.
 do j = 1, 3
   scalar_x = 0.125
@@ -310,6 +336,31 @@ call system_clock(count=c2)
 time_scalar_nth4 = real(c2 - c1, real64) / clock_rate / niter / npts * 1e9
 
 print '("nth_root(x,4) scalar time:", t30, f8.2, " ns")', time_scalar_nth4
+print '("  final scalar value:", t30, ES12.5)', scalar_val
+
+! Warm-up and time x**0.2 in a scalar loop with a carried dependency.
+do j = 1, 3
+  scalar_x = 0.125
+  do i = 1, npts
+    scalar_val = scalar_x**0.2
+    scalar_x = scalar_x + (1.e-7 * scalar_val)
+    if (scalar_x > 0.5) scalar_x = scalar_x - 0.375
+  enddo
+enddo
+
+call system_clock(count=c1)
+do j = 1, niter
+  scalar_x = 0.125
+  do i = 1, npts
+    scalar_val = scalar_x**0.2
+    scalar_x = scalar_x + (1.e-7 * scalar_val)
+    if (scalar_x > 0.5) scalar_x = scalar_x - 0.375
+  enddo
+enddo
+call system_clock(count=c2)
+time_scalar_pow_fifth = real(c2 - c1, real64) / clock_rate / niter / npts * 1e9
+
+print '("x**0.2 scalar time:", t30, f8.2, " ns")', time_scalar_pow_fifth
 print '("  final scalar value:", t30, ES12.5)', scalar_val
 
 ! Warm-up and time nth_root(x,5) in a scalar loop with a carried dependency.
