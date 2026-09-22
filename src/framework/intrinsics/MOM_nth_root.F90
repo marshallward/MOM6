@@ -72,10 +72,18 @@ module procedure nth_root
       root_xr = root_xr * (num / den)
     enddo
 
-    ! One Newton iteration with a compensated residual polishes the result
-    ! after Halley convergence.
-    root_nm1 = integer_power(root_xr, n - 1)
-    root_xr = root_xr + (power_residual(xr, root_xr, n) / (real(n) * root_nm1))
+    !! One Newton iteration with a compensated residual polishes the result
+    !! after Halley convergence.
+    !root_nm1 = integer_power(root_xr, n - 1)
+    !root_xr = root_xr + (power_residual(xr, root_xr, n) / (real(n) * root_nm1))
+
+    !! Faster, less accurate, but seems equivalent?
+    !root_n = integer_power(root_xr, n)
+    !root_xr = root_xr + (root_xr * ((xr - root_n) / root_n) / real(n))
+
+    ! One division, about same accuracy as newton + power_residual()
+    root_n = integer_power(root_xr, n)
+    root_xr = root_xr + (root_xr * (xr - root_n)) / (real(n) * root_n)
 
     root = descale_nth_root(root_xr, e_x)
   endif
@@ -123,7 +131,13 @@ pure subroutine rescale_nth_root(x, n, r, e_a)
   else
     e_a = (e_x + 1_int64) / n64
   endif
+  !e_a = floor(real(e_x) / real(n)) + 1
   e_r = e_x - e_a * n64
+
+  !! Better?
+  !e_a = (e_x + 1_int64 + (n64-1_int64) * &
+  !     (1_int64 + sign(1_int64,e_x))/2_int64) / n64
+  !e_r = e_x - e_a * n64
 
   ! Insert the new exponent and clear the sign bit so x is positive.
   call mvbits(e_r + expbias, 0, expwidth + 1, xb, expbit)
@@ -192,8 +206,9 @@ pure function power_residual(x, root, n) result(resid)
   p_hi = 1.0
   p_lo = 0.0
   do m=1,n
-    p_new = p_hi * root
-    p_err = ieee_fma(p_hi, root, -p_new) + (p_lo * root)
+    p_new = (p_hi * root)
+    !p_err = ieee_fma(p_hi, root, -p_new) + (p_lo * root)
+    p_err = (p_hi * root - p_new) + (p_lo * root)
     p_hi = p_new + p_err
     p_lo = p_err - (p_hi - p_new)
   enddo

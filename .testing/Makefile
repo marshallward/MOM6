@@ -79,7 +79,8 @@ CODEBASE := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))..
 AC_SRCDIR := $(CODEBASE)/ac
 
 # User-defined configuration
--include config.mk
+CONFIG ?= config.mk
+-include $(CONFIG)
 
 # Set the FMS library
 FMS_COMMIT ?= 2025.02.01
