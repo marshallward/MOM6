@@ -1307,6 +1307,10 @@ subroutine diabatic_ALE_legacy(u, v, h, tv, BLD, fluxes, visc, ADp, CDp, dt, Tim
   endif  ! (CS%mix_boundary_tracers)
 
   ! For passive tracers, the changes in thickness due to boundary fluxes has yet to be applied
+  !   ent_s is mapped as a whole, because the two overlapping sections of it that are passed as
+  ! ea and eb could not be mapped separately.
+  !$omp target update to(h)
+  !$omp target enter data map(to: h_orig, ent_s)
   call call_tracer_column_fns(h_orig, h, ent_s(:,:,1:nz), ent_s(:,:,2:nz+1), fluxes, BLD, dt, &
                               G, GV, US, tv, CS%optics, CS%tracer_flow_CSp, CS%debug, &
                               KPP_CSp=CS%KPP_CSp, &
@@ -1314,6 +1318,7 @@ subroutine diabatic_ALE_legacy(u, v, h, tv, BLD, fluxes, visc, ADp, CDp, dt, Tim
                               evap_CFL_limit=CS%evap_CFL_limit, &
                               minimum_forcing_depth=CS%minimum_forcing_depth, h_BL=visc%h_ML, &
                               prediabatic_T=CS%prediabatic_T, prediabatic_S=CS%prediabatic_S)
+  !$omp target exit data map(delete: h_orig, ent_s)
 
   call cpu_clock_end(id_clock_tracers)
 
@@ -2005,6 +2010,10 @@ subroutine diabatic_ALE(u, v, h, tv, BLD, fluxes, visc, ADp, CDp, dt, Time_end, 
   endif  ! (CS%mix_boundary_tracer_ALE)
 
   ! For passive tracers, the changes in thickness due to boundary fluxes has yet to be applied
+  !   ent_s is mapped as a whole, because the two overlapping sections of it that are passed as
+  ! ea and eb could not be mapped separately.
+  !$omp target update to(h)
+  !$omp target enter data map(to: h_orig, ent_s)
   call call_tracer_column_fns(h_orig, h, ent_s(:,:,1:nz), ent_s(:,:,2:nz+1), fluxes, BLD, dt, &
                               G, GV, US, tv, CS%optics, CS%tracer_flow_CSp, CS%debug, &
                               KPP_CSp=CS%KPP_CSp, &
@@ -2012,6 +2021,7 @@ subroutine diabatic_ALE(u, v, h, tv, BLD, fluxes, visc, ADp, CDp, dt, Time_end, 
                               evap_CFL_limit=CS%evap_CFL_limit, &
                               minimum_forcing_depth=CS%minimum_forcing_depth, h_BL=visc%h_ML, &
                               prediabatic_T=CS%prediabatic_T, prediabatic_S=CS%prediabatic_S)
+  !$omp target exit data map(delete: h_orig, ent_s)
 
   call cpu_clock_end(id_clock_tracers)
 
@@ -2837,9 +2847,11 @@ subroutine layered_diabatic(u, v, h, tv, BLD, fluxes, visc, ADp, CDp, dt, Time_e
 
     enddo
 
+    !$omp target enter data map(to: hold, eatr, ebtr)
     call call_tracer_column_fns(hold, h, eatr, ebtr, fluxes, BLD, dt, G, GV, US, tv, &
                               CS%optics, CS%tracer_flow_CSp, CS%debug, &
                               KPP_CSp=CS%KPP_CSp, nonLocalTrans=KPP_NLTscalar, h_BL=visc%h_ML)
+    !$omp target exit data map(delete: hold, eatr, ebtr)
 
   elseif (CS%double_diffuse) then  ! extra diffusivity for passive tracers
 
@@ -2858,14 +2870,18 @@ subroutine layered_diabatic(u, v, h, tv, BLD, fluxes, visc, ADp, CDp, dt, Time_e
       eatr(i,j,k) = ea(i,j,k) + add_ent
     enddo ; enddo ; enddo
 
+    !$omp target enter data map(to: hold, eatr, ebtr)
     call call_tracer_column_fns(hold, h, eatr, ebtr, fluxes, BLD, dt, G, GV, US, tv, &
                                 CS%optics, CS%tracer_flow_CSp, CS%debug, &
                                 KPP_CSp=CS%KPP_CSp, nonLocalTrans=KPP_NLTscalar, h_BL=visc%h_ML)
+    !$omp target exit data map(delete: hold, eatr, ebtr)
 
   else
+    !$omp target enter data map(to: hold, ea, eb)
     call call_tracer_column_fns(hold, h, ea, eb, fluxes, BLD, dt, G, GV, US, tv, &
                                 CS%optics, CS%tracer_flow_CSp, CS%debug, &
                                 KPP_CSp=CS%KPP_CSp, nonLocalTrans=KPP_NLTscalar, h_BL=visc%h_ML)
+    !$omp target exit data map(delete: hold, ea, eb)
 
   endif  ! (CS%mix_boundary_tracers)
 
@@ -3204,8 +3220,11 @@ subroutine adiabatic(h, tv, fluxes, dt, G, GV, US, CS)
 
   zeros(:,:,:) = 0.0
 
+  !$omp target update to(h)
+  !$omp target enter data map(to: zeros)
   call call_tracer_column_fns(h, h, zeros, zeros, fluxes, zeros(:,:,1), dt, G, GV, US, tv, &
                               CS%optics, CS%tracer_flow_CSp, CS%debug)
+  !$omp target exit data map(delete: zeros)
 
 end subroutine adiabatic
 
