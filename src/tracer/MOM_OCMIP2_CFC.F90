@@ -465,19 +465,41 @@ subroutine OCMIP2_CFC_column_physics(h_old, h_new, ea, eb, fluxes, dt, G, GV, US
     do k=1,nz ;do j=js,je ; do i=is,ie
       h_work(i,j,k) = h_old(i,j,k)
     enddo ; enddo ; enddo
+    !$omp target enter data map(to: h_work, CS%CFC11)
+    !$omp target enter data map(to: fluxes)
+    !$omp target enter data if(associated(fluxes%netMassIn)) map(to: fluxes%netMassIn)
+    !$omp target enter data if(associated(fluxes%netMassOut)) map(to: fluxes%netMassOut)
     call applyTracerBoundaryFluxesInOut(G, GV, CS%CFC11, dt, fluxes, h_work, &
                                         evap_CFL_limit, minimum_forcing_depth)
     call tracer_vertdiff(h_work, ea, eb, dt, CS%CFC11, G, GV, sfc_flux=CFC11_flux)
+    !$omp target exit data if(associated(fluxes%netMassOut)) map(release: fluxes%netMassOut)
+    !$omp target exit data if(associated(fluxes%netMassIn)) map(release: fluxes%netMassIn)
+    !$omp target exit data map(release: fluxes)
+    !$omp target exit data map(from: CS%CFC11)
+    !$omp target exit data map(delete: h_work)
 
     do k=1,nz ;do j=js,je ; do i=is,ie
       h_work(i,j,k) = h_old(i,j,k)
     enddo ; enddo ; enddo
+    !$omp target enter data map(to: h_work, CS%CFC12)
+    !$omp target enter data map(to: fluxes)
+    !$omp target enter data if(associated(fluxes%netMassIn)) map(to: fluxes%netMassIn)
+    !$omp target enter data if(associated(fluxes%netMassOut)) map(to: fluxes%netMassOut)
     call applyTracerBoundaryFluxesInOut(G, GV, CS%CFC12, dt, fluxes, h_work, &
                                         evap_CFL_limit, minimum_forcing_depth)
     call tracer_vertdiff(h_work, ea, eb, dt, CS%CFC12, G, GV, sfc_flux=CFC12_flux)
+    !$omp target exit data if(associated(fluxes%netMassOut)) map(release: fluxes%netMassOut)
+    !$omp target exit data if(associated(fluxes%netMassIn)) map(release: fluxes%netMassIn)
+    !$omp target exit data map(release: fluxes)
+    !$omp target exit data map(from: CS%CFC12)
+    !$omp target exit data map(delete: h_work)
   else
+    !$omp target enter data map(to: CS%CFC11)
     call tracer_vertdiff(h_old, ea, eb, dt, CS%CFC11, G, GV, sfc_flux=CFC11_flux)
+    !$omp target exit data map(from: CS%CFC11)
+    !$omp target enter data map(to: CS%CFC12)
     call tracer_vertdiff(h_old, ea, eb, dt, CS%CFC12, G, GV, sfc_flux=CFC12_flux)
+    !$omp target exit data map(from: CS%CFC12)
   endif
 
   ! Write out any desired diagnostics from tracer sources & sinks here.

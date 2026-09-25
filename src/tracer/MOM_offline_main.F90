@@ -795,12 +795,26 @@ subroutine offline_fw_fluxes_into_ocean(G, GV, CS, fluxes, h, in_flux_optional)
     call hchksum(h, "h before fluxes into ocean", G%HI, unscale=GV%H_to_MKS)
     call MOM_tracer_chkinv("Before fluxes into ocean", G, GV, h, CS%tracer_reg)
   endif
+  !   h and the freshwater fluxes may have been changed on the host since they were last on the
+  ! device, so they are updated explicitly in case they are already present there.
+  !$omp target enter data map(to: h, fluxes)
+  !$omp target enter data if(associated(fluxes%netMassIn)) map(to: fluxes%netMassIn)
+  !$omp target enter data if(associated(fluxes%netMassOut)) map(to: fluxes%netMassOut)
+  !$omp target update to(h)
+  !$omp target update if(associated(fluxes%netMassIn)) to(fluxes%netMassIn)
+  !$omp target update if(associated(fluxes%netMassOut)) to(fluxes%netMassOut)
   do m = 1,CS%tracer_reg%ntr
     ! Layer thicknesses should only be updated after the last tracer is finished
     update_h = ( m == CS%tracer_reg%ntr )
+    !$omp target enter data map(to: CS%tracer_reg%tr(m)%t)
     call applyTracerBoundaryFluxesInOut(G, GV, CS%tracer_reg%tr(m)%t, CS%dt_offline, fluxes, h, &
                                         CS%evap_CFL_limit, CS%minimum_forcing_depth, update_h_opt=update_h)
+    !$omp target exit data map(from: CS%tracer_reg%tr(m)%t)
   enddo
+  !$omp target update from(h)
+  !$omp target exit data if(associated(fluxes%netMassOut)) map(release: fluxes%netMassOut)
+  !$omp target exit data if(associated(fluxes%netMassIn)) map(release: fluxes%netMassIn)
+  !$omp target exit data map(release: h, fluxes)
   if (CS%debug) then
     call hchksum(h, "h after fluxes into ocean", G%HI, unscale=GV%H_to_MKS)
     call MOM_tracer_chkinv("After fluxes into ocean", G, GV, h, CS%tracer_reg)
@@ -834,12 +848,26 @@ subroutine offline_fw_fluxes_out_ocean(G, GV, CS, fluxes, h, out_flux_optional)
     call hchksum(h, "h before fluxes out of ocean", G%HI, unscale=GV%H_to_MKS)
     call MOM_tracer_chkinv("Before fluxes out of ocean", G, GV, h, CS%tracer_reg)
   endif
+  !   h and the freshwater fluxes may have been changed on the host since they were last on the
+  ! device, so they are updated explicitly in case they are already present there.
+  !$omp target enter data map(to: h, fluxes)
+  !$omp target enter data if(associated(fluxes%netMassIn)) map(to: fluxes%netMassIn)
+  !$omp target enter data if(associated(fluxes%netMassOut)) map(to: fluxes%netMassOut)
+  !$omp target update to(h)
+  !$omp target update if(associated(fluxes%netMassIn)) to(fluxes%netMassIn)
+  !$omp target update if(associated(fluxes%netMassOut)) to(fluxes%netMassOut)
   do m = 1, CS%tracer_reg%ntr
     ! Layer thicknesses should only be updated after the last tracer is finished
     update_h = ( m == CS%tracer_reg%ntr )
+    !$omp target enter data map(to: CS%tracer_reg%tr(m)%t)
     call applyTracerBoundaryFluxesInOut(G, GV, CS%tracer_reg%tr(m)%t, CS%dt_offline, fluxes, h, &
                                         CS%evap_CFL_limit, CS%minimum_forcing_depth, update_h_opt = update_h)
+    !$omp target exit data map(from: CS%tracer_reg%tr(m)%t)
   enddo
+  !$omp target update from(h)
+  !$omp target exit data if(associated(fluxes%netMassOut)) map(release: fluxes%netMassOut)
+  !$omp target exit data if(associated(fluxes%netMassIn)) map(release: fluxes%netMassIn)
+  !$omp target exit data map(release: h, fluxes)
   if (CS%debug) then
     call hchksum(h, "h after fluxes out of ocean", G%HI, unscale=GV%H_to_MKS)
     call MOM_tracer_chkinv("Before fluxes out of ocean", G, GV, h, CS%tracer_reg)

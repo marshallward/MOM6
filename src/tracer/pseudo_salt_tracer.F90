@@ -261,11 +261,22 @@ subroutine pseudo_salt_tracer_column_physics(h_old, h_new, ea, eb, fluxes, dt, G
     do k=1,nz ; do j=js,je ; do i=is,ie
       h_work(i,j,k) = h_old(i,j,k)
     enddo ; enddo ; enddo
+    !$omp target enter data map(to: h_work, CS%ps)
+    !$omp target enter data map(to: fluxes)
+    !$omp target enter data if(associated(fluxes%netMassIn)) map(to: fluxes%netMassIn)
+    !$omp target enter data if(associated(fluxes%netMassOut)) map(to: fluxes%netMassOut)
     call applyTracerBoundaryFluxesInOut(G, GV, CS%ps, dt, fluxes, h_work, evap_CFL_limit, &
                                         minimum_forcing_depth, out_flux_optional=net_salt)
     call tracer_vertdiff(h_work, ea, eb, dt, CS%ps, G, GV)
+    !$omp target exit data if(associated(fluxes%netMassOut)) map(release: fluxes%netMassOut)
+    !$omp target exit data if(associated(fluxes%netMassIn)) map(release: fluxes%netMassIn)
+    !$omp target exit data map(release: fluxes)
+    !$omp target exit data map(from: CS%ps)
+    !$omp target exit data map(delete: h_work)
   else
+    !$omp target enter data map(to: CS%ps)
     call tracer_vertdiff(h_old, ea, eb, dt, CS%ps, G, GV)
+    !$omp target exit data map(from: CS%ps)
   endif
 
   if (debug) then

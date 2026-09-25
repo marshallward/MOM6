@@ -1798,10 +1798,19 @@ subroutine MARBL_tracers_column_physics(h_old, ea, eb, fluxes, dt, G, GV, US, CS
       if (CS%debug) &
         call hchksum(riv_flux_loc(:,:), &
             trim(MARBL_instances%tracer_metadata(m)%short_name)//' riv flux', G%HI, unscale=GV%H_to_m)
+      !$omp target enter data map(to: h_work, CS%tracer_data(m)%tr)
+      !$omp target enter data map(to: fluxes)
+      !$omp target enter data if(associated(fluxes%netMassIn)) map(to: fluxes%netMassIn)
+      !$omp target enter data if(associated(fluxes%netMassOut)) map(to: fluxes%netMassOut)
       call applyTracerBoundaryFluxesInOut(G, GV, CS%tracer_data(m)%tr(:,:,:) , dt, fluxes, h_work, &
           evap_CFL_limit, minimum_forcing_depth, in_flux_optional=riv_flux_loc)
       call tracer_vertdiff(h_work, ea, eb, dt, CS%tracer_data(m)%tr(:,:,:), G, GV, &
           sfc_flux=GV%Rho0 * CS%STF(:,:,m))
+      !$omp target exit data if(associated(fluxes%netMassOut)) map(release: fluxes%netMassOut)
+      !$omp target exit data if(associated(fluxes%netMassIn)) map(release: fluxes%netMassIn)
+      !$omp target exit data map(release: fluxes)
+      !$omp target exit data map(from: CS%tracer_data(m)%tr)
+      !$omp target exit data map(delete: h_work)
     enddo
   else
     ! TODO: do we want to support these options? does not apply river fluxes!
@@ -1809,8 +1818,10 @@ subroutine MARBL_tracers_column_physics(h_old, ea, eb, fluxes, dt, G, GV, US, CS
     !       Much like we now require prediabatic_T and prediabatic_S, we can abort
     !       in tracer flow control if they are not present.
     do m=1,CS%ntr
+      !$omp target enter data map(to: CS%tracer_data(m)%tr)
       call tracer_vertdiff(h_old, ea, eb, dt, CS%tracer_data(m)%tr(:,:,:), G, GV, &
           sfc_flux=GV%Rho0 * CS%STF(:,:,m))
+      !$omp target exit data map(from: CS%tracer_data(m)%tr)
     enddo
   endif
 
