@@ -371,19 +371,20 @@ subroutine ideal_age_tracer_column_physics(h_old, h_new, ea, eb, fluxes, dt, G, 
       enddo
       call applyTracerBoundaryFluxesInOut(G, GV, CS%tr(:,:,:,m), dt, fluxes, h_work, &
                                           evap_CFL_limit, minimum_forcing_depth)
-      !$omp target update from(h_work, CS%tr(:,:,:,m))
       call tracer_vertdiff(h_work, ea, eb, dt, CS%tr(:,:,:,m), G, GV)
     enddo
-    !   Everything that the device wrote has already been copied back, so nothing is copied here.
     !$omp target exit data if(associated(fluxes%netMassOut)) map(release: fluxes%netMassOut)
     !$omp target exit data if(associated(fluxes%netMassIn)) map(release: fluxes%netMassIn)
     !$omp target exit data map(release: fluxes)
-    !$omp target exit data map(release: CS%tr)
+    !$omp target exit data map(from: CS%tr)
     !$omp target exit data map(delete: h_work)
   else
+    !   h_old, ea and eb are mapped to the device by the caller.
+    !$omp target enter data map(to: CS%tr)
     do m=1,CS%ntr
       call tracer_vertdiff(h_old, ea, eb, dt, CS%tr(:,:,:,m), G, GV)
     enddo
+    !$omp target exit data map(from: CS%tr)
   endif
 
   Isecs_per_year = 1.0 / (365.0*86400.0*US%s_to_T)

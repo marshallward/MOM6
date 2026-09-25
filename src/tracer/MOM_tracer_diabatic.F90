@@ -56,15 +56,14 @@ subroutine tracer_vertdiff(h_old, ea, eb, dt, tr, G, GV, &
   real :: sink_dist !< The distance the tracer sinks in a time step [H ~> m or kg m-2].
   real, dimension(SZI_(G),SZJ_(G)) :: &
     sfc_src, &      !< The time-integrated surface source of the tracer [CU H ~> CU m or CU kg m-2].
-    btm_src         !< The time-integrated bottom source of the tracer [CU H ~> CU m or CU kg m-2].
-  real, dimension(SZI_(G)) :: &
+    btm_src, &      !< The time-integrated bottom source of the tracer [CU H ~> CU m or CU kg m-2].
     b1, &           !< b1 is used by the tridiagonal solver [H-1 ~> m-1 or m2 kg-1].
-    d1              !! d1=1-c1 is used by the tridiagonal solver [nondim].
-  real :: c1(SZI_(G),SZK_(GV))    !< c1 is used by the tridiagonal solver [nondim].
-  real :: h_minus_dsink(SZI_(G),SZK_(GV)) !< The layer thickness minus the
+    d1              !< d1=1-c1 is used by the tridiagonal solver [nondim].
+  real :: c1(SZI_(G),SZJ_(G),SZK_(GV))    !< c1 is used by the tridiagonal solver [nondim].
+  real :: h_minus_dsink(SZI_(G),SZJ_(G),SZK_(GV)) !< The layer thickness minus the
                     !! difference in sinking rates across the layer [H ~> m or kg m-2].
                     !! By construction, 0 <= h_minus_dsink < h_work.
-  real :: sink(SZI_(G),SZK_(GV)+1) !< The tracer's sinking distances at the
+  real :: sink(SZI_(G),SZJ_(G),SZK_(GV)+1) !< The tracer's sinking distances at the
                     !! interfaces, limited to prevent characteristics from
                     !! crossing within a single timestep [H ~> m or kg m-2].
   real :: b_denom_1 !< The first term in the denominator of b1 [H ~> m or kg m-2].
@@ -73,6 +72,7 @@ subroutine tracer_vertdiff(h_old, ea, eb, dt, tr, G, GV, &
   real :: h_neglect !< A thickness that is so small it is usually lost
                     !! in roundoff and can be neglected [H ~> m or kg m-2].
   logical :: convert_flux = .true.
+  logical :: use_reservoir !< True if there is a bottom reservoir for the tracer.
 
   integer :: i, j, k, is, ie, js, je, nz
   is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec ; nz = GV%ke
@@ -84,138 +84,152 @@ subroutine tracer_vertdiff(h_old, ea, eb, dt, tr, G, GV, &
   endif
 
   if (present(convert_flux_in)) convert_flux = convert_flux_in
+  use_reservoir = present(btm_reservoir)
   h_neglect = GV%H_subroundoff
   sink_dist = 0.0
   if (present(sink_rate)) sink_dist = (dt*sink_rate) * GV%Z_to_H
-  !$OMP parallel default(shared) private(sink,h_minus_dsink,b_denom_1,b1,d1,h_tr,c1)
-  !$OMP do
-  do j=js,je ; do i=is,ie ; sfc_src(i,j) = 0.0 ; btm_src(i,j) = 0.0 ; enddo ; enddo
+
+  !   h_old, ea, eb and tr are mapped to the device by the caller.  The optional fluxes and the
+  ! bottom reservoir are mapped here, because a caller might pass them as expressions that it
+  ! can not map by name.
+  !$omp target enter data map(alloc: sfc_src, btm_src, b1, d1, c1, h_minus_dsink, sink)
+  !$omp target enter data map(to: sfc_flux) if(present(sfc_flux))
+  !$omp target enter data map(to: btm_flux) if(present(btm_flux))
+  !$omp target enter data map(to: btm_reservoir) if(present(btm_reservoir))
+
+  do concurrent (j=js:je, i=is:ie)
+    sfc_src(i,j) = 0.0 ; btm_src(i,j) = 0.0
+  enddo
   if (present(sfc_flux)) then
     if (convert_flux) then
-      !$OMP do
-      do j=js,je ; do i=is,ie
+      do concurrent (j=js:je, i=is:ie)
         sfc_src(i,j) = (sfc_flux(i,j)*dt) * GV%RZ_to_H
-      enddo ; enddo
+      enddo
     else
-      !$OMP do
-      do j=js,je ; do i=is,ie
+      do concurrent (j=js:je, i=is:ie)
         sfc_src(i,j) = sfc_flux(i,j)
-      enddo ; enddo
+      enddo
     endif
   endif
   if (present(btm_flux)) then
     if (convert_flux) then
-      !$OMP do
-      do j=js,je ; do i=is,ie
+      do concurrent (j=js:je, i=is:ie)
         btm_src(i,j) = (btm_flux(i,j)*dt) * GV%RZ_to_H
-      enddo ; enddo
+      enddo
     else
-      !$OMP do
-      do j=js,je ; do i=is,ie
+      do concurrent (j=js:je, i=is:ie)
         btm_src(i,j) = btm_flux(i,j)
-      enddo ; enddo
+      enddo
     endif
   endif
 
   if (present(sink_rate)) then
-    !$OMP do
-    do j=js,je
+    do concurrent (j=js:je)
       ! Find the sinking rates at all interfaces, limiting them if necesary
       ! so that the characteristics do not cross within a timestep.
       !   If a non-constant sinking rate were used, that would be incorprated
       ! here.
-      if (present(btm_reservoir)) then
-        do i=is,ie ; sink(i,nz+1) = sink_dist ; enddo
-        do k=2,nz ; do i=is,ie
-          sink(i,K) = sink_dist ; h_minus_dsink(i,k) = h_old(i,j,k)
+      if (use_reservoir) then
+        do concurrent (i=is:ie) ; sink(i,j,nz+1) = sink_dist ; enddo
+        do k=2,nz ; do concurrent (i=is:ie)
+          sink(i,j,K) = sink_dist ; h_minus_dsink(i,j,k) = h_old(i,j,k)
         enddo ; enddo
       else
-        do i=is,ie ; sink(i,nz+1) = 0.0 ; enddo
+        do concurrent (i=is:ie) ; sink(i,j,nz+1) = 0.0 ; enddo
         ! Find the limited sinking distance at the interfaces.
-        do k=nz,2,-1 ; do i=is,ie
-          if (sink(i,K+1) >= sink_dist) then
-            sink(i,K) = sink_dist
-            h_minus_dsink(i,k) = h_old(i,j,k) + (sink(i,K+1) - sink(i,K))
-          elseif (sink(i,K+1) + h_old(i,j,k) < sink_dist) then
-            sink(i,K) = sink(i,K+1) + h_old(i,j,k)
-            h_minus_dsink(i,k) = 0.0
+        do k=nz,2,-1 ; do concurrent (i=is:ie)
+          if (sink(i,j,K+1) >= sink_dist) then
+            sink(i,j,K) = sink_dist
+            h_minus_dsink(i,j,k) = h_old(i,j,k) + (sink(i,j,K+1) - sink(i,j,K))
+          elseif (sink(i,j,K+1) + h_old(i,j,k) < sink_dist) then
+            sink(i,j,K) = sink(i,j,K+1) + h_old(i,j,k)
+            h_minus_dsink(i,j,k) = 0.0
           else
-            sink(i,K) = sink_dist
-            h_minus_dsink(i,k) = (h_old(i,j,k) + sink(i,K+1)) - sink(i,K)
+            sink(i,j,K) = sink_dist
+            h_minus_dsink(i,j,k) = (h_old(i,j,k) + sink(i,j,K+1)) - sink(i,j,K)
           endif
         enddo ; enddo
       endif
-      do i=is,ie
-        sink(i,1) = 0.0 ; h_minus_dsink(i,1) = (h_old(i,j,1) + sink(i,2))
+      do concurrent (i=is:ie)
+        sink(i,j,1) = 0.0 ; h_minus_dsink(i,j,1) = (h_old(i,j,1) + sink(i,j,2))
       enddo
 
       ! Now solve the tridiagonal equation for the tracer concentrations.
-      do i=is,ie ; if (G%mask2dT(i,j) > 0.0) then
-        b_denom_1 = h_minus_dsink(i,1) + ea(i,j,1) + h_neglect
-        b1(i) = 1.0 / (b_denom_1 + eb(i,j,1))
-        d1(i) = b_denom_1 * b1(i)
+      do concurrent (i=is:ie, G%mask2dT(i,j) > 0.0) DO_LOCALITY(local(b_denom_1, h_tr))
+        b_denom_1 = h_minus_dsink(i,j,1) + ea(i,j,1) + h_neglect
+        b1(i,j) = 1.0 / (b_denom_1 + eb(i,j,1))
+        d1(i,j) = b_denom_1 * b1(i,j)
         h_tr = h_old(i,j,1) + h_neglect
-        tr(i,j,1) = (b1(i)*h_tr)*tr(i,j,1) + b1(i)*sfc_src(i,j)
-      endif ; enddo
-      do k=2,nz-1 ; do i=is,ie ; if (G%mask2dT(i,j) > 0.0) then
-        c1(i,k) = eb(i,j,k-1) * b1(i)
-        b_denom_1 = h_minus_dsink(i,k) + d1(i) * (ea(i,j,k) + sink(i,K)) + &
+        tr(i,j,1) = (b1(i,j)*h_tr)*tr(i,j,1) + b1(i,j)*sfc_src(i,j)
+      enddo
+      do k=2,nz-1 ; do concurrent (i=is:ie, G%mask2dT(i,j) > 0.0) DO_LOCALITY(local(b_denom_1, h_tr))
+        c1(i,j,k) = eb(i,j,k-1) * b1(i,j)
+        b_denom_1 = h_minus_dsink(i,j,k) + d1(i,j) * (ea(i,j,k) + sink(i,j,K)) + &
                     h_neglect
-        b1(i) = 1.0 / (b_denom_1 + eb(i,j,k))
-        d1(i) = b_denom_1 * b1(i)
+        b1(i,j) = 1.0 / (b_denom_1 + eb(i,j,k))
+        d1(i,j) = b_denom_1 * b1(i,j)
         h_tr = h_old(i,j,k) + h_neglect
-        tr(i,j,k) = b1(i) * (h_tr * tr(i,j,k) + &
-                             (ea(i,j,k) + sink(i,K)) * tr(i,j,k-1))
-      endif ; enddo ; enddo
-      do i=is,ie ; if (G%mask2dT(i,j) > 0.0) then
-        c1(i,nz) = eb(i,j,nz-1) * b1(i)
-        b_denom_1 = h_minus_dsink(i,nz) + d1(i) * (ea(i,j,nz) + sink(i,nz)) + &
+        tr(i,j,k) = b1(i,j) * (h_tr * tr(i,j,k) + &
+                               (ea(i,j,k) + sink(i,j,K)) * tr(i,j,k-1))
+      enddo ; enddo
+      do concurrent (i=is:ie, G%mask2dT(i,j) > 0.0) DO_LOCALITY(local(b_denom_1, h_tr))
+        c1(i,j,nz) = eb(i,j,nz-1) * b1(i,j)
+        b_denom_1 = h_minus_dsink(i,j,nz) + d1(i,j) * (ea(i,j,nz) + sink(i,j,nz)) + &
                     h_neglect
-        b1(i) = 1.0 / (b_denom_1 + eb(i,j,nz))
+        b1(i,j) = 1.0 / (b_denom_1 + eb(i,j,nz))
         h_tr = h_old(i,j,nz) + h_neglect
-        tr(i,j,nz) = b1(i) * ((h_tr * tr(i,j,nz) + btm_src(i,j)) + &
-                              (ea(i,j,nz) + sink(i,nz)) * tr(i,j,nz-1))
-      endif ; enddo
-      if (present(btm_reservoir)) then ; do i=is,ie ; if (G%mask2dT(i,j) > 0.0) then
-        btm_reservoir(i,j) = btm_reservoir(i,j) + (sink(i,nz+1)*tr(i,j,nz)) * GV%H_to_RZ
-      endif ; enddo ; endif
+        tr(i,j,nz) = b1(i,j) * ((h_tr * tr(i,j,nz) + btm_src(i,j)) + &
+                                (ea(i,j,nz) + sink(i,j,nz)) * tr(i,j,nz-1))
+      enddo
 
-      do k=nz-1,1,-1 ; do i=is,ie ; if (G%mask2dT(i,j) > 0.0) then
-        tr(i,j,k) = tr(i,j,k) + c1(i,k+1)*tr(i,j,k+1)
-      endif ; enddo ; enddo
+      do k=nz-1,1,-1 ; do concurrent (i=is:ie, G%mask2dT(i,j) > 0.0)
+        tr(i,j,k) = tr(i,j,k) + c1(i,j,k+1)*tr(i,j,k+1)
+      enddo ; enddo
     enddo
+
+    !   The bottom reservoir takes up the tracer that sinks out of the bottom layer.  This uses the
+    ! bottom layer concentration from the end of the downward sweep of the tridiagonal solver, which
+    ! the upward sweep does not change, so it can be done here after the solver is complete.
+    if (present(btm_reservoir)) then
+      do concurrent (j=js:je, i=is:ie, G%mask2dT(i,j) > 0.0)
+        btm_reservoir(i,j) = btm_reservoir(i,j) + (sink(i,j,nz+1)*tr(i,j,nz)) * GV%H_to_RZ
+      enddo
+    endif
   else
-    !$OMP do
-    do j=js,je
-      do i=is,ie ; if (G%mask2dT(i,j) > 0.0) then
+    do concurrent (j=js:je)
+      do concurrent (i=is:ie, G%mask2dT(i,j) > 0.0) DO_LOCALITY(local(b_denom_1, h_tr))
         h_tr = h_old(i,j,1) + h_neglect
         b_denom_1 = h_tr + ea(i,j,1)
-        b1(i) = 1.0 / (b_denom_1 + eb(i,j,1))
-        d1(i) = h_tr * b1(i)
-        tr(i,j,1) = (b1(i)*h_tr)*tr(i,j,1) + b1(i)*sfc_src(i,j)
-      endif ; enddo
-      do k=2,nz-1 ; do i=is,ie ; if (G%mask2dT(i,j) > 0.0) then
-        c1(i,k) = eb(i,j,k-1) * b1(i)
+        b1(i,j) = 1.0 / (b_denom_1 + eb(i,j,1))
+        d1(i,j) = h_tr * b1(i,j)
+        tr(i,j,1) = (b1(i,j)*h_tr)*tr(i,j,1) + b1(i,j)*sfc_src(i,j)
+      enddo
+      do k=2,nz-1 ; do concurrent (i=is:ie, G%mask2dT(i,j) > 0.0) DO_LOCALITY(local(b_denom_1, h_tr))
+        c1(i,j,k) = eb(i,j,k-1) * b1(i,j)
         h_tr = h_old(i,j,k) + h_neglect
-        b_denom_1 = h_tr + d1(i) * ea(i,j,k)
-        b1(i) = 1.0 / (b_denom_1 + eb(i,j,k))
-        d1(i) = b_denom_1 * b1(i)
-        tr(i,j,k) = b1(i) * (h_tr * tr(i,j,k) + ea(i,j,k) * tr(i,j,k-1))
-      endif ; enddo ; enddo
-      do i=is,ie ; if (G%mask2dT(i,j) > 0.0) then
-        c1(i,nz) = eb(i,j,nz-1) * b1(i)
+        b_denom_1 = h_tr + d1(i,j) * ea(i,j,k)
+        b1(i,j) = 1.0 / (b_denom_1 + eb(i,j,k))
+        d1(i,j) = b_denom_1 * b1(i,j)
+        tr(i,j,k) = b1(i,j) * (h_tr * tr(i,j,k) + ea(i,j,k) * tr(i,j,k-1))
+      enddo ; enddo
+      do concurrent (i=is:ie, G%mask2dT(i,j) > 0.0) DO_LOCALITY(local(b_denom_1, h_tr))
+        c1(i,j,nz) = eb(i,j,nz-1) * b1(i,j)
         h_tr = h_old(i,j,nz) + h_neglect
-        b_denom_1 = h_tr + d1(i)*ea(i,j,nz)
-        b1(i) = 1.0 / ( b_denom_1 + eb(i,j,nz))
-        tr(i,j,nz) = b1(i) * (( h_tr * tr(i,j,nz) + btm_src(i,j)) + &
-                              ea(i,j,nz) * tr(i,j,nz-1))
-      endif ; enddo
-      do k=nz-1,1,-1 ; do i=is,ie ; if (G%mask2dT(i,j) > 0.0) then
-        tr(i,j,k) = tr(i,j,k) + c1(i,k+1)*tr(i,j,k+1)
-      endif ; enddo ; enddo
+        b_denom_1 = h_tr + d1(i,j)*ea(i,j,nz)
+        b1(i,j) = 1.0 / ( b_denom_1 + eb(i,j,nz))
+        tr(i,j,nz) = b1(i,j) * (( h_tr * tr(i,j,nz) + btm_src(i,j)) + &
+                                ea(i,j,nz) * tr(i,j,nz-1))
+      enddo
+      do k=nz-1,1,-1 ; do concurrent (i=is:ie, G%mask2dT(i,j) > 0.0)
+        tr(i,j,k) = tr(i,j,k) + c1(i,j,k+1)*tr(i,j,k+1)
+      enddo ; enddo
     enddo
   endif
-  !$OMP end parallel
+
+  !$omp target exit data map(from: btm_reservoir) if(present(btm_reservoir))
+  !$omp target exit data map(release: btm_flux) if(present(btm_flux))
+  !$omp target exit data map(release: sfc_flux) if(present(sfc_flux))
+  !$omp target exit data map(delete: sfc_src, btm_src, b1, d1, c1, h_minus_dsink, sink)
 
 end subroutine tracer_vertdiff
 

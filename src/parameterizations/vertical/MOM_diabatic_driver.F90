@@ -2620,8 +2620,13 @@ subroutine layered_diabatic(u, v, h, tv, BLD, fluxes, visc, ADp, CDp, dt, Time_e
         ! between the buffer layers and the interior.
         ! Changes: T, S
         if (CS%tracer_tridiag) then
+          !$omp target enter data map(to: hold, ea, eb)
+          !$omp target enter data map(to: tv, tv%T, tv%S)
           call tracer_vertdiff(hold, ea, eb, dt, tv%T, G, GV)
           call tracer_vertdiff(hold, ea, eb, dt, tv%S, G, GV)
+          !$omp target exit data map(delete: hold, ea, eb)
+          !$omp target update from(tv%T, tv%S)
+          !$omp target exit data map(release: tv%T, tv%S, tv)
         else
           !$omp target enter data map(to: hold, ea, eb)
           !$omp target enter data map(to: tv, tv%T, tv%S)
@@ -2715,8 +2720,13 @@ subroutine layered_diabatic(u, v, h, tv, BLD, fluxes, visc, ADp, CDp, dt, Time_e
 
       ! Changes T and S via the tridiagonal solver; no change to h
       if (CS%tracer_tridiag) then
+        !$omp target enter data map(to: hold, ea, eb)
+        !$omp target enter data map(to: tv, tv%T, tv%S)
         call tracer_vertdiff(hold, ea, eb, dt, tv%T, G, GV)
         call tracer_vertdiff(hold, ea, eb, dt, tv%S, G, GV)
+        !$omp target exit data map(delete: hold, ea, eb)
+        !$omp target update from(tv%T, tv%S)
+        !$omp target exit data map(release: tv%T, tv%S, tv)
       else
         !$omp target enter data map(to: hold, ea, eb)
         !$omp target enter data map(to: tv, tv%T, tv%S)
