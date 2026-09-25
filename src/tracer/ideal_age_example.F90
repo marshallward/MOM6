@@ -356,14 +356,30 @@ subroutine ideal_age_tracer_column_physics(h_old, h_new, ea, eb, fluxes, dt, G, 
   if (CS%ntr < 1) return
 
   if (present(evap_CFL_limit) .and. present(minimum_forcing_depth)) then
+    !   h_old is mapped to the device by the caller.  The tracers, the working copy of the
+    ! thicknesses and the freshwater fluxes that applyTracerBoundaryFluxesInOut uses are mapped
+    ! here.  Each pointer component is mapped under the same test that gates its use, because an
+    ! unassociated pointer component can not be mapped.
+    !$omp target enter data map(alloc: h_work)
+    !$omp target enter data map(to: CS%tr)
+    !$omp target enter data map(to: fluxes)
+    !$omp target enter data if(associated(fluxes%netMassIn)) map(to: fluxes%netMassIn)
+    !$omp target enter data if(associated(fluxes%netMassOut)) map(to: fluxes%netMassOut)
     do m=1,CS%ntr
-      do k=1,nz ;do j=js,je ; do i=is,ie
+      do concurrent (k=1:nz, j=js:je, i=is:ie)
         h_work(i,j,k) = h_old(i,j,k)
-      enddo ; enddo ; enddo
+      enddo
       call applyTracerBoundaryFluxesInOut(G, GV, CS%tr(:,:,:,m), dt, fluxes, h_work, &
                                           evap_CFL_limit, minimum_forcing_depth)
+      !$omp target update from(h_work, CS%tr(:,:,:,m))
       call tracer_vertdiff(h_work, ea, eb, dt, CS%tr(:,:,:,m), G, GV)
     enddo
+    !   Everything that the device wrote has already been copied back, so nothing is copied here.
+    !$omp target exit data if(associated(fluxes%netMassOut)) map(release: fluxes%netMassOut)
+    !$omp target exit data if(associated(fluxes%netMassIn)) map(release: fluxes%netMassIn)
+    !$omp target exit data map(release: fluxes)
+    !$omp target exit data map(release: CS%tr)
+    !$omp target exit data map(delete: h_work)
   else
     do m=1,CS%ntr
       call tracer_vertdiff(h_old, ea, eb, dt, CS%tr(:,:,:,m), G, GV)

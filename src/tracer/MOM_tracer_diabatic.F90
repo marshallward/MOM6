@@ -15,6 +15,7 @@ use MOM_error_handler,    only : MOM_error, FATAL, WARNING
 implicit none ; private
 
 #include <MOM_memory.h>
+#include "do_concurrent_compat.h"
 public tracer_vertdiff, tracer_vertdiff_Eulerian
 public applyTracerBoundaryFluxesInOut
 
@@ -445,6 +446,7 @@ subroutine applyTracerBoundaryFluxesInOut(G, GV, Tr, dt, fluxes, h, evap_CFL_lim
 
   integer, parameter :: maxGroundings = 5
   integer :: numberOfGroundings, iGround(maxGroundings), jGround(maxGroundings)
+  integer :: nGround           ! The running count of groundings found by the host scan [nondim]
   real :: IforcingDepthScale ! The inverse of the scale over which to apply forcing [H-1 ~> m-1 or m2 kg-1]
   real :: dThickness         ! The change in a layer's thickness [H ~> m or kg m-2]
   real :: dTracer            ! The change in the integrated tracer content of a layer [conc H ~> conc m or conc kg m-2]
@@ -452,18 +454,19 @@ subroutine applyTracerBoundaryFluxesInOut(G, GV, Tr, dt, fluxes, h, evap_CFL_lim
   real :: hOld               ! The layer thickness before surface forcing is applied [H ~> m or kg m-2]
   real :: Ithickness         ! The inverse of the new layer thickness [H-1 ~> m-1 or m2 kg-1]
 
-  real :: h2d(SZI_(G),SZK_(GV))     ! A 2-d work copy of layer thicknesses [H ~> m or kg m-2]
-  real :: Tr2d(SZI_(G),SZK_(GV))    ! A 2-d work copy of tracer concentrations [conc]
+  real :: h_k                ! A column-local copy of the thickness of layer k [H ~> m or kg m-2]
+  real :: Tr_k               ! A column-local copy of the tracer concentration in layer k [conc]
   real :: in_flux(SZI_(G),SZJ_(G))  ! The total time-integrated amount of tracer that
                                     ! enters with freshwater [conc H ~> conc m or conc kg m-2]
   real :: out_flux(SZI_(G),SZJ_(G)) ! The total time-integrated amount of tracer that
                                     ! leaves with freshwater [conc H ~> conc m or conc kg m-2]
-  real :: netMassIn(SZI_(G))   ! The remaining mass entering ocean surface [H ~> m or kg m-2]
-  real :: netMassOut(SZI_(G))  ! The remaining mass leaving ocean surface [H ~> m or kg m-2]
-  real :: in_flux_1d(SZI_(G))  ! The remaining amount of tracer that enters with
-                               ! the freshwater [conc H ~> conc m or conc kg m-2]
-  real :: out_flux_1d(SZI_(G)) ! The remaining amount of tracer that leaves with
-                               ! the freshwater [conc H ~> conc m or conc kg m-2]
+  real :: hGround(SZI_(G),SZJ_(G))  ! The amount of tracer in each column that could not be
+                                    ! applied because the column grounded out [conc H ~> conc m or conc kg m-2]
+  real :: netMassOut_col  ! The remaining mass leaving the ocean surface in a column [H ~> m or kg m-2]
+  real :: in_flux_col     ! The remaining amount of tracer that enters with the freshwater in a
+                          ! column [conc H ~> conc m or conc kg m-2]
+  real :: out_flux_col    ! The remaining amount of tracer that leaves with the freshwater in a
+                          ! column [conc H ~> conc m or conc kg m-2]
   real :: hGrounding(maxGroundings) ! The remaining fresh water flux that was not able to be
                                ! supplied from a column that grounded out [H ~> m or kg m-2]
   logical :: update_h
@@ -475,16 +478,25 @@ subroutine applyTracerBoundaryFluxesInOut(G, GV, Tr, dt, fluxes, h, evap_CFL_lim
   ! If no freshwater fluxes, nothing needs to be done in this routine
   if ( (.not. associated(fluxes%netMassIn)) .or. (.not. associated(fluxes%netMassOut)) ) return
 
-  in_flux(:,:) = 0.0 ; out_flux(:,:) = 0.0
+  !   Tr, h and the fluxes type with its netMassIn and netMassOut arrays are mapped to the device
+  ! by the caller.  The optional tracer fluxes are mapped here, because a caller might pass them
+  ! as expressions that it can not map by name.
+  !$omp target enter data map(alloc: in_flux, out_flux, hGround)
+  !$omp target enter data map(to: in_flux_optional) if(present(in_flux_optional))
+  !$omp target enter data map(to: out_flux_optional) if(present(out_flux_optional))
+
+  do concurrent (j=js:je, i=is:ie)
+    in_flux(i,j) = 0.0 ; out_flux(i,j) = 0.0
+  enddo
   if (present(in_flux_optional)) then
-    do j=js,je ; do i=is,ie
+    do concurrent (j=js:je, i=is:ie)
       in_flux(i,j) = in_flux_optional(i,j)
-    enddo ; enddo
+    enddo
   endif
   if (present(out_flux_optional)) then
-    do j=js,je ; do i=is,ie
+    do concurrent (j=js:je, i=is:ie)
       out_flux(i,j) = out_flux_optional(i,j)
-    enddo ; enddo
+    enddo
   endif
 
   if (present(update_h_opt)) then
@@ -495,138 +507,114 @@ subroutine applyTracerBoundaryFluxesInOut(G, GV, Tr, dt, fluxes, h, evap_CFL_lim
 
   numberOfGroundings = 0
 
-!$OMP parallel do default(none) shared(is,ie,js,je,nz,h,Tr,G,GV,fluxes,dt,    &
-!$OMP                                  IforcingDepthScale,minimum_forcing_depth, &
-!$OMP                                  numberOfGroundings,iGround,jGround,update_h, &
-!$OMP                                  in_flux,out_flux,hGrounding,evap_CFL_limit) &
-!$OMP                          private(h2d,Tr2d,netMassIn,netMassOut,      &
-!$OMP                                  in_flux_1d,out_flux_1d,fractionOfForcing,     &
-!$OMP                                  dThickness,dTracer,hOld,Ithickness)
+  !   Each column is handled by one thread, working down the column with copies of the layer
+  ! thickness and tracer concentration.  The surface forcing is contained in the fluxes type.
+  ! We aggregate the thermodynamic forcing for a time step into the following:
+  ! These should have been set and stored during a call to applyBoundaryFluxesInOut
+  ! netMassIn    = net mass entering at ocean surface over a timestep
+  ! netMassOut   = net mass leaving ocean surface [H ~> m or kg m-2] over a time step.
+  !                netMassOut < 0 means mass leaves ocean.
+  ! Note here that the aggregateFW flag has already been taken care of in the call to
+  ! applyBoundaryFluxesInOut
+  do concurrent (j=js:je, i=is:ie) DO_LOCALITY(local(k, h_k, Tr_k, hOld, Ithickness, dThickness, dTracer)) &
+                                 & DO_LOCALITY(local(fractionOfForcing, IforcingDepthScale)) &
+                                 & DO_LOCALITY(local(netMassOut_col, in_flux_col, out_flux_col)) &
+                                 & DO_LOCALITY(reduce(+:numberOfGroundings))
+    in_flux_col = in_flux(i,j)
+    out_flux_col = out_flux(i,j)
+    if (G%mask2dT(i,j) > 0.) then
+      netMassOut_col = fluxes%netMassOut(i,j)
 
-  ! Work in vertical slices for efficiency
-  do j=js,je
+      ! Apply the surface boundary fluxes in two steps:
+      ! A/ update concentration from mass entering the ocean, which only changes the top layer
+      ! B/ update concentration from mass leaving ocean.
+      !   Step A does not change netMassOut_col or out_flux_col, so it is done here at the top of
+      ! the k-loop of step B, which recovers the answers from doing the two steps in turn.
+      do k=1,nz
+        h_k = h(i,j,k)
+        Tr_k = Tr(i,j,k)
 
-    ! Copy state into 2D-slice arrays
-    do k=1,nz ; do i=is,ie
-      h2d(i,k) = h(i,j,k)
-      Tr2d(i,k) = Tr(i,j,k)
-    enddo ; enddo
-
-    do i = is,ie
-      in_flux_1d(i) = in_flux(i,j)
-      out_flux_1d(i) = out_flux(i,j)
-    enddo
-    ! The surface forcing is contained in the fluxes type.
-    ! We aggregate the thermodynamic forcing for a time step into the following:
-    ! These should have been set and stored during a call to applyBoundaryFluxesInOut
-    ! netMassIn    = net mass entering at ocean surface over a timestep
-    ! netMassOut   = net mass leaving ocean surface [H ~> m or kg m-2] over a time step.
-    !                netMassOut < 0 means mass leaves ocean.
-
-    ! Note here that the aggregateFW flag has already been taken care of in the call to
-    ! applyBoundaryFluxesInOut
-    do i=is,ie
-      netMassOut(i) = fluxes%netMassOut(i,j)
-      netMassIn(i)  = fluxes%netMassIn(i,j)
-    enddo
-
-    ! Apply the surface boundary fluxes in three steps:
-    ! A/ update concentration from mass entering the ocean
-    ! B/ update concentration from mass leaving ocean.
-    do i=is,ie
-      if (G%mask2dT(i,j)>0.) then
-
-        ! A/ Update tracer due to incoming mass flux.
-        do k=1,1
+        if (k == 1) then
+          ! A/ Update tracer due to incoming mass flux.
 
           ! Change in state due to forcing
-          dThickness = netMassIn(i) ! Since we are adding mass, we can use all of it
+          dThickness = fluxes%netMassIn(i,j) ! Since we are adding mass, we can use all of it
           dTracer = 0.
 
           ! Update the forcing by the part to be consumed within the present k-layer.
-          ! If fractionOfForcing = 1, then updated netMassIn, netHeat, and netSalt vanish.
-          netMassIn(i) = netMassIn(i) - dThickness
-          dTracer = dTracer + in_flux_1d(i)
-          in_flux_1d(i) = 0.0
+          dTracer = dTracer + in_flux_col
+          in_flux_col = 0.0
 
           ! Update state
-          hOld     = h2d(i,k)               ! Keep original thickness in hand
-          h2d(i,k) = h2d(i,k) + dThickness  ! New thickness
-          if (h2d(i,k) > 0.0) then
-            Ithickness  = 1.0/h2d(i,k)      ! Inverse new thickness
+          hOld = h_k                ! Keep original thickness in hand
+          h_k  = h_k + dThickness   ! New thickness
+          if (h_k > 0.0) then
+            Ithickness  = 1.0/h_k   ! Inverse new thickness
             ! The "if"s below avoid changing T/S by roundoff unnecessarily
-            if (dThickness /= 0. .or. dTracer /= 0.) tr2d(i,k) = (hOld*tr2d(i,k)+ dTracer)*Ithickness
+            if (dThickness /= 0. .or. dTracer /= 0.) Tr_k = (hOld*Tr_k + dTracer)*Ithickness
           endif
-
-        enddo ! k=1,1
+        endif
 
         ! B/ Update tracer from mass leaving ocean
-        do k=1,nz
 
-          ! Place forcing into this layer if this layer has nontrivial thickness.
-          ! For layers thin relative to 1/IforcingDepthScale, then distribute
-          ! forcing into deeper layers.
-          IforcingDepthScale = 1. / max(GV%H_subroundoff, minimum_forcing_depth - netMassOut(i) )
-          ! fractionOfForcing = 1.0, unless h2d is less than IforcingDepthScale.
-          fractionOfForcing = min(1.0, h2d(i,k)*IforcingDepthScale)
+        ! Place forcing into this layer if this layer has nontrivial thickness.
+        ! For layers thin relative to 1/IforcingDepthScale, then distribute
+        ! forcing into deeper layers.
+        IforcingDepthScale = 1. / max(GV%H_subroundoff, minimum_forcing_depth - netMassOut_col )
+        ! fractionOfForcing = 1.0, unless h_k is less than IforcingDepthScale.
+        fractionOfForcing = min(1.0, h_k*IforcingDepthScale)
 
-          ! In the case with (-1)*netMassOut*fractionOfForcing greater than cfl*h, we
-          ! limit the forcing applied to this cell, leaving the remaining forcing to
-          ! be distributed downwards.
-          if (-fractionOfForcing*netMassOut(i) > evap_CFL_limit*h2d(i,k)) then
-            fractionOfForcing = -evap_CFL_limit*h2d(i,k)/netMassOut(i)
-          endif
-
-          ! Change in state due to forcing
-          dThickness = max( fractionOfForcing*netMassOut(i), -h2d(i,k) )
-          ! Note this is slightly different to how salt is currently treated
-          dTracer =  fractionOfForcing*out_flux_1d(i)
-
-          ! Update the forcing by the part to be consumed within the present k-layer.
-          ! If fractionOfForcing = 1, then new netMassOut vanishes.
-          netMassOut(i) = netMassOut(i) - dThickness
-          out_flux_1d(i) = out_flux_1d(i) - dTracer
-
-          ! Update state by the appropriate increment.
-          hOld     = h2d(i,k)               ! Keep original thickness in hand
-          h2d(i,k) = h2d(i,k) + dThickness  ! New thickness
-          if (h2d(i,k) > 0.) then
-            Ithickness  = 1.0/h2d(i,k) ! Inverse of new thickness
-            Tr2d(i,k)    = (hOld*Tr2d(i,k) + dTracer)*Ithickness
-          endif
-
-        enddo ! k
-
-      endif
-
-      ! If anything remains after the k-loop, then we have grounded out, which is a problem.
-      if (abs(in_flux_1d(i))+abs(out_flux_1d(i)) /= 0.0) then
-!$OMP critical
-        numberOfGroundings = numberOfGroundings +1
-        if (numberOfGroundings<=maxGroundings) then
-          iGround(numberOfGroundings) = i ! Record i,j location of event for
-          jGround(numberOfGroundings) = j ! warning message
-          hGrounding(numberOfGroundings) = abs(in_flux_1d(i))+abs(out_flux_1d(i))
+        ! In the case with (-1)*netMassOut*fractionOfForcing greater than cfl*h, we
+        ! limit the forcing applied to this cell, leaving the remaining forcing to
+        ! be distributed downwards.
+        if (-fractionOfForcing*netMassOut_col > evap_CFL_limit*h_k) then
+          fractionOfForcing = -evap_CFL_limit*h_k/netMassOut_col
         endif
-!$OMP end critical
-      endif
 
-    enddo ! i
+        ! Change in state due to forcing
+        dThickness = max( fractionOfForcing*netMassOut_col, -h_k )
+        ! Note this is slightly different to how salt is currently treated
+        dTracer =  fractionOfForcing*out_flux_col
 
-    ! Step C/ copy updated tracer concentration from the 2d slice now back into model state.
-    do k=1,nz ; do i=is,ie
-      Tr(i,j,k) = Tr2d(i,k)
-    enddo ; enddo
+        ! Update the forcing by the part to be consumed within the present k-layer.
+        ! If fractionOfForcing = 1, then new netMassOut vanishes.
+        netMassOut_col = netMassOut_col - dThickness
+        out_flux_col = out_flux_col - dTracer
 
-    if (update_h) then
-      do k=1,nz ; do i=is,ie
-        h(i,j,k) = h2d(i,k)
-      enddo ; enddo
+        ! Update state by the appropriate increment.
+        hOld = h_k                ! Keep original thickness in hand
+        h_k  = h_k + dThickness   ! New thickness
+        if (h_k > 0.) then
+          Ithickness = 1.0/h_k    ! Inverse of new thickness
+          Tr_k = (hOld*Tr_k + dTracer)*Ithickness
+        endif
+
+        ! C/ Copy the updated tracer concentration and thickness back into the model state.
+        Tr(i,j,k) = Tr_k
+        if (update_h) h(i,j,k) = h_k
+      enddo ! k
     endif
 
-  enddo ! j-loop finish
+    !   If anything remains after the k-loop, then we have grounded out, which is a problem.  This
+    ! is recorded for land points too, and the locations are gathered on the host below.
+    hGround(i,j) = abs(in_flux_col) + abs(out_flux_col)
+    if (hGround(i,j) /= 0.0) numberOfGroundings = numberOfGroundings + 1
+  enddo
 
   if (numberOfGroundings>0) then
+    !   Record the locations of the first few groundings in the order in which a serial i-j loop
+    ! would find them, for the warning messages.
+    !$omp target update from(hGround)
+    nGround = 0
+    do j=js,je ; do i=is,ie ; if (hGround(i,j) /= 0.0) then
+      nGround = nGround + 1
+      if (nGround<=maxGroundings) then
+        iGround(nGround) = i ! Record i,j location of event for
+        jGround(nGround) = j ! warning message
+        hGrounding(nGround) = hGround(i,j)
+      endif
+    endif ; enddo ; enddo
+
     do i = 1, min(numberOfGroundings, maxGroundings)
       write(mesg(1:45),'(3es15.3)') G%geoLonT( iGround(i), jGround(i) ), &
                              G%geoLatT( iGround(i), jGround(i)) , hGrounding(i)
@@ -640,6 +628,10 @@ subroutine applyTracerBoundaryFluxesInOut(G, GV, Tr, dt, fluxes, h, evap_CFL_lim
                               trim(mesg) // " groundings remaining", all_print=.true.)
     endif
   endif
+
+  !$omp target exit data map(release: out_flux_optional) if(present(out_flux_optional))
+  !$omp target exit data map(release: in_flux_optional) if(present(in_flux_optional))
+  !$omp target exit data map(delete: in_flux, out_flux, hGround)
 
 end subroutine applyTracerBoundaryFluxesInOut
 end module MOM_tracer_diabatic
