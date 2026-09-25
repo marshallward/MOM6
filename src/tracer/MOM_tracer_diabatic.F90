@@ -11,6 +11,7 @@ use MOM_grid,             only : ocean_grid_type
 use MOM_verticalGrid,     only : verticalGrid_type
 use MOM_forcing_type,     only : forcing
 use MOM_error_handler,    only : MOM_error, FATAL, WARNING
+use MOM_file_parser,      only : get_param, log_version, param_file_type
 
 implicit none ; private
 
@@ -18,6 +19,21 @@ implicit none ; private
 #include "do_concurrent_compat.h"
 public tracer_vertdiff, tracer_vertdiff_Eulerian
 public applyTracerBoundaryFluxesInOut
+public tracer_diabatic_init, tracer_diabatic_end
+
+integer, parameter :: default_niblock = 0 !< Default i block size for tracer_vertdiff [nondim]
+#ifdef __NVCOMPILER_OPENMP_GPU
+integer, parameter :: default_njblock = 0 !< Default j block size for tracer_vertdiff [nondim]
+#else
+integer, parameter :: default_njblock = 1 !< Default j block size for tracer_vertdiff, which works on one
+                                          !! row at a time, as this routine did before it was blocked [nondim]
+#endif
+
+!> The control structure with the block sizes used by tracer_vertdiff
+type, public :: tracer_diabatic_CS ; private
+  integer :: niblock = default_niblock !< The i block size used in array calculations [nondim].
+  integer :: njblock = default_njblock !< The j block size used in array calculations [nondim].
+end type tracer_diabatic_CS
 
 contains
 
@@ -26,7 +42,7 @@ contains
 !! is implemented with an fully implicit upwind advection scheme.  Alternate time units can be
 !! used for the timestep, surface and bottom fluxes and sink_rate provided they are all consistent.
 subroutine tracer_vertdiff(h_old, ea, eb, dt, tr, G, GV, &
-                           sfc_flux, btm_flux, btm_reservoir, sink_rate, convert_flux_in)
+                           sfc_flux, btm_flux, btm_reservoir, sink_rate, convert_flux_in, CS)
   type(ocean_grid_type),                     intent(in)    :: G      !< ocean grid structure
   type(verticalGrid_type),                   intent(in)    :: GV     !< ocean vertical grid structure
   real, dimension(SZI_(G),SZJ_(G),SZK_(GV)), intent(in)    :: h_old  !< layer thickness before entrainment
@@ -51,19 +67,69 @@ subroutine tracer_vertdiff(h_old, ea, eb, dt, tr, G, GV, &
                                                                      !! [Z T-1 ~> m s-1]
   logical,                          optional,intent(in)    :: convert_flux_in !< True if the specified sfc_flux needs
                                                                      !! to be integrated in time
+  type(tracer_diabatic_CS),         optional,intent(in)    :: CS     !< The control structure returned by a
+                                                                     !! previous call to tracer_diabatic_init.  If
+                                                                     !! absent, the default block sizes are used.
+
+  ! Local variables
+  integer :: nii, njj  ! The resolved i- and j-direction block sizes [nondim].
+
+  nii = default_niblock ; njj = default_njblock
+  if (present(CS)) then ; nii = CS%niblock ; njj = CS%njblock ; endif
+  if (nii == 0) nii = G%iec - G%isc + 1
+  if (njj == 0) njj = G%jec - G%jsc + 1
+
+  call tracer_vertdiff_block(h_old, ea, eb, dt, tr, G, GV, G%isc, G%iec, G%jsc, G%jec, nii, njj, &
+                             sfc_flux, btm_flux, btm_reservoir, sink_rate, convert_flux_in)
+
+end subroutine tracer_vertdiff
+
+!> Solve the tridiagonal equations of tracer_vertdiff, working on one i-j block of columns at a time.
+subroutine tracer_vertdiff_block(h_old, ea, eb, dt, tr, G, GV, is, ie, js, je, nii, njj, &
+                                 sfc_flux, btm_flux, btm_reservoir, sink_rate, convert_flux_in)
+  type(ocean_grid_type),                     intent(in)    :: G      !< ocean grid structure
+  type(verticalGrid_type),                   intent(in)    :: GV     !< ocean vertical grid structure
+  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)), intent(in)    :: h_old  !< layer thickness before entrainment
+                                                                     !! [H ~> m or kg m-2]
+  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)), intent(in)    :: ea     !< amount of fluid entrained from the layer
+                                                                     !! above [H ~> m or kg m-2]
+  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)), intent(in)    :: eb     !< amount of fluid entrained from the layer
+                                                                     !! below [H ~> m or kg m-2]
+  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)), intent(inout) :: tr     !< tracer concentration in concentration units [CU]
+  real,                                      intent(in)    :: dt     !< amount of time covered by this call [T ~> s]
+  integer,                                   intent(in)    :: is     !< The start i-index to work on.
+  integer,                                   intent(in)    :: ie     !< The end i-index to work on.
+  integer,                                   intent(in)    :: js     !< The start j-index to work on.
+  integer,                                   intent(in)    :: je     !< The end j-index to work on.
+  integer,                                   intent(in)    :: nii    !< Size of the i-block [nondim].
+  integer,                                   intent(in)    :: njj    !< Size of the j-block [nondim].
+  real, dimension(SZI_(G),SZJ_(G)), optional,intent(in)    :: sfc_flux !< surface flux of the tracer in units of
+                                                                     !! [CU R Z T-1 ~> CU kg m-2 s-1] or
+                                                                     !! [CU H ~> CU m or CU kg m-2] if
+                                                                     !! convert_flux_in is .false.
+  real, dimension(SZI_(G),SZJ_(G)), optional,intent(in)    :: btm_flux !< The (negative upward) bottom flux of the
+                                                                     !! tracer in [CU R Z T-1 ~> CU kg m-2 s-1] or
+                                                                     !! [CU H ~> CU m or CU kg m-2] if
+                                                                     !! convert_flux_in is .false.
+  real, dimension(SZI_(G),SZJ_(G)), optional,intent(inout) :: btm_reservoir !< amount of tracer in a bottom reservoir
+                                                                     !! [CU R Z ~> CU kg m-2]
+  real,                             optional,intent(in)    :: sink_rate !< rate at which the tracer sinks
+                                                                     !! [Z T-1 ~> m s-1]
+  logical,                          optional,intent(in)    :: convert_flux_in !< True if the specified sfc_flux needs
+                                                                     !! to be integrated in time
 
   ! local variables
   real :: sink_dist !< The distance the tracer sinks in a time step [H ~> m or kg m-2].
-  real, dimension(SZI_(G),SZJ_(G)) :: &
+  real, dimension(nii,njj) :: &
     sfc_src, &      !< The time-integrated surface source of the tracer [CU H ~> CU m or CU kg m-2].
     btm_src, &      !< The time-integrated bottom source of the tracer [CU H ~> CU m or CU kg m-2].
     b1, &           !< b1 is used by the tridiagonal solver [H-1 ~> m-1 or m2 kg-1].
     d1              !< d1=1-c1 is used by the tridiagonal solver [nondim].
-  real :: c1(SZI_(G),SZJ_(G),SZK_(GV))    !< c1 is used by the tridiagonal solver [nondim].
-  real :: h_minus_dsink(SZI_(G),SZJ_(G),SZK_(GV)) !< The layer thickness minus the
+  real :: c1(nii,njj,SZK_(GV))    !< c1 is used by the tridiagonal solver [nondim].
+  real :: h_minus_dsink(nii,njj,SZK_(GV)) !< The layer thickness minus the
                     !! difference in sinking rates across the layer [H ~> m or kg m-2].
                     !! By construction, 0 <= h_minus_dsink < h_work.
-  real :: sink(SZI_(G),SZJ_(G),SZK_(GV)+1) !< The tracer's sinking distances at the
+  real :: sink(nii,njj,SZK_(GV)+1) !< The tracer's sinking distances at the
                     !! interfaces, limited to prevent characteristics from
                     !! crossing within a single timestep [H ~> m or kg m-2].
   real :: b_denom_1 !< The first term in the denominator of b1 [H ~> m or kg m-2].
@@ -74,8 +140,11 @@ subroutine tracer_vertdiff(h_old, ea, eb, dt, tr, G, GV, &
   logical :: convert_flux = .true.
   logical :: use_reservoir !< True if there is a bottom reservoir for the tracer.
 
-  integer :: i, j, k, is, ie, js, je, nz
-  is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec ; nz = GV%ke
+  integer :: i, j, k, nz
+  integer :: isb, ieb           ! The i-index bounds of the current block.
+  integer :: jsb, jeb           ! The j-index bounds of the current block.
+  integer :: ii, jj             ! Block-local i- and j-index loop variables.
+  nz = GV%ke
 
   if (nz == 1) then
     call MOM_error(WARNING, "MOM_tracer_diabatic.F90, tracer_vertdiff called "//&
@@ -97,141 +166,170 @@ subroutine tracer_vertdiff(h_old, ea, eb, dt, tr, G, GV, &
   !$omp target enter data map(to: btm_flux) if(present(btm_flux))
   !$omp target enter data map(to: btm_reservoir) if(present(btm_reservoir))
 
-  do concurrent (j=js:je, i=is:ie)
-    sfc_src(i,j) = 0.0 ; btm_src(i,j) = 0.0
-  enddo
-  if (present(sfc_flux)) then
-    if (convert_flux) then
-      do concurrent (j=js:je, i=is:ie)
-        sfc_src(i,j) = (sfc_flux(i,j)*dt) * GV%RZ_to_H
-      enddo
-    else
-      do concurrent (j=js:je, i=is:ie)
-        sfc_src(i,j) = sfc_flux(i,j)
-      enddo
-    endif
-  endif
-  if (present(btm_flux)) then
-    if (convert_flux) then
-      do concurrent (j=js:je, i=is:ie)
-        btm_src(i,j) = (btm_flux(i,j)*dt) * GV%RZ_to_H
-      enddo
-    else
-      do concurrent (j=js:je, i=is:ie)
-        btm_src(i,j) = btm_flux(i,j)
-      enddo
-    endif
-  endif
+  do jsb=js,je,njj ; do isb=is,ie,nii
+    jeb = min(je, jsb+njj-1) ; ieb = min(ie, isb+nii-1)
 
-  if (present(sink_rate)) then
-    do concurrent (j=js:je)
-      ! Find the sinking rates at all interfaces, limiting them if necesary
-      ! so that the characteristics do not cross within a timestep.
-      !   If a non-constant sinking rate were used, that would be incorprated
-      ! here.
-      if (use_reservoir) then
-        do concurrent (i=is:ie) ; sink(i,j,nz+1) = sink_dist ; enddo
-        do k=2,nz ; do concurrent (i=is:ie)
-          sink(i,j,K) = sink_dist ; h_minus_dsink(i,j,k) = h_old(i,j,k)
-        enddo ; enddo
+    do concurrent (j=jsb:jeb, i=isb:ieb) DO_LOCALITY(local(ii, jj))
+      ii = i - isb + 1 ; jj = j - jsb + 1
+      sfc_src(ii,jj) = 0.0 ; btm_src(ii,jj) = 0.0
+    enddo
+    if (present(sfc_flux)) then
+      if (convert_flux) then
+        do concurrent (j=jsb:jeb, i=isb:ieb) DO_LOCALITY(local(ii, jj))
+          ii = i - isb + 1 ; jj = j - jsb + 1
+          sfc_src(ii,jj) = (sfc_flux(i,j)*dt) * GV%RZ_to_H
+        enddo
       else
-        do concurrent (i=is:ie) ; sink(i,j,nz+1) = 0.0 ; enddo
-        ! Find the limited sinking distance at the interfaces.
-        do k=nz,2,-1 ; do concurrent (i=is:ie)
-          if (sink(i,j,K+1) >= sink_dist) then
-            sink(i,j,K) = sink_dist
-            h_minus_dsink(i,j,k) = h_old(i,j,k) + (sink(i,j,K+1) - sink(i,j,K))
-          elseif (sink(i,j,K+1) + h_old(i,j,k) < sink_dist) then
-            sink(i,j,K) = sink(i,j,K+1) + h_old(i,j,k)
-            h_minus_dsink(i,j,k) = 0.0
-          else
-            sink(i,j,K) = sink_dist
-            h_minus_dsink(i,j,k) = (h_old(i,j,k) + sink(i,j,K+1)) - sink(i,j,K)
-          endif
-        enddo ; enddo
+        do concurrent (j=jsb:jeb, i=isb:ieb) DO_LOCALITY(local(ii, jj))
+          ii = i - isb + 1 ; jj = j - jsb + 1
+          sfc_src(ii,jj) = sfc_flux(i,j)
+        enddo
       endif
-      do concurrent (i=is:ie)
-        sink(i,j,1) = 0.0 ; h_minus_dsink(i,j,1) = (h_old(i,j,1) + sink(i,j,2))
+    endif
+    if (present(btm_flux)) then
+      if (convert_flux) then
+        do concurrent (j=jsb:jeb, i=isb:ieb) DO_LOCALITY(local(ii, jj))
+          ii = i - isb + 1 ; jj = j - jsb + 1
+          btm_src(ii,jj) = (btm_flux(i,j)*dt) * GV%RZ_to_H
+        enddo
+      else
+        do concurrent (j=jsb:jeb, i=isb:ieb) DO_LOCALITY(local(ii, jj))
+          ii = i - isb + 1 ; jj = j - jsb + 1
+          btm_src(ii,jj) = btm_flux(i,j)
+        enddo
+      endif
+    endif
+
+    if (present(sink_rate)) then
+      do concurrent (j=jsb:jeb) DO_LOCALITY(local(jj))
+        jj = j - jsb + 1
+        ! Find the sinking rates at all interfaces, limiting them if necesary
+        ! so that the characteristics do not cross within a timestep.
+        !   If a non-constant sinking rate were used, that would be incorprated
+        ! here.
+        if (use_reservoir) then
+          do concurrent (i=isb:ieb) DO_LOCALITY(local(ii))
+            ii = i - isb + 1
+            sink(ii,jj,nz+1) = sink_dist
+          enddo
+          do k=2,nz ; do concurrent (i=isb:ieb) DO_LOCALITY(local(ii))
+            ii = i - isb + 1
+            sink(ii,jj,K) = sink_dist ; h_minus_dsink(ii,jj,k) = h_old(i,j,k)
+          enddo ; enddo
+        else
+          do concurrent (i=isb:ieb) DO_LOCALITY(local(ii))
+            ii = i - isb + 1
+            sink(ii,jj,nz+1) = 0.0
+          enddo
+          ! Find the limited sinking distance at the interfaces.
+          do k=nz,2,-1 ; do concurrent (i=isb:ieb) DO_LOCALITY(local(ii))
+            ii = i - isb + 1
+            if (sink(ii,jj,K+1) >= sink_dist) then
+              sink(ii,jj,K) = sink_dist
+              h_minus_dsink(ii,jj,k) = h_old(i,j,k) + (sink(ii,jj,K+1) - sink(ii,jj,K))
+            elseif (sink(ii,jj,K+1) + h_old(i,j,k) < sink_dist) then
+              sink(ii,jj,K) = sink(ii,jj,K+1) + h_old(i,j,k)
+              h_minus_dsink(ii,jj,k) = 0.0
+            else
+              sink(ii,jj,K) = sink_dist
+              h_minus_dsink(ii,jj,k) = (h_old(i,j,k) + sink(ii,jj,K+1)) - sink(ii,jj,K)
+            endif
+          enddo ; enddo
+        endif
+        do concurrent (i=isb:ieb) DO_LOCALITY(local(ii))
+          ii = i - isb + 1
+          sink(ii,jj,1) = 0.0 ; h_minus_dsink(ii,jj,1) = (h_old(i,j,1) + sink(ii,jj,2))
+        enddo
+
+        ! Now solve the tridiagonal equation for the tracer concentrations.
+        do concurrent (i=isb:ieb, G%mask2dT(i,j) > 0.0) DO_LOCALITY(local(ii, b_denom_1, h_tr))
+          ii = i - isb + 1
+          b_denom_1 = h_minus_dsink(ii,jj,1) + ea(i,j,1) + h_neglect
+          b1(ii,jj) = 1.0 / (b_denom_1 + eb(i,j,1))
+          d1(ii,jj) = b_denom_1 * b1(ii,jj)
+          h_tr = h_old(i,j,1) + h_neglect
+          tr(i,j,1) = (b1(ii,jj)*h_tr)*tr(i,j,1) + b1(ii,jj)*sfc_src(ii,jj)
+        enddo
+        do k=2,nz-1 ; do concurrent (i=isb:ieb, G%mask2dT(i,j) > 0.0) DO_LOCALITY(local(ii, b_denom_1, h_tr))
+          ii = i - isb + 1
+          c1(ii,jj,k) = eb(i,j,k-1) * b1(ii,jj)
+          b_denom_1 = h_minus_dsink(ii,jj,k) + d1(ii,jj) * (ea(i,j,k) + sink(ii,jj,K)) + &
+                      h_neglect
+          b1(ii,jj) = 1.0 / (b_denom_1 + eb(i,j,k))
+          d1(ii,jj) = b_denom_1 * b1(ii,jj)
+          h_tr = h_old(i,j,k) + h_neglect
+          tr(i,j,k) = b1(ii,jj) * (h_tr * tr(i,j,k) + &
+                                   (ea(i,j,k) + sink(ii,jj,K)) * tr(i,j,k-1))
+        enddo ; enddo
+        do concurrent (i=isb:ieb, G%mask2dT(i,j) > 0.0) DO_LOCALITY(local(ii, b_denom_1, h_tr))
+          ii = i - isb + 1
+          c1(ii,jj,nz) = eb(i,j,nz-1) * b1(ii,jj)
+          b_denom_1 = h_minus_dsink(ii,jj,nz) + d1(ii,jj) * (ea(i,j,nz) + sink(ii,jj,nz)) + &
+                      h_neglect
+          b1(ii,jj) = 1.0 / (b_denom_1 + eb(i,j,nz))
+          h_tr = h_old(i,j,nz) + h_neglect
+          tr(i,j,nz) = b1(ii,jj) * ((h_tr * tr(i,j,nz) + btm_src(ii,jj)) + &
+                                    (ea(i,j,nz) + sink(ii,jj,nz)) * tr(i,j,nz-1))
+        enddo
+
+        do k=nz-1,1,-1 ; do concurrent (i=isb:ieb, G%mask2dT(i,j) > 0.0) DO_LOCALITY(local(ii))
+          ii = i - isb + 1
+          tr(i,j,k) = tr(i,j,k) + c1(ii,jj,k+1)*tr(i,j,k+1)
+        enddo ; enddo
       enddo
 
-      ! Now solve the tridiagonal equation for the tracer concentrations.
-      do concurrent (i=is:ie, G%mask2dT(i,j) > 0.0) DO_LOCALITY(local(b_denom_1, h_tr))
-        b_denom_1 = h_minus_dsink(i,j,1) + ea(i,j,1) + h_neglect
-        b1(i,j) = 1.0 / (b_denom_1 + eb(i,j,1))
-        d1(i,j) = b_denom_1 * b1(i,j)
-        h_tr = h_old(i,j,1) + h_neglect
-        tr(i,j,1) = (b1(i,j)*h_tr)*tr(i,j,1) + b1(i,j)*sfc_src(i,j)
-      enddo
-      do k=2,nz-1 ; do concurrent (i=is:ie, G%mask2dT(i,j) > 0.0) DO_LOCALITY(local(b_denom_1, h_tr))
-        c1(i,j,k) = eb(i,j,k-1) * b1(i,j)
-        b_denom_1 = h_minus_dsink(i,j,k) + d1(i,j) * (ea(i,j,k) + sink(i,j,K)) + &
-                    h_neglect
-        b1(i,j) = 1.0 / (b_denom_1 + eb(i,j,k))
-        d1(i,j) = b_denom_1 * b1(i,j)
-        h_tr = h_old(i,j,k) + h_neglect
-        tr(i,j,k) = b1(i,j) * (h_tr * tr(i,j,k) + &
-                               (ea(i,j,k) + sink(i,j,K)) * tr(i,j,k-1))
-      enddo ; enddo
-      do concurrent (i=is:ie, G%mask2dT(i,j) > 0.0) DO_LOCALITY(local(b_denom_1, h_tr))
-        c1(i,j,nz) = eb(i,j,nz-1) * b1(i,j)
-        b_denom_1 = h_minus_dsink(i,j,nz) + d1(i,j) * (ea(i,j,nz) + sink(i,j,nz)) + &
-                    h_neglect
-        b1(i,j) = 1.0 / (b_denom_1 + eb(i,j,nz))
-        h_tr = h_old(i,j,nz) + h_neglect
-        tr(i,j,nz) = b1(i,j) * ((h_tr * tr(i,j,nz) + btm_src(i,j)) + &
-                                (ea(i,j,nz) + sink(i,j,nz)) * tr(i,j,nz-1))
-      enddo
-
-      do k=nz-1,1,-1 ; do concurrent (i=is:ie, G%mask2dT(i,j) > 0.0)
-        tr(i,j,k) = tr(i,j,k) + c1(i,j,k+1)*tr(i,j,k+1)
-      enddo ; enddo
-    enddo
-
-    !   The bottom reservoir takes up the tracer that sinks out of the bottom layer.  This uses the
-    ! bottom layer concentration from the end of the downward sweep of the tridiagonal solver, which
-    ! the upward sweep does not change, so it can be done here after the solver is complete.
-    if (present(btm_reservoir)) then
-      do concurrent (j=js:je, i=is:ie, G%mask2dT(i,j) > 0.0)
-        btm_reservoir(i,j) = btm_reservoir(i,j) + (sink(i,j,nz+1)*tr(i,j,nz)) * GV%H_to_RZ
+      !   The bottom reservoir takes up the tracer that sinks out of the bottom layer.  This uses the
+      ! bottom layer concentration from the end of the downward sweep of the tridiagonal solver, which
+      ! the upward sweep does not change, so it can be done here after the solver is complete.
+      if (present(btm_reservoir)) then
+        do concurrent (j=jsb:jeb, i=isb:ieb, G%mask2dT(i,j) > 0.0) DO_LOCALITY(local(ii, jj))
+          ii = i - isb + 1 ; jj = j - jsb + 1
+          btm_reservoir(i,j) = btm_reservoir(i,j) + (sink(ii,jj,nz+1)*tr(i,j,nz)) * GV%H_to_RZ
+        enddo
+      endif
+    else
+      do concurrent (j=jsb:jeb) DO_LOCALITY(local(jj))
+        jj = j - jsb + 1
+        do concurrent (i=isb:ieb, G%mask2dT(i,j) > 0.0) DO_LOCALITY(local(ii, b_denom_1, h_tr))
+          ii = i - isb + 1
+          h_tr = h_old(i,j,1) + h_neglect
+          b_denom_1 = h_tr + ea(i,j,1)
+          b1(ii,jj) = 1.0 / (b_denom_1 + eb(i,j,1))
+          d1(ii,jj) = h_tr * b1(ii,jj)
+          tr(i,j,1) = (b1(ii,jj)*h_tr)*tr(i,j,1) + b1(ii,jj)*sfc_src(ii,jj)
+        enddo
+        do k=2,nz-1 ; do concurrent (i=isb:ieb, G%mask2dT(i,j) > 0.0) DO_LOCALITY(local(ii, b_denom_1, h_tr))
+          ii = i - isb + 1
+          c1(ii,jj,k) = eb(i,j,k-1) * b1(ii,jj)
+          h_tr = h_old(i,j,k) + h_neglect
+          b_denom_1 = h_tr + d1(ii,jj) * ea(i,j,k)
+          b1(ii,jj) = 1.0 / (b_denom_1 + eb(i,j,k))
+          d1(ii,jj) = b_denom_1 * b1(ii,jj)
+          tr(i,j,k) = b1(ii,jj) * (h_tr * tr(i,j,k) + ea(i,j,k) * tr(i,j,k-1))
+        enddo ; enddo
+        do concurrent (i=isb:ieb, G%mask2dT(i,j) > 0.0) DO_LOCALITY(local(ii, b_denom_1, h_tr))
+          ii = i - isb + 1
+          c1(ii,jj,nz) = eb(i,j,nz-1) * b1(ii,jj)
+          h_tr = h_old(i,j,nz) + h_neglect
+          b_denom_1 = h_tr + d1(ii,jj)*ea(i,j,nz)
+          b1(ii,jj) = 1.0 / ( b_denom_1 + eb(i,j,nz))
+          tr(i,j,nz) = b1(ii,jj) * (( h_tr * tr(i,j,nz) + btm_src(ii,jj)) + &
+                                    ea(i,j,nz) * tr(i,j,nz-1))
+        enddo
+        do k=nz-1,1,-1 ; do concurrent (i=isb:ieb, G%mask2dT(i,j) > 0.0) DO_LOCALITY(local(ii))
+          ii = i - isb + 1
+          tr(i,j,k) = tr(i,j,k) + c1(ii,jj,k+1)*tr(i,j,k+1)
+        enddo ; enddo
       enddo
     endif
-  else
-    do concurrent (j=js:je)
-      do concurrent (i=is:ie, G%mask2dT(i,j) > 0.0) DO_LOCALITY(local(b_denom_1, h_tr))
-        h_tr = h_old(i,j,1) + h_neglect
-        b_denom_1 = h_tr + ea(i,j,1)
-        b1(i,j) = 1.0 / (b_denom_1 + eb(i,j,1))
-        d1(i,j) = h_tr * b1(i,j)
-        tr(i,j,1) = (b1(i,j)*h_tr)*tr(i,j,1) + b1(i,j)*sfc_src(i,j)
-      enddo
-      do k=2,nz-1 ; do concurrent (i=is:ie, G%mask2dT(i,j) > 0.0) DO_LOCALITY(local(b_denom_1, h_tr))
-        c1(i,j,k) = eb(i,j,k-1) * b1(i,j)
-        h_tr = h_old(i,j,k) + h_neglect
-        b_denom_1 = h_tr + d1(i,j) * ea(i,j,k)
-        b1(i,j) = 1.0 / (b_denom_1 + eb(i,j,k))
-        d1(i,j) = b_denom_1 * b1(i,j)
-        tr(i,j,k) = b1(i,j) * (h_tr * tr(i,j,k) + ea(i,j,k) * tr(i,j,k-1))
-      enddo ; enddo
-      do concurrent (i=is:ie, G%mask2dT(i,j) > 0.0) DO_LOCALITY(local(b_denom_1, h_tr))
-        c1(i,j,nz) = eb(i,j,nz-1) * b1(i,j)
-        h_tr = h_old(i,j,nz) + h_neglect
-        b_denom_1 = h_tr + d1(i,j)*ea(i,j,nz)
-        b1(i,j) = 1.0 / ( b_denom_1 + eb(i,j,nz))
-        tr(i,j,nz) = b1(i,j) * (( h_tr * tr(i,j,nz) + btm_src(i,j)) + &
-                                ea(i,j,nz) * tr(i,j,nz-1))
-      enddo
-      do k=nz-1,1,-1 ; do concurrent (i=is:ie, G%mask2dT(i,j) > 0.0)
-        tr(i,j,k) = tr(i,j,k) + c1(i,j,k+1)*tr(i,j,k+1)
-      enddo ; enddo
-    enddo
-  endif
+  enddo ; enddo ! ij block loop
 
   !$omp target exit data map(from: btm_reservoir) if(present(btm_reservoir))
   !$omp target exit data map(release: btm_flux) if(present(btm_flux))
   !$omp target exit data map(release: sfc_flux) if(present(sfc_flux))
   !$omp target exit data map(delete: sfc_src, btm_src, b1, d1, c1, h_minus_dsink, sink)
 
-end subroutine tracer_vertdiff
+end subroutine tracer_vertdiff_block
 
 
 !> This subroutine solves a tridiagonal equation for the final tracer concentrations after
@@ -648,4 +746,45 @@ subroutine applyTracerBoundaryFluxesInOut(G, GV, Tr, dt, fluxes, h, evap_CFL_lim
   !$omp target exit data map(delete: in_flux, out_flux, hGround)
 
 end subroutine applyTracerBoundaryFluxesInOut
+
+!> Read the run-time parameters that set the block sizes used by tracer_vertdiff.
+subroutine tracer_diabatic_init(param_file, CS)
+  type(param_file_type),    intent(in) :: param_file !< A structure to parse for run-time parameters
+  type(tracer_diabatic_CS), pointer    :: CS         !< The control structure for this module
+
+  ! This include declares and sets the variable "version".
+# include "version_variable.h"
+  character(len=40) :: mdl = "MOM_tracer_diabatic" ! This module's name.
+
+  if (associated(CS)) then
+    call MOM_error(WARNING, "tracer_diabatic_init called with an associated control structure.")
+    return
+  endif
+  allocate(CS)
+
+  call log_version(param_file, mdl, version, "")
+  call get_param(param_file, mdl, "TRACER_DIABATIC_NIBLOCK", CS%niblock, &
+                 "The i-direction block size used in the tracer vertical diffusion calculations. "//&
+                 "The default 0 setting is dynamic and fits the "//&
+                 "full computational i-domain length.", default=default_niblock, layoutParam=.true.)
+  call get_param(param_file, mdl, "TRACER_DIABATIC_NJBLOCK", CS%njblock, &
+                 "The j-direction block size used in the tracer vertical diffusion calculations. "//&
+                 "The default 0 setting is dynamic and fits the "//&
+                 "full computational j-domain length.", default=default_njblock, layoutParam=.true.)
+  if (CS%niblock < 0) &
+    call MOM_error(FATAL, "MOM_tracer_diabatic, tracer_diabatic_init: "//&
+                          "TRACER_DIABATIC_NIBLOCK must be nonnegative; use 0 to select the default block size.")
+  if (CS%njblock < 0) &
+    call MOM_error(FATAL, "MOM_tracer_diabatic, tracer_diabatic_init: "//&
+                          "TRACER_DIABATIC_NJBLOCK must be nonnegative; use 0 to select the default block size.")
+
+end subroutine tracer_diabatic_init
+
+!> Deallocate the control structure for this module.
+subroutine tracer_diabatic_end(CS)
+  type(tracer_diabatic_CS), pointer :: CS !< The control structure for this module
+
+  if (associated(CS)) deallocate(CS)
+
+end subroutine tracer_diabatic_end
 end module MOM_tracer_diabatic

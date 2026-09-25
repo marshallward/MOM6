@@ -20,7 +20,7 @@ use MOM_spatial_means, only : global_mass_int_EFP
 use MOM_sponge, only : set_up_sponge_field, sponge_CS
 use MOM_time_manager, only : time_type, time_to_real
 use MOM_tracer_registry, only : register_tracer, tracer_registry_type
-use MOM_tracer_diabatic, only : tracer_vertdiff, applyTracerBoundaryFluxesInOut
+use MOM_tracer_diabatic, only : tracer_vertdiff, applyTracerBoundaryFluxesInOut, tracer_diabatic_CS
 use MOM_tracer_Z_init, only : tracer_Z_init
 use MOM_unit_scaling, only : unit_scale_type
 use MOM_variables, only : surface
@@ -299,7 +299,7 @@ end subroutine initialize_ideal_age_tracer
 
 !> Applies diapycnal diffusion, aging and regeneration at the surface to the ideal age tracers
 subroutine ideal_age_tracer_column_physics(h_old, h_new, ea, eb, fluxes, dt, G, GV, US, CS, &
-              evap_CFL_limit, minimum_forcing_depth, Hbl)
+              evap_CFL_limit, minimum_forcing_depth, Hbl, tracer_diabatic_CSp)
   type(ocean_grid_type),   intent(in) :: G    !< The ocean's grid structure
   type(verticalGrid_type), intent(in) :: GV   !< The ocean's vertical grid structure
   real, dimension(SZI_(G),SZJ_(G),SZK_(GV)), &
@@ -325,6 +325,8 @@ subroutine ideal_age_tracer_column_physics(h_old, h_new, ea, eb, fluxes, dt, G, 
   real,          optional, intent(in) :: minimum_forcing_depth !< The smallest depth over which
                                               !! fluxes can be applied [H ~> m or kg m-2]
   real, dimension(SZI_(G),SZJ_(G)), optional, intent(in) :: Hbl !< Boundary layer thickness [H ~> m or kg m-2]
+  type(tracer_diabatic_CS), optional, intent(in) :: tracer_diabatic_CSp !< The control structure for the
+                                              !! tracer vertical diffusion, with its block sizes
 
 !   This subroutine applies diapycnal diffusion and any other column
 ! tracer physics or chemistry to the tracers from this file.
@@ -371,7 +373,7 @@ subroutine ideal_age_tracer_column_physics(h_old, h_new, ea, eb, fluxes, dt, G, 
       enddo
       call applyTracerBoundaryFluxesInOut(G, GV, CS%tr(:,:,:,m), dt, fluxes, h_work, &
                                           evap_CFL_limit, minimum_forcing_depth)
-      call tracer_vertdiff(h_work, ea, eb, dt, CS%tr(:,:,:,m), G, GV)
+      call tracer_vertdiff(h_work, ea, eb, dt, CS%tr(:,:,:,m), G, GV, CS=tracer_diabatic_CSp)
     enddo
     !$omp target exit data if(associated(fluxes%netMassOut)) map(release: fluxes%netMassOut)
     !$omp target exit data if(associated(fluxes%netMassIn)) map(release: fluxes%netMassIn)
@@ -382,7 +384,7 @@ subroutine ideal_age_tracer_column_physics(h_old, h_new, ea, eb, fluxes, dt, G, 
     !   h_old, ea and eb are mapped to the device by the caller.
     !$omp target enter data map(to: CS%tr)
     do m=1,CS%ntr
-      call tracer_vertdiff(h_old, ea, eb, dt, CS%tr(:,:,:,m), G, GV)
+      call tracer_vertdiff(h_old, ea, eb, dt, CS%tr(:,:,:,m), G, GV, CS=tracer_diabatic_CSp)
     enddo
     !$omp target exit data map(from: CS%tr)
   endif

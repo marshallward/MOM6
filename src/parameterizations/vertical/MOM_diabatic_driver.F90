@@ -70,7 +70,7 @@ use MOM_sponge,              only : apply_sponge, sponge_CS
 use MOM_ALE_sponge,          only : apply_ALE_sponge, ALE_sponge_CS
 use MOM_time_manager,        only : time_type, real_to_time, operator(-), operator(<=)
 use MOM_tracer_flow_control, only : call_tracer_column_fns, tracer_flow_control_CS, extract_tracer_flow_member
-use MOM_tracer_diabatic,     only : tracer_vertdiff, tracer_vertdiff_Eulerian
+use MOM_tracer_diabatic,     only : tracer_vertdiff, tracer_vertdiff_Eulerian, tracer_diabatic_CS
 use MOM_unit_scaling,        only : unit_scale_type
 use MOM_variables,           only : thermo_var_ptrs, vertvisc_type, accel_diag_ptrs
 use MOM_variables,           only : cont_diag_ptrs, MOM_thermovar_chksum, p3d
@@ -2177,6 +2177,7 @@ subroutine layered_diabatic(u, v, h, tv, BLD, fluxes, visc, ADp, CDp, dt, Time_e
   integer :: dir_flag     ! An integer encoding the directions in which to do halo updates.
   logical :: showCallTree ! If true, show the call tree
   integer, dimension(2) :: EOSdom ! The i-computational domain for the equation of state
+  type(tracer_diabatic_CS), pointer :: tracer_diabatic_CSp ! The block sizes used by tracer_vertdiff
   integer :: i, j, k, is, ie, js, je, Isq, Ieq, Jsq, Jeq, nz, nkmb, halo
 
   is   = G%isc  ; ie  = G%iec  ; js  = G%jsc  ; je  = G%jec ; nz = GV%ke
@@ -2622,8 +2623,9 @@ subroutine layered_diabatic(u, v, h, tv, BLD, fluxes, visc, ADp, CDp, dt, Time_e
         if (CS%tracer_tridiag) then
           !$omp target enter data map(to: hold, ea, eb)
           !$omp target enter data map(to: tv, tv%T, tv%S)
-          call tracer_vertdiff(hold, ea, eb, dt, tv%T, G, GV)
-          call tracer_vertdiff(hold, ea, eb, dt, tv%S, G, GV)
+          call extract_tracer_flow_member(CS%tracer_flow_CSp, tracer_diabatic_CSp=tracer_diabatic_CSp)
+          call tracer_vertdiff(hold, ea, eb, dt, tv%T, G, GV, CS=tracer_diabatic_CSp)
+          call tracer_vertdiff(hold, ea, eb, dt, tv%S, G, GV, CS=tracer_diabatic_CSp)
           !$omp target exit data map(delete: hold, ea, eb)
           !$omp target update from(tv%T, tv%S)
           !$omp target exit data map(release: tv%T, tv%S, tv)
@@ -2722,8 +2724,9 @@ subroutine layered_diabatic(u, v, h, tv, BLD, fluxes, visc, ADp, CDp, dt, Time_e
       if (CS%tracer_tridiag) then
         !$omp target enter data map(to: hold, ea, eb)
         !$omp target enter data map(to: tv, tv%T, tv%S)
-        call tracer_vertdiff(hold, ea, eb, dt, tv%T, G, GV)
-        call tracer_vertdiff(hold, ea, eb, dt, tv%S, G, GV)
+        call extract_tracer_flow_member(CS%tracer_flow_CSp, tracer_diabatic_CSp=tracer_diabatic_CSp)
+        call tracer_vertdiff(hold, ea, eb, dt, tv%T, G, GV, CS=tracer_diabatic_CSp)
+        call tracer_vertdiff(hold, ea, eb, dt, tv%S, G, GV, CS=tracer_diabatic_CSp)
         !$omp target exit data map(delete: hold, ea, eb)
         !$omp target update from(tv%T, tv%S)
         !$omp target exit data map(release: tv%T, tv%S, tv)

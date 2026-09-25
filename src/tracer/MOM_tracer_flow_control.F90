@@ -19,6 +19,7 @@ use MOM_open_boundary, only : ocean_OBC_type
 use MOM_restart,       only : MOM_restart_CS
 use MOM_sponge,        only : sponge_CS
 use MOM_ALE_sponge,    only : ALE_sponge_CS
+use MOM_tracer_diabatic, only : tracer_diabatic_CS, tracer_diabatic_init, tracer_diabatic_end
 use MOM_tracer_registry, only : tracer_registry_type
 use MOM_unit_scaling,  only : unit_scale_type
 use MOM_variables,     only : surface, thermo_var_ptrs
@@ -122,6 +123,8 @@ type, public :: tracer_flow_control_CS ; private
   type(dyed_obc_tracer_CS), pointer :: dyed_obc_tracer_CSp => NULL()
   type(nw2_tracers_CS), pointer :: nw2_tracers_CSp => NULL()
   !>@}
+  type(tracer_diabatic_CS), pointer :: tracer_diabatic_CSp => NULL() !< The control structure with the block
+                                               !! sizes used by the tracer vertical diffusion
 end type tracer_flow_control_CS
 
 contains
@@ -327,6 +330,8 @@ subroutine tracer_flow_control_init(restart, day, G, GV, US, h, param_file, diag
   if (.not. associated(CS)) call MOM_error(FATAL, "tracer_flow_control_init: "// &
          "Module must be initialized via call_tracer_register before it is used.")
 
+  call tracer_diabatic_init(param_file, CS%tracer_diabatic_CSp)
+
 !  Add other user-provided calls here.
   if (CS%use_USER_tracer_example) &
     call USER_initialize_tracer(restart, day, G, GV, US, h, diag, OBC, CS%USER_tracer_example_CSp, &
@@ -419,13 +424,17 @@ end subroutine get_chl_from_model
 
 !> Returns pointers or values of members within the tracer_flow_control_CS type. For extensibility,
 !! each returned argument is an optional argument
-subroutine extract_tracer_flow_member(CS, use_MARBL_tracers)
+subroutine extract_tracer_flow_member(CS, use_MARBL_tracers, tracer_diabatic_CSp)
   type(tracer_flow_control_CS), target, intent(in)  :: CS !< module control structure
   ! All output arguments are optional
   logical,                    optional, intent(out) :: use_MARBL_tracers  !< If true, MARBL tracers are active
+  type(tracer_diabatic_CS), optional, pointer       :: tracer_diabatic_CSp !< The control structure with the
+                                                                  !! block sizes used by tracer_vertdiff
 
   ! Constants within tracer_flow_control_CS
   if (present(use_MARBL_tracers)) use_MARBL_tracers = CS%use_MARBL_tracers
+  ! Pointers to control structures
+  if (present(tracer_diabatic_CSp)) tracer_diabatic_CSp => CS%tracer_diabatic_CSp
 end subroutine extract_tracer_flow_member
 
 !> This subroutine calls the individual tracer modules' subroutines to
@@ -543,7 +552,8 @@ subroutine call_tracer_column_fns(h_old, h_new, ea, eb, fluxes, mld, dt, G, GV, 
       call ideal_age_tracer_column_physics(h_old, h_new, ea, eb, fluxes, dt, &
                                            G, GV, US, CS%ideal_age_tracer_CSp, &
                                            evap_CFL_limit=evap_CFL_limit, &
-                                           minimum_forcing_depth=minimum_forcing_depth, Hbl=Hbl)
+                                           minimum_forcing_depth=minimum_forcing_depth, Hbl=Hbl, &
+                                           tracer_diabatic_CSp=CS%tracer_diabatic_CSp)
     endif
     if (CS%use_MARBL_tracers) then
       if ((.not. present(prediabatic_T)) .or. (.not. present(prediabatic_S))) &
@@ -637,7 +647,8 @@ subroutine call_tracer_column_fns(h_old, h_new, ea, eb, fluxes, mld, dt, G, GV, 
         call convert_MLD_to_ML_thickness(mld, h_new, Hbl, tv, G, GV)
       endif
       call ideal_age_tracer_column_physics(h_old, h_new, ea, eb, fluxes, dt, &
-                                           G, GV, US, CS%ideal_age_tracer_CSp, Hbl=Hbl)
+                                           G, GV, US, CS%ideal_age_tracer_CSp, Hbl=Hbl, &
+                                           tracer_diabatic_CSp=CS%tracer_diabatic_CSp)
     endif
     if (CS%use_MARBL_tracers) then
       if ((.not. present(prediabatic_T)) .or. (.not. present(prediabatic_S))) &
@@ -965,6 +976,7 @@ subroutine tracer_flow_control_end(CS)
   if (CS%use_boundary_impulse_tracer) call boundary_impulse_tracer_end(CS%boundary_impulse_tracer_CSp)
   if (CS%use_dyed_obc_tracer) call dyed_obc_tracer_end(CS%dyed_obc_tracer_CSp)
   if (CS%use_nw2_tracers) call nw2_tracers_end(CS%nw2_tracers_CSp)
+  call tracer_diabatic_end(CS%tracer_diabatic_CSp)
 
   if (associated(CS)) deallocate(CS)
 end subroutine tracer_flow_control_end
