@@ -2,6 +2,8 @@
 ! See the LICENSE file for licensing information.
 ! SPDX-License-Identifier: Apache-2.0
 
+#include "do_concurrent_compat.h"
+
 !> The central module of the MOM6 ocean model
 module MOM
 
@@ -4710,34 +4712,55 @@ subroutine extract_surface_state(CS, sfc_state_in)
   if (allocated(sfc_state%ocean_mass) .and. allocated(sfc_state%ocean_heat) .and. &
       allocated(sfc_state%ocean_salt)) then
     do concurrent (j=js:je, i=is:ie)
-      sfc_state%ocean_mass(i,j) = 0.0
-      sfc_state%ocean_heat(i,j) = 0.0 ; sfc_state%ocean_salt(i,j) = 0.0
+      sfc_state%ocean_mass(i,j) = 0.
+      sfc_state%ocean_heat(i,j) = 0.
+      sfc_state%ocean_salt(i,j) = 0.
     enddo
-    do concurrent (j=js:je, k=1:nz, i=is:ie)
-      mass = GV%H_to_RZ*h(i,j,k)
-      sfc_state%ocean_mass(i,j) = sfc_state%ocean_mass(i,j) + mass
-      sfc_state%ocean_heat(i,j) = sfc_state%ocean_heat(i,j) + mass * CS%tv%T(i,j,k)
-      sfc_state%ocean_salt(i,j) = sfc_state%ocean_salt(i,j) + mass * (1.0e-3*CS%tv%S(i,j,k))
+
+    do concurrent (j=js:je, i=is:ie) DO_LOCALITY(local(k, mass))
+      do k=1,nz
+        mass = GV%H_to_RZ * h(i,j,k)
+        sfc_state%ocean_mass(i,j) = sfc_state%ocean_mass(i,j) + mass
+        sfc_state%ocean_heat(i,j) = sfc_state%ocean_heat(i,j) + mass * CS%tv%T(i,j,k)
+        sfc_state%ocean_salt(i,j) = sfc_state%ocean_salt(i,j) + mass * (1e-3 * CS%tv%S(i,j,k))
+      enddo
     enddo
   else
     if (allocated(sfc_state%ocean_mass)) then
-      do concurrent (j=js:je, i=is:ie) ; sfc_state%ocean_mass(i,j) = 0.0 ; enddo
-      do concurrent (j=js:je, k=1:nz, i=is:ie)
-        sfc_state%ocean_mass(i,j) = sfc_state%ocean_mass(i,j) + GV%H_to_RZ*h(i,j,k)
+      do concurrent (j=js:je, i=is:ie)
+        sfc_state%ocean_mass(i,j) = 0.
+      enddo
+
+      do concurrent (j=js:je, i=is:ie) DO_LOCALITY(local(k))
+        do k=1,nz
+          sfc_state%ocean_mass(i,j) = sfc_state%ocean_mass(i,j) + GV%H_to_RZ * h(i,j,k)
+        enddo
       enddo
     endif
+
     if (allocated(sfc_state%ocean_heat)) then
-      do concurrent (j=js:je, i=is:ie) ; sfc_state%ocean_heat(i,j) = 0.0 ; enddo
-      do concurrent (j=js:je, k=1:nz, i=is:ie)
-        mass = GV%H_to_RZ*h(i,j,k)
-        sfc_state%ocean_heat(i,j) = sfc_state%ocean_heat(i,j) + mass * CS%tv%T(i,j,k)
+      do concurrent (j=js:je, i=is:ie)
+        sfc_state%ocean_heat(i,j) = 0.
+      enddo
+
+      do concurrent (j=js:je, i=is:ie) DO_LOCALITY(local(k, mass))
+        do k=1,nz
+          mass = GV%H_to_RZ * h(i,j,k)
+          sfc_state%ocean_heat(i,j) = sfc_state%ocean_heat(i,j) + mass * CS%tv%T(i,j,k)
+        enddo
       enddo
     endif
+
     if (allocated(sfc_state%ocean_salt)) then
-      do concurrent (j=js:je, i=is:ie) ; sfc_state%ocean_salt(i,j) = 0.0 ; enddo
-      do concurrent (j=js:je, k=1:nz, i=is:ie)
-        mass = GV%H_to_RZ*h(i,j,k)
-        sfc_state%ocean_salt(i,j) = sfc_state%ocean_salt(i,j) + mass * (1.0e-3*CS%tv%S(i,j,k))
+      do concurrent (j=js:je, i=is:ie)
+        sfc_state%ocean_salt(i,j) = 0.
+      enddo
+
+      do concurrent (j=js:je, i=is:ie) DO_LOCALITY(local(k, mass))
+        do k=1,nz
+          mass = GV%H_to_RZ*h(i,j,k)
+          sfc_state%ocean_salt(i,j) = sfc_state%ocean_salt(i,j) + mass * (1e-3 * CS%tv%S(i,j,k))
+        enddo
       enddo
     endif
   endif
