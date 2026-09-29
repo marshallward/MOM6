@@ -9,7 +9,6 @@ use MOM_cpu_clock,      only : cpu_clock_id, cpu_clock_begin, cpu_clock_end, CLO
 use MOM_coms,           only : EFP_type, real_to_EFP, EFP_to_real, operator(+), assignment(=), EFP_sum_across_PEs
 use MOM_debugging,      only : hchksum
 use MOM_diag_mediator,  only : post_data, register_diag_field, safe_alloc_alloc
-use MOM_diag_mediator,  only : post_data_3d_by_column, post_data_3d_final
 use MOM_diag_mediator,  only : time_type, diag_ctrl
 use MOM_domains,        only : create_group_pass, do_group_pass, group_pass_type
 use MOM_error_handler,  only : MOM_error, FATAL, WARNING, MOM_mesg
@@ -440,6 +439,7 @@ subroutine energetic_PBL(h_3d, u_3d, v_3d, tv, fluxes, visc, dt, Kd_int, G, GV, 
 
   ! The following variables are used for diagnostics
   real, dimension(SZI_(G),SZJ_(G),SZK_(GV)+1) :: &
+    diag_Kd_ePBL_col_by_col, & ! The ePBL diffusivity before BBL additions [H Z T-1 ~> m2 s-1 or kg m-1 s-1].
     diag_Velocity_Scale, & ! The velocity scale used in getting Kd [Z T-1 ~> m s-1]
     diag_Mixing_Length, &  ! The length scale used in getting Kd [Z ~> m]
     Kd_BBL_3d, &           ! The bottom boundary layer diffusivities [H Z T-1 ~> m2 s-1 or kg m-1 s-1]
@@ -481,6 +481,57 @@ subroutine energetic_PBL(h_3d, u_3d, v_3d, tv, fluxes, visc, dt, Kd_int, G, GV, 
   type(energetic_PBL_CS)  :: CS_tmp1, CS_tmp2 ! Copies of the energetic PBL control structure that
                                        ! can be modified to test for sensitivities
   logical :: BBL_mixing ! If true, there is bottom boundary layer mixing.
+  real, dimension(WSZK_(SZK_(GV))) :: &
+    h, &            ! The layer thickness [H ~> m or kg m-2].
+    dz, &           ! The vertical distance across layers [Z ~> m].
+    T0, &           ! The initial layer temperatures [C ~> degC].
+    S0, &           ! The initial layer salinities [S ~> ppt].
+    dSV_dT_1d, &    ! The partial derivatives of specific volume with temperature [R-1 C-1 ~> m3 kg-1 degC-1].
+    dSV_dS_1d, &    ! The partial derivatives of specific volume with salinity [R-1 S-1 ~> m3 kg-1 ppt-1].
+    TKE_forcing, &  ! Forcing of the TKE in the layer coming from TKE_forced [R Z3 T-2 ~> J m-2].
+    u, &            ! The zonal velocity [L T-1 ~> m s-1].
+    v               ! The meridional velocity [L T-1 ~> m s-1].
+  real, dimension(WSZKI_(SZK_(GV))) :: &
+    Kd, &           ! The diapycnal diffusivity due to ePBL [H Z T-1 ~> m2 s-1 or kg m-1 s-1].
+    mixvel, &       ! A turbulent mixing velocity [Z T-1 ~> m s-1].
+    mixlen, &       ! A turbulent mixing length [Z ~> m].
+    mixvel_BBL, &   ! A bottom boundary layer turbulent mixing velocity [Z T-1 ~> m s-1].
+    mixlen_BBL, &   ! A bottom boundary layer turbulent mixing length [Z ~> m].
+    Kd_BBL, &       ! The bottom boundary layer diapycnal diffusivity [H Z T-1 ~> m2 s-1 or kg m-1 s-1].
+    SpV_dt, &       ! Specific volume interpolated to interfaces divided by dt or 1.0 / (dt * Rho0),
+                    ! in [R-1 T-1 ~> m3 kg-1 s-1], used to convert local TKE into a turbulence velocity cubed.
+    SpV_dt_cf       ! Specific volume interpolated to interfaces divided by dt or 1.0 / (dt * Rho0)
+                    ! times conversion factors for answer dates before 20240101 in
+                    ! [m3 Z-3 R-1 T2 s-3 ~> m3 kg-1 s-1] or without the conversion factors for
+                    ! answer dates of 20240101 and later in [R-1 T-1 ~> m3 kg-1 s-1], used to
+                    ! convert local TKE into a turbulence velocity cubed.
+  real, dimension(WSZKI_(SZK_(GV))) :: &
+    Kd_1, Kd_2      ! Diapycnal diffusivities found with different ePBL options [H Z T-1 ~> m2 s-1 or kg m-1 s-1].
+  real :: SpV_dt_tmp(WSZKI_(SZK_(GV)))  ! Specific volume interpolated to interfaces divided by dt or 1.0 / (dt * Rho0)
+                    ! times conversion factors for answer dates before 20240101 in
+                    ! [m3 Z-3 R-1 T2 s-3 ~> m3 kg-1 s-1] or without the conversion factors for
+                    ! answer dates of 20240101 and later in [R-1 T-1 ~> m3 kg-1 s-1], used to
+                    ! convert local TKE into a turbulence velocity cubed.
+  real :: absf      ! The absolute value of f [T-1 ~> s-1].
+  real :: U_star    ! The surface friction velocity [Z T-1 ~> m s-1].
+  real :: U_Star_Mean ! The surface friction without gustiness [Z T-1 ~> m s-1].
+  real :: mech_TKE  ! The mechanically generated turbulent kinetic energy available for mixing over a
+                    ! timestep before the application of the efficiency in mstar [R Z3 T-2 ~> J m-2].
+  real :: u_star_BBL ! The bottom boundary layer friction velocity [H T-1 ~> m s-1 or kg m-2 s-1].
+  real :: u_star_BBL_z_t ! The bottom boundary layer friction velocity converted to Z T-1 [Z T-1 ~> m s-1].
+  real :: BBL_TKE   ! The mechanically generated turbulent kinetic energy available for bottom
+                    ! boundary layer mixing within a timestep [R Z3 T-2 ~> J m-2].
+  real :: B_Flux    ! The surface buoyancy flux [Z2 T-3 ~> m2 s-3].
+  real :: MLD_io    ! The mixed layer depth found by ePBL_column [Z ~> m].
+  real :: BBLD_io   ! The bottom boundary layer thickness found by ePBL_BBL_column [Z ~> m].
+  real :: MLD_in    ! The first guess at the mixed layer depth [Z ~> m].
+  real :: BBLD_in   ! The first guess at the bottom boundary layer thickness [Z ~> m].
+  real :: BLD_1, BLD_2  ! Surface or bottom boundary layer depths found with different ePBL_column options [Z ~> m].
+  type(ePBL_column_diags) :: eCD     ! A container for passing around diagnostics.
+  type(ePBL_column_diags) :: eCD_tmp ! A container for not passing around diagnostics.
+  integer, dimension(SZI_(G),SZJ_(G)) :: &
+    OBL_its_col, OBL_count_col, & ! The surface boundary layer iteration count and column count [nondim].
+    BBL_its_col, BBL_count_col    ! The bottom boundary layer iteration count and column count [nondim].
   integer :: i, j, k, is, ie, js, je, nz, ii, jj, iie, jje
   integer :: isb, jsb, ieb, jeb, nii, njj
 
@@ -526,6 +577,11 @@ subroutine energetic_PBL(h_3d, u_3d, v_3d, tv, fluxes, visc, dt, Kd_int, G, GV, 
   endif
   if (CS%debug .or. (CS%id_Mixing_Length>0)) diag_Mixing_Length(:,:,:) = 0.0
   if (CS%debug .or. (CS%id_Velocity_Scale>0)) diag_Velocity_Scale(:,:,:) = 0.0
+  if (CS%id_Kd_ePBL_col_by_col > 0) diag_Kd_ePBL_col_by_col(:,:,:) = 0.0
+  if (report_avg_its) then
+    OBL_its_col(:,:) = 0 ; OBL_count_col(:,:) = 0
+    BBL_its_col(:,:) = 0 ; BBL_count_col(:,:) = 0
+  endif
   if (BBL_mixing) then
     if (CS%debug .or. (CS%id_BBL_Mix_Length>0)) BBL_Mix_Length(:,:,:) = 0.0
     if (CS%debug .or. (CS%id_BBL_Vel_Scale>0)) BBL_Vel_Scale(:,:,:) = 0.0
@@ -591,11 +647,216 @@ subroutine energetic_PBL(h_3d, u_3d, v_3d, tv, fluxes, visc, dt, Kd_int, G, GV, 
 
     do jj=1,jje ; do ii=1,iie
       j = jsb+jj-1 ; i = isb+ii-1
-      call energetic_PBL_driver_column(i, j, ii, jj)
+      SpV_dt(:) = 0.0
+      if ((dt > 0.0) .and. GV%Boussinesq .or. .not.allocated(tv%SpV_avg)) then
+        if (CS%answer_date < 20240101) then
+          do K=1,nz+1 ; SpV_dt(K) = 1.0 / (dt*GV%Rho0) ; enddo
+        else
+          do K=1,nz+1 ; SpV_dt(K) = I_rho0dt ; enddo
+        endif
+      endif
+
+      if (G%mask2dT(i,j) > 0.0) then
+        do k=1,nz
+          h(k) = h_blk(ii,jj,k) ; dz(k) = dz_blk(ii,jj,k)
+          u(k) = u_blk(ii,jj,k) ; v(k) = v_blk(ii,jj,k)
+          T0(k) = T0_blk(ii,jj,k) ; S0(k) = S0_blk(ii,jj,k) ; TKE_forcing(k) = TKE_forcing_blk(ii,jj,k)
+          dSV_dT_1d(k) = dSV_dT_blk(ii,jj,k) ; dSV_dS_1d(k) = dSV_dS_blk(ii,jj,k)
+        enddo
+        do K=1,nz+1 ; Kd(K) = 0.0 ; enddo
+
+        if (associated(fluxes%ustar) .and. (GV%Boussinesq .or. .not.associated(fluxes%tau_mag))) then
+          u_star = fluxes%ustar(i,j)
+          u_star_Mean = fluxes%ustar_gustless(i,j)
+          mech_TKE = dt * GV%Rho0 * u_star**3
+        elseif (allocated(tv%SpV_avg)) then
+          u_star = sqrt(fluxes%tau_mag(i,j) * tv%SpV_avg(i,j,1))
+          u_star_Mean = sqrt(fluxes%tau_mag_gustless(i,j) * tv%SpV_avg(i,j,1))
+          mech_TKE = dt * u_star * fluxes%tau_mag(i,j)
+        else
+          u_star = sqrt(fluxes%tau_mag(i,j) * I_rho)
+          u_star_Mean = sqrt(fluxes%tau_mag_gustless(i,j) * I_rho)
+          mech_TKE = dt * GV%Rho0 * u_star**3
+        endif
+        diag_ustar(i,j) = u_star
+
+        if (allocated(tv%SpV_avg) .and. .not.GV%Boussinesq) then
+          SpV_dt(1) = tv%SpV_avg(i,j,1) * I_dt
+          do K=2,nz
+            SpV_dt(K) = 0.5*(tv%SpV_avg(i,j,k-1) + tv%SpV_avg(i,j,k)) * I_dt
+          enddo
+          SpV_dt(nz+1) = tv%SpV_avg(i,j,nz) * I_dt
+        endif
+
+        B_flux = buoy_flux(i,j)
+        if (associated(fluxes%ustar_shelf) .and. associated(fluxes%frac_shelf_h)) then
+          if (fluxes%frac_shelf_h(i,j) > 0.0) &
+            u_star = (1.0 - fluxes%frac_shelf_h(i,j)) * u_star + &
+                     fluxes%frac_shelf_h(i,j) * fluxes%ustar_shelf(i,j)
+        endif
+        if (u_star < CS%ustar_min) u_star = CS%ustar_min
+        if (CS%omega_frac >= 1.0) then
+          absf = 2.0*CS%omega
+        else
+          absf = 0.25*((abs(G%CoriolisBu(I,J)) + abs(G%CoriolisBu(I-1,J-1))) + &
+                       (abs(G%CoriolisBu(I,J-1)) + abs(G%CoriolisBu(I-1,J))))
+          if (CS%omega_frac > 0.0) &
+            absf = sqrt(CS%omega_frac*4.0*CS%omega**2 + (1.0-CS%omega_frac)*absf**2)
+        endif
+
+        MLD_io = -1.0
+        if (CS%MLD_iteration_guess .and. (CS%ML_depth(i,j) > 0.0))  MLD_io = CS%ML_depth(i,j)
+        BBLD_io = 0.0
+        MLD_in = MLD_io
+
+        if (CS%answer_date < 20240101) then
+          do K=1,nz+1 ; SpV_dt_cf(K) = (US%Z_to_m**3*US%s_to_T**3) * SpV_dt(K) ; enddo
+        else
+          do K=1,nz+1 ; SpV_dt_cf(K) = SpV_dt(K) ; enddo
+        endif
+        if (stoch_CS%pert_epbl) then
+          call ePBL_column(h, dz, u, v, T0, S0, dSV_dT_1d, dSV_dS_1d, SpV_dt_cf, TKE_forcing, B_flux, absf, &
+                           u_star, u_star_mean, mech_TKE, dt, MLD_io, Kd, mixvel, mixlen, GV, &
+                           US, CS, eCD, Waves, G, i, j, &
+                           TKE_gen_stoch=stoch_CS%epbl1_wts(i,j), TKE_diss_stoch=stoch_CS%epbl2_wts(i,j))
+        else
+          call ePBL_column(h, dz, u, v, T0, S0, dSV_dT_1d, dSV_dS_1d, SpV_dt_cf, TKE_forcing, B_flux, absf, &
+                           u_star, u_star_mean, mech_TKE, dt, MLD_io, Kd, mixvel, mixlen, GV, &
+                           US, CS, eCD, Waves, G, i, j)
+        endif
+        if (CS%id_Kd_ePBL_col_by_col > 0) then ; do K=1,nz+1
+          diag_Kd_ePBL_col_by_col(i,j,K) = Kd(K)
+        enddo ; endif
+
+        if (BBL_mixing) then
+          if (CS%MLD_iteration_guess .and. (CS%BBL_depth(i,j) > 0.0)) BBLD_io = CS%BBL_depth(i,j)
+          BBLD_in = BBLD_io
+          u_star_BBL = max(visc%ustar_BBL(i,j), CS%ustar_min*GV%Z_to_H)
+          if (GV%Boussinesq) then
+            u_star_BBL_z_t = u_star_BBL*GV%H_to_Z
+          else
+            u_star_BBL_z_t = u_star_BBL*GV%H_to_RZ*tv%SpV_avg(i,j,1)
+          endif
+
+          if (CS%ePBL_BBL_use_mstar) then
+            BBL_TKE = dt * ((u_star_BBL*GV%H_to_RZ) * u_star_BBL_z_t**2)
+          else
+            if (CS%BBL_effic_bug) then
+              BBL_TKE = CS%ePBL_BBL_effic * GV%H_to_RZ * dt * visc%BBL_meanKE_loss_sqrtCd(i,j)
+            else
+              BBL_TKE = CS%ePBL_BBL_effic * GV%H_to_RZ * dt * visc%BBL_meanKE_loss(i,j)
+            endif
+            if ((CS%ePBL_tidal_effic > 0.0) .and. associated(fluxes%BBL_tidal_dis)) &
+              BBL_TKE = BBL_TKE + CS%ePBL_tidal_effic * dt * fluxes%BBL_tidal_dis(i,j)
+          endif
+
+          call ePBL_BBL_column(h, dz, u, v, T0, S0, dSV_dT_1d, dSV_dS_1d, SpV_dt, absf, dt, Kd, BBL_TKE, &
+                               u_star_BBL, u_star_BBL_z_t, BBL_buoy_flux(i,j), Kd_BBL, BBLD_io, mixvel_BBL, &
+                               mixlen_BBL, GV, US, CS, eCD)
+
+          do K=1,nz+1 ; Kd(K) = Kd(K) + Kd_BBL(K) ; enddo
+          if (CS%id_Kd_BBL > 0) then ; do K=1,nz+1
+            Kd_BBL_3d(i,j,K) = Kd_BBL(K)
+          enddo ; endif
+          if (CS%id_ustar_BBL > 0) diag_ustar_BBL(i,j) = u_star_BBL
+          if ((CS%id_BBL_decay_scale > 0) .and. (CS%TKE_decay * absf > 0)) &
+            diag_BBL_decay_scale(i,j) = u_star_BBL / (CS%TKE_decay * absf)
+        endif
+
+        do K=1,nz+1 ; Kd_int(i,j,K) = Kd(K) ; enddo
+        CS%ML_depth(i,j) = MLD_io
+        CS%BBL_depth(i,j) = BBLD_io
+
+        if (CS%TKE_diagnostics) then
+          diag_TKE_MKE(i,j) = diag_TKE_MKE(i,j) + eCD%dTKE_MKE
+          diag_TKE_conv(i,j) = diag_TKE_conv(i,j) + eCD%dTKE_conv
+          diag_TKE_forcing(i,j) = diag_TKE_forcing(i,j) + eCD%dTKE_forcing
+          diag_TKE_wind(i,j) = diag_TKE_wind(i,j) + eCD%dTKE_wind
+          diag_TKE_mixing(i,j) = diag_TKE_mixing(i,j) + eCD%dTKE_mixing
+          diag_TKE_mech_decay(i,j) = diag_TKE_mech_decay(i,j) + eCD%dTKE_mech_decay
+          diag_TKE_conv_decay(i,j) = diag_TKE_conv_decay(i,j) + eCD%dTKE_conv_decay
+        endif
+        if (CS%debug .or. (CS%id_Mixing_Length > 0)) then ; do K=1,nz+1
+          diag_Mixing_Length(i,j,K) = mixlen(K)
+        enddo ; endif
+        if (CS%debug .or. (CS%id_Velocity_Scale > 0)) then ; do K=1,nz+1
+          diag_Velocity_Scale(i,j,K) = mixvel(K)
+        enddo ; endif
+        if (BBL_mixing) then
+          if (CS%debug .or. (CS%id_BBL_Mix_Length>0)) then ; do k=1,nz
+            BBL_Mix_Length(i,j,k) = mixlen_BBL(k)
+          enddo ; endif
+          if (CS%debug .or. (CS%id_BBL_Vel_Scale>0)) then ; do k=1,nz
+            BBL_Vel_Scale(i,j,k) = mixvel_BBL(k)
+          enddo ; endif
+          if (CS%id_TKE_BBL>0) diag_TKE_BBL(i,j) = diag_TKE_BBL(i,j) + BBL_TKE
+        endif
+        if (CS%id_mstar_sfc > 0) diag_mstar_sfc(i,j) = eCD%mstar
+        if (CS%id_mstar_bbl > 0) diag_mstar_BBL(i,j) = eCD%mstar_BBL
+        if (CS%id_mstar_LT > 0) diag_mstar_lt(i,j) = eCD%mstar_LT
+        if (CS%id_LA > 0) diag_LA(i,j) = eCD%LA
+        if (CS%id_LA_mod > 0) diag_LA_mod(i,j) = eCD%LAmod
+        if (report_avg_its) then
+          OBL_its_col(i,j) = eCD%OBL_its ; OBL_count_col(i,j) = 1
+          if (BBL_mixing) then
+            BBL_its_col(i,j) = eCD%BBL_its ; BBL_count_col(i,j) = 1
+          endif
+        endif
+
+        if (CS%options_diff > 0) then
+          if (CS%options_diff < 4) then
+            BLD_1 = MLD_in ; BLD_2 = MLD_in
+            do K=1,nz+1 ; SpV_dt_tmp(K) = SpV_scale1 * SpV_dt(K) ; enddo
+            call ePBL_column(h, dz, u, v, T0, S0, dSV_dT_1d, dSV_dS_1d, SpV_dt_tmp, TKE_forcing, &
+                             B_flux, absf, u_star, u_star_mean, mech_TKE, dt, BLD_1, Kd_1, &
+                             mixvel, mixlen, GV, US, CS_tmp1, eCD_tmp, Waves, G, i, j)
+            do K=1,nz+1 ; SpV_dt_tmp(K) = SpV_scale2 * SpV_dt(K) ; enddo
+            call ePBL_column(h, dz, u, v, T0, S0, dSV_dT_1d, dSV_dS_1d, SpV_dt_tmp, TKE_forcing, &
+                             B_flux, absf, u_star, u_star_mean, mech_TKE, dt, BLD_2, Kd_2, &
+                             mixvel, mixlen, GV, US, CS_tmp2, eCD_tmp, Waves, G, i, j)
+          else
+            BLD_1 = BBLD_in ; BLD_2 = BBLD_in
+            BBL_TKE = CS%ePBL_BBL_effic * GV%H_to_RZ * dt * visc%BBL_meanKE_loss(i,j)
+            if ((CS%ePBL_tidal_effic > 0.0) .and. associated(fluxes%BBL_tidal_dis)) &
+              BBL_TKE = BBL_TKE + CS%ePBL_tidal_effic * dt * fluxes%BBL_tidal_dis(i,j)
+            u_star_BBL = max(visc%ustar_BBL(i,j), CS%ustar_min*GV%Z_to_H)
+            u_star_BBL_z_t = u_star_bbl*GV%H_to_Z
+            call ePBL_BBL_column(h, dz, u, v, T0, S0, dSV_dT_1d, dSV_dS_1d, SpV_dt, absf, dt, Kd, BBL_TKE, &
+                                 u_star_BBL, u_star_BBL_z_t, BBL_buoy_flux(i,j), Kd_1, BLD_1, mixvel_BBL, &
+                                 mixlen_BBL, GV, US, CS_tmp1, eCD_tmp)
+            call ePBL_BBL_column(h, dz, u, v, T0, S0, dSV_dT_1d, dSV_dS_1d, SpV_dt, absf, dt, Kd, BBL_TKE, &
+                                 u_star_BBL, u_star_BBL_z_t, BBL_buoy_flux(i,j), Kd_2, BLD_2, mixvel_BBL, &
+                                 mixlen_BBL, GV, US, CS_tmp2, eCD_tmp)
+          endif
+
+          if (CS%id_opt_diff_Kd_ePBL > 0) then
+            do K=1,nz+1 ; diff_Kd(i,j,K) = Kd_1(K) - Kd_2(K) ; enddo
+          endif
+          if (CS%id_opt_maxdiff_Kd_ePBL > 0) then
+            max_abs_diff_Kd(i,j) = 0.0
+            do K=1,nz+1 ; max_abs_diff_Kd(i,j) = max(max_abs_diff_Kd(i,j), abs(Kd_1(K) - Kd_2(K))) ; enddo
+          endif
+          if (CS%id_opt_diff_hML_depth > 0) diff_hML_depth(i,j) = BLD_1 - BLD_2
+        endif
+      else
+        do K=1,nz+1 ; Kd_int(i,j,K) = 0. ; enddo
+        CS%ML_depth(i,j) = 0.0
+        CS%BBL_depth(i,j) = 0.0
+      endif
     enddo ; enddo
 
   enddo ; enddo ! i-block and j-block loops
-  if (CS%id_Kd_ePBL_col_by_col > 0) call post_data_3d_final(CS%id_Kd_ePBL_col_by_col, CS%diag)
+  if (report_avg_its) then
+    do j=js,je ; do i=is,ie
+      CS%sum_its(1) = CS%sum_its(1) + real_to_EFP(real(OBL_its_col(i,j)))
+      CS%sum_its(2) = CS%sum_its(2) + real_to_EFP(real(OBL_count_col(i,j)))
+      if (BBL_mixing) then
+        CS%sum_its_BBL(1) = CS%sum_its_BBL(1) + real_to_EFP(real(BBL_its_col(i,j)))
+        CS%sum_its_BBL(2) = CS%sum_its_BBL(2) + real_to_EFP(real(BBL_count_col(i,j)))
+      endif
+    enddo ; enddo
+  endif
+  if (CS%id_Kd_ePBL_col_by_col > 0) call post_data(CS%id_Kd_ePBL_col_by_col, diag_Kd_ePBL_col_by_col, CS%diag)
 
   if (CS%debug .and. BBL_mixing) then
     call hchksum(visc%BBL_meanKE_loss, "ePBL visc%BBL_meanKE_loss", G%HI, &
@@ -650,261 +911,6 @@ subroutine energetic_PBL(h_3d, u_3d, v_3d, tv, fluxes, visc, dt, Kd_int, G, GV, 
     if (CS%id_opt_maxdiff_Kd_ePBL > 0) call post_data(CS%id_opt_maxdiff_Kd_ePBL, max_abs_diff_Kd, CS%diag)
     if (CS%id_opt_diff_hML_depth > 0)  call post_data(CS%id_opt_diff_hML_depth, diff_hML_depth, CS%diag)
   endif
-
-contains
-
-subroutine energetic_PBL_driver_column(i, j, ii, jj)
-  integer, intent(in) :: i, j, ii, jj
-
-  real, dimension(WSZK_(SZK_(GV))) :: &
-    h, &            ! The layer thickness [H ~> m or kg m-2].
-    dz, &           ! The vertical distance across layers [Z ~> m].
-    T0, &           ! The initial layer temperatures [C ~> degC].
-    S0, &           ! The initial layer salinities [S ~> ppt].
-    dSV_dT_1d, &    ! The partial derivatives of specific volume with temperature [R-1 C-1 ~> m3 kg-1 degC-1].
-    dSV_dS_1d, &    ! The partial derivatives of specific volume with salinity [R-1 S-1 ~> m3 kg-1 ppt-1].
-    TKE_forcing, &  ! Forcing of the TKE in the layer coming from TKE_forced [R Z3 T-2 ~> J m-2].
-    u, &            ! The zonal velocity [L T-1 ~> m s-1].
-    v               ! The meridional velocity [L T-1 ~> m s-1].
-  real, dimension(WSZKI_(SZK_(GV))) :: &
-    Kd, &           ! The diapycnal diffusivity due to ePBL [H Z T-1 ~> m2 s-1 or kg m-1 s-1].
-    mixvel, &       ! A turbulent mixing velocity [Z T-1 ~> m s-1].
-    mixlen, &       ! A turbulent mixing length [Z ~> m].
-    mixvel_BBL, &   ! A bottom boundary layer turbulent mixing velocity [Z T-1 ~> m s-1].
-    mixlen_BBL, &   ! A bottom boundary layer turbulent mixing length [Z ~> m].
-    Kd_BBL, &       ! The bottom boundary layer diapycnal diffusivity [H Z T-1 ~> m2 s-1 or kg m-1 s-1].
-    SpV_dt, &       ! Specific volume interpolated to interfaces divided by dt or 1.0 / (dt * Rho0),
-                    ! in [R-1 T-1 ~> m3 kg-1 s-1], used to convert local TKE into a turbulence velocity cubed.
-    SpV_dt_cf       ! Specific volume interpolated to interfaces divided by dt or 1.0 / (dt * Rho0)
-                    ! times conversion factors for answer dates before 20240101 in
-                    ! [m3 Z-3 R-1 T2 s-3 ~> m3 kg-1 s-1] or without the conversion factors for
-                    ! answer dates of 20240101 and later in [R-1 T-1 ~> m3 kg-1 s-1], used to
-                    ! convert local TKE into a turbulence velocity cubed.
-  real, dimension(WSZKI_(SZK_(GV))) :: &
-    Kd_1, Kd_2      ! Diapycnal diffusivities found with different ePBL options [H Z T-1 ~> m2 s-1 or kg m-1 s-1].
-  real :: SpV_dt_tmp(WSZKI_(SZK_(GV)))  ! Specific volume interpolated to interfaces divided by dt or 1.0 / (dt * Rho0)
-                    ! times conversion factors for answer dates before 20240101 in
-                    ! [m3 Z-3 R-1 T2 s-3 ~> m3 kg-1 s-1] or without the conversion factors for
-                    ! answer dates of 20240101 and later in [R-1 T-1 ~> m3 kg-1 s-1], used to
-                    ! convert local TKE into a turbulence velocity cubed.
-  real :: absf      ! The absolute value of f [T-1 ~> s-1].
-  real :: U_star    ! The surface friction velocity [Z T-1 ~> m s-1].
-  real :: U_Star_Mean ! The surface friction without gustiness [Z T-1 ~> m s-1].
-  real :: mech_TKE  ! The mechanically generated turbulent kinetic energy available for mixing over a
-                    ! timestep before the application of the efficiency in mstar [R Z3 T-2 ~> J m-2].
-  real :: u_star_BBL ! The bottom boundary layer friction velocity [H T-1 ~> m s-1 or kg m-2 s-1].
-  real :: u_star_BBL_z_t ! The bottom boundary layer friction velocity converted to Z T-1 [Z T-1 ~> m s-1].
-  real :: BBL_TKE   ! The mechanically generated turbulent kinetic energy available for bottom
-                    ! boundary layer mixing within a timestep [R Z3 T-2 ~> J m-2].
-  real :: B_Flux    ! The surface buoyancy flux [Z2 T-3 ~> m2 s-3].
-  real :: MLD_io    ! The mixed layer depth found by ePBL_column [Z ~> m].
-  real :: BBLD_io   ! The bottom boundary layer thickness found by ePBL_BBL_column [Z ~> m].
-  real :: MLD_in    ! The first guess at the mixed layer depth [Z ~> m].
-  real :: BBLD_in   ! The first guess at the bottom boundary layer thickness [Z ~> m].
-  real :: BLD_1, BLD_2  ! Surface or bottom boundary layer depths found with different ePBL_column options [Z ~> m].
-  type(ePBL_column_diags) :: eCD     ! A container for passing around diagnostics.
-  type(ePBL_column_diags) :: eCD_tmp ! A container for not passing around diagnostics.
-  integer :: k
-
-  SpV_dt(:) = 0.0
-  if ((dt > 0.0) .and. GV%Boussinesq .or. .not.allocated(tv%SpV_avg)) then
-    if (CS%answer_date < 20240101) then
-      do K=1,nz+1 ; SpV_dt(K) = 1.0 / (dt*GV%Rho0) ; enddo
-    else
-      do K=1,nz+1 ; SpV_dt(K) = I_rho0dt ; enddo
-    endif
-  endif
-
-  if (G%mask2dT(i,j) > 0.0) then
-    do k=1,nz
-      h(k) = h_blk(ii,jj,k) ; dz(k) = dz_blk(ii,jj,k)
-      u(k) = u_blk(ii,jj,k) ; v(k) = v_blk(ii,jj,k)
-      T0(k) = T0_blk(ii,jj,k) ; S0(k) = S0_blk(ii,jj,k) ; TKE_forcing(k) = TKE_forcing_blk(ii,jj,k)
-      dSV_dT_1d(k) = dSV_dT_blk(ii,jj,k) ; dSV_dS_1d(k) = dSV_dS_blk(ii,jj,k)
-    enddo
-    do K=1,nz+1 ; Kd(K) = 0.0 ; enddo
-
-    if (associated(fluxes%ustar) .and. (GV%Boussinesq .or. .not.associated(fluxes%tau_mag))) then
-      u_star = fluxes%ustar(i,j)
-      u_star_Mean = fluxes%ustar_gustless(i,j)
-      mech_TKE = dt * GV%Rho0 * u_star**3
-    elseif (allocated(tv%SpV_avg)) then
-      u_star = sqrt(fluxes%tau_mag(i,j) * tv%SpV_avg(i,j,1))
-      u_star_Mean = sqrt(fluxes%tau_mag_gustless(i,j) * tv%SpV_avg(i,j,1))
-      mech_TKE = dt * u_star * fluxes%tau_mag(i,j)
-    else
-      u_star = sqrt(fluxes%tau_mag(i,j) * I_rho)
-      u_star_Mean = sqrt(fluxes%tau_mag_gustless(i,j) * I_rho)
-      mech_TKE = dt * GV%Rho0 * u_star**3
-    endif
-    diag_ustar(i,j) = u_star
-
-    if (allocated(tv%SpV_avg) .and. .not.GV%Boussinesq) then
-      SpV_dt(1) = tv%SpV_avg(i,j,1) * I_dt
-      do K=2,nz
-        SpV_dt(K) = 0.5*(tv%SpV_avg(i,j,k-1) + tv%SpV_avg(i,j,k)) * I_dt
-      enddo
-      SpV_dt(nz+1) = tv%SpV_avg(i,j,nz) * I_dt
-    endif
-
-    B_flux = buoy_flux(i,j)
-    if (associated(fluxes%ustar_shelf) .and. associated(fluxes%frac_shelf_h)) then
-      if (fluxes%frac_shelf_h(i,j) > 0.0) &
-        u_star = (1.0 - fluxes%frac_shelf_h(i,j)) * u_star + &
-                 fluxes%frac_shelf_h(i,j) * fluxes%ustar_shelf(i,j)
-    endif
-    if (u_star < CS%ustar_min) u_star = CS%ustar_min
-    if (CS%omega_frac >= 1.0) then
-      absf = 2.0*CS%omega
-    else
-      absf = 0.25*((abs(G%CoriolisBu(I,J)) + abs(G%CoriolisBu(I-1,J-1))) + &
-                   (abs(G%CoriolisBu(I,J-1)) + abs(G%CoriolisBu(I-1,J))))
-      if (CS%omega_frac > 0.0) &
-        absf = sqrt(CS%omega_frac*4.0*CS%omega**2 + (1.0-CS%omega_frac)*absf**2)
-    endif
-
-    MLD_io = -1.0
-    if (CS%MLD_iteration_guess .and. (CS%ML_depth(i,j) > 0.0))  MLD_io = CS%ML_depth(i,j)
-    BBLD_io = 0.0
-    MLD_in = MLD_io
-
-    if (CS%answer_date < 20240101) then
-      do K=1,nz+1 ; SpV_dt_cf(K) = (US%Z_to_m**3*US%s_to_T**3) * SpV_dt(K) ; enddo
-    else
-      do K=1,nz+1 ; SpV_dt_cf(K) = SpV_dt(K) ; enddo
-    endif
-    if (stoch_CS%pert_epbl) then
-      call ePBL_column(h, dz, u, v, T0, S0, dSV_dT_1d, dSV_dS_1d, SpV_dt_cf, TKE_forcing, B_flux, absf, &
-                       u_star, u_star_mean, mech_TKE, dt, MLD_io, Kd, mixvel, mixlen, GV, &
-                       US, CS, eCD, Waves, G, i, j, &
-                       TKE_gen_stoch=stoch_CS%epbl1_wts(i,j), TKE_diss_stoch=stoch_CS%epbl2_wts(i,j))
-    else
-      call ePBL_column(h, dz, u, v, T0, S0, dSV_dT_1d, dSV_dS_1d, SpV_dt_cf, TKE_forcing, B_flux, absf, &
-                       u_star, u_star_mean, mech_TKE, dt, MLD_io, Kd, mixvel, mixlen, GV, &
-                       US, CS, eCD, Waves, G, i, j)
-    endif
-    if (CS%id_Kd_ePBL_col_by_col > 0) &
-      call post_data_3d_by_column(CS%id_Kd_ePBL_col_by_col, Kd, CS%diag, i, j)
-
-    if (BBL_mixing) then
-      if (CS%MLD_iteration_guess .and. (CS%BBL_depth(i,j) > 0.0)) BBLD_io = CS%BBL_depth(i,j)
-      BBLD_in = BBLD_io
-      u_star_BBL = max(visc%ustar_BBL(i,j), CS%ustar_min*GV%Z_to_H)
-      if (GV%Boussinesq) then
-        u_star_BBL_z_t = u_star_BBL*GV%H_to_Z
-      else
-        u_star_BBL_z_t = u_star_BBL*GV%H_to_RZ*tv%SpV_avg(i,j,1)
-      endif
-
-      if (CS%ePBL_BBL_use_mstar) then
-        BBL_TKE = dt * ((u_star_BBL*GV%H_to_RZ) * u_star_BBL_z_t**2)
-      else
-        if (CS%BBL_effic_bug) then
-          BBL_TKE = CS%ePBL_BBL_effic * GV%H_to_RZ * dt * visc%BBL_meanKE_loss_sqrtCd(i,j)
-        else
-          BBL_TKE = CS%ePBL_BBL_effic * GV%H_to_RZ * dt * visc%BBL_meanKE_loss(i,j)
-        endif
-        if ((CS%ePBL_tidal_effic > 0.0) .and. associated(fluxes%BBL_tidal_dis)) &
-          BBL_TKE = BBL_TKE + CS%ePBL_tidal_effic * dt * fluxes%BBL_tidal_dis(i,j)
-      endif
-
-      call ePBL_BBL_column(h, dz, u, v, T0, S0, dSV_dT_1d, dSV_dS_1d, SpV_dt, absf, dt, Kd, BBL_TKE, &
-                           u_star_BBL, u_star_BBL_z_t, BBL_buoy_flux(i,j), Kd_BBL, BBLD_io, mixvel_BBL, mixlen_BBL, &
-                           GV, US, CS, eCD)
-
-      do K=1,nz+1 ; Kd(K) = Kd(K) + Kd_BBL(K) ; enddo
-      if (CS%id_Kd_BBL > 0) then ; do K=1,nz+1
-        Kd_BBL_3d(i,j,K) = Kd_BBL(K)
-      enddo ; endif
-      if (CS%id_ustar_BBL > 0) diag_ustar_BBL(i,j) = u_star_BBL
-      if ((CS%id_BBL_decay_scale > 0) .and. (CS%TKE_decay * absf > 0)) &
-        diag_BBL_decay_scale(i,j) = u_star_BBL / (CS%TKE_decay * absf)
-    endif
-
-    do K=1,nz+1 ; Kd_int(i,j,K) = Kd(K) ; enddo
-    CS%ML_depth(i,j) = MLD_io
-    CS%BBL_depth(i,j) = BBLD_io
-
-    if (CS%TKE_diagnostics) then
-      diag_TKE_MKE(i,j) = diag_TKE_MKE(i,j) + eCD%dTKE_MKE
-      diag_TKE_conv(i,j) = diag_TKE_conv(i,j) + eCD%dTKE_conv
-      diag_TKE_forcing(i,j) = diag_TKE_forcing(i,j) + eCD%dTKE_forcing
-      diag_TKE_wind(i,j) = diag_TKE_wind(i,j) + eCD%dTKE_wind
-      diag_TKE_mixing(i,j) = diag_TKE_mixing(i,j) + eCD%dTKE_mixing
-      diag_TKE_mech_decay(i,j) = diag_TKE_mech_decay(i,j) + eCD%dTKE_mech_decay
-      diag_TKE_conv_decay(i,j) = diag_TKE_conv_decay(i,j) + eCD%dTKE_conv_decay
-    endif
-    if (CS%debug .or. (CS%id_Mixing_Length > 0)) then ; do K=1,nz+1
-      diag_Mixing_Length(i,j,K) = mixlen(K)
-    enddo ; endif
-    if (CS%debug .or. (CS%id_Velocity_Scale > 0)) then ; do K=1,nz+1
-      diag_Velocity_Scale(i,j,K) = mixvel(K)
-    enddo ; endif
-    if (BBL_mixing) then
-      if (CS%debug .or. (CS%id_BBL_Mix_Length>0)) then ; do k=1,nz
-        BBL_Mix_Length(i,j,k) = mixlen_BBL(k)
-      enddo ; endif
-      if (CS%debug .or. (CS%id_BBL_Vel_Scale>0)) then ; do k=1,nz
-        BBL_Vel_Scale(i,j,k) = mixvel_BBL(k)
-      enddo ; endif
-      if (CS%id_TKE_BBL>0) diag_TKE_BBL(i,j) = diag_TKE_BBL(i,j) + BBL_TKE
-    endif
-    if (CS%id_mstar_sfc > 0) diag_mstar_sfc(i,j) = eCD%mstar
-    if (CS%id_mstar_bbl > 0) diag_mstar_BBL(i,j) = eCD%mstar_BBL
-    if (CS%id_mstar_LT > 0) diag_mstar_lt(i,j) = eCD%mstar_LT
-    if (CS%id_LA > 0) diag_LA(i,j) = eCD%LA
-    if (CS%id_LA_mod > 0) diag_LA_mod(i,j) = eCD%LAmod
-    if (report_avg_its) then
-      CS%sum_its(1) = CS%sum_its(1) + real_to_EFP(real(eCD%OBL_its))
-      CS%sum_its(2) = CS%sum_its(2) + real_to_EFP(1.0)
-      if (BBL_mixing) then
-        CS%sum_its_BBL(1) = CS%sum_its_BBL(1) + real_to_EFP(real(eCD%BBL_its))
-        CS%sum_its_BBL(2) = CS%sum_its_BBL(2) + real_to_EFP(1.0)
-      endif
-    endif
-
-    if (CS%options_diff > 0) then
-      if (CS%options_diff < 4) then
-        BLD_1 = MLD_in ; BLD_2 = MLD_in
-        do K=1,nz+1 ; SpV_dt_tmp(K) = SpV_scale1 * SpV_dt(K) ; enddo
-        call ePBL_column(h, dz, u, v, T0, S0, dSV_dT_1d, dSV_dS_1d, SpV_dt_tmp, TKE_forcing, &
-                         B_flux, absf, u_star, u_star_mean, mech_TKE, dt, BLD_1, Kd_1, &
-                         mixvel, mixlen, GV, US, CS_tmp1, eCD_tmp, Waves, G, i, j)
-        do K=1,nz+1 ; SpV_dt_tmp(K) = SpV_scale2 * SpV_dt(K) ; enddo
-        call ePBL_column(h, dz, u, v, T0, S0, dSV_dT_1d, dSV_dS_1d, SpV_dt_tmp, TKE_forcing, &
-                         B_flux, absf, u_star, u_star_mean, mech_TKE, dt, BLD_2, Kd_2, &
-                         mixvel, mixlen, GV, US, CS_tmp2, eCD_tmp, Waves, G, i, j)
-      else
-        BLD_1 = BBLD_in ; BLD_2 = BBLD_in
-        BBL_TKE = CS%ePBL_BBL_effic * GV%H_to_RZ * dt * visc%BBL_meanKE_loss(i,j)
-        if ((CS%ePBL_tidal_effic > 0.0) .and. associated(fluxes%BBL_tidal_dis)) &
-          BBL_TKE = BBL_TKE + CS%ePBL_tidal_effic * dt * fluxes%BBL_tidal_dis(i,j)
-        u_star_BBL = max(visc%ustar_BBL(i,j), CS%ustar_min*GV%Z_to_H)
-        u_star_BBL_z_t = u_star_bbl*GV%H_to_Z
-        call ePBL_BBL_column(h, dz, u, v, T0, S0, dSV_dT_1d, dSV_dS_1d, SpV_dt, absf, dt, Kd, BBL_TKE, &
-                             u_star_BBL, u_star_BBL_z_t, BBL_buoy_flux(i,j), Kd_1, BLD_1, mixvel_BBL, mixlen_BBL, &
-                             GV, US, CS_tmp1, eCD_tmp)
-        call ePBL_BBL_column(h, dz, u, v, T0, S0, dSV_dT_1d, dSV_dS_1d, SpV_dt, absf, dt, Kd, BBL_TKE, &
-                             u_star_BBL, u_star_BBL_z_t, BBL_buoy_flux(i,j), Kd_2, BLD_2, mixvel_BBL, mixlen_BBL, &
-                             GV, US, CS_tmp2, eCD_tmp)
-      endif
-
-      if (CS%id_opt_diff_Kd_ePBL > 0) then
-        do K=1,nz+1 ; diff_Kd(i,j,K) = Kd_1(K) - Kd_2(K) ; enddo
-      endif
-      if (CS%id_opt_maxdiff_Kd_ePBL > 0) then
-        max_abs_diff_Kd(i,j) = 0.0
-        do K=1,nz+1 ; max_abs_diff_Kd(i,j) = max(max_abs_diff_Kd(i,j), abs(Kd_1(K) - Kd_2(K))) ; enddo
-      endif
-      if (CS%id_opt_diff_hML_depth > 0) diff_hML_depth(i,j) = BLD_1 - BLD_2
-    endif
-  else
-    do K=1,nz+1 ; Kd_int(i,j,K) = 0. ; enddo
-    CS%ML_depth(i,j) = 0.0
-    CS%BBL_depth(i,j) = 0.0
-  endif
-
-end subroutine energetic_PBL_driver_column
 
 end subroutine energetic_PBL
 
