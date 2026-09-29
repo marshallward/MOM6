@@ -305,6 +305,21 @@ character*(20), parameter :: ADDITIVE_STRING = "ADDITIVE"
 
 logical :: report_avg_its = .false.  !< Report the average number of ePBL iterations for debugging.
 
+!> Fixed declared extent for vertical work-column arrays in GPU builds. Device
+!! column routines declare local arrays with this extent, rather than with the
+!! active vertical extent, to avoid runtime-sized device automatic allocations.
+!! Checked against GV%ke in energetic_PBL_init.
+integer, parameter :: fixed_col_extent = 128
+
+! TODO: Generalize this condition to support other GPU compilers.
+#ifdef __NVCOMPILER_OPENMP_GPU
+#define WSZK_(n)  fixed_col_extent
+#define WSZKI_(n) fixed_col_extent+1
+#else
+#define WSZK_(n)  n
+#define WSZKI_(n) n+1
+#endif
+
 !> A type for conveniently passing around ePBL diagnostics for a column.
 type, public :: ePBL_column_diags ; private
   !>@{ Local column copies of energy change diagnostics, all in [R Z3 T-3 ~> W m-2].
@@ -394,19 +409,9 @@ subroutine energetic_PBL(h_3d, u_3d, v_3d, tv, fluxes, visc, dt, Kd_int, G, GV, 
 !      mstar = 1.25, nstar = 0.4, TKE_decay = 0.0, conv_decay = 0.0
 
   ! Local variables
-  real, dimension(SZI_(G),SZK_(GV)) :: &
-    h_2d, &         ! A 2-d slice of the layer thickness [H ~> m or kg m-2].
-    dz_2d, &        ! A 2-d slice of the vertical distance across layers [Z ~> m].
-    T_2d, &         ! A 2-d slice of the layer temperatures [C ~> degC].
-    S_2d, &         ! A 2-d slice of the layer salinities [S ~> ppt].
-    TKE_forced_2d, & ! A 2-d slice of TKE_forced [R Z3 T-2 ~> J m-2].
-    dSV_dT_2d, &    ! A 2-d slice of dSV_dT [R-1 C-1 ~> m3 kg-1 degC-1].
-    dSV_dS_2d, &    ! A 2-d slice of dSV_dS [R-1 S-1 ~> m3 kg-1 ppt-1].
-    u_2d, &         ! A 2-d slice of the zonal velocity [L T-1 ~> m s-1].
-    v_2d            ! A 2-d slice of the meridional velocity [L T-1 ~> m s-1].
-  real, dimension(SZI_(G),SZK_(GV)+1) :: &
-    Kd_2d           ! A 2-d version of the diapycnal diffusivity [H Z T-1 ~> m2 s-1 or kg m-1 s-1]
-  real, dimension(SZK_(GV)) :: &
+  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)) :: &
+    dz_3d           ! The vertical distance across layers [Z ~> m].
+  real, dimension(WSZK_(SZK_(GV))) :: &
     h, &            ! The layer thickness [H ~> m or kg m-2].
     dz, &           ! The vertical distance across layers [Z ~> m].
     T0, &           ! The initial layer temperatures [C ~> degC].
@@ -416,7 +421,7 @@ subroutine energetic_PBL(h_3d, u_3d, v_3d, tv, fluxes, visc, dt, Kd_int, G, GV, 
     TKE_forcing, &  ! Forcing of the TKE in the layer coming from TKE_forced [R Z3 T-2 ~> J m-2].
     u, &            ! The zonal velocity [L T-1 ~> m s-1].
     v               ! The meridional velocity [L T-1 ~> m s-1].
-  real, dimension(SZK_(GV)+1) :: &
+  real, dimension(WSZKI_(SZK_(GV))) :: &
     Kd, &           ! The diapycnal diffusivity due to ePBL [H Z T-1 ~> m2 s-1 or kg m-1 s-1].
     mixvel, &       ! A turbulent mixing velocity [Z T-1 ~> m s-1].
     mixlen, &       ! A turbulent mixing length [Z ~> m].
@@ -484,7 +489,7 @@ subroutine energetic_PBL(h_3d, u_3d, v_3d, tv, fluxes, visc, dt, Kd_int, G, GV, 
     diag_ustar         ! The surface boundary layer friction velocity [Z T-1 ~> m s-1]
 
   ! The following variables are only used for diagnosing sensitivities to ePBL settings
-  real, dimension(SZK_(GV)+1) :: &
+  real, dimension(WSZKI_(SZK_(GV))) :: &
     Kd_1, Kd_2      ! Diapycnal diffusivities found with different ePBL options [H Z T-1 ~> m2 s-1 or kg m-1 s-1]
   real :: diff_Kd(SZI_(G),SZJ_(G),SZK_(GV)+1) ! The change in diapycnal diffusivities found with different
                         ! ePBL options [H Z T-1 ~> m2 s-1 or kg m-1 s-1]
@@ -497,7 +502,7 @@ subroutine energetic_PBL(h_3d, u_3d, v_3d, tv, fluxes, visc, dt, Kd_int, G, GV, 
                         ! [nondim] or [T3 m3 Z-3 s-3 ~> 1]
   real :: SpV_scale2    ! A factor that accounts for the varying scaling of SpV_dt with answer date
                         ! [nondim] or [Z3 s3 T-3 m-3 ~> 1]
-  real :: SpV_dt_tmp(SZK_(GV)+1)  ! Specific volume interpolated to interfaces divided by dt or 1.0 / (dt * Rho0)
+  real :: SpV_dt_tmp(WSZKI_(SZK_(GV)))  ! Specific volume interpolated to interfaces divided by dt or 1.0 / (dt * Rho0)
                         ! times conversion factors for answer dates before 20240101 in
                         ! [m3 Z-3 R-1 T2 s-3 ~> m3 kg-1 s-1] or without the conversion factors for
                         ! answer dates of 20240101 and later in [R-1 T-1 ~> m3 kg-1 s-1], used to
@@ -589,15 +594,9 @@ subroutine energetic_PBL(h_3d, u_3d, v_3d, tv, fluxes, visc, dt, Kd_int, G, GV, 
 
   !!OMP parallel do default(private) shared(js,je,nz,is,ie,h_3d,u_3d,v_3d,tv,dt,I_dt,BBL_mixing, &
   !!OMP                                  CS,G,GV,US,fluxes,TKE_forced,dSV_dT,dSV_dS,Kd_int)
+  call thickness_to_dz(h_3d, tv, dz_3d, G, GV, US, is=is, ie=ie, js=js, je=je)
+
   do j=js,je
-    ! Copy the thicknesses and other fields to 2-d arrays.
-    do k=1,nz ; do i=is,ie
-      h_2d(i,k) = h_3d(i,j,k) ; u_2d(i,k) = u_3d(i,j,k) ; v_2d(i,k) = v_3d(i,j,k)
-      T_2d(i,k) = tv%T(i,j,k) ; S_2d(i,k) = tv%S(i,j,k)
-      TKE_forced_2d(i,k) = TKE_forced(i,j,k)
-      dSV_dT_2d(i,k) = dSV_dT(i,j,k) ; dSV_dS_2d(i,k) = dSV_dS(i,j,k)
-    enddo ; enddo
-    call thickness_to_dz(h_3d, tv, dz_2d, j, G, GV)
 
     ! Set the inverse density used to translating local TKE into a turbulence velocity
     SpV_dt(:) = 0.0
@@ -623,10 +622,10 @@ subroutine energetic_PBL(h_3d, u_3d, v_3d, tv, fluxes, visc, dt, Kd_int, G, GV, 
 
       ! Copy the thicknesses and other fields to 1-d arrays.
       do k=1,nz
-        h(k) = h_2d(i,k) + GV%H_subroundoff ; dz(k) = dz_2d(i,k) + GV%dZ_subroundoff
-        u(k) = u_2d(i,k) ; v(k) = v_2d(i,k)
-        T0(k) = T_2d(i,k) ; S0(k) = S_2d(i,k) ; TKE_forcing(k) =  TKE_forced_2d(i,k)
-        dSV_dT_1d(k) = dSV_dT_2d(i,k) ; dSV_dS_1d(k) = dSV_dS_2d(i,k)
+        h(k) = h_3d(i,j,k) + GV%H_subroundoff ; dz(k) = dz_3d(i,j,k) + GV%dZ_subroundoff
+        u(k) = u_3d(i,j,k) ; v(k) = v_3d(i,j,k)
+        T0(k) = tv%T(i,j,k) ; S0(k) = tv%S(i,j,k) ; TKE_forcing(k) = TKE_forced(i,j,k)
+        dSV_dT_1d(k) = dSV_dT(i,j,k) ; dSV_dS_1d(k) = dSV_dS(i,j,k)
       enddo
       do K=1,nz+1 ; Kd(K) = 0.0 ; enddo
 
@@ -737,7 +736,7 @@ subroutine energetic_PBL(h_3d, u_3d, v_3d, tv, fluxes, visc, dt, Kd_int, G, GV, 
 
       ! Copy the diffusivities to a 2-d array.
       do K=1,nz+1
-        Kd_2d(i,K) = Kd(K)
+        Kd_int(i,j,K) = Kd(K)
       enddo
       CS%ML_depth(i,j) = MLD_io
       CS%BBL_depth(i,j) = BBLD_io
@@ -823,12 +822,10 @@ subroutine energetic_PBL(h_3d, u_3d, v_3d, tv, fluxes, visc, dt, Kd_int, G, GV, 
 
     else ! End of the ocean-point part of the i-loop
       ! For masked points, Kd_int must still be set (to 0) because it has intent out.
-      do K=1,nz+1 ; Kd_2d(i,K) = 0. ; enddo
+      do K=1,nz+1 ; Kd_int(i,j,K) = 0. ; enddo
       CS%ML_depth(i,j) = 0.0
       CS%BBL_depth(i,j) = 0.0
     endif ; enddo ! Close of i-loop - Note the unusual loop order, with k-loops inside i-loops.
-
-    do K=1,nz+1 ; do i=is,ie ; Kd_int(i,j,K) = Kd_2d(i,K) ; enddo ; enddo
 
   enddo ! j-loop
   if (CS%id_Kd_ePBL_col_by_col > 0) call post_data_3d_final(CS%id_Kd_ePBL_col_by_col, CS%diag)
@@ -966,7 +963,7 @@ subroutine ePBL_column(h, dz, u, v, T0, S0, dSV_dT, dSV_dS, SpV_dt, TKE_forcing,
 ! mixing.
 
   ! Local variables
-  real, dimension(SZK_(GV)+1) :: &
+  real, dimension(WSZKI_(SZK_(GV))) :: &
     pres_Z, &       ! Interface pressures with a rescaling factor to convert interface height
                     ! movements into changes in column potential energy [R Z2 T-2 ~> kg m-1 s-2].
     hb_hs           ! The distance from the bottom over the thickness of the
@@ -983,7 +980,7 @@ subroutine ePBL_column(h, dz, u, v, T0, S0, dSV_dT, dSV_dS, SpV_dt, TKE_forcing,
   real :: Idecay_len_TKE  ! The inverse of a turbulence decay length scale [H-1 ~> m-1 or m2 kg-1].
   real :: dz_sum    ! The total thickness of the water column [Z ~> m].
 
-  real, dimension(SZK_(GV)) :: &
+  real, dimension(WSZK_(SZK_(GV))) :: &
     dT_to_dColHt, & ! Partial derivative of the total column height with the temperature changes
                     ! within a layer [Z C-1 ~> m degC-1].
     dS_to_dColHt, & ! Partial derivative of the total column height with the salinity changes
@@ -1020,7 +1017,7 @@ subroutine ePBL_column(h, dz, u, v, T0, S0, dSV_dT, dSV_dS, SpV_dt, TKE_forcing,
                     ! mixing effects with other yet lower layers [C H ~> degC m or degC kg m-2].
     Sh_b            ! An effective salinity times a thickness in the layer below, including implicit
                     ! mixing effects with other yet lower layers [S H ~> ppt m or ppt kg m-2].
-  real, dimension(SZK_(GV)+1) :: &
+  real, dimension(WSZKI_(SZK_(GV))) :: &
     MixLen_shape, & ! A nondimensional shape factor for the mixing length that
                     ! gives it an appropriate asymptotic value at the bottom of
                     ! the boundary layer [nondim].
@@ -1153,15 +1150,15 @@ subroutine ePBL_column(h, dz, u, v, T0, S0, dSV_dT, dSV_dS, SpV_dt, TKE_forcing,
   real, dimension(20) :: Kddt_h_itt     ! The value of Kddt_h_guess after each iteration [H ~> m or kg m-2]
   real, dimension(20) :: dPEa_dKd_itt   ! The value of dPEc_dKd after each iteration [R Z3 T-2 H-1 ~> J m-3 or J kg-1]
   real, dimension(20) :: MKE_src_itt    ! The value of MKE_src after each iteration [R Z3 T-2 ~> J m-2]
-  real, dimension(SZK_(GV)) :: mech_TKE_k  ! The mechanically generated turbulent kinetic energy
+  real, dimension(WSZK_(SZK_(GV))) :: mech_TKE_k  ! The mechanically generated turbulent kinetic energy
                     ! available for mixing over a time step for each layer [R Z3 T-2 ~> J m-2].
-  real, dimension(SZK_(GV)) :: conv_PErel_k ! The potential energy that has been convectively released
+  real, dimension(WSZK_(SZK_(GV))) :: conv_PErel_k ! The potential energy that has been convectively released
                     ! during this timestep for each layer [R Z3 T-2 ~> J m-2].
-  real, dimension(SZK_(GV)) :: nstar_k   ! The fraction of conv_PErel that can be converted to mixing
+  real, dimension(WSZK_(SZK_(GV))) :: nstar_k   ! The fraction of conv_PErel that can be converted to mixing
                     ! for each layer [nondim].
-  real, dimension(SZK_(GV)) :: dT_expect ! Expected temperature changes [C ~> degC]
-  real, dimension(SZK_(GV)) :: dS_expect ! Expected salinity changes [S ~> ppt]
-  integer, dimension(SZK_(GV)) :: num_itts
+  real, dimension(WSZK_(SZK_(GV))) :: dT_expect ! Expected temperature changes [C ~> degC]
+  real, dimension(WSZK_(SZK_(GV))) :: dS_expect ! Expected salinity changes [S ~> ppt]
+  integer, dimension(WSZK_(SZK_(GV))) :: num_itts
 
   integer :: k, nz, itt, max_itt
 
@@ -2021,7 +2018,7 @@ subroutine ePBL_BBL_column(h, dz, u, v, T0, S0, dSV_dT, dSV_dS, SpV_dt, absf, &
 !  energy that is supplied as an argument to this routine.
 
   ! Local variables
-  real, dimension(SZK_(GV)+1) :: &
+  real, dimension(WSZKI_(SZK_(GV))) :: &
     pres_Z, &       ! Interface pressures with a rescaling factor to convert interface height
                     ! movements into changes in column potential energy [R Z2 T-2 ~> kg m-1 s-2].
     dztop_dztot     ! The distance from the surface divided by the thickness of the
@@ -2039,7 +2036,7 @@ subroutine ePBL_BBL_column(h, dz, u, v, T0, S0, dSV_dT, dSV_dS, SpV_dt, absf, &
   real :: Idecay_len_TKE  ! The inverse of a turbulence decay length scale [H-1 ~> m-1 or m2 kg-1].
   real :: dz_sum    ! The total thickness of the water column [Z ~> m].
 
-  real, dimension(SZK_(GV)) :: &
+  real, dimension(WSZK_(SZK_(GV))) :: &
     dT_to_dColHt, & ! Partial derivative of the total column height with the temperature changes
                     ! within a layer [Z C-1 ~> m degC-1].
     dS_to_dColHt, & ! Partial derivative of the total column height with the salinity changes
@@ -2089,7 +2086,7 @@ subroutine ePBL_BBL_column(h, dz, u, v, T0, S0, dSV_dT, dSV_dS, SpV_dt, absf, &
                     ! mixing effects with other yet lower layers [C H ~> degC m or degC kg m-2].
     Sh_b            ! An effective salinity times a thickness in the layer below, including implicit
                     ! mixing effects with other yet lower layers [S H ~> ppt m or ppt kg m-2].
-  real, dimension(SZK_(GV)+1) :: &
+  real, dimension(WSZKI_(SZK_(GV))) :: &
     MixLen_shape, & ! A nondimensional shape factor for the mixing length that
                     ! gives it an appropriate asymptotic value at the bottom of
                     ! the boundary layer [nondim].
@@ -2176,11 +2173,11 @@ subroutine ePBL_BBL_column(h, dz, u, v, T0, S0, dSV_dT, dSV_dS, SpV_dt, absf, &
   real, dimension(20) :: Kddt_h_itt     ! The value of Kddt_h_guess after each iteration [H ~> m or kg m-2]
   real, dimension(20) :: dPEa_dKd_itt   ! The value of dPEc_dKd after each iteration [R Z3 T-2 H-1 ~> J m-3 or J kg-1]
 !  real, dimension(20) :: MKE_src_itt    ! The value of MKE_src after each iteration [R Z3 T-2 ~> J m-2]
-  real, dimension(SZK_(GV)) :: dT_expect !< Expected temperature changes [C ~> degC]
-  real, dimension(SZK_(GV)) :: dS_expect !< Expected salinity changes [S ~> ppt]
-  real, dimension(SZK_(GV)) :: mech_BBL_TKE_k  ! The mechanically generated turbulent kinetic energy
+  real, dimension(WSZK_(SZK_(GV))) :: dT_expect !< Expected temperature changes [C ~> degC]
+  real, dimension(WSZK_(SZK_(GV))) :: dS_expect !< Expected salinity changes [S ~> ppt]
+  real, dimension(WSZK_(SZK_(GV))) :: mech_BBL_TKE_k  ! The mechanically generated turbulent kinetic energy
                     ! available for bottom boundary mixing over a time step for each layer [R Z3 T-2 ~> J m-2].
-  integer, dimension(SZK_(GV)) :: num_itts
+  integer, dimension(WSZK_(SZK_(GV))) :: num_itts
 
   integer :: k, nz, itt, max_itt
 
@@ -2766,7 +2763,7 @@ subroutine kappa_eqdisc(shape_func, CS, GV, dz, absf, B_flux, u_star, MLD_guess)
   real, intent(in) :: B_Flux    !< The surface buoyancy flux [Z2 T-3 ~> m2 s-3]
   real, dimension(SZK_(GV)), intent(in)  :: dz     !< The vertical distance across layers [Z ~> m]
   real, intent(in) :: MLD_guess !< Mixing Layer depth guessed/found for iteration [Z ~> m].
-  real, dimension(SZK_(GV)+1) :: hz !< depth variable, only used in this routine [H ~> m]
+  real, dimension(WSZKI_(SZK_(GV))) :: hz !< depth variable, only used in this routine [H ~> m]
 
   ! local variables for this subroutine
   integer :: nz
@@ -3761,6 +3758,13 @@ subroutine energetic_PBL_init(Time, G, GV, US, param_file, diag, CS)
   CS%initialized = .true.
   CS%diag => diag
   CS%Time => Time
+
+#ifdef __NVCOMPILER_OPENMP_GPU
+  if (GV%ke > fixed_col_extent) call MOM_error(FATAL, &
+    "energetic_PBL_init: GPU builds of ePBL require GV%ke <= fixed_col_extent because the "//&
+    "column routines use fixed-size local arrays on the device; increase fixed_col_extent in "//&
+    "MOM_energetic_PBL.F90 or use a CPU build.")
+#endif
 
 ! Set default, read and log parameters
   call log_version(param_file, mdl, version, "")
