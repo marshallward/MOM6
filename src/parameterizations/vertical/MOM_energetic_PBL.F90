@@ -247,10 +247,12 @@ type, public :: energetic_PBL_CS ; private
                              !! values use the integer root function cuberoot(A) and therefore
                              !! can work with scaled variables.
   logical :: orig_PE_calc    !< If true, the ePBL code uses the original form of the
-                             !! potential energy change code.  Otherwise, it uses a newer version
-                             !! that can work with successive increments to the diffusivity in
-                             !! upward or downward passes.
+                              !! potential energy change code.  Otherwise, it uses a newer version
+                              !! that can work with successive increments to the diffusivity in
+                              !! upward or downward passes.
   logical :: debug           !< If true, write verbose checksums for debugging purposes.
+  integer :: niblock         !< The i block size used in ePBL column calculations [nondim].
+  integer :: njblock         !< The j block size used in ePBL column calculations [nondim].
   type(diag_ctrl), pointer :: diag=>NULL() !< A structure that is used to regulate the
                              !! timing of diagnostic output.
 
@@ -318,6 +320,14 @@ integer, parameter :: fixed_col_extent = 128
 #else
 #define WSZK_(n)  n
 #define WSZKI_(n) n+1
+#endif
+
+#ifdef __NVCOMPILER_OPENMP_GPU
+integer, parameter :: default_niblock = 0 !< Default i block size, 0 being the full domain [nondim].
+integer, parameter :: default_njblock = 0 !< Default j block size, 0 being the full domain [nondim].
+#else
+integer, parameter :: default_niblock = 0 !< Default i block size, 0 being the full domain [nondim].
+integer, parameter :: default_njblock = 1 !< Default j block size [nondim].
 #endif
 
 !> A type for conveniently passing around ePBL diagnostics for a column.
@@ -411,6 +421,18 @@ subroutine energetic_PBL(h_3d, u_3d, v_3d, tv, fluxes, visc, dt, Kd_int, G, GV, 
   ! Local variables
   real, dimension(SZI_(G),SZJ_(G),SZK_(GV)) :: &
     dz_3d           ! The vertical distance across layers [Z ~> m].
+  ! Block-sized hand-off buffers between the 3D MOM state and the column solver.
+  real, dimension(merge(G%iec-G%isc+1, CS%niblock, CS%niblock==0), &
+                  merge(G%jec-G%jsc+1, CS%njblock, CS%njblock==0), WSZK_(SZK_(GV))) :: &
+    h_blk, &        ! The layer thickness [H ~> m or kg m-2].
+    dz_blk, &       ! The vertical distance across layers [Z ~> m].
+    T0_blk, &       ! The initial layer temperatures [C ~> degC].
+    S0_blk, &       ! The initial layer salinities [S ~> ppt].
+    dSV_dT_blk, &   ! The partial derivatives of specific volume with temperature [R-1 C-1 ~> m3 kg-1 degC-1].
+    dSV_dS_blk, &   ! The partial derivatives of specific volume with salinity [R-1 S-1 ~> m3 kg-1 ppt-1].
+    TKE_forcing_blk, & ! Forcing of the TKE in the layer coming from TKE_forced [R Z3 T-2 ~> J m-2].
+    u_blk, &        ! The zonal velocity [L T-1 ~> m s-1].
+    v_blk           ! The meridional velocity [L T-1 ~> m s-1].
   real, dimension(WSZK_(SZK_(GV))) :: &
     h, &            ! The layer thickness [H ~> m or kg m-2].
     dz, &           ! The vertical distance across layers [Z ~> m].
@@ -511,9 +533,12 @@ subroutine energetic_PBL(h_3d, u_3d, v_3d, tv, fluxes, visc, dt, Kd_int, G, GV, 
   type(energetic_PBL_CS)  :: CS_tmp1, CS_tmp2 ! Copies of the energetic PBL control structure that
                                        ! can be modified to test for sensitivities
   logical :: BBL_mixing ! If true, there is bottom boundary layer mixing.
-  integer :: i, j, k, is, ie, js, je, nz
+  integer :: i, j, k, is, ie, js, je, nz, ii, jj, iie, jje
+  integer :: isb, jsb, ieb, jeb, nii, njj
 
   is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec ; nz = GV%ke
+  nii = merge(ie-is+1, CS%niblock, CS%niblock==0)
+  njj = merge(je-js+1, CS%njblock, CS%njblock==0)
 
   if (.not. CS%initialized) call MOM_error(FATAL, "energetic_PBL: "//&
          "Module must be initialized before it is used.")
@@ -596,7 +621,29 @@ subroutine energetic_PBL(h_3d, u_3d, v_3d, tv, fluxes, visc, dt, Kd_int, G, GV, 
   !!OMP                                  CS,G,GV,US,fluxes,TKE_forced,dSV_dT,dSV_dS,Kd_int)
   call thickness_to_dz(h_3d, tv, dz_3d, G, GV, US, is=is, ie=ie, js=js, je=je)
 
-  do j=js,je
+  do jsb=js,je,njj ; do isb=is,ie,nii
+    ieb = min(ie, isb+nii-1)
+    jeb = min(je, jsb+njj-1)
+    iie = ieb-isb+1
+    jje = jeb-jsb+1
+
+    do jj=1,jje ; j = jsb+jj-1
+      do ii=1,iie ; i = isb+ii-1
+        do k=1,nz
+          h_blk(ii,jj,k) = h_3d(i,j,k) + GV%H_subroundoff
+          dz_blk(ii,jj,k) = dz_3d(i,j,k) + GV%dZ_subroundoff
+          u_blk(ii,jj,k) = u_3d(i,j,k)
+          v_blk(ii,jj,k) = v_3d(i,j,k)
+          T0_blk(ii,jj,k) = tv%T(i,j,k)
+          S0_blk(ii,jj,k) = tv%S(i,j,k)
+          TKE_forcing_blk(ii,jj,k) = TKE_forced(i,j,k)
+          dSV_dT_blk(ii,jj,k) = dSV_dT(i,j,k)
+          dSV_dS_blk(ii,jj,k) = dSV_dS(i,j,k)
+        enddo
+      enddo
+    enddo
+
+  do jj=1,jje ; j = jsb+jj-1
 
     ! Set the inverse density used to translating local TKE into a turbulence velocity
     SpV_dt(:) = 0.0
@@ -618,14 +665,14 @@ subroutine energetic_PBL(h_3d, u_3d, v_3d, tv, fluxes, visc, dt, Kd_int, G, GV, 
     ! homogenizing the shortwave heating within that cell.  This sets the energy
     ! and ustar and wstar available to drive mixing at the first interior
     ! interface.
-    do i=is,ie ; if (G%mask2dT(i,j) > 0.0) then
+    do ii=1,iie ; i = isb+ii-1 ; if (G%mask2dT(i,j) > 0.0) then
 
       ! Copy the thicknesses and other fields to 1-d arrays.
       do k=1,nz
-        h(k) = h_3d(i,j,k) + GV%H_subroundoff ; dz(k) = dz_3d(i,j,k) + GV%dZ_subroundoff
-        u(k) = u_3d(i,j,k) ; v(k) = v_3d(i,j,k)
-        T0(k) = tv%T(i,j,k) ; S0(k) = tv%S(i,j,k) ; TKE_forcing(k) = TKE_forced(i,j,k)
-        dSV_dT_1d(k) = dSV_dT(i,j,k) ; dSV_dS_1d(k) = dSV_dS(i,j,k)
+        h(k) = h_blk(ii,jj,k) ; dz(k) = dz_blk(ii,jj,k)
+        u(k) = u_blk(ii,jj,k) ; v(k) = v_blk(ii,jj,k)
+        T0(k) = T0_blk(ii,jj,k) ; S0(k) = S0_blk(ii,jj,k) ; TKE_forcing(k) = TKE_forcing_blk(ii,jj,k)
+        dSV_dT_1d(k) = dSV_dT_blk(ii,jj,k) ; dSV_dS_1d(k) = dSV_dS_blk(ii,jj,k)
       enddo
       do K=1,nz+1 ; Kd(K) = 0.0 ; enddo
 
@@ -828,6 +875,7 @@ subroutine energetic_PBL(h_3d, u_3d, v_3d, tv, fluxes, visc, dt, Kd_int, G, GV, 
     endif ; enddo ! Close of i-loop - Note the unusual loop order, with k-loops inside i-loops.
 
   enddo ! j-loop
+  enddo ; enddo ! i-block and j-block loops
   if (CS%id_Kd_ePBL_col_by_col > 0) call post_data_3d_final(CS%id_Kd_ePBL_col_by_col, CS%diag)
 
   if (CS%debug .and. BBL_mixing) then
@@ -3774,6 +3822,18 @@ subroutine energetic_PBL_init(Time, G, GV, US, param_file, diag, CS)
   call get_param(param_file, mdl, "DEBUG", CS%debug, &
                  "If true, write out verbose debugging data.", &
                  default=.false., debuggingParam=.true.)
+  call get_param(param_file, mdl, "EPBL_NIBLOCK", CS%niblock, &
+                 "The i-direction block size used in ePBL column calculations.  The default 0 "//&
+                 "setting dynamically uses the full computational domain width.", &
+                 default=default_niblock, layoutParam=.true.)
+  call get_param(param_file, mdl, "EPBL_NJBLOCK", CS%njblock, &
+                 "The j-direction block size used in ePBL column calculations.  The default 0 "//&
+                 "setting dynamically uses the full computational domain height.", &
+                 default=default_njblock, layoutParam=.true.)
+  if (CS%niblock < 0) call MOM_error(FATAL, "EPBL_NIBLOCK must be nonnegative; "//&
+                                            "use 0 to select the full computational domain.")
+  if (CS%njblock < 0) call MOM_error(FATAL, "EPBL_NJBLOCK must be nonnegative; "//&
+                                            "use 0 to select the full computational domain.")
   call get_param(param_file, mdl, "OMEGA", CS%omega, &
                  "The rotation rate of the earth.", &
                  units="s-1", default=7.2921e-5, scale=US%T_to_S)
