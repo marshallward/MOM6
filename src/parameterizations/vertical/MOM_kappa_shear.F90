@@ -2113,7 +2113,11 @@ pure subroutine find_kappa_tke(N2, S2, kappa_in, Idz, h_Int, dz_Int, dz_h_Int, I
   logical, parameter :: debug_soln = .false.
   real :: K_err_lin ! The imbalance in the K equation [H T-1 ~> m s-1 or kg m-2 s-1]
   real :: Q_err_lin ! The imbalance in the Q equation [H Z T-3 ~> m2 s-3 or kg m-1 s-3]
+#ifdef __NVCOMPILER_OPENMP_GPU
+  real, dimension(GPU_nk_max+1) :: &
+#else
   real, dimension(nz+1) :: &
+#endif
     I_Ld2_debug, & ! A separate version of I_Ld2 for debugging [H-1 Z-1 ~> m-2 or m kg-1].
     kappa_prev, & ! The value of kappa at the start of the current iteration [H Z T-1 ~> m2 s-1 or Pa s]
     TKE_prev   ! The value of TKE at the start of the current iteration [Z2 T-2 ~> m2 s-2].
