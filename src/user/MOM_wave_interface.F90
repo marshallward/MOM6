@@ -15,6 +15,7 @@ use MOM_file_parser,   only : get_param, log_version, param_file_type
 use MOM_forcing_type,  only : mech_forcing
 use MOM_grid,          only : ocean_grid_type
 use MOM_hor_index,     only : hor_index_type
+use MOM_intrinsic_functions, only : exp => exp_repro
 use MOM_io,            only : file_exists, get_var_sizes, read_variable
 use MOM_io,            only : vardesc, var_desc
 use MOM_safe_alloc,    only : safe_alloc_ptr
@@ -1043,6 +1044,7 @@ end subroutine Update_Stokes_Drift
 
 !> Return the value of (1 - exp(-x))/x [nondim], using an accurate expression for small values of x.
 pure real function one_minus_exp_x(x)
+  !$omp declare target
   real, intent(in) :: x !< The argument of the function ((1 - exp(-x))/x) [nondim]
   real, parameter :: C1_6 = 1.0/6.0  ! A rational fraction [nondim]
   if (abs(x) <= 2.0e-5) then
@@ -1314,6 +1316,7 @@ end subroutine get_Langmuir_Number
 !! when misalignment is enabled.
 pure subroutine get_Langmuir_Number_pure( LA, G, GV, US, HBL, ustar, i, j, dz, Waves, &
                                           U_H, V_H, Override_MA )
+  !$omp declare target
   type(ocean_grid_type),     intent(in)  :: G     !< Ocean grid structure
   type(verticalGrid_type),   intent(in)  :: GV    !< Ocean vertical grid structure
   real,                      intent(out) :: LA    !< Langmuir number [nondim]
@@ -1323,7 +1326,7 @@ pure subroutine get_Langmuir_Number_pure( LA, G, GV, US, HBL, ustar, i, j, dz, W
   integer,                   intent(in)  :: i     !< Meridional index of h-point
   integer,                   intent(in)  :: j     !< Zonal index of h-point
   real, dimension(SZK_(GV)), intent(in)  :: dz    !< Grid layer thickness [Z ~> m]
-  type(Wave_parameters_CS),  intent(in), pointer :: Waves !< Surface wave control structure.
+  type(Wave_parameters_CS),  intent(in)  :: Waves !< Surface wave control structure.
   real, dimension(SZK_(GV)), &
                    optional, intent(in)  :: U_H   !< Zonal velocity at H point [L T-1 ~> m s-1] or [m s-1]
   real, dimension(SZK_(GV)), &
@@ -1578,11 +1581,12 @@ end subroutine Get_StokesSL_LiFoxKemper
 
 !> Pure compute-only version of get_StokesSL_LiFoxKemper.
 pure subroutine get_StokesSL_LiFoxKemper_pure(ustar, hbl, GV, US, CS, UStokes_SL, LA)
+  !$omp declare target
   real, intent(in)  :: ustar !< water-side surface friction velocity [Z T-1 ~> m s-1].
   real, intent(in)  :: hbl   !< boundary layer depth [Z ~> m].
   type(verticalGrid_type), intent(in) :: GV !< Ocean vertical grid structure
   type(unit_scale_type),   intent(in) :: US !< A dimensional unit scaling type
-  type(wave_parameters_CS), intent(in), pointer :: CS !< Wave parameter Control structure
+  type(wave_parameters_CS), intent(in) :: CS !< Wave parameter Control structure
   real, intent(out) :: UStokes_SL !< Surface layer averaged Stokes drift [L T-1 ~> m s-1]
   real, intent(out) :: LA    !< Langmuir number [nondim]
   real, parameter :: u19p5_to_u10 = 1.075 ! ratio of U19.5 to U10 (Holthuijsen, 2007) [nondim]
@@ -1647,6 +1651,7 @@ end subroutine Get_StokesSL_LiFoxKemper_pure
 
 !> Get SL Averaged Stokes drift from a Stokes drift Profile
 pure subroutine Get_SL_Average_Prof( GV, AvgDepth, dz, Profile, Average )
+  !$omp declare target
   type(verticalGrid_type),  &
        intent(in)   :: GV       !< Ocean vertical grid structure
   real, intent(in)  :: AvgDepth !< Depth to average over (negative) [Z ~> m]
@@ -1693,6 +1698,7 @@ end subroutine Get_SL_Average_Prof
 
 !> Get SL averaged Stokes drift from the banded Spectrum method
 pure subroutine Get_SL_Average_Band( GV, AvgDepth, NB, WaveNumbers, SurfStokes, Average )
+  !$omp declare target
   type(verticalGrid_type),  &
        intent(in)     :: GV          !< Ocean vertical grid
   real, intent(in)    :: AvgDepth    !< Depth to average over [Z ~> m].
@@ -2315,11 +2321,12 @@ end subroutine ust_2_u10_coare3p5
 
 !> Pure compute-only version of ust_2_u10_coare3p5.
 pure subroutine ust_2_u10_coare3p5_pure(USTair, U10, GV, US, CS)
+  !$omp declare target
   real, intent(in)                    :: USTair !< Wind friction velocity [Z T-1 ~> m s-1]
   real, intent(out)                   :: U10    !< 10-m neutral wind speed [L T-1 ~> m s-1]
   type(verticalGrid_type), intent(in) :: GV     !< vertical grid type
   type(unit_scale_type),   intent(in) :: US     !< A dimensional unit scaling type
-  type(wave_parameters_CS), intent(in), pointer :: CS !< Wave parameter Control structure
+  type(wave_parameters_CS), intent(in) :: CS !< Wave parameter Control structure
 
   real :: z0sm, z0, z0rough  ! Roughness lengths [Z ~> m]
   real :: ten_m_scale ! The 10 m reference height, in rescaled units [Z ~> m]

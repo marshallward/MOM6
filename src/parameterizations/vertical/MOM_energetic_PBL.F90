@@ -3,6 +3,7 @@
 ! SPDX-License-Identifier: Apache-2.0
 
 !> Energetically consistent planetary boundary layer parameterization
+#include "do_concurrent_compat.h"
 module MOM_energetic_PBL
 
 use MOM_cpu_clock,      only : cpu_clock_id, cpu_clock_begin, cpu_clock_end, CLOCK_ROUTINE
@@ -16,7 +17,7 @@ use MOM_file_parser,    only : get_param, log_param, log_version, param_file_typ
 use MOM_forcing_type,   only : forcing
 use MOM_grid,           only : ocean_grid_type
 use MOM_interface_heights, only : thickness_to_dz
-use MOM_intrinsic_functions, only : cuberoot
+use MOM_intrinsic_functions, only : cuberoot, exp => exp_repro
 use MOM_string_functions, only : uppercase
 use MOM_unit_scaling,   only : unit_scale_type
 use MOM_variables,      only : thermo_var_ptrs, vertvisc_type
@@ -624,14 +625,19 @@ subroutine energetic_PBL(h_3d, u_3d, v_3d, tv, fluxes, visc, dt, Kd_int, G, GV, 
   !!OMP                                  CS,G,GV,US,fluxes,TKE_forced,dSV_dT,dSV_dS,Kd_int)
   call thickness_to_dz(h_3d, tv, dz_3d, G, GV, US, is=is, ie=ie, js=js, je=je)
 
+  !$omp target enter data map(alloc: h_blk, dz_blk, u_blk, v_blk, T0_blk, S0_blk, TKE_forcing_blk, &
+  !$omp   dSV_dT_blk, dSV_dS_blk)
+
   do jsb=js,je,njj ; do isb=is,ie,nii
     ieb = min(ie, isb+nii-1)
     jeb = min(je, jsb+njj-1)
     iie = ieb-isb+1
     jje = jeb-jsb+1
 
-    do jj=1,jje ; do ii=1,iie
-      j = jsb+jj-1 ; i = isb+ii-1
+    do concurrent (jj=1:jje, ii=1:iie)
+      j = jsb+jj-1
+      i = isb+ii-1
+
       do k=1,nz
         h_blk(ii,jj,k) = h_3d(i,j,k) + GV%H_subroundoff
         dz_blk(ii,jj,k) = dz_3d(i,j,k) + GV%dZ_subroundoff
@@ -643,8 +649,13 @@ subroutine energetic_PBL(h_3d, u_3d, v_3d, tv, fluxes, visc, dt, Kd_int, G, GV, 
         dSV_dT_blk(ii,jj,k) = dSV_dT(i,j,k)
         dSV_dS_blk(ii,jj,k) = dSV_dS(i,j,k)
       enddo
-    enddo ; enddo
+    enddo
 
+    !$omp target teams distribute parallel do collapse(2) &
+    !$omp   private(i,j,k,h,dz,T0,S0,dSV_dT_1d,dSV_dS_1d,TKE_forcing,u,v,Kd,mixvel,mixlen, &
+    !$omp&    mixvel_BBL,mixlen_BBL,Kd_BBL,SpV_dt,SpV_dt_cf,Kd_1,Kd_2,SpV_dt_tmp, &
+    !$omp&    absf,u_star,u_star_mean,mech_TKE,u_star_BBL,u_star_BBL_z_t,BBL_TKE,B_flux, &
+    !$omp&    MLD_io,BBLD_io,MLD_in,BBLD_in,BLD_1,BLD_2,eCD,eCD_tmp)
     do jj=1,jje ; do ii=1,iie
       j = jsb+jj-1 ; i = isb+ii-1
       SpV_dt(:) = 0.0
@@ -846,6 +857,10 @@ subroutine energetic_PBL(h_3d, u_3d, v_3d, tv, fluxes, visc, dt, Kd_int, G, GV, 
     enddo ; enddo
 
   enddo ; enddo ! i-block and j-block loops
+
+  !$omp target exit data map(release: h_blk, dz_blk, u_blk, v_blk, T0_blk, S0_blk, TKE_forcing_blk, &
+  !$omp   dSV_dT_blk, dSV_dS_blk)
+
   if (report_avg_its) then
     do j=js,je ; do i=is,ie
       CS%sum_its(1) = CS%sum_its(1) + real_to_EFP(real(OBL_its_col(i,j)))
