@@ -21,7 +21,7 @@ use MOM_string_functions, only : uppercase
 use MOM_unit_scaling,   only : unit_scale_type
 use MOM_variables,      only : thermo_var_ptrs, vertvisc_type
 use MOM_verticalGrid,   only : verticalGrid_type
-use MOM_wave_interface, only : wave_parameters_CS, Get_Langmuir_Number
+use MOM_wave_interface, only : wave_parameters_CS, Get_Langmuir_Number_pure
 use MOM_stochastics,    only : stochastic_CS
 
 implicit none ; private
@@ -918,7 +918,7 @@ end subroutine energetic_PBL
 
 !> This subroutine determines the diffusivities from the integrated energetics
 !!  mixed layer model for a single column of water.
-subroutine ePBL_column(h, dz, u, v, T0, S0, dSV_dT, dSV_dS, SpV_dt, TKE_forcing, B_flux, absf, &
+pure subroutine ePBL_column(h, dz, u, v, T0, S0, dSV_dT, dSV_dS, SpV_dt, TKE_forcing, B_flux, absf, &
                        u_star, u_star_mean, mech_TKE_in, dt, MLD_io, Kd, mixvel, mixlen, GV, US, CS, eCD, &
                        Waves, G, i, j, TKE_gen_stoch, TKE_diss_stoch)
   type(verticalGrid_type), intent(in)    :: GV     !< The ocean's vertical grid structure.
@@ -970,7 +970,7 @@ subroutine ePBL_column(h, dz, u, v, T0, S0, dSV_dT, dSV_dS, SpV_dt, TKE_forcing,
                            intent(out)   :: mixlen !< The mixing length scale used in Kd [Z ~> m].
   type(energetic_PBL_CS),  intent(in)    :: CS     !< Energetic PBL control structure
   type(ePBL_column_diags), intent(inout) :: eCD    !< A container for passing around diagnostics.
-  type(wave_parameters_CS), pointer      :: Waves  !< Waves control structure for Langmuir turbulence
+  type(wave_parameters_CS), intent(in), pointer :: Waves  !< Waves control structure for Langmuir turbulence
   type(ocean_grid_type),   intent(in)    :: G      !< The ocean's grid structure.
   integer,                 intent(in)    :: i      !< The i-index to work on (used for Waves)
   integer,                 intent(in)    :: j      !< The j-index to work on (used for Waves)
@@ -1276,8 +1276,8 @@ subroutine ePBL_column(h, dz, u, v, T0, S0, dSV_dT, dSV_dS, SpV_dt, TKE_forcing,
 
     !/ Here we get mstar, which is the ratio of convective TKE driven mixing to UStar**3
     if (CS%Use_LT) then
-      call get_Langmuir_Number(LA, G, GV, US, abs(MLD_guess), u_star_mean, i, j, dz, Waves, &
-                               U_H=u, V_H=v)
+      call get_Langmuir_Number_pure(LA, G, GV, US, abs(MLD_guess), u_star_mean, i, j, dz, Waves, &
+                                    U_H=u, V_H=v)
       call find_mstar(CS, US, B_flux, u_star, MLD_guess, absf, .false., &
                       mstar_total, Langmuir_Number=La, Convect_Langmuir_Number=LAmod,&
                       mstar_LT=mstar_LT)
@@ -1984,7 +1984,7 @@ end subroutine ePBL_column
 
 !> This subroutine determines the diffusivities from a bottom boundary layer version of
 !! the integrated energetics mixed layer model for a single column of water.
-subroutine ePBL_BBL_column(h, dz, u, v, T0, S0, dSV_dT, dSV_dS, SpV_dt, absf, &
+pure subroutine ePBL_BBL_column(h, dz, u, v, T0, S0, dSV_dT, dSV_dS, SpV_dt, absf, &
                            dt, Kd, BBL_TKE_in, u_star_BBL, u_star_BBL_z_t, b_flux_BBL, Kd_BBL, BBLD_io, mixvel_BBL, &
                            mixlen_BBL, GV, US, CS, eCD)
   type(verticalGrid_type),   intent(in)  :: GV     !< The ocean's vertical grid structure.
@@ -2781,7 +2781,7 @@ end subroutine ePBL_BBL_column
 
 !> Gives shape function that sets the vertical structure of OSBL diffusivity
 !! as described in Sane et al. 2025
-subroutine kappa_eqdisc(shape_func, CS, GV, dz, absf, B_flux, u_star, MLD_guess)
+pure subroutine kappa_eqdisc(shape_func, CS, GV, dz, absf, B_flux, u_star, MLD_guess)
 
   type(verticalGrid_type), intent(in) :: GV     !< The ocean's vertical grid structure.
   type(energetic_PBL_CS),  intent(in) :: CS     !< Energetic PBL control struct
@@ -2895,7 +2895,7 @@ subroutine kappa_eqdisc(shape_func, CS, GV, dz, absf, B_flux, u_star, MLD_guess)
 end subroutine kappa_eqdisc
 
 !> Gives velocity scale (v_0) using equations that approximate neural network of Sane et al. 2023
-subroutine get_eqdisc_v0(CS, absf, B_flux, u_star, v0_dummy)
+pure subroutine get_eqdisc_v0(CS, absf, B_flux, u_star, v0_dummy)
   type(energetic_PBL_CS),  intent(in) :: CS     !< Energetic PBL control struct
   real, intent(in) :: B_flux !< The surface buoyancy flux [Z2 T-3 ~> m2 s-3]
   real, intent(in) :: u_star !< The surface friction velocity [Z T-1 ~> m s-1]
@@ -2966,7 +2966,7 @@ end subroutine get_eqdisc_v0
 
 !> Gives velocity scale (v_0^h) using equations that with using boundary layer depth as one of its inputs
 !! These equations are different than those set in get_eqdisc_v0 subroutine
-subroutine get_eqdisc_v0h(CS, B_flux, u_star, MLD_guess, v0_dummy)
+pure subroutine get_eqdisc_v0h(CS, B_flux, u_star, MLD_guess, v0_dummy)
   type(energetic_PBL_CS),  intent(in) :: CS     !< Energetic PBL control struct
   real, intent(in) :: B_flux !< The surface buoyancy flux [Z2 T-3 ~> m2 s-3]
   real, intent(in) :: u_star !< The surface friction velocity [Z T-1 ~> m s-1]
@@ -3036,7 +3036,7 @@ end subroutine get_eqdisc_v0h
 !! return values of less than 1e-30 are deliberately reset to 1e-30.  For relatively large values
 !! of hb*Idecay, the return value increases linearly with hb.  When Idecay ~= 0, the return value
 !! is close to 1.
-function exp_decay_TKE_adjust(hb, ha, Idecay) result(TKE_to_PE_scale)
+pure function exp_decay_TKE_adjust(hb, ha, Idecay) result(TKE_to_PE_scale)
   real, intent(in) :: hb   !< The thickness over which the buoyancy flux varies on the
                            !! near-boundary side of an interface (e.g., a well-mixed bottom
                            !! boundary layer thickness) [H ~> m or kg m-2]
@@ -3097,7 +3097,7 @@ end function exp_decay_TKE_adjust
 
 !> This subroutine calculates the change in potential energy and or derivatives
 !! for several changes in an interface's diapycnal diffusivity times a timestep.
-subroutine find_PE_chg(Kddt_h0, dKddt_h, hp_a, hp_b, Th_a, Sh_a, Th_b, Sh_b, &
+pure subroutine find_PE_chg(Kddt_h0, dKddt_h, hp_a, hp_b, Th_a, Sh_a, Th_b, Sh_b, &
                        dT_to_dPE_a, dS_to_dPE_a, dT_to_dPE_b, dS_to_dPE_b, &
                        pres_Z, dT_to_dColHt_a, dS_to_dColHt_a, dT_to_dColHt_b, dS_to_dColHt_b, &
                        PE_chg, dPEc_dKd, dPE_max, dPEc_dKd_0, PE_ColHt_cor)
@@ -3246,7 +3246,7 @@ end subroutine find_PE_chg
 !! diffusivity, returning both the added diffusivity and the realized potential energy change, and
 !! optionally also the maximum change in potential energy that would be realized for an infinitely
 !! large diffusivity.
-subroutine find_Kd_from_PE_chg(Kd_prev, dKd_max, dt_h, max_PE_chg, hp_a, hp_b, Th_a, Sh_a, Th_b, Sh_b, &
+pure subroutine find_Kd_from_PE_chg(Kd_prev, dKd_max, dt_h, max_PE_chg, hp_a, hp_b, Th_a, Sh_a, Th_b, Sh_b, &
                        dT_to_dPE_a, dS_to_dPE_a, dT_to_dPE_b, dS_to_dPE_b, pres_Z, &
                        dT_to_dColHt_a, dS_to_dColHt_a, dT_to_dColHt_b, dS_to_dColHt_b, &
                        Kd_add, PE_chg, dPE_max, frac_dKd_max_PE)
@@ -3390,7 +3390,7 @@ end subroutine find_Kd_from_PE_chg
 !> This subroutine calculates the change in potential energy and or derivatives
 !! for several changes in an interface's diapycnal diffusivity times a timestep
 !! using the original form used in the first version of ePBL.
-subroutine find_PE_chg_orig(Kddt_h, h_k, b_den_1, dTe_term, dSe_term, &
+pure subroutine find_PE_chg_orig(Kddt_h, h_k, b_den_1, dTe_term, dSe_term, &
                        dT_km1_t2, dS_km1_t2, dT_to_dPE_k, dS_to_dPE_k, &
                        dT_to_dPEa, dS_to_dPEa, pres_Z, dT_to_dColHt_k, &
                        dS_to_dColHt_k, dT_to_dColHta, dS_to_dColHta, PE_chg, &
@@ -3544,7 +3544,7 @@ subroutine find_PE_chg_orig(Kddt_h, h_k, b_den_1, dTe_term, dSe_term, &
 end subroutine find_PE_chg_orig
 
 !> This subroutine finds the mstar value for ePBL
-subroutine find_mstar(CS, US, Buoyancy_Flux, UStar, &
+pure subroutine find_mstar(CS, US, Buoyancy_Flux, UStar, &
                       BLD, Abs_Coriolis, Is_BBL, mstar, &
                       Langmuir_Number, mstar_LT, Convect_Langmuir_Number)
   type(energetic_PBL_CS), intent(in) :: CS    !< Energetic PBL control structure
@@ -3641,7 +3641,7 @@ subroutine find_mstar(CS, US, Buoyancy_Flux, UStar, &
 end subroutine Find_mstar
 
 !> This subroutine modifies the mstar value if the Langmuir number is present
-subroutine mstar_Langmuir(CS, US, Abs_Coriolis, Buoyancy_Flux, UStar, BLD, Langmuir_Number, &
+pure subroutine mstar_Langmuir(CS, US, Abs_Coriolis, Buoyancy_Flux, UStar, BLD, Langmuir_Number, &
                           mstar, mstar_LT, Convect_Langmuir_Number)
   type(energetic_PBL_CS), intent(in) :: CS    !< Energetic PBL control structure
   type(unit_scale_type), intent(in)  :: US    !< A dimensional unit scaling type

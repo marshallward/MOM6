@@ -37,6 +37,7 @@ public Update_Stokes_Drift ! Public interface to update the Stokes drift profile
                            ! called in step_mom.
 public get_Langmuir_Number ! Public interface to compute Langmuir number called from
                            ! ePBL or KPP routines.
+public get_Langmuir_Number_pure ! Pure compute-only Langmuir number routine.
 public Stokes_PGF ! Public interface to compute Stokes-shear induced pressure gradient force anomaly
 public StokesMixing ! NOT READY - Public interface to add down-Stokes gradient
                     ! momentum mixing (e.g. the approach of Harcourt 2013/2015)
@@ -1041,7 +1042,7 @@ subroutine Update_Stokes_Drift(G, GV, US, CS, dz, ustar, dt, dynamics_step)
 end subroutine Update_Stokes_Drift
 
 !> Return the value of (1 - exp(-x))/x [nondim], using an accurate expression for small values of x.
-real function one_minus_exp_x(x)
+pure real function one_minus_exp_x(x)
   real, intent(in) :: x !< The argument of the function ((1 - exp(-x))/x) [nondim]
   real, parameter :: C1_6 = 1.0/6.0  ! A rational fraction [nondim]
   if (abs(x) <= 2.0e-5) then
@@ -1307,6 +1308,112 @@ subroutine get_Langmuir_Number( LA, G, GV, US, HBL, ustar, i, j, dz, Waves, &
 
 end subroutine get_Langmuir_Number
 
+!> Pure compute-only interface to get Langmuir number based on options stored in wave structure.
+!! This mirrors get_Langmuir_Number but omits runtime error handling so it can be called from pure
+!! column routines. Callers are responsible for passing valid wave settings and optional velocities
+!! when misalignment is enabled.
+pure subroutine get_Langmuir_Number_pure( LA, G, GV, US, HBL, ustar, i, j, dz, Waves, &
+                                          U_H, V_H, Override_MA )
+  type(ocean_grid_type),     intent(in)  :: G     !< Ocean grid structure
+  type(verticalGrid_type),   intent(in)  :: GV    !< Ocean vertical grid structure
+  real,                      intent(out) :: LA    !< Langmuir number [nondim]
+  type(unit_scale_type),     intent(in)  :: US    !< A dimensional unit scaling type
+  real,                      intent(in)  :: HBL   !< (Positive) thickness of boundary layer [Z ~> m]
+  real,                      intent(in)  :: ustar !< Friction velocity [Z T-1 ~> m s-1]
+  integer,                   intent(in)  :: i     !< Meridional index of h-point
+  integer,                   intent(in)  :: j     !< Zonal index of h-point
+  real, dimension(SZK_(GV)), intent(in)  :: dz    !< Grid layer thickness [Z ~> m]
+  type(Wave_parameters_CS),  intent(in), pointer :: Waves !< Surface wave control structure.
+  real, dimension(SZK_(GV)), &
+                   optional, intent(in)  :: U_H   !< Zonal velocity at H point [L T-1 ~> m s-1] or [m s-1]
+  real, dimension(SZK_(GV)), &
+                   optional, intent(in)  :: V_H   !< Meridional velocity at H point [L T-1 ~> m s-1] or [m s-1]
+  logical,         optional, intent(in)  :: Override_MA !< Override to use misalignment in LA calculation.
+
+  ! Local Variables
+  real :: Top, Bottom, MidPoint  ! Positions within each layer [Z ~> m]
+  real :: Dpt_LASL         ! Averaging depth for Stokes drift [Z ~> m]
+  real :: ShearDirection   ! Shear angular direction from atan2 [radians]
+  real :: WaveDirection    ! Wave angular direction from atan2 [radians]
+  real :: LA_STKx, LA_STKy, LA_STK ! Stokes velocities in [L T-1 ~> m s-1]
+  logical :: ContinueLoop, USE_MA
+  real, dimension(SZK_(GV)) :: US_H, VS_H ! Profiles of Stokes velocities [L T-1 ~> m s-1]
+  real :: StkBand_X, StkBand_Y ! Stokes drifts by band [L T-1 ~> m s-1]
+  integer :: k, BB
+
+  Dpt_LASL = -1.0*max(Waves%LA_FracHBL*HBL, Waves%LA_HBL_min)
+
+  USE_MA = Waves%LA_Misalignment
+  if (present(Override_MA)) USE_MA = Override_MA
+
+  ShearDirection = 0.0
+  if (USE_MA .and. present(U_H) .and. present(V_H)) then
+    ContinueLoop = .true.
+    bottom = 0.0
+    do k = 1,GV%ke
+      Top = Bottom
+      MidPoint = Bottom + 0.5*dz(k)
+      Bottom = Bottom + dz(k)
+
+      if (Waves%LA_Misalign_bug) then
+        if (MidPoint > Dpt_LASL .and. k > 1 .and. ContinueLoop) then
+          ShearDirection = atan2(V_H(1)-V_H(k), U_H(1)-U_H(k))
+          ContinueLoop = .false.
+        endif
+      else
+        if (MidPoint > abs(Dpt_LASL) .and. (k > 1) .and. ContinueLoop) then
+          ShearDirection = atan2(V_H(1)-V_H(k), U_H(1)-U_H(k))
+          ContinueLoop = .false.
+        endif
+      endif
+    enddo
+  endif
+
+  LA_STK = 0.0 ; LA_STKx = 0.0 ; LA_STKy = 0.0
+  if (Waves%WaveMethod==TESTPROF) then
+    do k = 1,GV%ke
+      US_H(k) = 0.5*(Waves%US_X(I,j,k)+Waves%US_X(I-1,j,k))
+      VS_H(k) = 0.5*(Waves%US_Y(i,J,k)+Waves%US_Y(i,J-1,k))
+    enddo
+    call Get_SL_Average_Prof( GV, Dpt_LASL, dz, US_H, LA_STKx)
+    call Get_SL_Average_Prof( GV, Dpt_LASL, dz, VS_H, LA_STKy)
+    LA_STK = sqrt((LA_STKX*LA_STKX) + (LA_STKY*LA_STKY))
+  elseif (Waves%WaveMethod==SURFBANDS) then
+    LA_STKx = 0.0 ; LA_STKy = 0.0
+    do bb = 1,Waves%NumBands
+      StkBand_X = 0.5*(Waves%STKx0(I,j,bb)+Waves%STKx0(I-1,j,bb))
+      StkBand_Y = 0.5*(Waves%STKy0(i,J,bb)+Waves%STKy0(i,J-1,bb))
+      LA_STKx = LA_STKx + StkBand_X * &
+                (1.-EXP(-abs(Dpt_LASL * 2.0 * Waves%WaveNum_Cen(BB)))) / &
+                abs(Dpt_LASL * 2.0 * Waves%WaveNum_Cen(BB))
+      LA_STKy = LA_STKy + StkBand_Y * &
+                (1.-EXP(-abs(Dpt_LASL * 2.0 * Waves%WaveNum_Cen(BB)))) / &
+                abs(Dpt_LASL * 2.0 * Waves%WaveNum_Cen(BB))
+    enddo
+    LA_STK = sqrt((LA_STKX**2) + (LA_STKY**2))
+  elseif (Waves%WaveMethod==DHH85) then
+    do k = 1,GV%ke
+      US_H(k) = 0.5*(Waves%US_X(I,j,k)+Waves%US_X(I-1,j,k))
+      VS_H(k) = 0.5*(Waves%US_Y(i,J,k)+Waves%US_Y(i,J-1,k))
+    enddo
+    call Get_SL_Average_Prof( GV, Dpt_LASL, dz, US_H, LA_STKx)
+    call Get_SL_Average_Prof( GV, Dpt_LASL, dz, VS_H, LA_STKy)
+    LA_STK = sqrt((LA_STKX**2) + (LA_STKY**2))
+  elseif (Waves%WaveMethod==LF17) then
+    call get_StokesSL_LiFoxKemper_pure(ustar, HBL*Waves%LA_FracHBL, GV, US, Waves, LA_STK, LA)
+  endif
+
+  if (.not.(Waves%WaveMethod==LF17)) then
+    LA = max(Waves%La_min, sqrt(US%Z_to_L*ustar / (LA_STK + Waves%La_Stk_backgnd)))
+  endif
+
+  if (Use_MA .and. present(U_H) .and. present(V_H)) then
+    WaveDirection = atan2(LA_STKy, LA_STKx)
+    LA = LA / sqrt(max(1.e-8, cos( WaveDirection - ShearDirection)))
+  endif
+
+end subroutine get_Langmuir_Number_pure
+
 !> function to return the wave method string set in the param file
 function get_wave_method(CS)
   character(:), allocatable :: get_wave_method
@@ -1469,8 +1576,77 @@ subroutine get_StokesSL_LiFoxKemper(ustar, hbl, GV, US, CS, UStokes_SL, LA)
 
 end subroutine Get_StokesSL_LiFoxKemper
 
+!> Pure compute-only version of get_StokesSL_LiFoxKemper.
+pure subroutine get_StokesSL_LiFoxKemper_pure(ustar, hbl, GV, US, CS, UStokes_SL, LA)
+  real, intent(in)  :: ustar !< water-side surface friction velocity [Z T-1 ~> m s-1].
+  real, intent(in)  :: hbl   !< boundary layer depth [Z ~> m].
+  type(verticalGrid_type), intent(in) :: GV !< Ocean vertical grid structure
+  type(unit_scale_type),   intent(in) :: US !< A dimensional unit scaling type
+  type(wave_parameters_CS), intent(in), pointer :: CS !< Wave parameter Control structure
+  real, intent(out) :: UStokes_SL !< Surface layer averaged Stokes drift [L T-1 ~> m s-1]
+  real, intent(out) :: LA    !< Langmuir number [nondim]
+  real, parameter :: u19p5_to_u10 = 1.075 ! ratio of U19.5 to U10 (Holthuijsen, 2007) [nondim]
+  real, parameter :: fm_into_fp = 1.296 ! ratio of mean frequency to peak frequency [nondim]
+  real, parameter :: us_to_u10 = 0.0162 ! ratio of surface Stokes drift to U10 [nondim]
+  real, parameter :: r_loss = 0.667 ! loss ratio of Stokes transport [nondim]
+  real :: UStokes  ! The surface Stokes drift [L T-1 ~> m s-1]
+  real :: hm0      ! The significant wave height [Z ~> m]
+  real :: fm       ! The mean wave frequency [T-1 ~> s-1]
+  real :: fp       ! The peak wave frequency [T-1 ~> s-1]
+  real :: kphil    ! A peak wavenumber in the Phillips spectrum [Z-1 ~> m-1]
+  real :: kstar    ! A rescaled wavenumber? [Z-1 ~> m-1]
+  real :: vstokes  ! The total Stokes transport [Z L T-1 ~> m2 s-1]
+  real :: z0       ! The boundary layer depth [Z ~> m]
+  real :: z0i      ! The inverse of the boundary layer depth [Z-1 ~> m-1]
+  real :: r1, r2, r3, r4  ! Nondimensional ratios [nondim]
+  real :: r5       ! A single expression that combines r2 and r4 [nondim]
+  real :: root_2kz ! The square root of twice the peak wavenumber times the boundary layer depth [nondim]
+  real :: u10      ! The 10 m wind speed [L T-1 ~> m s-1]
+  real :: PI       ! 3.1415926535... [nondim]
+
+  PI = 4.0*atan(1.0)
+  UStokes_sl = 0.0
+  LA = 1.e8
+  if (ustar > 0.0) then
+    call ust_2_u10_coare3p5_pure(ustar*sqrt(CS%rho_ocn/CS%rho_air), u10, GV, US, CS)
+    UStokes = us_to_u10*u10
+    hm0 = CS%SWH_from_u10sq * u10**2
+    fp = 0.877 * (US%L_to_Z*GV%g_Earth) / (2.0 * PI * u19p5_to_u10 * u10)
+    fm = fm_into_fp * fp
+    vstokes = 0.125 * PI * r_loss * US%Z_to_L * fm * hm0**2
+    kphil = 0.176 * UStokes / vstokes
+    z0 = abs(hbl)
+
+    if (CS%answer_date < 20230102) then
+      z0i = 1.0 / z0
+      kstar = kphil * 2.56
+      r1 = ( 0.151 / kphil * z0i - 0.84 ) * ( 1.0 - exp(-2.0 * kphil * z0) )
+      r2 = -( 0.84 + 0.0591 / kphil * z0i ) * sqrt( 2.0 * PI * kphil * z0 ) * &
+           erfc( sqrt( 2.0 * kphil * z0 ) )
+      r3 = ( 0.0632 / kstar * z0i + 0.125 ) * (1.0 - exp(-2.0 * kstar * z0) )
+      r4 = ( 0.125 + 0.0946 / kstar * z0i ) * sqrt( 2.0 * PI * kstar * z0) * &
+           erfc( sqrt( 2.0 * kstar * z0 ) )
+      UStokes_sl = UStokes * (0.715 + r1 + r2 + r3 + r4)
+    else
+      r1 = ( 0.302 - 1.68*(kphil*z0) ) * one_minus_exp_x(2.0 * (kphil * z0))
+      r3 = ( 0.1264 + 0.64*(kphil*z0) ) * one_minus_exp_x(5.12 * (kphil * z0))
+      root_2kz = sqrt(2.0 * kphil * z0)
+      if (root_2kz > 1e-3) then
+        r5 = sqrt(PI) * (root_2kz * (-0.84 * erfc(root_2kz) + 0.2 * erfc(1.6*root_2kz)) + &
+                         0.1182 * (erfc(1.6*root_2kz) - erfc(root_2kz)) / root_2kz)
+      else
+        r5 = -0.64*sqrt(PI)*root_2kz + (-0.14184 + 1.0839648 * root_2kz**2)
+      endif
+      UStokes_sl = UStokes * (0.715 + ((r1 + r3) + r5))
+    endif
+
+    if (UStokes_sl /= 0.0) LA = sqrt(US%Z_to_L*ustar / UStokes_sl)
+  endif
+
+end subroutine Get_StokesSL_LiFoxKemper_pure
+
 !> Get SL Averaged Stokes drift from a Stokes drift Profile
-subroutine Get_SL_Average_Prof( GV, AvgDepth, dz, Profile, Average )
+pure subroutine Get_SL_Average_Prof( GV, AvgDepth, dz, Profile, Average )
   type(verticalGrid_type),  &
        intent(in)   :: GV       !< Ocean vertical grid structure
   real, intent(in)  :: AvgDepth !< Depth to average over (negative) [Z ~> m]
@@ -1516,7 +1692,7 @@ subroutine Get_SL_Average_Prof( GV, AvgDepth, dz, Profile, Average )
 end subroutine Get_SL_Average_Prof
 
 !> Get SL averaged Stokes drift from the banded Spectrum method
-subroutine Get_SL_Average_Band( GV, AvgDepth, NB, WaveNumbers, SurfStokes, Average )
+pure subroutine Get_SL_Average_Band( GV, AvgDepth, NB, WaveNumbers, SurfStokes, Average )
   type(verticalGrid_type),  &
        intent(in)     :: GV          !< Ocean vertical grid
   real, intent(in)    :: AvgDepth    !< Depth to average over [Z ~> m].
@@ -2136,6 +2312,64 @@ subroutine ust_2_u10_coare3p5(USTair, U10, GV, US, CS)
   endif
 
 end subroutine ust_2_u10_coare3p5
+
+!> Pure compute-only version of ust_2_u10_coare3p5.
+pure subroutine ust_2_u10_coare3p5_pure(USTair, U10, GV, US, CS)
+  real, intent(in)                    :: USTair !< Wind friction velocity [Z T-1 ~> m s-1]
+  real, intent(out)                   :: U10    !< 10-m neutral wind speed [L T-1 ~> m s-1]
+  type(verticalGrid_type), intent(in) :: GV     !< vertical grid type
+  type(unit_scale_type),   intent(in) :: US     !< A dimensional unit scaling type
+  type(wave_parameters_CS), intent(in), pointer :: CS !< Wave parameter Control structure
+
+  real :: z0sm, z0, z0rough  ! Roughness lengths [Z ~> m]
+  real :: ten_m_scale ! The 10 m reference height, in rescaled units [Z ~> m]
+  real :: I_ten_m_scale ! The inverse of the 10 m reference height, in rescaled units [Z-1 ~> m-1]
+  real :: u10a  ! The previous guess for u10 [L T-1 ~> m s-1]
+  real :: alpha ! The Charnock coeffient [nondim]
+  real :: Cd    ! The drag coefficient [nondim]
+  real :: I_sqrtCd  ! The inverse of the square root of the drag coefficient [nondim]
+  real :: I_vonKar  ! The inverse of the von Karman coefficient [nondim]
+  integer :: CT
+
+  z0sm = 0.11 * CS%nu_air / USTair
+  u10a = 1000.0*US%m_s_to_L_T
+
+  if (CS%answer_date < 20230103) then
+    u10 = US%Z_to_L*USTair / sqrt(0.001)
+    ten_m_scale = 10.0*US%m_to_Z
+    CT=0
+    do while (abs(u10a/u10 - 1.) > 0.001)
+      CT=CT+1
+      u10a = u10
+      alpha = min(CS%Charnock_min, CS%Charnock_slope_U10 * u10 + CS%Charnock_intercept)
+      z0rough = alpha * (US%Z_to_L*USTair)**2 / GV%g_Earth
+      z0 = z0sm + z0rough
+      Cd = ( CS%vonKar / log(ten_m_scale / z0) )**2
+      u10 = US%Z_to_L*USTair/sqrt(Cd)
+      if (CT>20) then
+        u10 = US%Z_to_L*USTair/sqrt(0.0015)
+        exit
+      endif
+    enddo
+  else
+    u10 = US%Z_to_L*USTair * sqrt(1000.0)
+    I_vonKar = 1.0 / CS%vonKar
+    I_ten_m_scale = 0.1*US%Z_to_m
+
+    do CT=1,20
+      if (abs(u10a - u10) <= 0.001*u10) exit
+      u10a = u10
+      alpha = min(CS%Charnock_min, CS%Charnock_slope_U10 * u10 + CS%Charnock_intercept)
+      z0rough = alpha * (CS%I_g_Earth * USTair**2)
+      z0 = z0sm + z0rough
+      I_sqrtCd = abs(log(z0 * I_ten_m_scale)) * I_vonKar
+      u10 = US%Z_to_L*USTair * I_sqrtCd
+    enddo
+
+    if (abs(u10a - u10) > 0.001*u10) u10 = US%Z_to_L*USTair * 25.82
+  endif
+
+end subroutine ust_2_u10_coare3p5_pure
 
 !> Clear pointers, deallocate memory
 subroutine Waves_end(CS)
