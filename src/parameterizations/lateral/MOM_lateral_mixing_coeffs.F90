@@ -845,7 +845,7 @@ subroutine calc_slope_functions(h, tv, dt, G, GV, US, CS, OBC)
       call calc_isoneutral_slopes(G, GV, US, h, e, tv, dt*CS%kappa_smooth, CS%use_stanley_iso, &
                                   CS%slope_x, CS%slope_y, niblock, njblock, nkblock, N2_u=N2_u, &
                                   N2_v=N2_v, halo=isoneutral_halo, OBC=OBC, OBC_N2=CS%OBC_friendly)
-      !$omp target exit data map(from: CS%slope_x, CS%slope_y, N2_u, N2_v)
+      !$omp target update from( CS%slope_x, CS%slope_y, N2_u, N2_v)
       call calc_Visbeck_coeffs_old(h, CS%slope_x, CS%slope_y, N2_u, N2_v, G, GV, US, CS, OBC)
       !$omp target exit data map(release: tv%T, tv%S, tv)
       !$omp target exit data map(release: tv%p_surf) if (associated(tv%p_surf))
