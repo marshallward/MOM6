@@ -26,7 +26,7 @@ use MOM_error_handler,       only : callTree_showQuery
 use MOM_error_handler,       only : callTree_enter, callTree_leave, callTree_waypoint
 use MOM_file_parser,         only : get_param, log_param, log_version, param_file_type
 use MOM_forcing_type,        only : forcing, optics_type
-use MOM_full_convection,     only : full_convection
+use MOM_full_convection,     only : full_convection, full_convection_init, full_convection_CS
 use MOM_grid,                only : ocean_grid_type
 use MOM_interface_heights,   only : thickness_to_dz, find_rho_bottom
 use MOM_internal_tides,      only : int_tide_CS, get_lowmode_loss, get_lowmode_diffusivity
@@ -194,6 +194,7 @@ type, public :: set_diffusivity_CS ; private
   type(bkgnd_mixing_cs),     pointer :: bkgnd_mixing_csp     => NULL() !< Control structure for a child module
   type(int_tide_CS),         pointer :: int_tide_CSp         => NULL() !< Control structure for a child module
   type(tidal_mixing_cs) :: tidal_mixing   !< Control structure for a child module
+  type(full_convection_CS) :: full_conv_CS !< Control structure for a child module
 
   !>@{ Diagnostic IDs
   integer :: id_maxTKE     = -1, id_TKE_to_Kd   = -1, id_Kd_user    = -1
@@ -464,7 +465,7 @@ subroutine set_diffusivity(u, v, h, u_h, v_h, tv, fluxes, optics, visc, dt, Kd_i
     call cpu_clock_begin(id_clock_kappaShear)
     if (CS%Vertex_shear) then
       call full_convection(G, GV, US, h, tv, T_f, S_f, fluxes%p_surf, &
-                           kappa_dt_fill, halo=1)
+                           kappa_dt_fill, CS%full_conv_CS, halo=1)
 
       call calc_kappa_shear_vertex(u, v, h, T_f, S_f, tv, fluxes%p_surf, visc%Kd_shear, &
                                    visc%TKE_turb, visc%Kv_shear_Bu, dt, G, GV, US, CS%kappaShear_CSp)
@@ -3031,6 +3032,7 @@ subroutine set_diffusivity_init(Time, G, GV, US, param_file, diag, CS, int_tide_
 
   CS%useKappaShear = kappa_shear_init(Time, G, GV, US, param_file, CS%diag, CS%kappaShear_CSp)
   CS%Vertex_Shear = kappa_shear_at_vertex(param_file)
+  if (CS%useKappaShear .and. CS%Vertex_Shear) call full_convection_init(param_file, CS%full_conv_CS)
 
   if (CS%useKappaShear) &
     id_clock_kappaShear = cpu_clock_id('(Ocean kappa_shear)', grain=CLOCK_MODULE)
