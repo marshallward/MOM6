@@ -19,9 +19,21 @@ jobs:
     steps:
     - uses: actions/checkout@v7
 
+    - name: Install flint
+      run: |
+        python3 -m pip install git+https://github.com/marshallward/flint.git
+
     - name: Check white space (non-blocking)
       run: |
         ./.testing/trailer.py -e TEOS10 -l 120 src config_src 2>&1 | tee style_errors
+      continue-on-error: true
+
+    - name: Check assignment spacing (non-blocking)
+      run: |
+        ./.testing/tools/fix_assignment_spacing.py src config_src \
+          --exclude config_src/drivers/STALE_mct_cap \
+          --exclude config_src/drivers/nuopc_cap \
+          --report 2>&1 | tee assignment_spacing_errors
       continue-on-error: true
 
     - name: Install packages used when generating documentation
@@ -41,7 +53,7 @@ jobs:
     - name: Report doxygen or style errors
       run: |
         grep "warning:" docs/_build/doxygen_warn_nortd_log.txt | grep -v "as part of a" | tee doxy_errors
-        cat style_errors doxy_errors > all_errors
+        cat style_errors assignment_spacing_errors doxy_errors > all_errors
         cat all_errors
         test ! -s  all_errors
 
