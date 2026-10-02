@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Normalize Fortran assignment spacing using flint statements.
+"""Report Fortran assignment spacing inconsistencies using flint statements.
 
 Default behavior is a dry run over explicit ``*.F90`` paths. Use ``--write`` to
 apply changes. The default excludes unmaintained cap directories.
@@ -111,7 +111,7 @@ def format_statements(path: Path, statements, source_lines=None) -> tuple[str, l
     return render(statements), changes
 
 
-def fix_assignment_spacing(paths, write=False, report=False, diff=False, excludes=()) -> int:
+def report_assignment_spacing(paths, write=False, report=False, diff=False, excludes=()) -> int:
     changed: list[Path] = []
     all_changes: list[Change] = []
     project = flint.parse(*(str(path) for path in paths), excludes=excludes)
@@ -169,7 +169,7 @@ def main() -> int:
     )
 
     args = parser.parse_args()
-    return fix_assignment_spacing(
+    return report_assignment_spacing(
         args.paths,
         write=args.write,
         report=args.report,
