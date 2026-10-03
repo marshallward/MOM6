@@ -37,13 +37,14 @@ jobs:
         nerrors=$(wc -l < assignment_spacing_errors)
         echo "Assignment spacing issues: ${nerrors}"
         if [ "${nerrors}" -gt 0 ]; then
-          printf '%s\n' \
-            '' \
-            'To fix assignment spacing locally, run:' \
-            '  ./.testing/tools/report_assignment_spacing.py src config_src \' \
-            '    --exclude config_src/drivers/STALE_mct_cap \' \
-            '    --exclude config_src/drivers/nuopc_cap \' \
-            '    --write' | tee -a assignment_spacing_errors
+          {
+            echo
+            echo "To fix assignment spacing locally, run:"
+            echo "  ./.testing/tools/report_assignment_spacing.py src config_src \\"
+            echo "    --exclude config_src/drivers/STALE_mct_cap \\"
+            echo "    --exclude config_src/drivers/nuopc_cap \\"
+            echo "    --write"
+          } | tee -a assignment_spacing_errors
         fi
       continue-on-error: true
 
