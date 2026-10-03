@@ -450,8 +450,15 @@ subroutine set_diffusivity(u, v, h, u_h, v_h, tv, fluxes, optics, visc, dt, Kd_i
       call full_convection(G, GV, US, h, tv, T_f, S_f, fluxes%p_surf, &
                            kappa_dt_fill, halo=1)
 
+      !$omp target enter data map(to: T_f, S_f, tv, tv%T, tv%S, tv%eqn_of_state)
+      !$omp target enter data map(to: fluxes%p_surf) if (associated(fluxes%p_surf))
+      !$omp target enter data map(alloc: visc%Kd_shear, visc%TKE_turb)
       call calc_kappa_shear_vertex(u, v, h, T_f, S_f, tv, fluxes%p_surf, visc%Kd_shear, &
                                    visc%TKE_turb, visc%Kv_shear_Bu, dt, G, GV, US, CS%kappaShear_CSp)
+      !$omp target update from(visc%Kv_shear_Bu) if (associated(visc%Kv_shear_Bu))
+      !$omp target exit data map(from: visc%Kd_shear, visc%TKE_turb)
+      !$omp target exit data map(release: T_f, S_f, tv, tv%T, tv%S, tv%eqn_of_state)
+      !$omp target exit data map(release: fluxes%p_surf) if (associated(fluxes%p_surf))
       ! TODO: tile/port whole-domain Kv_shear initialization.
       if (associated(visc%Kv_shear)) visc%Kv_shear(:,:,:) = 0.0 ! needed for other parameterizations
       if (CS%debug) then
@@ -461,8 +468,15 @@ subroutine set_diffusivity(u, v, h, u_h, v_h, tv, fluxes, optics, visc, dt, Kd_i
       endif
     else
       ! Changes: visc%Kd_shear ;  Sets: visc%Kv_shear and visc%TKE_turb
+      !$omp target enter data map(to: u_h, v_h, h, tv, tv%T, tv%S, tv%eqn_of_state)
+      !$omp target enter data map(to: fluxes%p_surf) if (associated(fluxes%p_surf))
+      !$omp target enter data map(alloc: visc%Kd_shear, visc%TKE_turb)
       call calculate_kappa_shear(u_h, v_h, h, tv, fluxes%p_surf, visc%Kd_shear, visc%TKE_turb, &
                                  visc%Kv_shear, dt, G, GV, US, CS%kappaShear_CSp)
+      !$omp target update from(visc%Kv_shear) if (associated(visc%Kv_shear))
+      !$omp target exit data map(from: visc%Kd_shear, visc%TKE_turb)
+      !$omp target exit data map(release: u_h, v_h, h, tv, tv%T, tv%S, tv%eqn_of_state)
+      !$omp target exit data map(release: fluxes%p_surf) if (associated(fluxes%p_surf))
       if (CS%debug) then
         call hchksum(visc%Kd_shear, "after calc_KS visc%Kd_shear", G%HI, unscale=GV%HZ_T_to_m2_s)
         call hchksum(visc%Kv_shear, "after calc_KS visc%Kv_shear", G%HI, unscale=GV%HZ_T_to_m2_s)
@@ -3050,6 +3064,7 @@ subroutine set_diffusivity_end(CS)
   endif
 
   ! NOTE: CS%kappaShear_CSp is always allocated, even if unused
+  ! !$omp target exit data map(delete: CS%kappaShear_CSp)
   deallocate(CS%kappaShear_CSp)
 end subroutine set_diffusivity_end
 

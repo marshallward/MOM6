@@ -250,7 +250,7 @@ subroutine thickness_diffuse(h, uhtr, vhtr, tv, dt, G, GV, US, MEKE, VarMix, CDp
 
   !$omp target update to(MEKE%KhTh_fac)
   !$omp target enter data map(alloc: KH_u_CFL, KH_v_CFL, Khth_Loc_u, Khth_Loc_v, int_slope_u, int_slope_v, &
-  !$omp                     e, KH_u, KH_v, uhD, vhD) map(to: VarMix, VarMix%res_fn_u, VarMix%res_fn_v)
+  !$omp                     e, KH_u, KH_v, uhD, vhD)
 
   do concurrent (j=js:je, I=is-1:ie)
     KH_u_CFL(I,j) = (0.25*CS%max_Khth_CFL) /  &
@@ -282,7 +282,6 @@ subroutine thickness_diffuse(h, uhtr, vhtr, tv, dt, G, GV, US, MEKE, VarMix, CDp
 
   if (use_VarMix) then
     if (use_Visbeck) then
-      !$omp target update from( VarMix%L2u, VarMix%SN_u)
       do concurrent (j=js:je, I=is-1:ie)
         Khth_loc_u(I,j) = Khth_loc_u(I,j) + &
           CS%KHTH_Slope_Cff*VarMix%L2u(I,j) * VarMix%SN_u(I,j)
@@ -292,7 +291,6 @@ subroutine thickness_diffuse(h, uhtr, vhtr, tv, dt, G, GV, US, MEKE, VarMix, CDp
 
   if (allocated(MEKE%Kh)) then
     if (CS%MEKE_GEOMETRIC) then
-      !$omp target update from( VarMix%SN_u)
       do concurrent (j=js:je, I=is-1:ie)
         Khth_loc_u(I,j) = Khth_loc_u(I,j) + G%OBCmaskCu(I,j) * CS%MEKE_GEOMETRIC_alpha * &
                           0.5*(MEKE%MEKE(i,j)+MEKE%MEKE(i+1,j)) / &
@@ -306,14 +304,12 @@ subroutine thickness_diffuse(h, uhtr, vhtr, tv, dt, G, GV, US, MEKE, VarMix, CDp
   endif
 
   if (Resoln_scaled) then
-    !$omp target update from( VarMix%Res_fn_u )
     do concurrent (j=js:je, I=is-1:ie)
       Khth_loc_u(I,j) = Khth_loc_u(I,j) * VarMix%Res_fn_u(I,j)
     enddo
   endif
 
   if (Depth_scaled) then
-    !$omp target update from( VarMix%Depth_fn_u )
     do concurrent (j=js:je, I=is-1:ie)
       Khth_loc_u(I,j) = Khth_loc_u(I,j) * VarMix%Depth_fn_u(I,j)
     enddo
@@ -375,7 +371,6 @@ subroutine thickness_diffuse(h, uhtr, vhtr, tv, dt, G, GV, US, MEKE, VarMix, CDp
 
   if (use_VarMix) then
     if (use_Visbeck) then
-      !$omp target update from( VarMix%L2v, VarMix%SN_v )
       do concurrent (J=js-1:je, i=is:ie)
         Khth_loc_v(i,J) = Khth_loc_v(i,J) + CS%KHTH_Slope_Cff*VarMix%L2v(i,J)*VarMix%SN_v(i,J)
       enddo
@@ -383,7 +378,6 @@ subroutine thickness_diffuse(h, uhtr, vhtr, tv, dt, G, GV, US, MEKE, VarMix, CDp
   endif
   if (allocated(MEKE%Kh)) then
     if (CS%MEKE_GEOMETRIC) then
-      !$omp target update from( VarMix%SN_v )
       do concurrent (J=js-1:je, i=is:ie)
         Khth_loc_v(i,J) = Khth_loc_v(i,J) + G%OBCmaskCv(i,J) * CS%MEKE_GEOMETRIC_alpha * &
                         0.5*(MEKE%MEKE(i,j)+MEKE%MEKE(i,j+1)) / &
@@ -397,14 +391,12 @@ subroutine thickness_diffuse(h, uhtr, vhtr, tv, dt, G, GV, US, MEKE, VarMix, CDp
   endif
 
   if (Resoln_scaled) then
-    !$omp target update from( VarMix%Res_fn_v )
     do concurrent (J=js-1:je, i=is:ie)
       Khth_loc_v(i,J) = Khth_loc_v(i,J) * VarMix%Res_fn_v(i,J)
     enddo
   endif
 
   if (Depth_scaled) then
-    !$omp target update from( VarMix%Depth_fn_v )
     do concurrent (J=js-1:je, i=is:ie)
       Khth_loc_v(i,J) = Khth_loc_v(i,J) * VarMix%Depth_fn_v(i,J)
     enddo
@@ -459,7 +451,6 @@ subroutine thickness_diffuse(h, uhtr, vhtr, tv, dt, G, GV, US, MEKE, VarMix, CDp
 
   if (allocated(MEKE%Kh)) then
     if (CS%MEKE_GEOMETRIC) then
-      !$omp target update from( VarMix%SN_u, VarMix%SN_v )
       if (CS%MEKE_GEOM_answer_date < 20190101) then
         do concurrent (j=js:je, i=is:ie)
           ! This does not give bitwise rotational symmetry.
@@ -532,7 +523,6 @@ subroutine thickness_diffuse(h, uhtr, vhtr, tv, dt, G, GV, US, MEKE, VarMix, CDp
   ! Calculate uhD, vhD from h, e, KH_u, KH_v, tv%T/S
   if (STOCH%skeb_use_gm) then
     if (use_stored_slopes) then
-      !$omp target update from(VarMix%slope_x, VarMix%slope_y)
       call thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV, US, MEKE, CS, &
                                   int_slope_u, int_slope_v, VarMix%slope_x, VarMix%slope_y, &
                                   STOCH=STOCH, VarMix=VarMix, &
@@ -546,7 +536,6 @@ subroutine thickness_diffuse(h, uhtr, vhtr, tv, dt, G, GV, US, MEKE, VarMix, CDp
     endif
   else
     if (use_stored_slopes) then
-      !$omp target update from(VarMix%slope_x, VarMix%slope_y)
       call thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV, US, MEKE, CS, &
                                   int_slope_u, int_slope_v, VarMix%slope_x, VarMix%slope_y, &
                                   Sfn_unlim_u_3D=Sfn_unlim_u_3D, Sfn_unlim_v_3D=Sfn_unlim_v_3D, &
@@ -670,7 +659,7 @@ subroutine thickness_diffuse(h, uhtr, vhtr, tv, dt, G, GV, US, MEKE, VarMix, CDp
   endif
 
   !$omp target exit data map(release: KH_u_CFL, KH_v_CFL, Khth_Loc_u, Khth_Loc_v, int_slope_u, int_slope_v, &
-  !$omp   e, KH_u, KH_v, uhD, vhD, VarMix, VarMix%res_fn_u, VarMix%res_fn_v, Sfn_unlim_u_3D, Sfn_unlim_v_3D)
+  !$omp   e, KH_u, KH_v, uhD, vhD, Sfn_unlim_u_3D, Sfn_unlim_v_3D)
   !$omp target exit data map(from: MEKE%GM_src) if(allocated(MEKE%GM_src))
   !$omp target exit data map(from: MEKE%Kh) if(allocated(MEKE%Kh))
 
@@ -902,8 +891,6 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV
   !$omp     dzN2_v, Slope_y_PE, slope2_Ratio_v, Sfn_unlim_v, hN2_y_PE, drho_dT_v, drho_dT_dT_hr, &
   !$omp     drho_dS_v, drdj_v, diag_sfn_unlim_y, T_v, S_v, pres_v, drdkDe_v) &
   !$omp   map(to: tv, tv%T, tv%S, meke)
-  !$omp target enter data if(present_slope_x) map(to: slope_x)
-  !$omp target enter data if(present_slope_y) map(to: slope_y)
   !$omp target enter data if(associated(tv%p_surf)) map(to: tv%p_surf)
   !$omp target enter data if(allocated(MEKE%GM_src)) map(to: MEKE%GM_src)
 
@@ -1850,8 +1837,6 @@ subroutine thickness_diffuse_full(h, e, Kh_u, Kh_v, tv, uhD, vhD, cg1, dt, G, GV
   !$omp     T_u, S_u, dzN2_v, Slope_y_PE, slope2_Ratio_v, Sfn_unlim_v, hN2_y_PE, &
   !$omp     drho_dT_v, drho_dT_dT_hr, drho_dS_v, drdj_v, diag_sfn_unlim_y, T_v, S_v, pres_v, &
   !$omp     drdkDe_v, tv, tv%T, tv%S, meke)
-  !$omp target exit data if(present_slope_x) map(release: slope_x)
-  !$omp target exit data if(present_slope_y) map(release: slope_y)
   !$omp target exit data if(associated(tv%p_surf)) map(release: tv%p_surf)
   !$omp target exit data if(allocated(MEKE%GM_src)) map(from: MEKE%GM_src)
 
