@@ -118,7 +118,13 @@ def format_statements(
     changes: list[Change] = []
 
     for statement in statements:
+        if not getattr(statement, 'source_visible', True):
+            continue
+
         original_statement = statement.source_text()
+        if not original_statement:
+            continue
+
         original_body = statement.source_line()
 
         apply_spacing_policy(statement, do_controls=do_controls, strict=strict)
