@@ -62,12 +62,29 @@ jobs:
         mkdir _build && make nortd DOXYGEN_RELEASE=Release_1_8_13 UPDATEHTMLEQS=Y
         cat _build/doxygen_warn_nortd_log.txt
 
-    - name: Report doxygen or style errors
+    - name: Report doxygen errors
+      if: always()
       run: |
-        grep "warning:" docs/_build/doxygen_warn_nortd_log.txt | grep -v "as part of a" | tee doxy_errors
-        cat style_errors assignment_spacing_errors doxy_errors > all_errors
-        cat all_errors
-        test ! -s  all_errors
+        if [ -f docs/_build/doxygen_warn_nortd_log.txt ]; then
+          grep "warning:" docs/_build/doxygen_warn_nortd_log.txt | grep -v "as part of a" | tee doxy_errors
+        else
+          touch doxy_errors
+        fi
+        test ! -s doxy_errors
+
+    - name: Report whitespace errors
+      if: always()
+      run: |
+        touch style_errors
+        cat style_errors
+        test ! -s style_errors
+
+    - name: Report assignment spacing errors
+      if: always()
+      run: |
+        touch assignment_spacing_errors
+        cat assignment_spacing_errors
+        test ! -s assignment_spacing_errors
 
   # Executables
 
