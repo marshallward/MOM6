@@ -160,8 +160,8 @@ def apply_spacing_policy(statement, context: Context) -> None:
             set_comma_spacing(token)
 
 
-def changed_line(statement, original, formatted, source_lines=None):
-    """Return the first physical source line changed by formatting."""
+def changed_lines(statement, original, formatted, source_lines=None):
+    """Return physical source lines changed by formatting."""
     original_lines = original.splitlines()
     formatted_lines = formatted.splitlines()
 
@@ -172,10 +172,9 @@ def changed_line(statement, original, formatted, source_lines=None):
         ):
             line_number = statement.line_number + offset
             if source_lines and line_number <= len(source_lines):
-                return line_number, source_lines[line_number - 1]
-            return line_number, original_line
-
-    return statement.line_number, original_lines[0] if original_lines else ''
+                yield line_number, source_lines[line_number - 1]
+            else:
+                yield line_number, original_line
 
 
 def format_statements(
@@ -204,19 +203,19 @@ def format_statements(
 
         formatted_statement = statement.source_text()
         if formatted_statement != original_statement:
-            line_number, original_line = changed_line(
+            for line_number, original_line in changed_lines(
                 statement,
                 original_body,
                 statement.source_line(),
                 source_lines,
-            )
-            changes.append(
-                Change(
-                    path=path,
-                    line_number=line_number,
-                    original=original_line,
+            ):
+                changes.append(
+                    Change(
+                        path=path,
+                        line_number=line_number,
+                        original=original_line,
+                    )
                 )
-            )
 
     return render(statements), changes
 
