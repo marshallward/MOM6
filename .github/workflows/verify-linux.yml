@@ -23,16 +23,18 @@ jobs:
       run: |
         python3 -m pip install git+https://github.com/marshallward/flint.git
 
-    - name: Check white space (non-blocking)
+    - name: Check white space
+      id: whitespace
       run: |
         set +e
         ./.testing/trailer.py -e TEOS10 -l 120 src config_src 2>&1 | tee style_errors
         status=${PIPESTATUS[0]}
         set -e
         exit ${status}
-      continue-on-error: true
 
-    - name: Check assignment spacing (non-blocking)
+    - name: Check assignment spacing
+      id: assignment_spacing
+      if: always()
       run: |
         set +e
         ./.testing/tools/report_assignment_spacing.py src config_src \
@@ -56,9 +58,10 @@ jobs:
           } | tee -a assignment_spacing_errors
         fi
         exit ${status}
-      continue-on-error: true
 
-    - name: Check callable comma spacing (non-blocking)
+    - name: Check callable comma spacing
+      id: callable_comma_spacing
+      if: always()
       run: |
         set +e
         ./.testing/tools/report_callable_comma_spacing.py src config_src \
@@ -82,9 +85,9 @@ jobs:
           } | tee -a callable_comma_spacing_errors
         fi
         exit ${status}
-      continue-on-error: true
 
     - name: Install packages used when generating documentation
+      if: always()
       run: |
         sudo apt-get update
         sudo apt-get install python3-sphinx python3-lxml perl
@@ -92,6 +95,7 @@ jobs:
         sudo apt-get install graphviz
 
     - name: Build doxygen HTML
+      if: always()
       run: |
         cd docs
         perl -e 'print "perl version $^V" . "\n"'
@@ -99,6 +103,7 @@ jobs:
         cat _build/doxygen_warn_nortd_log.txt
 
     - name: Report doxygen errors
+      id: doxygen
       if: always()
       run: |
         if [ -f docs/_build/doxygen_warn_nortd_log.txt ]; then
@@ -107,6 +112,17 @@ jobs:
           touch doxy_errors
         fi
         test ! -s doxy_errors
+
+    - name: Report style and documentation failures
+      if: always()
+      run: |
+        {
+          echo "Style and documentation check outcomes:"
+          echo "  whitespace: ${{ steps.whitespace.outcome }}"
+          echo "  assignment spacing: ${{ steps.assignment_spacing.outcome }}"
+          echo "  callable comma spacing: ${{ steps.callable_comma_spacing.outcome }}"
+          echo "  doxygen: ${{ steps.doxygen.outcome }}"
+        } | tee -a "$GITHUB_STEP_SUMMARY"
 
   # Executables
 
