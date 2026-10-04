@@ -31,6 +31,7 @@ jobs:
     - name: Check assignment spacing (non-blocking)
       run: |
         ./.testing/tools/report_assignment_spacing.py src config_src \
+          --exclude src/equation_of_state/TEOS10 \
           --exclude config_src/drivers/STALE_mct_cap \
           --exclude config_src/drivers/nuopc_cap \
           --report 2>&1 | tee assignment_spacing_errors
@@ -41,6 +42,7 @@ jobs:
             echo
             echo "To fix assignment spacing locally, run:"
             echo "  ./.testing/tools/report_assignment_spacing.py src config_src \\"
+            echo "    --exclude src/equation_of_state/TEOS10 \\"
             echo "    --exclude config_src/drivers/STALE_mct_cap \\"
             echo "    --exclude config_src/drivers/nuopc_cap \\"
             echo "    --write"
