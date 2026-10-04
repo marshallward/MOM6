@@ -25,16 +25,23 @@ jobs:
 
     - name: Check white space (non-blocking)
       run: |
+        set +e
         ./.testing/trailer.py -e TEOS10 -l 120 src config_src 2>&1 | tee style_errors
+        status=${PIPESTATUS[0]}
+        set -e
+        exit ${status}
       continue-on-error: true
 
     - name: Check assignment spacing (non-blocking)
       run: |
+        set +e
         ./.testing/tools/report_assignment_spacing.py src config_src \
           --exclude src/equation_of_state/TEOS10 \
           --exclude config_src/drivers/STALE_mct_cap \
           --exclude config_src/drivers/nuopc_cap \
           --report 2>&1 | tee assignment_spacing_errors
+        status=${PIPESTATUS[0]}
+        set -e
         nerrors=$(wc -l < assignment_spacing_errors)
         echo "Assignment spacing issues: ${nerrors}"
         if [ "${nerrors}" -gt 0 ]; then
@@ -48,15 +55,19 @@ jobs:
             echo "    --write"
           } | tee -a assignment_spacing_errors
         fi
+        exit ${status}
       continue-on-error: true
 
     - name: Check callable comma spacing (non-blocking)
       run: |
+        set +e
         ./.testing/tools/report_callable_comma_spacing.py src config_src \
           --exclude src/equation_of_state/TEOS10 \
           --exclude config_src/drivers/STALE_mct_cap \
           --exclude config_src/drivers/nuopc_cap \
           --report 2>&1 | tee callable_comma_spacing_errors
+        status=${PIPESTATUS[0]}
+        set -e
         nerrors=$(wc -l < callable_comma_spacing_errors)
         echo "Callable comma spacing issues: ${nerrors}"
         if [ "${nerrors}" -gt 0 ]; then
@@ -70,6 +81,7 @@ jobs:
             echo "    --write"
           } | tee -a callable_comma_spacing_errors
         fi
+        exit ${status}
       continue-on-error: true
 
     - name: Install packages used when generating documentation
@@ -95,26 +107,6 @@ jobs:
           touch doxy_errors
         fi
         test ! -s doxy_errors
-
-    - name: Report whitespace errors
-      if: always()
-      run: |
-        touch style_errors
-        cat style_errors
-        test ! -s style_errors
-
-    - name: Report assignment spacing errors
-      if: always()
-      run: |
-        touch assignment_spacing_errors
-        cat assignment_spacing_errors
-        test ! -s assignment_spacing_errors
-
-    - name: Report callable comma spacing errors
-      if: always()
-      run: |
-        touch callable_comma_spacing_errors
-        cat callable_comma_spacing_errors
 
   # Executables
 
