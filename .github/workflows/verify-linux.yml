@@ -50,6 +50,28 @@ jobs:
         fi
       continue-on-error: true
 
+    - name: Check callable comma spacing (non-blocking)
+      run: |
+        ./.testing/tools/report_callable_comma_spacing.py src config_src \
+          --exclude src/equation_of_state/TEOS10 \
+          --exclude config_src/drivers/STALE_mct_cap \
+          --exclude config_src/drivers/nuopc_cap \
+          --report 2>&1 | tee callable_comma_spacing_errors
+        nerrors=$(wc -l < callable_comma_spacing_errors)
+        echo "Callable comma spacing issues: ${nerrors}"
+        if [ "${nerrors}" -gt 0 ]; then
+          {
+            echo
+            echo "To fix callable comma spacing locally, run:"
+            echo "  ./.testing/tools/report_callable_comma_spacing.py src config_src \\"
+            echo "    --exclude src/equation_of_state/TEOS10 \\"
+            echo "    --exclude config_src/drivers/STALE_mct_cap \\"
+            echo "    --exclude config_src/drivers/nuopc_cap \\"
+            echo "    --write"
+          } | tee -a callable_comma_spacing_errors
+        fi
+      continue-on-error: true
+
     - name: Install packages used when generating documentation
       run: |
         sudo apt-get update
@@ -87,6 +109,12 @@ jobs:
         touch assignment_spacing_errors
         cat assignment_spacing_errors
         test ! -s assignment_spacing_errors
+
+    - name: Report callable comma spacing errors
+      if: always()
+      run: |
+        touch callable_comma_spacing_errors
+        cat callable_comma_spacing_errors
 
   # Executables
 
