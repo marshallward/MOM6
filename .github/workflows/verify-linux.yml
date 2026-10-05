@@ -86,6 +86,33 @@ jobs:
         fi
         exit ${status}
 
+    - name: Check operator spacing
+      id: operator_spacing
+      if: always()
+      run: |
+        set +e
+        ./.testing/tools/report_operator_spacing.py src config_src \
+          --exclude src/equation_of_state/TEOS10 \
+          --exclude config_src/drivers/STALE_mct_cap \
+          --exclude config_src/drivers/nuopc_cap \
+          --report 2>&1 | tee operator_spacing_errors
+        status=${PIPESTATUS[0]}
+        set -e
+        nerrors=$(wc -l < operator_spacing_errors)
+        echo "Operator spacing issues: ${nerrors}"
+        if [ "${nerrors}" -gt 0 ]; then
+          {
+            echo
+            echo "To fix operator spacing locally, run:"
+            echo "  ./.testing/tools/report_operator_spacing.py src config_src \\"
+            echo "    --exclude src/equation_of_state/TEOS10 \\"
+            echo "    --exclude config_src/drivers/STALE_mct_cap \\"
+            echo "    --exclude config_src/drivers/nuopc_cap \\"
+            echo "    --write"
+          } | tee -a operator_spacing_errors
+        fi
+        exit ${status}
+
     - name: Install packages used when generating documentation
       if: always()
       run: |
@@ -121,6 +148,7 @@ jobs:
           echo "  whitespace: ${{ steps.whitespace.outcome }}"
           echo "  assignment spacing: ${{ steps.assignment_spacing.outcome }}"
           echo "  callable comma spacing: ${{ steps.callable_comma_spacing.outcome }}"
+          echo "  operator spacing: ${{ steps.operator_spacing.outcome }}"
           echo "  doxygen: ${{ steps.doxygen.outcome }}"
         } | tee -a "$GITHUB_STEP_SUMMARY"
 
