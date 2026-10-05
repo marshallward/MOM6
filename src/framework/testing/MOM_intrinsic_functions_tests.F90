@@ -490,9 +490,7 @@ end subroutine test_exp_ulp_accuracy
 
 !> Test ULP accuracy over a wide range of positive values.
 !!
-!! log_repro should be within a few ULP of the true value.  This first-pass
-!! implementation uses a series polynomial rather than a Remez fit, so the
-!! tolerance is looser than exp_repro().
+!! log_repro should be within a few ULP of the true value.
 subroutine test_log_ulp_accuracy
   integer, parameter :: npts = 100000
   real, parameter :: ymin = -700.
@@ -535,7 +533,7 @@ subroutine test_log_ulp_accuracy
 
   ! Assert that log_repro() is within 8 ULP.
   print '(1x,a)', '=== scalar log_repro() accuracy'
-  call check_ulp_accuracy(y, val, val_quad, max_ulp_tol=8.)
+  call check_ulp_accuracy(x, val, val_quad, max_ulp_tol=8.)
 
   ! We expect scalar and vector implementations to agree.
   call assert(all(val == val_vec), 'Scalar and vector log_repro() do not agree')
@@ -543,13 +541,13 @@ subroutine test_log_ulp_accuracy
 
   ! log() accuracy is provided for comparison.
   print '(1x,a)', '=== scalar log() accuracy'
-  call check_ulp_accuracy(y, val_log, val_quad)
+  call check_ulp_accuracy(x, val_log, val_quad)
 
   if (all(val_log == val_log_vec)) then
     print '(1x,a)', '=== vector log() matches scalar'
   else
     print '(1x,a)', '=== vector log() accuracy'
-    call check_ulp_accuracy(y, val_log_vec, val_quad_vec)
+    call check_ulp_accuracy(x, val_log_vec, val_quad_vec)
   endif
 end subroutine test_log_ulp_accuracy
 
@@ -636,11 +634,11 @@ subroutine check_ulp_accuracy(x, val, ref, max_ulp_tol)
   print '(2x,"Tested ", i0, " points")', npts
 
   ! NOTE: Floats use t25 assuming a positive sign as blank
-  print '(2x,"max abs err:", t25, ES12.5, " at input = ", f10.4)', &
+  print '(2x,"max abs err:", t25, ES12.5, " at input = ", ES14.5E3)', &
       max_abs_err, x_max_abs
-  print '(2x,"max rel err:", t25, ES12.5, " at input = ", f10.4)', &
+  print '(2x,"max rel err:", t25, ES12.5, " at input = ", ES14.5E3)', &
       max_rel_err, x_max_rel
-  print '(2x,"max ULP err (vs quad):", t26, f12.10, " at input = ", f10.4)', &
+  print '(2x,"max ULP err (vs quad):", t26, f12.10, " at input = ", ES14.5E3)', &
       max_ulp, x_max_ulp
   print '(2x,"mean abs err:", t25, ES12.5)', sum_abs_err / npts
   print '(2x,"mean rel err:", t25, ES12.5)', sum_rel_err / npts
