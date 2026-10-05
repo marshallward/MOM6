@@ -11,20 +11,31 @@ use iso_fortran_env, only : int64
 
 implicit none ; private
 
-public :: invcosh, cuberoot, exp_repro
+public :: invcosh, cuberoot, exp_repro, log_repro
 public :: intrinsic_functions_unit_tests
 
 interface
   !> Reproducible exponential function
   !!
   !! Compute exp(x) with bitwise reproducibility across platforms.
-  !! Implemented in submodule MOM_exp
+  !! Implemented in submodule MOM_log
   elemental module function exp_repro(x) result(a)
     real, intent(in) :: x
       !< Input value
     real :: a
       !< exp(x)
   end function exp_repro
+
+  !> Reproducible natural logarithm function
+  !!
+  !! Compute log(x) with bitwise reproducibility across platforms.
+  !! Implemented in submodule MOM_exp
+  elemental module function log_repro(x) result(a)
+    real, intent(in) :: x
+      !< Input value
+    real :: a
+      !< log(x)
+  end function log_repro
 end interface
 
 real, parameter :: real_mold = 0.

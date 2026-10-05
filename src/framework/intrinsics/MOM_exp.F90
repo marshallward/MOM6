@@ -27,7 +27,6 @@ integer(kind=int_kind), parameter :: pos_inf_bits &
 integer(kind=int_kind), parameter :: neg_inf_bits &
     = ior(pos_inf_bits, ishft(-1_int_kind, signbit))
   !< IEEE -Inf bit pattern
-
 ! Fast integer rounding offset
 real, parameter :: round_bias = 1.5 * 2_int_kind**(digits(real_mold) - 1)
   !< Binary offset used to trigger rounding of fractional values
