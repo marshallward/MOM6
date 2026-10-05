@@ -18,7 +18,7 @@ use, intrinsic :: ieee_exceptions, only : ieee_divide_by_zero
 
 use MOM_error_handler, only : assert
 use MOM_unit_testing, only : TestSuite
-use MOM_intrinsic_functions, only : exp_repro
+use MOM_intrinsic_functions, only : exp_repro, log_repro
 
 implicit none ; private
 
@@ -65,6 +65,12 @@ real, parameter :: log_tiny = -708.39641853226408
   !< log(tiny()) [nondim]
 real, parameter :: exp_log_tiny = 2.2250738585072625e-308
   !< exp(log_tiny) [nondim]
+real, parameter :: log_033 = -1.1086626245216111
+  !< log(0.33) [nondim]
+real, parameter :: log_2 = 0.69314718055994531
+  !< log(2) [nondim]
+real, parameter :: log_10 = 2.3025850929940457
+  !< log(10) [nondim]
 
 ! Module-level flag to enable/disable IEEE exception tests
 logical :: ieee_flags_supported = .false.
@@ -482,6 +488,72 @@ subroutine test_exp_ulp_accuracy
 end subroutine test_exp_ulp_accuracy
 
 
+!> Test ULP accuracy over a wide range of positive values.
+!!
+!! log_repro should be within a few ULP of the true value.  This first-pass
+!! implementation uses a series polynomial rather than a Remez fit, so the
+!! tolerance is looser than exp_repro().
+subroutine test_log_ulp_accuracy
+  integer, parameter :: npts = 100000
+  real, parameter :: ymin = -700.
+  real, parameter :: ymax = 700.
+
+  ! Input axis
+  real :: y(npts), x(npts)
+  real :: I_npts
+
+  real :: val(npts), val_vec(npts)
+  real :: val_log(npts), val_log_vec(npts)
+  real(kind=realq) :: val_quad(npts), val_quad_vec(npts)
+
+  integer :: i
+
+  ! Generate positive test points with logarithms spanning [ymin,ymax].
+  I_npts = 1. / (npts - 1)
+  do i = 1, npts
+    y(i) = ymin + (i - 1) * ((ymax - ymin) * I_npts)
+    x(i) = exp(y(i))
+  enddo
+
+  ! Several libraries have scalar and vector implementations, chosen at the
+  ! discretion of the compiler.  The following attempts to test each case.
+
+  ! Scalar evaluations
+  do i = 1, npts
+    val_log(i) = log(x(i))
+    val(i) = log_repro(x(i))
+    val_quad(i) = log(real(x(i), realq))
+
+    ! Impossible branch to prevent vectorization
+    if (val(i) > huge(val(i))) exit
+  enddo
+
+  ! Vector-favorable evaluation
+  val_log_vec = log(x)
+  val_vec = log_repro(x)
+  val_quad_vec = log(real(x, realq))
+
+  ! Assert that log_repro() is within 8 ULP.
+  print '(1x,a)', '=== scalar log_repro() accuracy'
+  call check_ulp_accuracy(y, val, val_quad, max_ulp_tol=8.)
+
+  ! We expect scalar and vector implementations to agree.
+  call assert(all(val == val_vec), 'Scalar and vector log_repro() do not agree')
+  print '(1x,a)', '=== vector log_repro() matches scalar'
+
+  ! log() accuracy is provided for comparison.
+  print '(1x,a)', '=== scalar log() accuracy'
+  call check_ulp_accuracy(y, val_log, val_quad)
+
+  if (all(val_log == val_log_vec)) then
+    print '(1x,a)', '=== vector log() matches scalar'
+  else
+    print '(1x,a)', '=== vector log() accuracy'
+    call check_ulp_accuracy(y, val_log_vec, val_quad_vec)
+  endif
+end subroutine test_log_ulp_accuracy
+
+
 !> Compute the function accuracy relative to a real128-precision reference.
 !! Absolute, relative, and ULP error is computed, as well as the number of
 !! points above 0.5 and 1 ULP.  An error is raised if any point exceeds the
@@ -561,14 +633,14 @@ subroutine check_ulp_accuracy(x, val, ref, max_ulp_tol)
     if (ulp_err >= 1.0) count_one_ulp = count_one_ulp + 1
   enddo
 
-  print '(2x,"Tested ", i0, " points in [-10, 10]")', npts
+  print '(2x,"Tested ", i0, " points")', npts
 
   ! NOTE: Floats use t25 assuming a positive sign as blank
-  print '(2x,"max abs err:", t25, ES12.5, " at x = ", f10.4)', &
+  print '(2x,"max abs err:", t25, ES12.5, " at input = ", f10.4)', &
       max_abs_err, x_max_abs
-  print '(2x,"max rel err:", t25, ES12.5, " at x = ", f10.4)', &
+  print '(2x,"max rel err:", t25, ES12.5, " at input = ", f10.4)', &
       max_rel_err, x_max_rel
-  print '(2x,"max ULP err (vs quad):", t26, f12.10, " at x = ", f10.4)', &
+  print '(2x,"max ULP err (vs quad):", t26, f12.10, " at input = ", f10.4)', &
       max_ulp, x_max_ulp
   print '(2x,"mean abs err:", t25, ES12.5)', sum_abs_err / npts
   print '(2x,"mean rel err:", t25, ES12.5)', sum_rel_err / npts
@@ -583,8 +655,7 @@ subroutine check_ulp_accuracy(x, val, ref, max_ulp_tol)
 
   ! exp_repro should be within 2 ULP of the quad-precision reference.
   if (present(max_ulp_tol)) then
-    call assert(max_ulp < max_ulp_tol, &
-        "exp_repro max ULP error exceeds 2 over [-10, 10]")
+    call assert(max_ulp < max_ulp_tol, "Max ULP error exceeds tolerance")
   endif
 end subroutine check_ulp_accuracy
 
@@ -709,6 +780,114 @@ subroutine test_exp_elemental
     endif
   enddo
 end subroutine test_exp_elemental
+
+
+!> Test that log_repro(1) = 0 exactly
+subroutine test_log_one
+  real :: val
+
+  val = log_repro(1.)
+
+  print '(2x, "log_repro(1) = ", ES22.15)', val
+
+  call assert(val == 0., "log_repro(1) should equal 0 exactly")
+end subroutine test_log_one
+
+
+!> Test log_repro at a general value (0.33)
+subroutine test_log_general
+  real :: x, val, ref, err
+  real, parameter :: tol = 1.e-12
+
+  x = 0.33
+  ref = log_033
+  val = log_repro(x)
+  err = abs(val - ref) / abs(ref)
+
+  print '(2x, "log_repro(0.33) = ", ES22.15, ", rel err = ", ES9.2)', val, err
+
+  call assert(err < tol, "log_repro(0.33) relative error exceeds tolerance")
+end subroutine test_log_general
+
+
+!> Test log_repro(2) against ln(2)
+subroutine test_log_two
+  real :: val, err
+  real, parameter :: tol = 1.e-15
+
+  val = log_repro(2.)
+  err = abs(val - log_2) / log_2
+
+  print '(2x, "log_repro(2) = ", ES22.15, ", rel err = ", ES9.2)', val, err
+
+  call assert(err < tol, "log_repro(2) relative error exceeds tolerance")
+end subroutine test_log_two
+
+
+!> Test log_repro(10) against reference value
+subroutine test_log_ten
+  real :: val, err
+  real, parameter :: tol = 1.e-12
+
+  val = log_repro(10.)
+  err = abs(val - log_10) / log_10
+
+  print '(2x, "log_repro(10) = ", ES22.15, ", rel err = ", ES9.2)', val, err
+
+  call assert(err < tol, "log_repro(10) relative error exceeds tolerance")
+end subroutine test_log_ten
+
+
+!> Test log_repro(+Inf) = +Inf
+subroutine test_log_pos_inf
+  real :: x, val, ref
+
+  x = ieee_value(0., ieee_positive_inf)
+  ref = ieee_value(0., ieee_positive_inf)
+  val = log_repro(x)
+
+  print '(2x, "log_repro(+Inf) = ", ES22.15)', val
+
+  call assert(val == ref, "log_repro(+Inf) should equal +Inf")
+end subroutine test_log_pos_inf
+
+
+!> Test log_repro(0) = -Inf
+subroutine test_log_zero
+  real :: val, ref
+
+  ref = ieee_value(0., ieee_negative_inf)
+  val = log_repro(0.)
+
+  print '(2x, "log_repro(0) = ", ES22.15)', val
+
+  call assert(val == ref, "log_repro(0) should equal -Inf")
+end subroutine test_log_zero
+
+
+!> Test log_repro(negative) = NaN
+subroutine test_log_negative
+  real :: val
+
+  val = log_repro(-1.)
+
+  print '(2x, "log_repro(-1) = ", ES22.15)', val
+
+  call assert(ieee_is_nan(val), "log_repro(-1) should be NaN")
+end subroutine test_log_negative
+
+
+!> Test log_repro(NaN) = NaN
+subroutine test_log_nan
+  real :: x, val
+
+  x = ieee_value(0., ieee_quiet_nan)
+  val = log_repro(x)
+
+  print '(2x, "log_repro(NaN) = ", ES22.15)', val
+
+  call assert(ieee_is_nan(val), "log_repro(NaN) should be NaN")
+end subroutine test_log_nan
 
 
 !> Test IEEE exception flags for normal input (should raise inexact only)
@@ -994,8 +1173,9 @@ subroutine run_intrinsic_functions_tests
   ! Evaluate error if quad precision is available
   if (realquad >= 0) then
     call suite%add(test_exp_ulp_accuracy, "test_exp_ulp_accuracy")
+    call suite%add(test_log_ulp_accuracy, "test_log_ulp_accuracy")
   else
-    print '(1x,a)', 'Skipping exp_repro ULP accuracy test: quad precision is unavailable.'
+    print '(1x,a)', 'Skipping exp_repro/log_repro ULP accuracy tests: quad precision is unavailable.'
   endif
 
   ! Property tests
@@ -1004,6 +1184,16 @@ subroutine run_intrinsic_functions_tests
 
   ! Elemental test
   call suite%add(test_exp_elemental, "test_exp_elemental")
+
+  ! log_repro tests
+  call suite%add(test_log_one, "test_log_one")
+  call suite%add(test_log_general, "test_log_general")
+  call suite%add(test_log_two, "test_log_two")
+  call suite%add(test_log_ten, "test_log_ten")
+  call suite%add(test_log_pos_inf, "test_log_pos_inf")
+  call suite%add(test_log_zero, "test_log_zero")
+  call suite%add(test_log_negative, "test_log_negative")
+  call suite%add(test_log_nan, "test_log_nan")
 
   ! IEEE exception flag tests (skipped if not supported)
   call suite%add(test_exp_flags_normal, "test_exp_flags_normal")
