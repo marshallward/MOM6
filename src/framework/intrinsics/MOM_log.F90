@@ -117,8 +117,10 @@ pure function log_remez_atanh_horner_17(x) result(a)
     !< Input value; expected range is approximately [-0.172, 0.172] [nondim]
   real :: a
     !< Approximation of 2 * atanh(x) [nondim]
-  real :: x2
-    !< x squared [nondim]
+  real :: x2, x3
+    !< Powers of x [nondim]
+  real :: q
+    !< Polynomial partial sum [nondim]
 
   !> Remez coefficients for 2 * atanh(x) on the reduced interval [nondim]
   real, parameter :: c(0:8) = [ &
@@ -134,9 +136,11 @@ pure function log_remez_atanh_horner_17(x) result(a)
   ]
 
   x2 = x * x
-  a = x * (c(0) + x2 * (c(1) + x2 * (c(2) + x2 * (c(3) + &
-      x2 * (c(4) + x2 * (c(5) + x2 * (c(6) + x2 * (c(7) + &
-      x2 * c(8)))))))))
+  x3 = x * x2
+
+  q = c(1) + x2 * (c(2) + x2 * (c(3) + x2 * (c(4) + &
+      x2 * (c(5) + x2 * (c(6) + x2 * (c(7) + x2 * c(8)))))))
+  a = c(0) * x + x3 * q
 end function log_remez_atanh_horner_17
 
 end submodule MOM_log
