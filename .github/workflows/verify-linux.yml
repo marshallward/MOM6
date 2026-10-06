@@ -113,6 +113,34 @@ jobs:
         fi
         exit ${status}
 
+    - name: Preview real variable units
+      id: real_units
+      if: always()
+      run: |
+        set +e
+        ./.testing/tools/report_real_units.py src config_src \
+          --exclude src/equation_of_state/TEOS10 \
+          --exclude config_src/drivers/STALE_mct_cap \
+          --exclude config_src/drivers/nuopc_cap \
+          --report 2>&1 | tee real_units_errors
+        status=${PIPESTATUS[0]}
+        set -e
+        nerrors=$(wc -l < real_units_errors)
+        echo "Real variable unit issues: ${nerrors}"
+        if [ "${nerrors}" -gt 0 ]; then
+          {
+            echo
+            echo "Preview only: real variable declarations should have bracketed units."
+            echo "To check real variable units locally, run:"
+            echo "  ./.testing/tools/report_real_units.py src config_src \\"
+            echo "    --exclude src/equation_of_state/TEOS10 \\"
+            echo "    --exclude config_src/drivers/STALE_mct_cap \\"
+            echo "    --exclude config_src/drivers/nuopc_cap \\"
+            echo "    --report"
+          } | tee -a real_units_errors
+        fi
+        exit 0
+
     - name: Install packages used when generating documentation
       if: always()
       run: |
@@ -149,6 +177,7 @@ jobs:
           echo "  assignment spacing: ${{ steps.assignment_spacing.outcome }}"
           echo "  callable comma spacing: ${{ steps.callable_comma_spacing.outcome }}"
           echo "  operator spacing: ${{ steps.operator_spacing.outcome }}"
+          echo "  real variable units preview: ${{ steps.real_units.outcome }}"
           echo "  doxygen: ${{ steps.doxygen.outcome }}"
         } | tee -a "$GITHUB_STEP_SUMMARY"
 
