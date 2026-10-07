@@ -125,7 +125,7 @@ jobs:
           --report 2>&1 | tee real_units_errors
         status=${PIPESTATUS[0]}
         set -e
-        nerrors=$(wc -l < real_units_errors)
+        nerrors=$(grep -E '^[^[:space:]].*:[0-9]+: [^[:space:]]+: ' real_units_errors | wc -l) || nerrors=0
         echo "Real variable unit issues: ${nerrors}"
         if [ "${nerrors}" -gt 0 ]; then
           {
