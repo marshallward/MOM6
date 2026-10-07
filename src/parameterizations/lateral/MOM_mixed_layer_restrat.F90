@@ -31,6 +31,7 @@ implicit none ; private
 
 #include <MOM_memory.h>
 #include "do_concurrent_compat.h"
+#include "omp_loop_bind_compat.h"
 
 #ifdef __NVCOMPILER_OPENMP_GPU
 integer, parameter :: default_nkblock = 0 !< Default k block size for the mixed layer density integral [nondim]
@@ -1247,7 +1248,7 @@ subroutine mixedlayer_restrat_Bodner(CS, G, GV, US, h, uhtr, vhtr, tv, forces, d
   ! These loops are OpenMP target constructs rather than do concurrent because they need the
   ! per-column dmu profile as a private automatic array, which do concurrent local() cannot
   ! yet express without crashing nvfortran (private() handles it correctly).
-  !$omp target teams loop collapse(2) &
+  !$omp target teams loop collapse(2) LOOP_BIND_TEAMS_PARALLEL &
   !$omp   private(k, dmu, grid_dsd, absf, h_sml, h_big, grd_b, r_wpup, psi_mag, IhTot, &
   !$omp           sigint, muzb, muza, hAtVel)
   do j=js,je ; do I=is-1,ie
@@ -1290,7 +1291,7 @@ subroutine mixedlayer_restrat_Bodner(CS, G, GV, US, h, uhtr, vhtr, tv, forces, d
   enddo ; enddo
 
   ! V- component
-  !$omp target teams loop collapse(2) &
+  !$omp target teams loop collapse(2) LOOP_BIND_TEAMS_PARALLEL &
   !$omp   private(k, dmu, grid_dsd, absf, h_sml, h_big, grd_b, r_wpup, psi_mag, IhTot, &
   !$omp           sigint, muzb, muza, hAtVel)
   do J=js-1,je ; do i=is,ie
