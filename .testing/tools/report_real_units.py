@@ -24,13 +24,14 @@ UNIT_RE = re.compile(r'\[[^\]\n]+\]')
 
 
 class Issue(NamedTuple):
-    """Description of one real variable missing bracketed units."""
+    """Description of one real variable documentation issue."""
 
     path: Path
     line_number: int
     name: str
     original: str
     comments: tuple[str, ...]
+    message: str = 'missing bracketed units'
 
 
 def is_real_declaration(statement) -> bool:
@@ -57,22 +58,12 @@ def comments_in_liminals(liminals: list[str]) -> list[str]:
     return [item for item in liminals if item.startswith('!')]
 
 
-def associated_liminal_comments(liminals: list[str]) -> list[str]:
-    """Return comments that look associated with preceding source code."""
-    comments: list[str] = []
-    newline_before_comment = False
-    for item in liminals:
-        if item.startswith('!'):
-            if (
-                not comments
-                and newline_before_comment
-                and not item.startswith(('!<', '!>', '!!'))
-            ):
-                return []
-            comments.append(item)
-        elif '\n' in item and not comments:
-            newline_before_comment = True
-    return comments
+def comments_starting_with(comments: list[str], prefix: str) -> list[str]:
+    """Return a comment block starting with a given prefix."""
+    for index, comment in enumerate(comments):
+        if comment.startswith(prefix):
+            return comments[index:]
+    return []
 
 
 def leading_forward_comment(statement) -> str:
@@ -82,11 +73,7 @@ def leading_forward_comment(statement) -> str:
 
 def leading_forward_comments(statement) -> list[str]:
     """Return Doxygen comments that document the following statement."""
-    comments = comments_in_liminals(statement[0].head)
-    for index, comment in enumerate(comments):
-        if comment.startswith('!>'):
-            return comments[index:]
-    return []
+    return comments_starting_with(comments_in_liminals(statement[0].head), '!>')
 
 
 def comment_after_token(statement, index: int) -> str:
@@ -95,7 +82,7 @@ def comment_after_token(statement, index: int) -> str:
 
 
 def comments_after_token(statement, index: int) -> list[str]:
-    """Return comments most directly associated with a token."""
+    """Return ordinary comments most directly associated with a token."""
     depth = 0
     comments: list[str] = []
     for offset, token in enumerate(statement[index:], start=index):
@@ -104,7 +91,7 @@ def comments_after_token(statement, index: int) -> list[str]:
         elif token in (')', ']', '}', '/)') and depth > 0:
             depth -= 1
 
-        comments.extend(associated_liminal_comments(token.tail))
+        comments.extend(comments_in_liminals(token.tail))
 
         if offset > index and token == ',' and depth == 0:
             break
@@ -113,6 +100,15 @@ def comments_after_token(statement, index: int) -> list[str]:
             break
 
     return comments
+
+
+def doxygen_tail_comments(statement, index: int) -> list[str]:
+    """Return a backward Doxygen comment block for a declaration token."""
+    comments = comments_starting_with(comments_in_liminals(statement[index].tail), '!<')
+    if comments:
+        return comments
+
+    return comments_starting_with(statement_trailing_comments(statement), '!<')
 
 
 def statement_trailing_comment(statement) -> str:
@@ -124,12 +120,16 @@ def statement_trailing_comments(statement) -> list[str]:
     """Return trailing comments on a declaration statement."""
     comments: list[str] = []
     for token in statement:
-        comments.extend(associated_liminal_comments(token.tail))
+        comments.extend(comments_in_liminals(token.tail))
     return comments
 
 
 def associated_comments(statement, index: int) -> list[str]:
     """Return the best available comment block for a declaration token."""
+    comments = doxygen_tail_comments(statement, index)
+    if comments:
+        return comments
+
     comments = comments_after_token(statement, index)
     if comments:
         return comments
@@ -139,6 +139,33 @@ def associated_comments(statement, index: int) -> list[str]:
         return comments
 
     return leading_forward_comments(statement)
+
+
+def comment_blocks(lines: list[str], statement, index: int) -> list[list[str]]:
+    """Return possible documentation blocks for a declaration token."""
+    doxygen_tail = doxygen_tail_comments(statement, index)
+    direct = comments_after_token(statement, index)
+    leading = leading_forward_comments(statement)
+
+    if doxygen_tail or direct:
+        blocks = [doxygen_tail, direct, leading]
+    else:
+        blocks = [
+            statement_trailing_comments(statement),
+            following_comment_block(lines, statement),
+            leading,
+        ]
+
+    result: list[list[str]] = []
+    for block in blocks:
+        if block and block not in result:
+            result.append(block)
+    return result
+
+
+def has_competing_doxygen_comments(statement, index: int) -> bool:
+    """Return True when both forward and backward Doxygen forms are present."""
+    return bool(leading_forward_comments(statement) and doxygen_tail_comments(statement, index))
 
 
 def declarator_name_indices(statement) -> list[int]:
@@ -172,6 +199,38 @@ def has_units(comment: str) -> bool:
     return bool(UNIT_RE.search(comment))
 
 
+def following_comment_block(lines: list[str], statement) -> list[str]:
+    """Return an indented plain comment block following a declaration."""
+    statement_lines = statement.source_line().splitlines()
+    if not statement_lines:
+        return []
+
+    declaration_index = statement.line_number - 1
+    last_code_offset = 0
+    for offset, line in enumerate(statement_lines):
+        if line.split('!', 1)[0].strip():
+            last_code_offset = offset
+
+    next_index = declaration_index + last_code_offset + 1
+    if next_index >= len(lines):
+        return []
+
+    first = lines[next_index]
+    stripped = first.lstrip(' ')
+    if not stripped.startswith('!'):
+        return []
+    comments: list[str] = []
+    while next_index < len(lines):
+        line = lines[next_index]
+        stripped = line.lstrip(' ')
+        if not stripped.startswith('!'):
+            break
+        comments.append(stripped.rstrip())
+        next_index += 1
+
+    return comments
+
+
 def source_line(path: Path, line_number: int) -> str:
     """Return one source line from a path."""
     lines = path.read_text(encoding='utf-8', errors='ignore').splitlines()
@@ -197,6 +256,7 @@ def collect_units(unit):
 def real_unit_issues(source) -> list[Issue]:
     """Return real variables missing bracketed units in one flint source."""
     path = Path(source.path)
+    lines = path.read_text(encoding='utf-8', errors='ignore').splitlines()
     issues: list[Issue] = []
 
     seen: set[tuple[int, str]] = set()
@@ -211,10 +271,11 @@ def real_unit_issues(source) -> list[Issue]:
             token = statement[index]
             seen.add((id(statement), str(token).lower()))
 
-            comments = associated_comments(statement, index)
-            comment = ' '.join(comments)
+            blocks = comment_blocks(lines, statement, index)
+            comments = blocks[0] if blocks else []
 
-            if has_units(comment):
+            competing_doxygen = has_competing_doxygen_comments(statement, index)
+            if any(has_units(' '.join(block)) for block in blocks) and not competing_doxygen:
                 continue
 
             line_number = token_line_number(statement, token)
@@ -225,6 +286,11 @@ def real_unit_issues(source) -> list[Issue]:
                     name=str(token),
                     original=source_line(path, line_number),
                     comments=tuple(comments),
+                    message=(
+                        'competing Doxygen comments'
+                        if competing_doxygen
+                        else 'missing bracketed units'
+                    ),
                 )
             )
 
@@ -244,10 +310,11 @@ def real_unit_issues(source) -> list[Issue]:
                 except ValueError:
                     continue
 
-                comments = associated_comments(statement, index)
-                comment = ' '.join(comments)
+                blocks = comment_blocks(lines, statement, index)
+                comments = blocks[0] if blocks else []
 
-                if has_units(comment):
+                competing_doxygen = has_competing_doxygen_comments(statement, index)
+                if any(has_units(' '.join(block)) for block in blocks) and not competing_doxygen:
                     continue
 
                 line_number = token_line_number(statement, variable.name)
@@ -258,6 +325,11 @@ def real_unit_issues(source) -> list[Issue]:
                         name=str(variable.name),
                         original=source_line(path, line_number),
                         comments=tuple(comments),
+                        message=(
+                            'competing Doxygen comments'
+                            if competing_doxygen
+                            else 'missing bracketed units'
+                        ),
                     )
                 )
 
@@ -276,7 +348,7 @@ def report_real_units(paths, report=False, excludes=()) -> int:
         for issue in all_issues:
             print(
                 f'{issue.path}:{issue.line_number}: '
-                f'{issue.name}: missing bracketed units'
+                f'{issue.name}: {issue.message}'
             )
             print(f'  declaration: {declaration_text(issue.original)}')
             if issue.comments:
