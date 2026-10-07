@@ -1063,12 +1063,9 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
       ! All viscosity contributions above are subject to resolution scaling
 
       if (rescale_Kh) then
-        !$omp target update from(Kh)
-        !$omp target update from(VarMix%Res_fn_h)
-        do kk=1,kmax ; do j=js_Kh,je_Kh ; do i=is_Kh,ie_Kh
+        do concurrent (kk=1:kmax, j=js_Kh:je_Kh, i=is_Kh:ie_Kh)
           Kh(i,j,kk) = VarMix%Res_fn_h(i,j) * Kh(i,j,kk)
-        enddo ; enddo ; enddo
-        !$omp target update to(Kh)
+        enddo
       endif
 
       ! Place a floor on the viscosity, if desired.
@@ -1457,12 +1454,9 @@ subroutine horizontal_viscosity(u, v, h, uh, vh, diffu, diffv, MEKE, VarMix, G, 
       ! All viscosity contributions above are subject to resolution scaling
 
       if (rescale_Kh) then
-        !$omp target update from(Kh)
-        !$omp target update from(VarMix%Res_fn_q)
-        do kk=1,kmax ; do J=js-1,Jeq ; do I=is-1,Ieq
+        do concurrent (kk=1:kmax, J=js-1:Jeq, I=is-1:Ieq)
           Kh(I,J,kk) = VarMix%Res_fn_q(I,J) * Kh(I,J,kk)
-        enddo ; enddo ; enddo
-        !$omp target update to(Kh)
+        enddo
       endif
 
       do concurrent (kk=1:kmax, J=js-1:Jeq, I=is-1:Ieq)
