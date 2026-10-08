@@ -8,21 +8,14 @@
 
 submodule (MOM_intrinsic_functions) MOM_exp
 
-use, intrinsic :: iso_fortran_env, only : int32, int64
 use, intrinsic :: ieee_arithmetic, only : ieee_rint
 use MOM_exp_data_n128, only : ndiv, idiv_scale_lookup, idiv_residual_lookup
 
 implicit none
 
-integer, parameter :: int_kind &
-    = merge(int64, int32, storage_size(real_mold) > storage_size(0_int32))
-  !< Integer kind with the same storage size as default real
-integer(kind=int_kind), parameter :: int_mold = 0
-  !< Integer mold value
-
 ! IEEE 754 special values
 integer(kind=int_kind), parameter :: pos_inf_bits &
-    = ishft(2_int_kind**expwidth - 1_int_kind, expbit)
+    = ishft(expmask, expbit)
   !< IEEE +Inf bit pattern
 integer(kind=int_kind), parameter :: neg_inf_bits &
     = ior(pos_inf_bits, ishft(-1_int_kind, signbit))
