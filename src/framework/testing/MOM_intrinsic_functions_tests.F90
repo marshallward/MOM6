@@ -1030,12 +1030,13 @@ end subroutine test_exp_flags_nan
 
 !> Print a summary table of IEEE exception flags for various inputs
 !!
-!! This is informational only - it shows which flags are raised by exp() and
-!! exp_repro() for different input categories. Not enforced by assertions.
+!! This is informational only - it shows which flags are raised by exp(),
+!! exp_repro(), log(), and log_repro() for different input categories. Not
+!! enforced by assertions.
 subroutine print_ieee_flags_summary
   real, volatile :: x, val_intrinsic, val_repro
-  logical :: flags_intrinsic(5), flags_repro(5)
-  character(len=5) :: flag_str_intrinsic, flag_str_repro
+  logical :: flags_intrinsic(5), flags_repro(5), flags_log_intrinsic(5), flags_log_repro(5)
+  character(len=5) :: flag_str_intrinsic, flag_str_repro, flag_str_log_intrinsic, flag_str_log_repro
   integer :: i
 
   ! Test cases: name, input value
@@ -1084,8 +1085,8 @@ subroutine print_ieee_flags_summary
   test_names(12) = "sNaN"
   test_values(12) = ieee_value(0., ieee_signaling_nan)
 
-  print '(/, "IEEE flags summary:", 1x, "exp()", 3x, "exp_repro")'
-  print '(a18, 2x, "IOUXZ", 3x, "IOUXZ")', ""
+  print '(/, "IEEE flags summary:", 1x, "exp()", 3x, "exp_repro", 3x, "log()", 3x, "log_repro")'
+  print '(a18, 2x, "IOUXZ", 3x, "IOUXZ", 7x, "IOUXZ", 3x, "IOUXZ")', ""
 
   do i = 1, 12
     x = test_values(i)
@@ -1100,8 +1101,18 @@ subroutine print_ieee_flags_summary
     val_repro = exp_repro(x)
     call get_flag_string(flags_repro, flag_str_repro)
 
-    print '(a18, ": ", a5, 3x, a5)', &
-        trim(test_names(i)), flag_str_intrinsic, flag_str_repro
+    ! Test intrinsic log()
+    call ieee_set_flag(ieee_all, .false.)
+    val_intrinsic = log(x)
+    call get_flag_string(flags_log_intrinsic, flag_str_log_intrinsic)
+
+    ! Test log_repro()
+    call ieee_set_flag(ieee_all, .false.)
+    val_repro = log_repro(x)
+    call get_flag_string(flags_log_repro, flag_str_log_repro)
+
+    print '(a18, ": ", a5, 3x, a5, 7x, a5, 3x, a5)', &
+        trim(test_names(i)), flag_str_intrinsic, flag_str_repro, flag_str_log_intrinsic, flag_str_log_repro
   enddo
 
 contains
