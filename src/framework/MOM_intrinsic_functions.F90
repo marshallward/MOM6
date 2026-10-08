@@ -7,7 +7,7 @@
 module MOM_intrinsic_functions
 
 use iso_fortran_env, only : stdout => output_unit, stderr => error_unit
-use iso_fortran_env, only : int64
+use iso_fortran_env, only : int32, int64
 
 implicit none ; private
 
@@ -18,7 +18,7 @@ interface
   !> Reproducible exponential function
   !!
   !! Compute exp(x) with bitwise reproducibility across platforms.
-  !! Implemented in submodule MOM_log
+  !! Implemented in submodule MOM_exp
   elemental module function exp_repro(x) result(a)
     real, intent(in) :: x
       !< Input value
@@ -29,7 +29,7 @@ interface
   !> Reproducible natural logarithm function
   !!
   !! Compute log(x) with bitwise reproducibility across platforms.
-  !! Implemented in submodule MOM_exp
+  !! Implemented in submodule MOM_log
   elemental module function log_repro(x) result(a)
     real, intent(in) :: x
       !< Input value
@@ -40,6 +40,11 @@ end interface
 
 real, parameter :: real_mold = 0.
   !< Real mold for numerical format queries [nondim]
+integer, parameter :: int_kind &
+    = merge(int64, int32, storage_size(real_mold) > storage_size(0_int32))
+  !< Integer kind with the same storage size as default real
+integer(kind=int_kind), parameter :: int_mold = 0
+  !< Integer mold value
 
 ! Floating point layout
 integer, parameter :: expbit = digits(real_mold) - 1
@@ -51,6 +56,8 @@ integer, parameter :: expwidth = signbit - expbit
   !< Number of exponent bits
 integer, parameter :: expbias = maxexponent(real_mold) - 1
   !< Exponent bias
+integer(kind=int_kind), parameter :: expmask = 2_int_kind**expwidth - 1_int_kind
+  !< Mask for the biased exponent value
 
 contains
 

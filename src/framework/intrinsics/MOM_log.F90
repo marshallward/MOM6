@@ -6,21 +6,12 @@
 
 submodule (MOM_intrinsic_functions) MOM_log
 
-use, intrinsic :: iso_fortran_env, only : int32, int64
 use MOM_log_data_n128, only : log_ndiv, log_invc_lookup, logc_lookup
 use MOM_log_data_n128, only : log_chi_lookup, log_clo_lookup
 
 implicit none
 
-integer, parameter :: int_kind &
-    = merge(int64, int32, storage_size(real_mold) > storage_size(0_int32))
-  !< Integer kind with the same storage size as default real
-integer(kind=int_kind), parameter :: int_mold = 0
-  !< Integer mold value
-
 ! IEEE 754 masks
-integer(kind=int_kind), parameter :: exp_mask = 2_int_kind**expwidth - 1_int_kind
-  !< Mask for the biased exponent value
 integer(kind=int_kind), parameter :: sign_mask = ishft(-1_int_kind, signbit)
   !< Mask for the sign bit
 
@@ -86,9 +77,9 @@ module procedure log_repro
     return
   endif
 
-  raw_exp = iand(ishft(xb, -expbit), exp_mask)
+  raw_exp = iand(ishft(xb, -expbit), expmask)
 
-  if (raw_exp == exp_mask) then
+  if (raw_exp == expmask) then
     a = x + x
     return
   endif
@@ -100,7 +91,7 @@ module procedure log_repro
   if (scaled_subnormal) then
     xs = x * scale_up
     xb = transfer(xs, int_mold)
-    raw_exp = iand(ishft(xb, -expbit), exp_mask)
+    raw_exp = iand(ishft(xb, -expbit), expmask)
   endif
 
   tmp = xb - log_offset_bits
