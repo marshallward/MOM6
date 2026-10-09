@@ -28,8 +28,6 @@ module procedure log_repro
     !< Lower precision bits of ln2: 1.90821492927058770002e-10 [nondim]
   integer(kind=int_kind), parameter :: Kbias = maxexponent(real_mold) - 2
     !< Exponent adjustment used to normalize subnormal inputs
-  real, parameter :: scale_up = transfer(ishft(int(expbias, int_kind) + Kbias, expbit), real_mold)
-    !< Exact power-of-two scale factor for subnormal inputs [nondim]
   integer(kind=int_kind), parameter :: log_table_step_bits = exp_stride / log_ndiv
     !< Spacing in integer representation between adjacent log table entries
   integer(kind=int_kind), parameter :: log_offset_bits = transfer(log_table_start, int_mold)
@@ -41,12 +39,14 @@ module procedure log_repro
     ! Offset from log table base and table-scale bin number
   integer(kind=int_kind) :: raw_exp
     ! Biased IEEE exponent field
+  integer(kind=int_kind) :: frac_bits
+    ! Fraction bits of a subnormal input
   integer(kind=int_kind) :: K
     ! Binary exponent in x = 2**K m [nondim]
+  integer :: top_frac_bit
+    ! Highest set fraction bit of a subnormal input
   integer :: idiv
     ! Lookup table subdivision index
-  real :: xs
-    ! Input value, possibly scaled to normalize subnormal numbers [nondim]
   real :: z
     ! Significand of x, adjusted into the log table interval [nondim]
   real :: r
@@ -63,7 +63,7 @@ module procedure log_repro
   ! Handle exceptional values before arithmetic range reduction.  This gives
   ! log(0) = -Inf with divide-by-zero, log(negative) = NaN with invalid,
   ! log(+Inf) = +Inf, and NaNs pass through with the usual signaling behavior.
-  if (x == 0.) then
+  if (iand(xb, not(sign_mask)) == 0_int_kind) then
     a = -1. / abs(x)
     return
   endif
@@ -99,8 +99,14 @@ module procedure log_repro
   ! in K after the table decomposition.
   scaled_subnormal = raw_exp == 0_int_kind
   if (scaled_subnormal) then
-    xs = x * scale_up
-    xb = transfer(xs, int_mold)
+    ! Normalize subnormal inputs using integer bit operations rather than
+    ! arithmetic scaling, which can be defeated by flush-to-zero modes.
+    frac_bits = iand(xb, exp_stride - 1_int_kind)
+    do top_frac_bit = expbit - 1, 0, -1
+      if (btest(frac_bits, top_frac_bit)) exit
+    enddo
+    xb = ishft(int(expbias - expbit + top_frac_bit, int_kind), expbit) + &
+        ishft(frac_bits - ishft(1_int_kind, top_frac_bit), expbit - top_frac_bit)
     raw_exp = iand(ishft(xb, -expbit), expmask)
   endif
 
