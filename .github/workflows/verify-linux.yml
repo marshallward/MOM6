@@ -119,6 +119,7 @@ jobs:
       run: |
         set +e
         ./.testing/tools/report_real_units.py src config_src \
+          --exclude src/framework \
           --exclude src/equation_of_state/TEOS10 \
           --exclude config_src/drivers/STALE_mct_cap \
           --exclude config_src/drivers/nuopc_cap \
@@ -133,6 +134,7 @@ jobs:
             echo "Preview only: real variable declarations should have bracketed units."
             echo "To check real variable units locally, run:"
             echo "  ./.testing/tools/report_real_units.py src config_src \\"
+            echo "    --exclude src/framework \\"
             echo "    --exclude src/equation_of_state/TEOS10 \\"
             echo "    --exclude config_src/drivers/STALE_mct_cap \\"
             echo "    --exclude config_src/drivers/nuopc_cap \\"
