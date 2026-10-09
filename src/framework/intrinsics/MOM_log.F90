@@ -86,11 +86,11 @@ module procedure log_repro
   endif
 
   ! Avoid table-reduction cancellation for values very close to 1.  The
-  ! existing log1p Remez tail is accurate over approximately [-1/128, 1/128],
-  ! and x - 1 is exact in this range by Sterbenz's lemma.
+  ! dedicated log1p path is accurate over approximately [-1/16, 0.065], and
+  ! x - 1 is exact in this range by Sterbenz's lemma.
   u = x - 1.
-  if (abs(u) <= 1. / 128.) then
-    a = u + log1p_remez_tail_8(u)
+  if ((u >= -1. / 16.) .and. (u <= 0.064697265625)) then
+    a = log1p_compensated_near(u)
     return
   endif
 
@@ -157,45 +157,60 @@ pure function log1p_taylor_tail_6(x) result(a)
 end function log1p_taylor_tail_6
 
 
-!> Remez estimate of log1p(x) - x over the near-one log_repro() range.
-pure function log1p_remez_tail_6(x) result(a)
+!> Compensated near-one estimate of log1p(x).
+pure function log1p_compensated_near(x) result(a)
   real, intent(in) :: x
-    !< Input value; expected range is approximately [-1/512, 1/512] [nondim]
+    !< Input value; expected range is approximately [-1/16, 0.065] [nondim]
   real :: a
-    !< Approximation of log1p(x) - x [nondim]
+    !< Approximation of log1p(x) [nondim]
 
-  real, parameter :: c(2:6) = [ &
-      -0.500000000000000001531992077481654475668128157188753876631778885247311583, &
-       0.3333333333322630456631544068975149947601565365240798082150360405372396857, &
-      -0.2499999999976636390789139216550810004312450069947905784129872818608102103, &
-       0.2000008112826621083191778349879309697511001440446713500798235478459693848, &
-      -0.166667650690583434892505189737659407295169538338185395188807100923723888]
-    !< Remez coefficients for log1p(x) - x on [-1/512, 1/512] [nondim]
+  real, parameter :: split_scale = 134217728.
+    !< Exact power-of-two scale used to split x into high and low parts [nondim]
+  real, parameter :: c(3:13) = [ &
+       0.3333333333333333495663409158244431039492812795260412782820753513055676037, &
+      -0.2500000000000048410898553018121243145959173159979113851695191401132202101, &
+       0.1999999999999401954600182759053457391449548132751979049871662291688667322, &
+      -0.1666666666544826424331902956193816320602454785603791935540999385211449934, &
+       0.142857142926292331379290143400260129042455919821774060063839433541603189, &
+      -0.1250000111081452467282831140237236744260745509124580241506815300101707851, &
+       0.1111110780004715236340979900688580293441238517810620127033976097471253938, &
+      -9.999529690174345780528722225743902151690897998496979148198959705548315274e-2, &
+       9.09152833243368478159650834402877235721130565569984927237483052376511638e-2, &
+      -8.42729367861804930413103634851785932895197979844461832654488007987301762e-2, &
+       7.684686137510498609385153891204008164960977636361018003750735920585730455e-2]
+    !< Remez coefficients for log1p(x) - x + x*x/2 on [-1/16, 265/4096] [nondim]
 
-  a = x * x * (c(2) + x * (c(3) + x * (c(4) + x * (c(5) + x * c(6)))))
-end function log1p_remez_tail_6
+  real :: x2, x3
+    !< Powers of the reduced argument [nondim]
+  real :: x_hi, x_lo
+    !< High and low parts of x [nondim]
+  real :: w, hi, lo, tail
+    !< Compensated partial sums and polynomial tail [nondim]
+  real :: p1, p2, p3, p4
+    !< Grouped polynomial partial sums [nondim]
 
+  x2 = x * x
+  x3 = x * x2
 
-!> Remez estimate of log1p(x) - x over the near-one log_repro() range.
-pure function log1p_remez_tail_8(x) result(a)
-  real, intent(in) :: x
-    !< Input value; expected range is approximately [-1/128, 1/128] [nondim]
-  real :: a
-    !< Approximation of log1p(x) - x [nondim]
+  p1 = (c(3) + (x * c(4))) + (x2 * c(5))
+  p2 = (c(6) + (x * c(7))) + (x2 * c(8))
+  p3 = (c(9) + (x * c(10))) + (x2 * c(11))
+  p4 = c(12) + (x * c(13))
+  tail = x3 * (p1 + (x3 * (p2 + (x3 * (p3 + (x3 * p4))))))
 
-  real, parameter :: c(2:8) = [ &
-      -0.50000000000000000146880644447745834276117239589584147686810426077429923, &
-       0.333333333333383439081489510558618980088213205599752827834025980978889853, &
-      -0.250000000000300387046095139450341182750948342481656948559960050179908581, &
-       0.199999996718934020585979325801837669966856969675133175387608887567261307, &
-      -0.166666664868771236962982455327063859706607758596032524924398075146814502, &
-       0.142871285441583989558603865248163259413977031840605019462415377267409527, &
-      -0.125015076930830173046952639984941031775223381177899836187586194388830784]
-    !< Remez coefficients for log1p(x) - x on [-1/128, 1/128] [nondim]
+  ! Split x and compensate the dominant x - x*x/2 terms.  This follows the
+  ! structure used by high-quality libm log1p kernels and reduces final-rounding
+  ! error near x = 0, where the leading terms dominate the result.
+  w = x * split_scale
+  x_hi = (x + w) - w
+  x_lo = x - x_hi
+  w = -0.5 * (x_hi * x_hi)
+  hi = x + w
+  lo = (x - hi) + w
+  lo = lo + ((-0.5 * x_lo) * (x_hi + x))
 
-  a = x * x * (c(2) + x * (c(3) + x * (c(4) + x * (c(5) + &
-      x * (c(6) + x * (c(7) + x * c(8)))))))
-end function log1p_remez_tail_8
+  a = (tail + lo) + hi
+end function log1p_compensated_near
 
 
 end submodule MOM_log
