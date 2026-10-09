@@ -29,12 +29,10 @@ module procedure log_repro
     !< Exponent adjustment used to normalize subnormal inputs
   real, parameter :: scale_up = transfer(ishft(int(expbias, int_kind) + Kbias, expbit), real_mold)
     !< Exact power-of-two scale factor for subnormal inputs [nondim]
-  integer(kind=int_kind), parameter :: two_to_expbit = 2_int_kind**expbit
-    !< Integer value 2**expbit, the spacing between IEEE exponent fields
-  integer(kind=int_kind), parameter :: log_table_step_bits = two_to_expbit / log_ndiv
+  integer(kind=int_kind), parameter :: log_table_step_bits = exp_stride / log_ndiv
     !< Spacing in integer representation between adjacent log table entries
   integer(kind=int_kind), parameter :: log_offset_bits = 4604367669032910848_int_kind
-    !< Bit pattern for the lower end of the log table range, 0x1.6p-1
+    !< Bit pattern for the lower end of the log table range, 0.6875 (=11/16)
 
   integer(kind=int_kind) :: xb, mb
     ! Bit representations of x and its normalized significand
@@ -105,19 +103,27 @@ module procedure log_repro
     raw_exp = iand(ishft(xb, -expbit), expmask)
   endif
 
+  ! Table reduction uses the ordered bit pattern of positive normal floats,
+  ! xb = biased_exp * 2**52 + frac, so one exponent step is an integer stride
+  ! of 2**52 and the table bins subdivide that stride.
+
+  ! Use the lower bound of the table as an offset to determine the bin
   tmp = xb - log_offset_bits
+
+  ! TODO: Replace these modulo() calls
   table_bin = floor_div_int(tmp, log_table_step_bits)
   idiv = int(modulo(table_bin, int(log_ndiv, int_kind)))
-  K = floor_div_int(tmp, two_to_expbit)
+  K = floor_div_int(tmp, exp_stride)
 
-  mb = xb - K * two_to_expbit
+  mb = xb - K * exp_stride
   z = transfer(mb, real_mold)
   if (scaled_subnormal) K = K - Kbias
 
-  ! log(x) = K*ln2 + log(c) + log1p(r), where r = z / c - 1.
-  ! The table makes |r| small; splitting c into high and low parts keeps the
-  ! reduction accurate when z is close to c.
+  ! log(x) = K*ln2 + log(c) + log(1+r), where r = z/c - 1.
+
+  ! Compute r as ((z - c_hi) - c_lo)) * (1/c) to avoid precision loss near c.
   r = ((z - log_chi_lookup(idiv)) - log_clo_lookup(idiv)) * log_invc_lookup(idiv)
+
   w = real(K) * ln2_hi + logc_lookup(idiv)
   hi = w + r
   lo = (w - hi + r) + real(K) * ln2_lo
