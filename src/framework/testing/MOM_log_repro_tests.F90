@@ -22,6 +22,8 @@ integer, parameter :: realquad = selected_real_kind(p=30, r=300)
   !< Potential real128 precision kind.  If unavailable, this will be negative.
 integer, parameter :: realq = merge(realquad, kind(1.), realquad >= 0.)
   !< Placeholder real128 for declarations.  Unused if real128 is unavailable.
+integer, parameter :: int_kind = selected_int_kind(18)
+  !< Integer kind large enough to hold a binary64 bit pattern.
 
 real, parameter :: rmold = 0.
   !< Mold value for default real [nondim]
@@ -49,6 +51,8 @@ real, parameter :: log_one_plus_eps = 2.2204460492503128e-16
   !< log(1 + epsilon(1)) [nondim]
 real, parameter :: log_one_minus_eps = -2.2204460492503136e-16
   !< log(1 - epsilon(1)) [nondim]
+integer, parameter :: log_dump_npts = 1000
+  !< Number of points in each optional log comparison dump.
 
 contains
 
@@ -874,6 +878,75 @@ subroutine test_log_reciprocal_property
 end subroutine test_log_reciprocal_property
 
 
+!> Optionally print deterministic log comparison values for platform comparisons.
+!!
+!! Set MOM_DUMP_LOG_VALUES in the environment to print two CSV tables: one with
+!! points equally spaced in log(x) over [-700, 700], and one with points equally
+!! spaced in x over the near-one special-case interval.
+subroutine test_log_value_dump
+  character(len=1) :: dump_enabled
+  integer :: status
+
+  call get_environment_variable("MOM_DUMP_LOG_VALUES", dump_enabled, status=status)
+  if (status /= 0) return
+
+  print '(1x,a)', '=== optional log comparison dump'
+  print '(a)', 'case,index,x_bits,log_repro_bits,log_bits,quad_ref_bits,x,log_repro,log,quad_ref'
+  call dump_log_grid("wide", log_dump_npts, -700., 700., .true.)
+  call dump_log_grid("near1", log_dump_npts, 1. - (1. / 16.), 1. + 0.064697265625, .false.)
+end subroutine test_log_value_dump
+
+
+!> Print one deterministic grid of log comparison values.
+subroutine dump_log_grid(grid_name, npts, grid_min, grid_max, log_spaced)
+  character(len=*), intent(in) :: grid_name
+    !< Label for the dumped grid.
+  integer, intent(in) :: npts
+    !< Number of points to print.
+  real, intent(in) :: grid_min
+    !< Lower end of the grid, either x or log(x) [nondim]
+  real, intent(in) :: grid_max
+    !< Upper end of the grid, either x or log(x) [nondim]
+  logical, intent(in) :: log_spaced
+    !< If true, grid_min and grid_max are values of log(x).
+
+  real :: grid_value, x, val_repro, val_log, ref
+    !< Input coordinate, input value, estimates, and quad reference [nondim]
+  real :: denom
+    !< Reciprocal denominator for the uniformly spaced grid [nondim]
+  integer :: i
+
+  denom = 1. / real(npts - 1)
+  do i = 1, npts
+    grid_value = grid_min + (real(i - 1) * ((grid_max - grid_min) * denom))
+    if (log_spaced) then
+      x = exp_repro(grid_value)
+    else
+      x = grid_value
+    endif
+
+    val_repro = log_repro(x)
+    val_log = log(x)
+    ref = real(log(real(x, realq)))
+
+    print '(a,",",i0,",",a,",",a,",",a,",",a,4(",",ES26.17E3))', &
+        trim(grid_name), i, real_bits_hex(x), real_bits_hex(val_repro), real_bits_hex(val_log), real_bits_hex(ref), &
+        x, val_repro, val_log, ref
+  enddo
+end subroutine dump_log_grid
+
+
+!> Return the binary64 bit pattern of x formatted as 16 hexadecimal digits.
+function real_bits_hex(x) result(hex_string)
+  real, intent(in) :: x
+    !< Value to format [nondim]
+  character(len=16) :: hex_string
+    !< Binary representation of x as hexadecimal digits.
+
+  write(hex_string, '(Z16.16)') transfer(x, 0_int_kind)
+end function real_bits_hex
+
+
 !> Add log_repro tests to the intrinsic function test suite.
 subroutine add_log_repro_tests(suite)
   type(TestSuite), intent(inout) :: suite
@@ -907,6 +980,7 @@ subroutine add_log_repro_tests(suite)
   ! Log property tests
   call suite%add(test_log_product_property, "test_log_product_property")
   call suite%add(test_log_reciprocal_property, "test_log_reciprocal_property")
+  call suite%add(test_log_value_dump, "test_log_value_dump")
 
   ! Evaluate log_repro error if quad precision is available
   if (realquad >= 0) then

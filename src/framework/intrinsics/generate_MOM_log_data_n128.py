@@ -20,7 +20,6 @@ The generated tables are printed to stdout as a complete Fortran module.
 from __future__ import annotations
 
 import argparse
-import math
 import struct
 from decimal import Decimal, ROUND_HALF_EVEN, getcontext
 
