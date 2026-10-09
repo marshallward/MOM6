@@ -87,11 +87,11 @@ module procedure log_repro
   endif
 
   ! Avoid table-reduction cancellation for values very close to 1.  The
-  ! existing log1p Taylor tail is accurate over approximately [-1/512, 1/512],
+  ! existing log1p Remez tail is accurate over approximately [-1/128, 1/128],
   ! and x - 1 is exact in this range by Sterbenz's lemma.
   u = x - 1.
-  if (abs(u) <= 1. / 512.) then
-    a = u + log1p_taylor_tail_6(u)
+  if (abs(u) <= 1. / 128.) then
+    a = u + log1p_remez_tail_8(u)
     return
   endif
 
@@ -148,6 +148,47 @@ pure function log1p_taylor_tail_6(x) result(a)
 
   a = x * x * (-0.5 + x * (1. / 3. + x * (-0.25 + x * (0.2 + x * (-1. / 6.)))))
 end function log1p_taylor_tail_6
+
+
+!> Remez estimate of log1p(x) - x over the near-one log_repro() range.
+pure function log1p_remez_tail_6(x) result(a)
+  real, intent(in) :: x
+    !< Input value; expected range is approximately [-1/512, 1/512] [nondim]
+  real :: a
+    !< Approximation of log1p(x) - x [nondim]
+
+  real, parameter :: c(2:6) = [ &
+      -0.500000000000000001531992077481654475668128157188753876631778885247311583, &
+       0.3333333333322630456631544068975149947601565365240798082150360405372396857, &
+      -0.2499999999976636390789139216550810004312450069947905784129872818608102103, &
+       0.2000008112826621083191778349879309697511001440446713500798235478459693848, &
+      -0.166667650690583434892505189737659407295169538338185395188807100923723888]
+    !< Remez coefficients for log1p(x) - x on [-1/512, 1/512] [nondim]
+
+  a = x * x * (c(2) + x * (c(3) + x * (c(4) + x * (c(5) + x * c(6)))))
+end function log1p_remez_tail_6
+
+
+!> Remez estimate of log1p(x) - x over the near-one log_repro() range.
+pure function log1p_remez_tail_8(x) result(a)
+  real, intent(in) :: x
+    !< Input value; expected range is approximately [-1/128, 1/128] [nondim]
+  real :: a
+    !< Approximation of log1p(x) - x [nondim]
+
+  real, parameter :: c(2:8) = [ &
+      -0.50000000000000000146880644447745834276117239589584147686810426077429923, &
+       0.333333333333383439081489510558618980088213205599752827834025980978889853, &
+      -0.250000000000300387046095139450341182750948342481656948559960050179908581, &
+       0.199999996718934020585979325801837669966856969675133175387608887567261307, &
+      -0.166666664868771236962982455327063859706607758596032524924398075146814502, &
+       0.142871285441583989558603865248163259413977031840605019462415377267409527, &
+      -0.125015076930830173046952639984941031775223381177899836187586194388830784]
+    !< Remez coefficients for log1p(x) - x on [-1/128, 1/128] [nondim]
+
+  a = x * x * (c(2) + x * (c(3) + x * (c(4) + x * (c(5) + &
+      x * (c(6) + x * (c(7) + x * c(8)))))))
+end function log1p_remez_tail_8
 
 
 end submodule MOM_log
