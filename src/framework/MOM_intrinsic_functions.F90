@@ -58,6 +58,8 @@ integer, parameter :: expbias = maxexponent(real_mold) - 1
   !< Exponent bias
 integer(kind=int_kind), parameter :: expmask = 2_int_kind**expwidth - 1_int_kind
   !< Mask for the biased exponent value
+integer(kind=int_kind), parameter :: exp_stride = 2_int_kind**expbit
+  !< Integer bit-pattern stride between adjacent IEEE exponent values
 
 contains
 
