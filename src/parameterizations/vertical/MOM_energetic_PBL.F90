@@ -623,10 +623,33 @@ subroutine energetic_PBL(h_3d, u_3d, v_3d, tv, fluxes, visc, dt, Kd_int, G, GV, 
 
   !!OMP parallel do default(private) shared(js,je,nz,is,ie,h_3d,u_3d,v_3d,tv,dt,I_dt,BBL_mixing, &
   !!OMP                                  CS,G,GV,US,fluxes,TKE_forced,dSV_dT,dSV_dS,Kd_int)
-  call thickness_to_dz(h_3d, tv, dz_3d, G, GV, US, is=is, ie=ie, js=js, je=je)
-
-  !$omp target enter data map(alloc: h_blk, dz_blk, u_blk, v_blk, T0_blk, S0_blk, TKE_forcing_blk, &
+  !$omp target enter data map(alloc: dz_3d, h_blk, dz_blk, u_blk, v_blk, T0_blk, S0_blk, TKE_forcing_blk, &
   !$omp   dSV_dT_blk, dSV_dS_blk)
+  !$omp target enter data map(alloc: diag_Kd_ePBL_col_by_col, diag_Velocity_Scale, diag_Mixing_Length, &
+  !$omp   Kd_BBL_3d, BBL_Vel_Scale, BBL_Mix_Length, diag_TKE_wind, diag_TKE_MKE, diag_TKE_conv, &
+  !$omp   diag_TKE_forcing, diag_TKE_mech_decay, diag_TKE_conv_decay, diag_TKE_mixing, diag_TKE_BBL, &
+  !$omp   diag_ustar_BBL, diag_BBL_decay_scale, diag_mstar_sfc, diag_mstar_BBL, diag_mstar_LT, diag_LA, &
+  !$omp   diag_LA_mod, diag_ustar, diff_Kd, max_abs_diff_Kd, diff_hML_depth, &
+  !$omp   OBL_its_col, OBL_count_col, BBL_its_col, BBL_count_col)
+  !$omp target enter data map(to: CS_tmp1, CS_tmp2)
+
+  !$omp target update to(diag_TKE_wind, diag_TKE_MKE, diag_TKE_conv, diag_TKE_forcing, &
+  !$omp   diag_TKE_mixing, diag_TKE_mech_decay, diag_TKE_conv_decay) if (CS%TKE_diagnostics)
+  !$omp target update to(diag_TKE_BBL) if (CS%TKE_diagnostics .and. BBL_mixing)
+  !$omp target update to(diag_Mixing_Length) if (CS%debug .or. (CS%id_Mixing_Length>0))
+  !$omp target update to(diag_Velocity_Scale) if (CS%debug .or. (CS%id_Velocity_Scale>0))
+  !$omp target update to(diag_Kd_ePBL_col_by_col) if (CS%id_Kd_ePBL_col_by_col > 0)
+  !$omp target update to(OBL_its_col, OBL_count_col, BBL_its_col, BBL_count_col) if (report_avg_its)
+  !$omp target update to(BBL_Mix_Length) if (BBL_mixing .and. (CS%debug .or. (CS%id_BBL_Mix_Length>0)))
+  !$omp target update to(BBL_Vel_Scale) if (BBL_mixing .and. (CS%debug .or. (CS%id_BBL_Vel_Scale>0)))
+  !$omp target update to(Kd_BBL_3d) if (BBL_mixing .and. (CS%id_Kd_BBL > 0))
+  !$omp target update to(diag_ustar_BBL) if (BBL_mixing .and. (CS%id_ustar_BBL > 0))
+  !$omp target update to(diag_BBL_decay_scale) if (BBL_mixing .and. (CS%id_BBL_decay_scale > 0))
+  !$omp target update to(diff_Kd) if ((CS%options_diff > 0) .and. (CS%id_opt_diff_Kd_ePBL > 0))
+  !$omp target update to(max_abs_diff_Kd) if ((CS%options_diff > 0) .and. (CS%id_opt_maxdiff_Kd_ePBL > 0))
+  !$omp target update to(diff_hML_depth) if ((CS%options_diff > 0) .and. (CS%id_opt_diff_hML_depth > 0))
+
+  call thickness_to_dz(h_3d, tv, dz_3d, G, GV, US, is=is, ie=ie, js=js, je=je, do_offload=.true.)
 
   do jsb=js,je,njj ; do isb=is,ie,nii
     ieb = min(ie, isb+nii-1)
@@ -858,7 +881,38 @@ subroutine energetic_PBL(h_3d, u_3d, v_3d, tv, fluxes, visc, dt, Kd_int, G, GV, 
 
   enddo ; enddo ! i-block and j-block loops
 
-  !$omp target exit data map(release: h_blk, dz_blk, u_blk, v_blk, T0_blk, S0_blk, TKE_forcing_blk, &
+  !$omp target update from(CS%ML_depth, CS%BBL_depth)
+  !$omp target update from(diag_ustar) if (CS%id_ustar_ePBL > 0)
+  !$omp target update from(diag_TKE_wind, diag_TKE_MKE, diag_TKE_conv, diag_TKE_forcing, &
+  !$omp   diag_TKE_mixing, diag_TKE_mech_decay, diag_TKE_conv_decay) if (CS%TKE_diagnostics)
+  !$omp target update from(diag_Mixing_Length) if (CS%debug .or. (CS%id_Mixing_Length>0))
+  !$omp target update from(diag_Velocity_Scale) if (CS%debug .or. (CS%id_Velocity_Scale>0))
+  !$omp target update from(diag_Kd_ePBL_col_by_col) if (CS%id_Kd_ePBL_col_by_col > 0)
+  !$omp target update from(diag_mstar_sfc) if (CS%id_mstar_sfc > 0)
+  !$omp target update from(diag_mstar_LT) if (CS%id_mstar_LT > 0)
+  !$omp target update from(diag_LA) if (CS%id_LA > 0)
+  !$omp target update from(diag_LA_mod) if (CS%id_LA_mod > 0)
+  !$omp target update from(OBL_its_col, OBL_count_col, BBL_its_col, BBL_count_col) if (report_avg_its)
+  !$omp target update from(Kd_int) if (CS%debug .and. BBL_mixing)
+  !$omp target update from(BBL_Mix_Length) if (BBL_mixing .and. (CS%debug .or. (CS%id_BBL_Mix_Length>0)))
+  !$omp target update from(BBL_Vel_Scale) if (BBL_mixing .and. (CS%debug .or. (CS%id_BBL_Vel_Scale>0)))
+  !$omp target update from(Kd_BBL_3d) if (BBL_mixing .and. (CS%id_Kd_BBL > 0))
+  !$omp target update from(diag_ustar_BBL) if (BBL_mixing .and. (CS%id_ustar_BBL > 0))
+  !$omp target update from(diag_BBL_decay_scale) if (BBL_mixing .and. (CS%id_BBL_decay_scale > 0))
+  !$omp target update from(diag_TKE_BBL) if (BBL_mixing .and. (CS%id_TKE_BBL > 0))
+  !$omp target update from(diag_mstar_BBL) if (BBL_mixing .and. (CS%id_mstar_BBL > 0))
+  !$omp target update from(diff_Kd) if ((CS%options_diff > 0) .and. (CS%id_opt_diff_Kd_ePBL > 0))
+  !$omp target update from(max_abs_diff_Kd) if ((CS%options_diff > 0) .and. (CS%id_opt_maxdiff_Kd_ePBL > 0))
+  !$omp target update from(diff_hML_depth) if ((CS%options_diff > 0) .and. (CS%id_opt_diff_hML_depth > 0))
+
+  !$omp target exit data map(release: CS_tmp1, CS_tmp2)
+  !$omp target exit data map(release: diag_Kd_ePBL_col_by_col, diag_Velocity_Scale, diag_Mixing_Length, &
+  !$omp   Kd_BBL_3d, BBL_Vel_Scale, BBL_Mix_Length, diag_TKE_wind, diag_TKE_MKE, diag_TKE_conv, &
+  !$omp   diag_TKE_forcing, diag_TKE_mech_decay, diag_TKE_conv_decay, diag_TKE_mixing, diag_TKE_BBL, &
+  !$omp   diag_ustar_BBL, diag_BBL_decay_scale, diag_mstar_sfc, diag_mstar_BBL, diag_mstar_LT, diag_LA, &
+  !$omp   diag_LA_mod, diag_ustar, diff_Kd, max_abs_diff_Kd, diff_hML_depth, &
+  !$omp   OBL_its_col, OBL_count_col, BBL_its_col, BBL_count_col)
+  !$omp target exit data map(release: dz_3d, h_blk, dz_blk, u_blk, v_blk, T0_blk, S0_blk, TKE_forcing_blk, &
   !$omp   dSV_dT_blk, dSV_dS_blk)
 
   if (report_avg_its) then
@@ -4490,6 +4544,9 @@ subroutine energetic_PBL_init(Time, G, GV, US, param_file, diag, CS)
   call safe_alloc_alloc(CS%ML_depth, isd, ied, jsd, jed)
   call safe_alloc_alloc(CS%BBL_depth, isd, ied, jsd, jed)
 
+  !$omp target enter data map(to: CS)
+  !$omp target enter data map(to: CS%ML_depth, CS%BBL_depth)
+
 end subroutine energetic_PBL_init
 
 !> Clean up and deallocate memory associated with the energetic_PBL module.
@@ -4498,6 +4555,9 @@ subroutine energetic_PBL_end(CS)
 
   character(len=256) :: mesg
   real :: avg_its ! The averaged number of iterations used by ePBL [nondim]
+
+  !$omp target exit data map(delete: CS%ML_depth, CS%BBL_depth)
+  !$omp target exit data map(delete: CS)
 
   if (allocated(CS%ML_depth))            deallocate(CS%ML_depth)
   if (allocated(CS%BBL_depth))           deallocate(CS%BBL_depth)
