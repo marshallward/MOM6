@@ -53,6 +53,10 @@ real, parameter :: log_one_minus_eps = -2.2204460492503136e-16
   !< log(1 - epsilon(1)) [nondim]
 integer, parameter :: log_dump_npts = 1000
   !< Number of points in each optional log comparison dump.
+integer(kind=int_kind), parameter :: log_dump_wide_start_bits = 4457293557087583675_int_kind
+  !< Bit pattern for the lower end of the optional dump range, 1.e-10 (Z'3DDB7CDFD9D7BDBB').
+integer(kind=int_kind), parameter :: log_dump_wide_end_bits = 4756540486875873280_int_kind
+  !< Bit pattern for the upper end of the optional dump range, 1.e10 (Z'4202A05F20000000').
 
 contains
 
@@ -892,48 +896,53 @@ subroutine test_log_value_dump
 
   print '(1x,a)', '=== optional log comparison dump'
   print '(a)', 'case,index,x_bits,log_repro_bits,log_bits,quad_ref_bits,x,log_repro,log,quad_ref'
-  call dump_log_grid("wide", log_dump_npts, -700., 700., .true.)
-  call dump_log_grid("near1", log_dump_npts, 1. - (1. / 16.), 1. + 0.064697265625, .false.)
+  call dump_log_bit_grid("wide", log_dump_npts, log_dump_wide_start_bits, log_dump_wide_end_bits)
+  call dump_log_bit_grid("near1", log_dump_npts, &
+      transfer(1. - (1. / 16.), 0_int_kind), transfer(1. + 0.064697265625, 0_int_kind))
 end subroutine test_log_value_dump
 
 
-!> Print one deterministic grid of log comparison values.
-subroutine dump_log_grid(grid_name, npts, grid_min, grid_max, log_spaced)
+!> Print one deterministic binary64 bit-grid of log comparison values.
+subroutine dump_log_bit_grid(grid_name, npts, start_bits, end_bits)
   character(len=*), intent(in) :: grid_name
     !< Label for the dumped grid.
   integer, intent(in) :: npts
     !< Number of points to print.
-  real, intent(in) :: grid_min
-    !< Lower end of the grid, either x or log(x) [nondim]
-  real, intent(in) :: grid_max
-    !< Upper end of the grid, either x or log(x) [nondim]
-  logical, intent(in) :: log_spaced
-    !< If true, grid_min and grid_max are values of log(x).
+  integer(kind=int_kind), intent(in) :: start_bits
+    !< Binary64 bit pattern for the first input value.
+  integer(kind=int_kind), intent(in) :: end_bits
+    !< Binary64 bit pattern for the last input value.
 
-  real :: grid_value, x, val_repro, val_log, ref
-    !< Input coordinate, input value, estimates, and quad reference [nondim]
-  real :: denom
-    !< Reciprocal denominator for the uniformly spaced grid [nondim]
+  real :: x, val_repro, val_log, ref
+    !< Input value, estimates, and rounded quad reference [nondim]
+  real(kind=realq) :: ref_quad
+    !< Quad-precision reference [nondim]
+  integer(kind=int_kind) :: x_bits, span, step, rem, offset
+    !< Input bit pattern and integer-grid spacing values.
+  integer(kind=int_kind) :: denom
+    !< Denominator for the uniformly spaced integer grid.
   integer :: i
 
-  denom = 1. / real(npts - 1)
+  span = end_bits - start_bits
+  denom = int(npts - 1, int_kind)
+  step = span / denom
+  rem = modulo(span, denom)
+
   do i = 1, npts
-    grid_value = grid_min + (real(i - 1) * ((grid_max - grid_min) * denom))
-    if (log_spaced) then
-      x = exp_repro(grid_value)
-    else
-      x = grid_value
-    endif
+    offset = int(i - 1, int_kind)
+    x_bits = start_bits + offset * step + (offset * rem) / denom
+    x = transfer(x_bits, 0.)
 
     val_repro = log_repro(x)
     val_log = log(x)
-    ref = real(log(real(x, realq)))
+    ref_quad = log(real(x, realq))
+    ref = real(ref_quad)
 
-    print '(a,",",i0,",",a,",",a,",",a,",",a,4(",",ES26.17E3))', &
+    print '(a,",",i0,",",a,",",a,",",a,",",a,3(",",ES26.17E3),",",ES46.37E3)', &
         trim(grid_name), i, real_bits_hex(x), real_bits_hex(val_repro), real_bits_hex(val_log), real_bits_hex(ref), &
-        x, val_repro, val_log, ref
+        x, val_repro, val_log, ref_quad
   enddo
-end subroutine dump_log_grid
+end subroutine dump_log_bit_grid
 
 
 !> Return the binary64 bit pattern of x formatted as 16 hexadecimal digits.
