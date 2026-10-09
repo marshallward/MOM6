@@ -52,6 +52,8 @@ module procedure log_repro
     ! Significand of x, adjusted into the log table interval [nondim]
   real :: r
     ! Reduced argument, r = z / c - 1 [nondim]
+  real :: u
+    ! Difference from 1 for near-one log1p path [nondim]
   real :: w, hi, lo
     ! Double-real partial sums for log(x) [nondim]
   logical :: scaled_subnormal
@@ -81,6 +83,15 @@ module procedure log_repro
 
   if (raw_exp == expmask) then
     a = x + x
+    return
+  endif
+
+  ! Avoid table-reduction cancellation for values very close to 1.  The
+  ! existing log1p Taylor tail is accurate over approximately [-1/512, 1/512],
+  ! and x - 1 is exact in this range by Sterbenz's lemma.
+  u = x - 1.
+  if (abs(u) <= 1. / 512.) then
+    a = u + log1p_taylor_tail_6(u)
     return
   endif
 
@@ -137,5 +148,6 @@ pure function log1p_taylor_tail_6(x) result(a)
 
   a = x * x * (-0.5 + x * (1. / 3. + x * (-0.25 + x * (0.2 + x * (-1. / 6.)))))
 end function log1p_taylor_tail_6
+
 
 end submodule MOM_log

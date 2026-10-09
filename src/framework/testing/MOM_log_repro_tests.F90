@@ -344,6 +344,69 @@ subroutine test_log_near_one_below
   call assert(err < tol, "log_repro(1-eps) absolute error exceeds tolerance")
 end subroutine test_log_near_one_below
 
+!> Print an informational accuracy sweep for log_repro near 1.
+!!
+!! The broad log_repro ULP sweep is uniform in log-space and does not sample
+!! values very close to 1 densely.  This diagnostic sweep probes values of the
+!! form 1 +/- 2**(-n) to characterize cancellation-sensitive behavior near
+!! log(1) without asserting an accuracy threshold.
+subroutine test_log_near_one_sweep
+  integer, parameter :: npts = digits(rmold) - 4
+
+  real :: dx
+  real :: x, val, ref, abs_err, rel_err, ulp_err
+  real :: max_abs_err, max_rel_err, max_ulp
+  real :: x_max_abs, x_max_rel, x_max_ulp
+  real :: ulp_val
+
+  integer :: i, iside
+
+  max_abs_err = 0.
+  max_rel_err = 0.
+  max_ulp = 0.
+
+  do iside = -1, 1, 2
+    dx = epsilon(1.)
+
+    do i = 1, npts
+      x = 1. + real(iside) * dx
+      val = log_repro(x)
+      ref = real(log(real(x, realq)))
+      abs_err = abs(val - ref)
+
+      if (abs_err > max_abs_err) then
+        max_abs_err = abs_err
+        x_max_abs = x
+      endif
+
+      if (ref /= 0.) then
+        rel_err = abs_err / abs(ref)
+        if (rel_err > max_rel_err) then
+          max_rel_err = rel_err
+          x_max_rel = x
+        endif
+      endif
+
+      ulp_val = abs(spacing(ref))
+      ulp_err = abs_err / ulp_val
+      if (ulp_err > max_ulp) then
+        max_ulp = ulp_err
+        x_max_ulp = x
+      endif
+
+      dx = 2. * dx
+    enddo
+  enddo
+
+  print '(2x,"Tested ", i0, " near-1 offsets on each side")', npts
+  print '(2x,"max abs err:", t25, ES12.5, " at input = ", ES22.15)', &
+      max_abs_err, x_max_abs
+  print '(2x,"max rel err:", t25, ES12.5, " at input = ", ES22.15)', &
+      max_rel_err, x_max_rel
+  print '(2x,"max ULP err (vs quad):", t26, f12.2, " at input = ", ES22.15)', &
+      max_ulp, x_max_ulp
+end subroutine test_log_near_one_sweep
+
 !> Test ULP accuracy over a wide range of positive values.
 !!
 !! log_repro should be within a few ULP of the true value.
@@ -657,9 +720,10 @@ subroutine add_log_repro_tests(suite)
 
   ! Evaluate log_repro error if quad precision is available
   if (realquad >= 0) then
+    call suite%add(test_log_near_one_sweep, "test_log_near_one_sweep")
     call suite%add(test_log_ulp_accuracy, "test_log_ulp_accuracy")
   else
-    print '(1x,a)', 'Skipping log_repro ULP accuracy test: quad precision is unavailable.'
+    print '(1x,a)', 'Skipping log_repro near-1 sweep and ULP accuracy test: quad precision is unavailable.'
   endif
 end subroutine add_log_repro_tests
 
