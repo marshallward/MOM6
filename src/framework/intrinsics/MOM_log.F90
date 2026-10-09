@@ -6,7 +6,8 @@
 
 submodule (MOM_intrinsic_functions) MOM_log
 
-use MOM_log_data_n128, only : log_ndiv, log_invc_lookup, logc_lookup
+use MOM_log_data_n128, only : log_ndiv, log_table_start
+use MOM_log_data_n128, only : log_invc_lookup, logc_lookup
 use MOM_log_data_n128, only : log_chi_lookup, log_clo_lookup
 
 implicit none
@@ -31,7 +32,7 @@ module procedure log_repro
     !< Exact power-of-two scale factor for subnormal inputs [nondim]
   integer(kind=int_kind), parameter :: log_table_step_bits = exp_stride / log_ndiv
     !< Spacing in integer representation between adjacent log table entries
-  integer(kind=int_kind), parameter :: log_offset_bits = 4604367669032910848_int_kind
+  integer(kind=int_kind), parameter :: log_offset_bits = transfer(log_table_start, int_mold)
     !< Bit pattern for the lower end of the log table range, 0.6875 (=11/16)
 
   integer(kind=int_kind) :: xb, mb
