@@ -347,64 +347,109 @@ end subroutine test_log_near_one_below
 !> Print an informational accuracy sweep for log_repro near 1.
 !!
 !! The broad log_repro ULP sweep is uniform in log-space and does not sample
-!! values very close to 1 densely.  This diagnostic sweep probes values of the
-!! form 1 +/- 2**(-n) to characterize cancellation-sensitive behavior near
-!! log(1) without asserting an accuracy threshold.
+!! values very close to 1 densely.  This diagnostic sweep probes the full
+!! near-one special-case interval and compares log_repro() with intrinsic log()
+!! against the same quad-precision reference without asserting an accuracy
+!! threshold.
 subroutine test_log_near_one_sweep
-  integer, parameter :: npts = digits(rmold) - 4
+  integer, parameter :: npts = 100000
+  real, parameter :: umin = -1. / 16.
+    !< Lower limit of the near-one log_repro() path [nondim]
+  real, parameter :: umax = 0.064697265625
+    !< Upper limit of the near-one log_repro() path, 265/4096 [nondim]
 
-  real :: dx
-  real :: x, val, ref, abs_err, rel_err, ulp_err
+  real :: u, x, val, val_log, ref
+  real :: abs_err, rel_err, ulp_err
+  real :: abs_err_log, rel_err_log, ulp_err_log
   real :: max_abs_err, max_rel_err, max_ulp
+  real :: max_abs_err_log, max_rel_err_log, max_ulp_log
   real :: x_max_abs, x_max_rel, x_max_ulp
+  real :: x_max_abs_log, x_max_rel_log, x_max_ulp_log
   real :: ulp_val
 
-  integer :: i, iside
+  integer :: i, n_half_ulp, n_half_ulp_log
 
   max_abs_err = 0.
   max_rel_err = 0.
   max_ulp = 0.
+  max_abs_err_log = 0.
+  max_rel_err_log = 0.
+  max_ulp_log = 0.
+  x_max_abs = 1.
+  x_max_rel = 1.
+  x_max_ulp = 1.
+  x_max_abs_log = 1.
+  x_max_rel_log = 1.
+  x_max_ulp_log = 1.
+  n_half_ulp = 0
+  n_half_ulp_log = 0
 
-  do iside = -1, 1, 2
-    dx = epsilon(1.)
+  do i = 0, npts
+    u = umin + ((umax - umin) * real(i)) / real(npts)
+    x = 1. + u
+    val = log_repro(x)
+    val_log = log(x)
+    ref = real(log(real(x, realq)))
+    ulp_val = abs(spacing(ref))
 
-    do i = 1, npts
-      x = 1. + real(iside) * dx
-      val = log_repro(x)
-      ref = real(log(real(x, realq)))
-      abs_err = abs(val - ref)
+    abs_err = abs(val - ref)
+    if (abs_err > max_abs_err) then
+      max_abs_err = abs_err
+      x_max_abs = x
+    endif
 
-      if (abs_err > max_abs_err) then
-        max_abs_err = abs_err
-        x_max_abs = x
+    abs_err_log = abs(val_log - ref)
+    if (abs_err_log > max_abs_err_log) then
+      max_abs_err_log = abs_err_log
+      x_max_abs_log = x
+    endif
+
+    if (ref /= 0.) then
+      rel_err = abs_err / abs(ref)
+      if (rel_err > max_rel_err) then
+        max_rel_err = rel_err
+        x_max_rel = x
       endif
 
-      if (ref /= 0.) then
-        rel_err = abs_err / abs(ref)
-        if (rel_err > max_rel_err) then
-          max_rel_err = rel_err
-          x_max_rel = x
-        endif
+      rel_err_log = abs_err_log / abs(ref)
+      if (rel_err_log > max_rel_err_log) then
+        max_rel_err_log = rel_err_log
+        x_max_rel_log = x
       endif
+    endif
 
-      ulp_val = abs(spacing(ref))
-      ulp_err = abs_err / ulp_val
-      if (ulp_err > max_ulp) then
-        max_ulp = ulp_err
-        x_max_ulp = x
-      endif
+    ulp_err = abs_err / ulp_val
+    if (ulp_err > max_ulp) then
+      max_ulp = ulp_err
+      x_max_ulp = x
+    endif
+    if (ulp_err > 0.5) n_half_ulp = n_half_ulp + 1
 
-      dx = 2. * dx
-    enddo
+    ulp_err_log = abs_err_log / ulp_val
+    if (ulp_err_log > max_ulp_log) then
+      max_ulp_log = ulp_err_log
+      x_max_ulp_log = x
+    endif
+    if (ulp_err_log > 0.5) n_half_ulp_log = n_half_ulp_log + 1
+
   enddo
 
-  print '(2x,"Tested ", i0, " near-1 offsets on each side")', npts
-  print '(2x,"max abs err:", t25, ES12.5, " at input = ", ES22.15)', &
+  print '(2x,"Tested ", i0, " values across near-1 interval [", ES12.5, ",", ES12.5, "]")', &
+      npts + 1, 1. + umin, 1. + umax
+  print '(2x,"log_repro max abs err:", t34, ES12.5, " at input = ", ES22.15)', &
       max_abs_err, x_max_abs
-  print '(2x,"max rel err:", t25, ES12.5, " at input = ", ES22.15)', &
+  print '(2x,"log_repro max rel err:", t34, ES12.5, " at input = ", ES22.15)', &
       max_rel_err, x_max_rel
-  print '(2x,"max ULP err (vs quad):", t26, f12.2, " at input = ", ES22.15)', &
+  print '(2x,"log_repro max ULP err:", t34, f12.2, " at input = ", ES22.15)', &
       max_ulp, x_max_ulp
+  print '(2x,"log_repro points > 0.5 ULP:", t34, i12)', n_half_ulp
+  print '(2x,"log() max abs err:", t34, ES12.5, " at input = ", ES22.15)', &
+      max_abs_err_log, x_max_abs_log
+  print '(2x,"log() max rel err:", t34, ES12.5, " at input = ", ES22.15)', &
+      max_rel_err_log, x_max_rel_log
+  print '(2x,"log() max ULP err:", t34, f12.2, " at input = ", ES22.15)', &
+      max_ulp_log, x_max_ulp_log
+  print '(2x,"log() points > 0.5 ULP:", t34, i12)', n_half_ulp_log
 end subroutine test_log_near_one_sweep
 
 !> Test ULP accuracy over a wide range of positive values.
@@ -450,25 +495,134 @@ subroutine test_log_ulp_accuracy
   val_vec = log_repro(x)
   val_quad_vec = log(real(x, realq))
 
-  ! Assert that log_repro() is within 8 ULP.
-  print '(1x,a)', '=== scalar log_repro() accuracy'
-  call check_ulp_accuracy(x, val, val_quad, max_ulp_tol=8.)
+  ! Assert that log_repro() is within 8 ULP and compare with intrinsic log().
+  print '(1x,a)', '=== scalar log_repro() and log() accuracy'
+  call check_log_accuracy_comparison(x, val, val_log, val_quad, ymin, ymax, max_ulp_tol=8.)
 
   ! We expect scalar and vector implementations to agree.
   call assert(all(val == val_vec), 'Scalar and vector log_repro() do not agree')
-  print '(1x,a)', '=== vector log_repro() matches scalar'
-
-  ! log() accuracy is provided for comparison.
-  print '(1x,a)', '=== scalar log() accuracy'
-  call check_ulp_accuracy(x, val_log, val_quad)
-
-  if (all(val_log == val_log_vec)) then
-    print '(1x,a)', '=== vector log() matches scalar'
-  else
-    print '(1x,a)', '=== vector log() accuracy'
-    call check_ulp_accuracy(x, val_log_vec, val_quad_vec)
-  endif
+  print '(1x,a)', '=== vector log_repro() and log() accuracy'
+  call check_log_accuracy_comparison(x, val_vec, val_log_vec, val_quad_vec, ymin, ymax, max_ulp_tol=8.)
 end subroutine test_log_ulp_accuracy
+
+
+!> Compare scalar log_repro() and intrinsic log() accuracy against a real128 reference.
+subroutine check_log_accuracy_comparison(x, val, val_log, ref, ymin, ymax, max_ulp_tol)
+  real, intent(in) :: x(:)
+    !< Input grid [nondim]
+  real, intent(in) :: val(:)
+    !< log_repro() estimates [nondim]
+  real, intent(in) :: val_log(:)
+    !< Intrinsic log() estimates [nondim]
+  real(kind=realq), intent(in) :: ref(:)
+    !< Reference estimates in real128 precision [nondim]
+  real, intent(in) :: ymin
+    !< Minimum value of log(x) in the input grid [nondim]
+  real, intent(in) :: ymax
+    !< Maximum value of log(x) in the input grid [nondim]
+  real, optional, intent(in) :: max_ulp_tol
+    !< Maximum ULP tolerance for log_repro()
+
+  real(kind=realq) :: err, err_log, rel_err, rel_err_log
+    !< Absolute and relative errors compared with ref [nondim]
+  real :: max_abs_err, max_rel_err, max_ulp
+    !< Maximum errors for log_repro() [nondim]
+  real :: max_abs_err_log, max_rel_err_log, max_ulp_log
+    !< Maximum errors for intrinsic log() [nondim]
+  real :: x_max_abs, x_max_rel, x_max_ulp
+    !< Inputs where log_repro() maximum errors occur [nondim]
+  real :: x_max_abs_log, x_max_rel_log, x_max_ulp_log
+    !< Inputs where intrinsic log() maximum errors occur [nondim]
+  real :: ulp_val, ulp_err, ulp_err_log
+    !< ULP size and ULP errors [nondim]
+
+  integer :: count_half_ulp, count_half_ulp_log
+    !< Number of points with errors above 0.5 ULP
+  integer :: i, npts
+
+  npts = size(x)
+
+  max_abs_err = 0.
+  max_rel_err = 0.
+  max_ulp = 0.
+  max_abs_err_log = 0.
+  max_rel_err_log = 0.
+  max_ulp_log = 0.
+  x_max_abs = x(1)
+  x_max_rel = x(1)
+  x_max_ulp = x(1)
+  x_max_abs_log = x(1)
+  x_max_rel_log = x(1)
+  x_max_ulp_log = x(1)
+  count_half_ulp = 0
+  count_half_ulp_log = 0
+
+  do i = 1, npts
+    ulp_val = abs(spacing(real(ref(i), kind(rmold))))
+
+    err = abs(real(val(i), realq) - ref(i))
+    if (err > max_abs_err) then
+      max_abs_err = err
+      x_max_abs = x(i)
+    endif
+
+    err_log = abs(real(val_log(i), realq) - ref(i))
+    if (err_log > max_abs_err_log) then
+      max_abs_err_log = err_log
+      x_max_abs_log = x(i)
+    endif
+
+    if (ref(i) /= 0.) then
+      rel_err = err / abs(ref(i))
+      if (rel_err > max_rel_err) then
+        max_rel_err = rel_err
+        x_max_rel = x(i)
+      endif
+
+      rel_err_log = err_log / abs(ref(i))
+      if (rel_err_log > max_rel_err_log) then
+        max_rel_err_log = rel_err_log
+        x_max_rel_log = x(i)
+      endif
+    endif
+
+    ulp_err = real(err, kind(rmold)) / ulp_val
+    if (ulp_err > max_ulp) then
+      max_ulp = ulp_err
+      x_max_ulp = x(i)
+    endif
+    if (ulp_err > 0.5) count_half_ulp = count_half_ulp + 1
+
+    ulp_err_log = real(err_log, kind(rmold)) / ulp_val
+    if (ulp_err_log > max_ulp_log) then
+      max_ulp_log = ulp_err_log
+      x_max_ulp_log = x(i)
+    endif
+    if (ulp_err_log > 0.5) count_half_ulp_log = count_half_ulp_log + 1
+
+  enddo
+
+  print '(2x,"Tested ", i0, " values with log(x) in [", ES12.5, ",", ES12.5, "]")', &
+      npts, ymin, ymax
+  print '(2x,"log_repro max abs err:", t34, ES12.5, " at input = ", ES14.5E3)', &
+      max_abs_err, x_max_abs
+  print '(2x,"log_repro max rel err:", t34, ES12.5, " at input = ", ES14.5E3)', &
+      max_rel_err, x_max_rel
+  print '(2x,"log_repro max ULP err:", t34, f12.10, " at input = ", ES14.5E3)', &
+      max_ulp, x_max_ulp
+  print '(2x,"log_repro points > 0.5 ULP:", t34, i12)', count_half_ulp
+  print '(2x,"log() max abs err:", t34, ES12.5, " at input = ", ES14.5E3)', &
+      max_abs_err_log, x_max_abs_log
+  print '(2x,"log() max rel err:", t34, ES12.5, " at input = ", ES14.5E3)', &
+      max_rel_err_log, x_max_rel_log
+  print '(2x,"log() max ULP err:", t34, f12.10, " at input = ", ES14.5E3)', &
+      max_ulp_log, x_max_ulp_log
+  print '(2x,"log() points > 0.5 ULP:", t34, i12)', count_half_ulp_log
+
+  if (present(max_ulp_tol)) then
+    call assert(max_ulp < max_ulp_tol, "Max ULP error exceeds tolerance")
+  endif
+end subroutine check_log_accuracy_comparison
 
 !> Compute the function accuracy relative to a real128-precision reference.
 !! Absolute, relative, and ULP error is computed, as well as the number of
@@ -587,12 +741,14 @@ subroutine test_log_product_property
   real :: r1, r2
   real :: x1, x2
   real :: log_product, log_sum
-  real :: err, max_err
-  real :: r1_max, r2_max
+  real :: log_product_std, log_sum_std
+  real :: err, err_std, max_err, max_err_std
+  real :: r1_max, r2_max, r1_max_std, r2_max_std
   integer :: i
   real :: seed
 
   max_err = 0.
+  max_err_std = 0.
 
   ! Use a simple deterministic sequence for reproducibility.
   seed = 0.246813579
@@ -611,6 +767,8 @@ subroutine test_log_product_property
 
     log_product = log_repro(x1 * x2)
     log_sum = log_repro(x1) + log_repro(x2)
+    log_product_std = log(x1 * x2)
+    log_sum_std = log(x1) + log(x2)
 
     if (log_product /= 0.) then
       err = abs(log_sum - log_product) / abs(log_product)
@@ -623,11 +781,26 @@ subroutine test_log_product_property
       r1_max = r1
       r2_max = r2
     endif
+
+    if (log_product_std /= 0.) then
+      err_std = abs(log_sum_std - log_product_std) / abs(log_product_std)
+    else
+      err_std = abs(log_sum_std - log_product_std)
+    endif
+
+    if (err_std > max_err_std) then
+      max_err_std = err_std
+      r1_max_std = r1
+      r2_max_std = r2
+    endif
   enddo
 
   print '("Tested ", i0, " random positive (x1, x2) pairs")', npts
-  print '("max rel err in log(x1*x2) vs log(x1)+log(x2):", t52, ES12.5)', max_err
+  print '("log_repro max rel err in log_repro(x1*x2) vs log_repro(x1)+log_repro(x2):", t82, ES12.5)', &
+      max_err
   print '("  at log(x1) = ", f10.6, ", log(x2) = ", f10.6)', r1_max, r2_max
+  print '("log() max rel err in log(x1*x2) vs log(x1)+log(x2):", t82, ES12.5)', max_err_std
+  print '("  at log(x1) = ", f10.6, ", log(x2) = ", f10.6)', r1_max_std, r2_max_std
 
   call assert(max_err < tol, "log_repro product property test failed")
 end subroutine test_log_product_property
@@ -643,12 +816,14 @@ subroutine test_log_reciprocal_property
   real :: r
   real :: x
   real :: log_inv_x, neg_log_x
-  real :: err, max_err
-  real :: r_max
+  real :: log_inv_x_std, neg_log_x_std
+  real :: err, err_std, max_err, max_err_std
+  real :: r_max, r_max_std
   integer :: i
   real :: seed
 
   max_err = 0.
+  max_err_std = 0.
 
   ! Use a simple deterministic sequence for reproducibility.
   seed = 0.135792468
@@ -663,6 +838,8 @@ subroutine test_log_reciprocal_property
 
     log_inv_x = log_repro(1. / x)
     neg_log_x = -log_repro(x)
+    log_inv_x_std = log(1. / x)
+    neg_log_x_std = -log(x)
 
     if (neg_log_x /= 0.) then
       err = abs(log_inv_x - neg_log_x) / abs(neg_log_x)
@@ -674,11 +851,24 @@ subroutine test_log_reciprocal_property
       max_err = err
       r_max = r
     endif
+
+    if (neg_log_x_std /= 0.) then
+      err_std = abs(log_inv_x_std - neg_log_x_std) / abs(neg_log_x_std)
+    else
+      err_std = abs(log_inv_x_std - neg_log_x_std)
+    endif
+
+    if (err_std > max_err_std) then
+      max_err_std = err_std
+      r_max_std = r
+    endif
   enddo
 
   print '("Tested ", i0, " random positive x values")', npts
-  print '("max rel err in log(1/x) vs -log(x):", t52, ES12.5)', max_err
+  print '("log_repro max rel err in log_repro(1/x) vs -log_repro(x):", t72, ES12.5)', max_err
   print '("  at log(x) = ", f10.6)', r_max
+  print '("log() max rel err in log(1/x) vs -log(x):", t72, ES12.5)', max_err_std
+  print '("  at log(x) = ", f10.6)', r_max_std
 
   call assert(max_err < tol, "log_repro reciprocal property test failed")
 end subroutine test_log_reciprocal_property
@@ -720,8 +910,8 @@ subroutine add_log_repro_tests(suite)
 
   ! Evaluate log_repro error if quad precision is available
   if (realquad >= 0) then
-    call suite%add(test_log_near_one_sweep, "test_log_near_one_sweep")
     call suite%add(test_log_ulp_accuracy, "test_log_ulp_accuracy")
+    call suite%add(test_log_near_one_sweep, "test_log_near_one_sweep")
   else
     print '(1x,a)', 'Skipping log_repro near-1 sweep and ULP accuracy test: quad precision is unavailable.'
   endif
