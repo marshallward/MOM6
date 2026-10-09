@@ -951,8 +951,46 @@ subroutine diabatic_ALE_legacy(u, v, h, tv, BLD, fluxes, visc, ADp, CDp, dt, Tim
     endif
 
     call find_uv_at_h(u, v, h, u_h, v_h, G, GV, US)
+    !$omp target update to(h)
+    !$omp target enter data map(to: u_h, v_h, dSV_dT, dSV_dS, cTKE, SkinBuoyFlux, BBL_BuoyFlux) &
+    !$omp   map(alloc: Kd_ePBL)
+    !$omp target enter data map(to: tv, tv%T, tv%S)
+    !$omp target enter data map(to: tv%SpV_avg) if (allocated(tv%SpV_avg))
+    !$omp target enter data map(to: fluxes)
+    !$omp target enter data map(to: fluxes%ustar) if (associated(fluxes%ustar))
+    !$omp target enter data map(to: fluxes%ustar_gustless) if (associated(fluxes%ustar_gustless))
+    !$omp target enter data map(to: fluxes%tau_mag) if (associated(fluxes%tau_mag))
+    !$omp target enter data map(to: fluxes%tau_mag_gustless) if (associated(fluxes%tau_mag_gustless))
+    !$omp target enter data map(to: fluxes%ustar_shelf) if (associated(fluxes%ustar_shelf))
+    !$omp target enter data map(to: fluxes%frac_shelf_h) if (associated(fluxes%frac_shelf_h))
+    !$omp target enter data map(to: fluxes%BBL_tidal_dis) if (associated(fluxes%BBL_tidal_dis))
+    !$omp target enter data map(to: visc%ustar_BBL) if (allocated(visc%ustar_BBL))
+    !$omp target enter data map(to: visc%BBL_meanKE_loss) if (allocated(visc%BBL_meanKE_loss))
+    !$omp target enter data map(to: visc%BBL_meanKE_loss_sqrtCd) if (allocated(visc%BBL_meanKE_loss_sqrtCd))
+    !$omp target enter data map(to: stoch_CS)
+    !$omp target enter data map(to: stoch_CS%epbl1_wts, stoch_CS%epbl2_wts) if (stoch_CS%pert_epbl)
+    ! Only the scalar members of Waves are mapped, which covers the LF17 and EFACTOR wave methods.
+    !$omp target enter data map(to: Waves) if (associated(Waves))
     call energetic_PBL(h, u_h, v_h, tv, fluxes, visc, dt, Kd_ePBL, G, GV, US, &
                        CS%ePBL, stoch_CS, dSV_dT, dSV_dS, cTKE, SkinBuoyFlux, BBL_BuoyFlux, waves=waves)
+    !$omp target exit data map(release: Waves) if (associated(Waves))
+    !$omp target exit data map(release: stoch_CS%epbl1_wts, stoch_CS%epbl2_wts) if (stoch_CS%pert_epbl)
+    !$omp target exit data map(release: stoch_CS)
+    !$omp target exit data map(release: visc%BBL_meanKE_loss_sqrtCd) if (allocated(visc%BBL_meanKE_loss_sqrtCd))
+    !$omp target exit data map(release: visc%BBL_meanKE_loss) if (allocated(visc%BBL_meanKE_loss))
+    !$omp target exit data map(release: visc%ustar_BBL) if (allocated(visc%ustar_BBL))
+    !$omp target exit data map(release: fluxes%BBL_tidal_dis) if (associated(fluxes%BBL_tidal_dis))
+    !$omp target exit data map(release: fluxes%frac_shelf_h) if (associated(fluxes%frac_shelf_h))
+    !$omp target exit data map(release: fluxes%ustar_shelf) if (associated(fluxes%ustar_shelf))
+    !$omp target exit data map(release: fluxes%tau_mag_gustless) if (associated(fluxes%tau_mag_gustless))
+    !$omp target exit data map(release: fluxes%tau_mag) if (associated(fluxes%tau_mag))
+    !$omp target exit data map(release: fluxes%ustar_gustless) if (associated(fluxes%ustar_gustless))
+    !$omp target exit data map(release: fluxes%ustar) if (associated(fluxes%ustar))
+    !$omp target exit data map(release: fluxes)
+    !$omp target exit data map(release: tv%SpV_avg) if (allocated(tv%SpV_avg))
+    !$omp target exit data map(release: tv%T, tv%S, tv)
+    !$omp target exit data map(from: Kd_ePBL) &
+    !$omp   map(release: u_h, v_h, dSV_dT, dSV_dS, cTKE, SkinBuoyFlux, BBL_BuoyFlux)
 
     call energetic_PBL_get_MLD(CS%ePBL, BLD(:,:), G, US)
     ! If visc%MLD or visc%h_ML exist, copy ePBL's BLD into them with appropriate conversions.
@@ -1626,8 +1664,46 @@ subroutine diabatic_ALE(u, v, h, tv, BLD, fluxes, visc, ADp, CDp, dt, Time_end, 
     endif
 
     call find_uv_at_h(u, v, h, u_h, v_h, G, GV, US)
+    !$omp target update to(h)
+    !$omp target enter data map(to: u_h, v_h, dSV_dT, dSV_dS, cTKE, SkinBuoyFlux, BBL_BuoyFlux) &
+    !$omp   map(alloc: Kd_ePBL)
+    !$omp target enter data map(to: tv, tv%T, tv%S)
+    !$omp target enter data map(to: tv%SpV_avg) if (allocated(tv%SpV_avg))
+    !$omp target enter data map(to: fluxes)
+    !$omp target enter data map(to: fluxes%ustar) if (associated(fluxes%ustar))
+    !$omp target enter data map(to: fluxes%ustar_gustless) if (associated(fluxes%ustar_gustless))
+    !$omp target enter data map(to: fluxes%tau_mag) if (associated(fluxes%tau_mag))
+    !$omp target enter data map(to: fluxes%tau_mag_gustless) if (associated(fluxes%tau_mag_gustless))
+    !$omp target enter data map(to: fluxes%ustar_shelf) if (associated(fluxes%ustar_shelf))
+    !$omp target enter data map(to: fluxes%frac_shelf_h) if (associated(fluxes%frac_shelf_h))
+    !$omp target enter data map(to: fluxes%BBL_tidal_dis) if (associated(fluxes%BBL_tidal_dis))
+    !$omp target enter data map(to: visc%ustar_BBL) if (allocated(visc%ustar_BBL))
+    !$omp target enter data map(to: visc%BBL_meanKE_loss) if (allocated(visc%BBL_meanKE_loss))
+    !$omp target enter data map(to: visc%BBL_meanKE_loss_sqrtCd) if (allocated(visc%BBL_meanKE_loss_sqrtCd))
+    !$omp target enter data map(to: stoch_CS)
+    !$omp target enter data map(to: stoch_CS%epbl1_wts, stoch_CS%epbl2_wts) if (stoch_CS%pert_epbl)
+    ! Only the scalar members of Waves are mapped, which covers the LF17 and EFACTOR wave methods.
+    !$omp target enter data map(to: Waves) if (associated(Waves))
     call energetic_PBL(h, u_h, v_h, tv, fluxes, visc, dt, Kd_ePBL, G, GV, US, &
                        CS%ePBL, stoch_CS, dSV_dT, dSV_dS, cTKE, SkinBuoyFlux, BBL_BuoyFlux, waves=waves)
+    !$omp target exit data map(release: Waves) if (associated(Waves))
+    !$omp target exit data map(release: stoch_CS%epbl1_wts, stoch_CS%epbl2_wts) if (stoch_CS%pert_epbl)
+    !$omp target exit data map(release: stoch_CS)
+    !$omp target exit data map(release: visc%BBL_meanKE_loss_sqrtCd) if (allocated(visc%BBL_meanKE_loss_sqrtCd))
+    !$omp target exit data map(release: visc%BBL_meanKE_loss) if (allocated(visc%BBL_meanKE_loss))
+    !$omp target exit data map(release: visc%ustar_BBL) if (allocated(visc%ustar_BBL))
+    !$omp target exit data map(release: fluxes%BBL_tidal_dis) if (associated(fluxes%BBL_tidal_dis))
+    !$omp target exit data map(release: fluxes%frac_shelf_h) if (associated(fluxes%frac_shelf_h))
+    !$omp target exit data map(release: fluxes%ustar_shelf) if (associated(fluxes%ustar_shelf))
+    !$omp target exit data map(release: fluxes%tau_mag_gustless) if (associated(fluxes%tau_mag_gustless))
+    !$omp target exit data map(release: fluxes%tau_mag) if (associated(fluxes%tau_mag))
+    !$omp target exit data map(release: fluxes%ustar_gustless) if (associated(fluxes%ustar_gustless))
+    !$omp target exit data map(release: fluxes%ustar) if (associated(fluxes%ustar))
+    !$omp target exit data map(release: fluxes)
+    !$omp target exit data map(release: tv%SpV_avg) if (allocated(tv%SpV_avg))
+    !$omp target exit data map(release: tv%T, tv%S, tv)
+    !$omp target exit data map(from: Kd_ePBL) &
+    !$omp   map(release: u_h, v_h, dSV_dT, dSV_dS, cTKE, SkinBuoyFlux, BBL_BuoyFlux)
 
     call energetic_PBL_get_MLD(CS%ePBL, BLD(:,:), G, US)
     ! If visc%MLD or visc%h_ML exist, copy ePBL's BLD into them with appropriate conversions.
