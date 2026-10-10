@@ -132,8 +132,11 @@ module procedure log_repro
   r = ((z - log_chi_lookup(idiv)) - log_clo_lookup(idiv)) * log_invc_lookup(idiv)
 
   w = real(K) * ln2_hi + logc_lookup(idiv)
+
   hi = w + r
-  lo = (w - hi + r) + real(K) * ln2_lo
+  ! XXX: No-op barrier to prevent optimization lo = real(K) + ln2_lo
+  hi = hi + (0. * hi)
+  lo = ((w - hi) + r) + real(K) * ln2_lo
 
   a = hi + (lo + log1p_taylor_tail_6(r))
 end procedure log_repro
@@ -216,10 +219,13 @@ pure function log1p_compensated_near(x) result(a)
   ! structure used by high-quality libm log1p kernels and reduces final-rounding
   ! error near x = 0, where the leading terms dominate the result.
   w = x * split_scale
+
   x_hi = (x + w) - w
   x_lo = x - x_hi
   w = -0.5 * (x_hi * x_hi)
   hi = x + w
+  ! XXX: No-op optimization barrier
+  hi = hi + (0. * hi)
   lo = (x - hi) + w
   lo = lo + ((-0.5 * x_lo) * (x_hi + x))
 
