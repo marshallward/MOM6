@@ -159,7 +159,15 @@ pure function log1p_taylor_tail_6(x) result(a)
   real :: a
     !< Approximation of log1p(x) - x [nondim]
 
-  a = x * x * (-0.5 + x * (1. / 3. + x * (-0.25 + x * (0.2 + x * (-1. / 6.)))))
+  real, parameter :: c(2:6) = [ &
+      -0.5, &
+       0.33333333333333333333333333333333333333333333333333, &
+      -0.25, &
+       0.20000000000000000000000000000000000000000000000000, &
+      -0.16666666666666666666666666666666666666666666666667]
+    !< Taylor coefficients for log1p(x) - x through degree 6 [nondim]
+
+  a = x * x * (c(2) + x * (c(3) + x * (c(4) + x * (c(5) + x * c(6)))))
 end function log1p_taylor_tail_6
 
 
