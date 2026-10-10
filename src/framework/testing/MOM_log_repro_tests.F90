@@ -374,6 +374,7 @@ subroutine test_log_near_one_sweep
   real :: x_max_abs, x_max_rel, x_max_ulp
   real :: x_max_abs_log, x_max_rel_log, x_max_ulp_log
   real :: ulp_val
+  real :: I_npts
 
   integer :: i, n_half_ulp, n_half_ulp_log
 
@@ -392,8 +393,9 @@ subroutine test_log_near_one_sweep
   n_half_ulp = 0
   n_half_ulp_log = 0
 
-  do i = 0, npts
-    u = umin + ((umax - umin) * real(i)) / real(npts)
+  I_npts = 1. / (npts - 1)
+  do i = 1, npts
+    u = umin + (i - 1) * ((umax - umin) * I_npts)
     x = 1. + u
     val = log_repro(x)
     val_log = log(x)
@@ -443,7 +445,7 @@ subroutine test_log_near_one_sweep
   enddo
 
   print '(2x,"Tested ", i0, " values across near-1 interval [", ES12.5, ",", ES12.5, "]")', &
-      npts + 1, 1. + umin, 1. + umax
+      npts, 1. + umin, 1. + umax
   print '(2x,"log_repro max abs err:", t34, ES12.5, " at input = ", ES22.15)', &
       max_abs_err, x_max_abs
   print '(2x,"log_repro max rel err:", t34, ES12.5, " at input = ", ES22.15)', &
