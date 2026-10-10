@@ -361,8 +361,8 @@ end subroutine test_log_near_one_below
 !! threshold.
 subroutine test_log_near_one_sweep
   integer, parameter :: npts = 100000
-  real, parameter :: umin = -1. / 16.
-    !< Lower limit of the near-one log_repro() path [nondim]
+  real, parameter :: umin = -0.0625
+    !< Lower limit of the near-one log_repro() path, -1/16 [nondim]
   real, parameter :: umax = 0.064697265625
     !< Upper limit of the near-one log_repro() path, 265/4096 [nondim]
 
@@ -462,17 +462,23 @@ subroutine test_log_near_one_sweep
   print '(2x,"log() points > 0.5 ULP:", t34, i12)', n_half_ulp_log
 end subroutine test_log_near_one_sweep
 
+
 !> Test ULP accuracy over a wide range of positive values.
 !!
 !! log_repro should be within a few ULP of the true value.
 subroutine test_log_ulp_accuracy
   integer, parameter :: npts = 100000
-  real, parameter :: ymin = -700.
-  real, parameter :: ymax = 700.
+  real, parameter :: xmin = 1.e-10
+    !< Lower end of the broad log_repro() accuracy sweep [nondim]
+  real, parameter :: xmax = 1.e10
+    !< Upper end of the broad log_repro() accuracy sweep [nondim]
 
   ! Input axis
-  real :: y(npts), x(npts)
-  real :: I_npts
+  real :: x(npts)
+  integer(kind=int_kind) :: x_bits, span, step, rem, offset
+    !< Input bit pattern and integer-grid spacing values.
+  integer(kind=int_kind) :: denom
+    !< Denominator for the uniformly spaced integer grid.
 
   real :: val(npts), val_vec(npts)
   real :: val_log(npts), val_log_vec(npts)
@@ -480,11 +486,18 @@ subroutine test_log_ulp_accuracy
 
   integer :: i
 
-  ! Generate positive test points with logarithms spanning [ymin,ymax].
-  I_npts = 1. / (npts - 1)
+  ! Generate reproducible positive test points with uniformly spaced binary64
+  ! bit coordinates.  This gives broad scale-aware coverage without relying on
+  ! exp() or exp_repro() to define the test inputs.
+  span = log_dump_wide_end_bits - log_dump_wide_start_bits
+  denom = int(npts - 1, int_kind)
+  step = span / denom
+  rem = modulo(span, denom)
+
   do i = 1, npts
-    y(i) = ymin + (i - 1) * ((ymax - ymin) * I_npts)
-    x(i) = exp(y(i))
+    offset = int(i - 1, int_kind)
+    x_bits = log_dump_wide_start_bits + offset * step + (offset * rem) / denom
+    x(i) = transfer(x_bits, 0.)
   enddo
 
   ! Several libraries have scalar and vector implementations, chosen at the
@@ -507,17 +520,17 @@ subroutine test_log_ulp_accuracy
 
   ! Assert that log_repro() is within 8 ULP and compare with intrinsic log().
   print '(1x,a)', '=== scalar log_repro() and log() accuracy'
-  call check_log_accuracy_comparison(x, val, val_log, val_quad, ymin, ymax, max_ulp_tol=8.)
+  call check_log_accuracy_comparison(x, val, val_log, val_quad, xmin, xmax, max_ulp_tol=8.)
 
   ! We expect scalar and vector implementations to agree.
   call assert(all(val == val_vec), 'Scalar and vector log_repro() do not agree')
   print '(1x,a)', '=== vector log_repro() and log() accuracy'
-  call check_log_accuracy_comparison(x, val_vec, val_log_vec, val_quad_vec, ymin, ymax, max_ulp_tol=8.)
+  call check_log_accuracy_comparison(x, val_vec, val_log_vec, val_quad_vec, xmin, xmax, max_ulp_tol=8.)
 end subroutine test_log_ulp_accuracy
 
 
 !> Compare scalar log_repro() and intrinsic log() accuracy against a real128 reference.
-subroutine check_log_accuracy_comparison(x, val, val_log, ref, ymin, ymax, max_ulp_tol)
+subroutine check_log_accuracy_comparison(x, val, val_log, ref, xmin, xmax, max_ulp_tol)
   real, intent(in) :: x(:)
     !< Input grid [nondim]
   real, intent(in) :: val(:)
@@ -526,10 +539,10 @@ subroutine check_log_accuracy_comparison(x, val, val_log, ref, ymin, ymax, max_u
     !< Intrinsic log() estimates [nondim]
   real(kind=realq), intent(in) :: ref(:)
     !< Reference estimates in real128 precision [nondim]
-  real, intent(in) :: ymin
-    !< Minimum value of log(x) in the input grid [nondim]
-  real, intent(in) :: ymax
-    !< Maximum value of log(x) in the input grid [nondim]
+  real, intent(in) :: xmin
+    !< Minimum value of x in the input grid [nondim]
+  real, intent(in) :: xmax
+    !< Maximum value of x in the input grid [nondim]
   real, optional, intent(in) :: max_ulp_tol
     !< Maximum ULP tolerance for log_repro()
 
@@ -612,8 +625,8 @@ subroutine check_log_accuracy_comparison(x, val, val_log, ref, ymin, ymax, max_u
 
   enddo
 
-  print '(2x,"Tested ", i0, " values with log(x) in [", ES12.5, ",", ES12.5, "]")', &
-      npts, ymin, ymax
+  print '(2x,"Tested ", i0, " values across x interval [", ES12.5, ",", ES12.5, "]")', &
+      npts, xmin, xmax
   print '(2x,"log_repro max abs err:", t34, ES12.5, " at input = ", ES14.5E3)', &
       max_abs_err, x_max_abs
   print '(2x,"log_repro max rel err:", t34, ES12.5, " at input = ", ES14.5E3)', &
