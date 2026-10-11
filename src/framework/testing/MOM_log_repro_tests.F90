@@ -51,7 +51,7 @@ real, parameter :: log_one_plus_eps = 2.2204460492503128e-16
   !< log(1 + epsilon(1)) [nondim]
 real, parameter :: log_one_minus_eps = -2.2204460492503136e-16
   !< log(1 - epsilon(1)) [nondim]
-integer, parameter :: log_dump_npts = 1000
+integer, parameter :: log_dump_npts = 100000
   !< Number of points in each optional log comparison dump.
 integer(kind=int_kind), parameter :: log_dump_wide_start_bits = 4457293557087583675_int_kind
   !< Bit pattern for the lower end of the optional dump range, 1.e-10 (Z'3DDB7CDFD9D7BDBB').
@@ -352,6 +352,35 @@ subroutine test_log_near_one_below
   call assert(err < tol, "log_repro(1-eps) absolute error exceeds tolerance")
 end subroutine test_log_near_one_below
 
+!> Test a near-one input that exposed a one-bit GCC/NVHPC difference.
+subroutine test_log_near_one_sensitive_bit
+  integer(kind=int_kind), parameter :: x_bits = 4607434661109602316_int_kind
+    !< Bit pattern Z'3FF0E569BD42980C', a sensitive near-one input.
+  integer(kind=int_kind), parameter :: result_bits_1 = 4588014630356761006_int_kind
+    !< Observed result bit pattern Z'3FABE6FF7AB5B9AE'.
+  integer(kind=int_kind), parameter :: result_bits_2 = 4588014630356761007_int_kind
+    !< Observed result bit pattern Z'3FABE6FF7AB5B9AF'.
+
+  real :: x, val, ref, ulp_err
+    !< Input value, log_repro() estimate, reference value, and ULP error [nondim]
+  integer(kind=int_kind) :: val_bits
+    !< Bit pattern of the log_repro() result.
+
+  x = transfer(x_bits, 0.)
+  val = log_repro(x)
+  ref = real(log(real(x, realq)))
+  val_bits = transfer(val, 0_int_kind)
+  ulp_err = abs(val - ref) / abs(spacing(ref))
+
+  print '(2x,"log_repro sensitive near-1 x_bits = ",a)', real_bits_hex(x)
+  print '(2x,"log_repro sensitive near-1 result = ",ES22.15,", bits = ",a,", ULP err = ",f12.10)', &
+      val, real_bits_hex(val), ulp_err
+
+  call assert((val_bits == result_bits_1) .or. (val_bits == result_bits_2), &
+      "log_repro sensitive near-one result is not one of the observed adjacent bit patterns")
+  call assert(ulp_err <= 1., "log_repro sensitive near-one ULP error exceeds tolerance")
+end subroutine test_log_near_one_sensitive_bit
+
 !> Print an informational accuracy sweep for log_repro near 1.
 !!
 !! The broad log_repro ULP sweep is uniform in log-space and does not sample
@@ -527,6 +556,85 @@ subroutine test_log_ulp_accuracy
   print '(1x,a)', '=== vector log_repro() and log() accuracy'
   call check_log_accuracy_comparison(x, val_vec, val_log_vec, val_quad_vec, xmin, xmax, max_ulp_tol=8.)
 end subroutine test_log_ulp_accuracy
+
+
+!> Test bitwise agreement between scalar log_repro() and a do-concurrent loop.
+!! When compiled with NVIDIA standard parallelism offload, this exercises
+!! log_repro() in a GPU kernel while keeping reference generation and bit
+!! comparisons on the host.
+subroutine test_log_do_concurrent_bitwise
+  integer, parameter :: npts = 10000
+
+  real :: x(npts), val_scalar(npts), val_concurrent(npts)
+    !< Input values and logarithm estimates [nondim]
+  integer(kind=int_kind) :: x_bits, start_bits, end_bits, span, step, rem, offset
+    !< Input bit pattern and integer-grid spacing values.
+  integer(kind=int_kind) :: bits_scalar, bits_concurrent
+    !< Binary64 bit patterns for scalar and do-concurrent results.
+  integer(kind=int_kind) :: denom
+    !< Denominator for the uniformly spaced integer grid.
+  integer :: i
+
+  start_bits = log_dump_wide_start_bits
+  end_bits = log_dump_wide_end_bits
+  span = end_bits - start_bits
+  denom = int(npts - 1, int_kind)
+  step = span / denom
+  rem = modulo(span, denom)
+
+  do i = 1, npts
+    offset = int(i - 1, int_kind)
+    x_bits = start_bits + offset * step + (offset * rem) / denom
+    x(i) = transfer(x_bits, 0.)
+  enddo
+
+  ! Add cases that stress special handling without relying on quad precision or
+  ! intrinsic log() inside the offloaded loop.
+  x(1) = 0.
+  x(2) = tiny(0.)
+  x(3) = nearest(0., 1.)
+  x(4) = huge(0.)
+  x(5) = 1. - epsilon(1.)
+  x(6) = 1.
+  x(7) = 1. + epsilon(1.)
+  x(8) = ieee_value(0., ieee_positive_inf)
+
+  do i = 1, npts
+    val_scalar(i) = log_repro(x(i))
+  enddo
+
+  call eval_log_repro_do_concurrent(x, val_concurrent)
+
+  do i = 1, npts
+    bits_scalar = transfer(val_scalar(i), 0_int_kind)
+    bits_concurrent = transfer(val_concurrent(i), 0_int_kind)
+
+    if (bits_scalar /= bits_concurrent) then
+      print '(2x,"log_repro do-concurrent mismatch at index ",i0)', i
+      print '(4x,"x_bits             = ",a)', real_bits_hex(x(i))
+      print '(4x,"scalar bits        = ",a)', real_bits_hex(val_scalar(i))
+      print '(4x,"do-concurrent bits = ",a)', real_bits_hex(val_concurrent(i))
+      call assert(.false., "do-concurrent log_repro() differs from scalar log_repro()")
+    endif
+  enddo
+
+  print '(2x,"do-concurrent log_repro() matched scalar results for ",i0," inputs")', npts
+end subroutine test_log_do_concurrent_bitwise
+
+
+!> Evaluate log_repro() over an array using a do-concurrent loop.
+subroutine eval_log_repro_do_concurrent(x, val)
+  real, intent(in) :: x(:)
+    !< Input values [nondim]
+  real, intent(out) :: val(:)
+    !< log_repro() estimates [nondim]
+
+  integer :: i
+
+  do concurrent (i=1:size(x))
+    val(i) = log_repro(x(i))
+  enddo
+end subroutine eval_log_repro_do_concurrent
 
 
 !> Compare scalar log_repro() and intrinsic log() accuracy against a real128 reference.
@@ -899,26 +1007,37 @@ end subroutine test_log_reciprocal_property
 
 !> Optionally print deterministic log comparison values for platform comparisons.
 !!
-!! Set MOM_DUMP_LOG_VALUES in the environment to print two CSV tables: one with
+!! Set MOM_DUMP_LOG in the environment to print two CSV tables: one with
 !! points equally spaced in log(x) over [-700, 700], and one with points equally
 !! spaced in x over the near-one special-case interval.
 subroutine test_log_value_dump
+  character(len=8) :: concurrent_mode
   character(len=1) :: dump_enabled
   integer :: status
+  logical :: use_do_concurrent
 
-  call get_environment_variable("MOM_DUMP_LOG_VALUES", dump_enabled, status=status)
+  call get_environment_variable("MOM_DUMP_LOG", dump_enabled, status=status)
   if (status /= 0) return
+
+  use_do_concurrent = .true.
+  call get_environment_variable("MOM_DUMP_LOG_DO_CONCURRENT", concurrent_mode, status=status)
+  if (status == 0) then
+    if ((concurrent_mode(1:1) == "0") .or. (concurrent_mode(1:1) == "F") .or. &
+        (concurrent_mode(1:1) == "f") .or. (concurrent_mode(1:1) == "N") .or. &
+        (concurrent_mode(1:1) == "n")) use_do_concurrent = .false.
+  endif
 
   print '(1x,a)', '=== optional log comparison dump'
   print '(a)', 'case,index,x_bits,log_repro_bits,log_bits,quad_ref_bits,x,log_repro,log,quad_ref'
-  call dump_log_bit_grid("wide", log_dump_npts, log_dump_wide_start_bits, log_dump_wide_end_bits)
+  call dump_log_bit_grid("wide", log_dump_npts, log_dump_wide_start_bits, log_dump_wide_end_bits, use_do_concurrent)
   call dump_log_bit_grid("near1", log_dump_npts, &
-      transfer(1. - (1. / 16.), 0_int_kind), transfer(1. + 0.064697265625, 0_int_kind))
+      transfer(1. - (1. / 16.), 0_int_kind), transfer(1. + 0.064697265625, 0_int_kind), &
+      use_do_concurrent)
 end subroutine test_log_value_dump
 
 
 !> Print one deterministic binary64 bit-grid of log comparison values.
-subroutine dump_log_bit_grid(grid_name, npts, start_bits, end_bits)
+subroutine dump_log_bit_grid(grid_name, npts, start_bits, end_bits, use_do_concurrent)
   character(len=*), intent(in) :: grid_name
     !< Label for the dumped grid.
   integer, intent(in) :: npts
@@ -927,13 +1046,17 @@ subroutine dump_log_bit_grid(grid_name, npts, start_bits, end_bits)
     !< Binary64 bit pattern for the first input value.
   integer(kind=int_kind), intent(in) :: end_bits
     !< Binary64 bit pattern for the last input value.
+  logical, intent(in) :: use_do_concurrent
+    !< If true, evaluate log_repro() using a do-concurrent loop.
 
-  real :: x, val_repro, val_log, ref
-    !< Input value, estimates, and rounded quad reference [nondim]
-  real(kind=realq) :: ref_quad
-    !< Quad-precision reference [nondim]
-  integer(kind=int_kind) :: x_bits, span, step, rem, offset
-    !< Input bit pattern and integer-grid spacing values.
+  real :: x_vals(npts), val_repro_vals(npts), val_log_vals(npts), ref_vals(npts)
+    !< Input values, estimates, and rounded quad references [nondim]
+  real(kind=realq) :: ref_quad_vals(npts)
+    !< Quad-precision reference values [nondim]
+  integer(kind=int_kind) :: x_bits_vals(npts)
+    !< Input bit patterns.
+  integer(kind=int_kind) :: span, step, rem
+    !< Integer-grid spacing values.
   integer(kind=int_kind) :: denom
     !< Denominator for the uniformly spaced integer grid.
   integer :: i
@@ -943,19 +1066,31 @@ subroutine dump_log_bit_grid(grid_name, npts, start_bits, end_bits)
   step = span / denom
   rem = modulo(span, denom)
 
-  do i = 1, npts
-    offset = int(i - 1, int_kind)
-    x_bits = start_bits + offset * step + (offset * rem) / denom
-    x = transfer(x_bits, 0.)
+  if (use_do_concurrent) then
+    do concurrent (i=1:npts)
+      x_bits_vals(i) = start_bits + int(i - 1, int_kind) * step + &
+          (int(i - 1, int_kind) * rem) / denom
+      x_vals(i) = transfer(x_bits_vals(i), 0.)
+      val_repro_vals(i) = log_repro(x_vals(i))
+    enddo
+  else
+    do i = 1, npts
+      x_bits_vals(i) = start_bits + int(i - 1, int_kind) * step + &
+          (int(i - 1, int_kind) * rem) / denom
+      x_vals(i) = transfer(x_bits_vals(i), 0.)
+      val_repro_vals(i) = log_repro(x_vals(i))
+    enddo
+  endif
 
-    val_repro = log_repro(x)
-    val_log = log(x)
-    ref_quad = log(real(x, realq))
-    ref = real(ref_quad)
+  do i = 1, npts
+    val_log_vals(i) = log(x_vals(i))
+    ref_quad_vals(i) = log(real(x_vals(i), realq))
+    ref_vals(i) = real(ref_quad_vals(i))
 
     print '(a,",",i0,",",a,",",a,",",a,",",a,3(",",ES26.17E3),",",ES46.37E3)', &
-        trim(grid_name), i, real_bits_hex(x), real_bits_hex(val_repro), real_bits_hex(val_log), real_bits_hex(ref), &
-        x, val_repro, val_log, ref_quad
+        trim(grid_name), i, real_bits_hex(x_vals(i)), real_bits_hex(val_repro_vals(i)), &
+        real_bits_hex(val_log_vals(i)), real_bits_hex(ref_vals(i)), &
+        x_vals(i), val_repro_vals(i), val_log_vals(i), ref_quad_vals(i)
   enddo
 end subroutine dump_log_bit_grid
 
@@ -1000,10 +1135,12 @@ subroutine add_log_repro_tests(suite)
   call suite%add(test_log_smallest_subnormal, "test_log_smallest_subnormal")
   call suite%add(test_log_near_one_above, "test_log_near_one_above")
   call suite%add(test_log_near_one_below, "test_log_near_one_below")
+  call suite%add(test_log_near_one_sensitive_bit, "test_log_near_one_sensitive_bit")
 
   ! Log property tests
   call suite%add(test_log_product_property, "test_log_product_property")
   call suite%add(test_log_reciprocal_property, "test_log_reciprocal_property")
+  call suite%add(test_log_do_concurrent_bitwise, "test_log_do_concurrent_bitwise")
   call suite%add(test_log_value_dump, "test_log_value_dump")
 
   ! Evaluate log_repro error if quad precision is available
