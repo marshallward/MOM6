@@ -140,7 +140,7 @@ module procedure log_repro
   hi = hi + (0. * hi)
   lo = ((w - hi) + r) + real(K) * ln2_lo
 
-  a = hi + (lo + log1p_taylor_tail_6(r))
+  a = hi + (lo + log1p_remez_tail_4(r))
 end procedure log_repro
 
 
@@ -174,6 +174,38 @@ pure function log1p_taylor_tail_6(x) result(a)
 
   a = x * x * (c(2) + x * (c(3) + x * (c(4) + x * (c(5) + x * c(6)))))
 end function log1p_taylor_tail_6
+
+
+!> Remez estimate of log1p(x) - x over the log_repro() table-reduced range.
+!! Uses a degree-4 polynomial for (log1p(x) - x) / x**2, giving a total
+!! degree-6 approximation to log1p(x) - x.
+pure function log1p_remez_tail_4(x) result(a)
+  real, intent(in) :: x
+    !< Input value; expected range is approximately [-0.004, 0.004] [nondim]
+  real :: a
+    !< Approximation of log1p(x) - x [nondim]
+
+  real, parameter :: c(0:4) = [ &
+      -0.50000000000000002711451064650790160934116372268686547205906, &
+       0.3333333333230997752147523284178620486976229118544577885604334, &
+      -0.2499999999767185361215234424897757570704485535532397300358652, &
+       0.2000027036539271991906992254523276458937349319710495606164597, &
+      -0.1666699786550779057543177943870606385873216854361152274042099]
+    !< Sollya Remez coefficients for (log1p(x) - x) / x**2 on [-0.0038910505836871057, +0.0038910505836871057] [nondim]
+
+  real :: x2, x4
+    !< Powers of x [nondim]
+  real :: p01, p23
+    !< Grouped polynomial partial sums [nondim]
+
+  x2 = x * x
+  x4 = x2 * x2
+
+  p01 = c(0) + (x * c(1))
+  p23 = c(2) + (x * c(3))
+
+  a = x2 * ((p01 + (x2 * p23)) + (x4 * c(4)))
+end function log1p_remez_tail_4
 
 
 !> Compensated near-one estimate of log1p(x).
