@@ -395,9 +395,15 @@ subroutine test_log_near_one_sweep
   real, parameter :: umax = 0.064697265625
     !< Upper limit of the near-one log_repro() path, 265/4096 [nondim]
 
-  real :: u, x, val, val_log, ref
-  real :: abs_err, rel_err, ulp_err
-  real :: abs_err_log, rel_err_log, ulp_err_log
+  real :: u, x, val, val_log
+  real(kind=realq) :: ref
+    !< Quad-precision reference estimate [nondim]
+  real(kind=realq) :: abs_err, rel_err
+    !< Absolute and relative errors for log_repro() [nondim]
+  real(kind=realq) :: abs_err_log, rel_err_log
+    !< Absolute and relative errors for intrinsic log() [nondim]
+  real :: ulp_err, ulp_err_log
+    !< ULP errors for log_repro() and intrinsic log() [nondim]
   real :: max_abs_err, max_rel_err, max_ulp
   real :: max_abs_err_log, max_rel_err_log, max_ulp_log
   real :: x_max_abs, x_max_rel, x_max_ulp
@@ -428,16 +434,16 @@ subroutine test_log_near_one_sweep
     x = 1. + u
     val = log_repro(x)
     val_log = log(x)
-    ref = real(log(real(x, realq)))
-    ulp_val = abs(spacing(ref))
+    ref = log(real(x, realq))
+    ulp_val = abs(spacing(real(ref, kind(rmold))))
 
-    abs_err = abs(val - ref)
+    abs_err = abs(real(val, realq) - ref)
     if (abs_err > max_abs_err) then
       max_abs_err = abs_err
       x_max_abs = x
     endif
 
-    abs_err_log = abs(val_log - ref)
+    abs_err_log = abs(real(val_log, realq) - ref)
     if (abs_err_log > max_abs_err_log) then
       max_abs_err_log = abs_err_log
       x_max_abs_log = x
@@ -457,14 +463,14 @@ subroutine test_log_near_one_sweep
       endif
     endif
 
-    ulp_err = abs_err / ulp_val
+    ulp_err = real(abs_err, kind(rmold)) / ulp_val
     if (ulp_err > max_ulp) then
       max_ulp = ulp_err
       x_max_ulp = x
     endif
     if (ulp_err > 0.5) n_half_ulp = n_half_ulp + 1
 
-    ulp_err_log = abs_err_log / ulp_val
+    ulp_err_log = real(abs_err_log, kind(rmold)) / ulp_val
     if (ulp_err_log > max_ulp_log) then
       max_ulp_log = ulp_err_log
       x_max_ulp_log = x
@@ -479,14 +485,14 @@ subroutine test_log_near_one_sweep
       max_abs_err, x_max_abs
   print '(2x,"log_repro max rel err:", t34, ES12.5, " at input = ", ES22.15)', &
       max_rel_err, x_max_rel
-  print '(2x,"log_repro max ULP err:", t34, f12.2, " at input = ", ES22.15)', &
+  print '(2x,"log_repro max ULP err:", t34, f12.10, " at input = ", ES22.15)', &
       max_ulp, x_max_ulp
   print '(2x,"log_repro points > 0.5 ULP:", t34, i12)', n_half_ulp
   print '(2x,"log() max abs err:", t34, ES12.5, " at input = ", ES22.15)', &
       max_abs_err_log, x_max_abs_log
   print '(2x,"log() max rel err:", t34, ES12.5, " at input = ", ES22.15)', &
       max_rel_err_log, x_max_rel_log
-  print '(2x,"log() max ULP err:", t34, f12.2, " at input = ", ES22.15)', &
+  print '(2x,"log() max ULP err:", t34, f12.10, " at input = ", ES22.15)', &
       max_ulp_log, x_max_ulp_log
   print '(2x,"log() points > 0.5 ULP:", t34, i12)', n_half_ulp_log
 end subroutine test_log_near_one_sweep
