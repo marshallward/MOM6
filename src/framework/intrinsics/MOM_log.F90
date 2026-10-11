@@ -20,7 +20,7 @@ integer(kind=int_kind), parameter :: sum_mask = not(1_int_kind)
   !< Clear the lowest significand bit.
 
 integer(kind=int_kind), parameter :: split_mask = &
-    not(ishft(1_int_kind, (digits(real_mold) + 1) / 2) - 1_int_kind)
+    -(2_int_kind**((digits(real_mold) + 1) / 2))
   !< Retain at most half the significant bits, making x_hi*x_hi exact.
 
 contains
