@@ -75,11 +75,6 @@ module procedure log_repro
     return
   endif
 
-  if (x == 1.) then
-    a = 0.
-    return
-  endif
-
   if (iand(xb, sign_mask) /= 0_int_kind) then
     a = (x - x) / (x - x)
     return
