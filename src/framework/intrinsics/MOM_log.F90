@@ -16,6 +16,13 @@ implicit none
 integer(kind=int_kind), parameter :: sign_mask = ishft(-1_int_kind, signbit)
   !< Mask for the sign bit
 
+integer(kind=int_kind), parameter :: sum_mask = not(1_int_kind)
+  !< Clear the lowest significand bit.
+
+integer(kind=int_kind), parameter :: split_mask = &
+    not(ishft(1_int_kind, (digits(real_mold) + 1) / 2) - 1_int_kind)
+  !< Retain at most half the significant bits, making x_hi*x_hi exact.
+
 contains
 
 !> Reproducible natural logarithm function
@@ -220,14 +227,12 @@ pure function log1p_compensated_near(x) result(a)
   ! error near x = 0, where the leading terms dominate the result.
   w = x * split_scale
 
-  x_hi = (x + w) - w
+  x_hi = transfer(iand(transfer(x, int_mold), split_mask), real_mold)
   x_lo = x - x_hi
+
   w = -0.5 * (x_hi * x_hi)
-  hi = x + w
-  ! XXX: No-op optimization barrier
-  hi = hi + (0. * hi)
-  lo = (x - hi) + w
-  lo = lo + ((-0.5 * x_lo) * (x_hi + x))
+  hi = transfer(iand(transfer(x + w, int_mold), sum_mask), real_mold)
+  lo = ((x - hi) + w) + ((-0.5 * x_lo) * (x_hi + x))
 
   a = (tail + lo) + hi
 end function log1p_compensated_near
