@@ -20,6 +20,7 @@ interface
   !! Compute exp(x) with bitwise reproducibility across platforms.
   !! Implemented in submodule MOM_exp
   elemental module function exp_repro(x) result(a)
+    !$omp declare target
     real, intent(in) :: x
       !< Input value
     real :: a
@@ -31,6 +32,7 @@ interface
   !! Compute log(x) with bitwise reproducibility across platforms.
   !! Implemented in submodule MOM_log
   elemental module function log_repro(x) result(a)
+    !$omp declare target
     real, intent(in) :: x
       !< Input value
     real :: a
