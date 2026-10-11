@@ -631,9 +631,11 @@ subroutine eval_log_repro_do_concurrent(x, val)
 
   integer :: i
 
+  !$omp target data map(to: x) map(tofrom: val)
   do concurrent (i=1:size(x))
     val(i) = log_repro(x(i))
   enddo
+  !$omp end target data
 end subroutine eval_log_repro_do_concurrent
 
 
@@ -1019,12 +1021,12 @@ subroutine test_log_value_dump
   call get_environment_variable("MOM_DUMP_LOG", dump_enabled, status=status)
   if (status /= 0) return
 
-  use_do_concurrent = .true.
+  use_do_concurrent = .false.
   call get_environment_variable("MOM_DUMP_LOG_DO_CONCURRENT", concurrent_mode, status=status)
   if (status == 0) then
-    if ((concurrent_mode(1:1) == "0") .or. (concurrent_mode(1:1) == "F") .or. &
-        (concurrent_mode(1:1) == "f") .or. (concurrent_mode(1:1) == "N") .or. &
-        (concurrent_mode(1:1) == "n")) use_do_concurrent = .false.
+    if ((concurrent_mode(1:1) == "1") .or. (concurrent_mode(1:1) == "T") .or. &
+        (concurrent_mode(1:1) == "t") .or. (concurrent_mode(1:1) == "Y") .or. &
+        (concurrent_mode(1:1) == "y")) use_do_concurrent = .true.
   endif
 
   print '(1x,a)', '=== optional log comparison dump'
@@ -1067,20 +1069,41 @@ subroutine dump_log_bit_grid(grid_name, npts, start_bits, end_bits, use_do_concu
   rem = modulo(span, denom)
 
   if (use_do_concurrent) then
+    !$omp target data map(from: x_bits_vals)
     do concurrent (i=1:npts)
       x_bits_vals(i) = start_bits + int(i - 1, int_kind) * step + &
           (int(i - 1, int_kind) * rem) / denom
-      x_vals(i) = transfer(x_bits_vals(i), 0.)
+    enddo
+    !$omp end target data
+
+    !$omp target data map(to: x_bits_vals) map(from: x_vals)
+    do concurrent (i=1:npts)
+      ! Decode positive normal binary64 inputs exactly without device TRANSFER.
+      x_vals(i) = scale(1. + scale(real(ibits(x_bits_vals(i), 0, 52)), -52), &
+          int(ibits(x_bits_vals(i), 52, 11)) - 1023)
+    enddo
+    !$omp end target data
+
+    ! Check device input generation independently of the logarithm calls.
+    call check_log_dump_grid(x_vals, x_bits_vals, start_bits, end_bits)
+    !$omp target data map(to: x_vals) map(from: val_repro_vals)
+    do concurrent (i=1:npts)
       val_repro_vals(i) = log_repro(x_vals(i))
     enddo
+    !$omp end target data
+
+    !call check_log_dump_grid(x_vals, x_bits_vals, start_bits, end_bits)
   else
     do i = 1, npts
       x_bits_vals(i) = start_bits + int(i - 1, int_kind) * step + &
           (int(i - 1, int_kind) * rem) / denom
-      x_vals(i) = transfer(x_bits_vals(i), 0.)
+      x_vals(i) = scale(1. + scale(real(ibits(x_bits_vals(i), 0, 52)), -52), &
+          int(ibits(x_bits_vals(i), 52, 11)) - 1023)
       val_repro_vals(i) = log_repro(x_vals(i))
     enddo
   endif
+
+  call check_log_dump_grid(x_vals, x_bits_vals, start_bits, end_bits)
 
   do i = 1, npts
     val_log_vals(i) = log(x_vals(i))
@@ -1093,6 +1116,38 @@ subroutine dump_log_bit_grid(grid_name, npts, start_bits, end_bits, use_do_concu
         x_vals(i), val_repro_vals(i), val_log_vals(i), ref_quad_vals(i)
   enddo
 end subroutine dump_log_bit_grid
+
+
+!> Check dump inputs on the host before formatting or reference evaluation.
+subroutine check_log_dump_grid(x, x_bits, start_bits, end_bits)
+  real, intent(in) :: x(:)
+    !< Generated input values [nondim]
+  integer(kind=int_kind), intent(in) :: x_bits(:)
+    !< Generated input bit patterns.
+  integer(kind=int_kind), intent(in) :: start_bits, end_bits
+    !< Expected endpoint bit patterns.
+
+  integer(kind=int_kind) :: denom, step, rem, offset, expected_bits, actual_bits
+    !< Host grid spacing, coordinate, and expected and observed bit patterns.
+  integer :: i
+
+  denom = int(size(x) - 1, int_kind)
+  step = (end_bits - start_bits) / denom
+  rem = modulo(end_bits - start_bits, denom)
+  do i = 1, size(x)
+    offset = int(i - 1, int_kind)
+    expected_bits = (start_bits + offset * step) + (offset * rem) / denom
+    actual_bits = transfer(x(i), 0_int_kind)
+    if ((x_bits(i) /= expected_bits) .or. (actual_bits /= expected_bits)) then
+      print '(2x,"log dump input mismatch at index ",i0)', i
+      print '(4x,"expected bits = ",Z16.16)', expected_bits
+      print '(4x,"grid bits     = ",Z16.16)', x_bits(i)
+      print '(4x,"x bits        = ",Z16.16)', actual_bits
+      call assert(.false., "MOM_log_repro_tests: check_log_dump_grid: input grid differs from host formula")
+      exit
+    endif
+  enddo
+end subroutine check_log_dump_grid
 
 
 !> Return the binary64 bit pattern of x formatted as 16 hexadecimal digits.
