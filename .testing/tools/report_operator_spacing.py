@@ -23,28 +23,16 @@ from pathlib import Path
 from typing import NamedTuple
 
 import flint
-from flint.token import TokenKind
 
 
-BINARY_OPERATOR_KINDS = {
-    TokenKind.POINTER_ASSIGNMENT,
-    TokenKind.ARITHMETIC_OPERATOR,
-    TokenKind.RELATIONAL_OPERATOR,
-    TokenKind.LOGICAL_OPERATOR,
-    TokenKind.DEFINED_OPERATOR,
-}
-
-GROUP_STARTERS = {'(', '[', '{', '(/'}
-GROUP_ENDERS = {')': '(', ']': '[', '}': '{', '/)': '(/'}
-NON_CALLABLE_GROUP_NAMES = {
-    'associate', 'do', 'else', 'elseif', 'forall', 'if', 'select', 'where',
-    'while',
-}
-
-UNARY_SIGN_CONTEXT = {
-    '(', '[', '{', '(/', ',', ':', '::', '=', '=>', '+', '-', '*', '/', '//',
-    '<', '>', '<=', '>=', '==', '/=', '.and.', '.or.', '.eqv.', '.neqv.',
-    '.not.',
+SKIPPED_OPERATOR_ROLES = {
+    'callable_or_subscript_operator',
+    'concatenation',
+    'declaration_specifier',
+    'do_control_operator',
+    'exponentiation',
+    'format_specifier',
+    'generic_operator_specifier',
 }
 
 
@@ -102,137 +90,23 @@ def render(statements) -> str:
     return ''.join(output)
 
 
-def is_unary_sign(statement, index: int) -> bool:
-    """Return True if a plus or minus token is acting as a unary sign."""
-    token = statement[index]
-    if token not in ('+', '-'):
-        return False
-    if index <= statement.code_index:
-        return True
-    prior = statement[index - 1]
-    return prior in UNARY_SIGN_CONTEXT or prior.is_operator
-
-
-def in_declaration_prefix(statement, index: int, declaration_end: int | None) -> bool:
-    """Return True for tokens before the declarator section of declarations."""
-    if statement.kind != 'declaration':
-        return False
-    if declaration_end is None:
-        return True
-    return index < declaration_end
-
-
-def opens_callable_or_subscript_group(statement, index: int) -> bool:
-    """Return True if a delimiter opens a likely argument/subscript group."""
-    token = statement[index]
-    if token in ('[', '{', '(/'):
-        return True
-    if token != '(' or index == 0:
-        return False
-
-    prior = statement[index - 1]
-    return (
-        getattr(prior, 'is_name', False)
-        and str(prior).lower() not in NON_CALLABLE_GROUP_NAMES
-    )
-
-
-def in_do_control(statement, index: int) -> bool:
-    """Return True for tokens in a do-loop control clause."""
-    return statement.is_do_statement() and index > statement.code_index
-
-
-def is_print_format_star(statement, index: int) -> bool:
-    """Return True for the star in print *, output statements."""
-    return (
-        index > statement.code_index
-        and statement[statement.code_index] == 'print'
-        and statement[index] == '*'
-        and getattr(statement[index - 1], 'is_name', False)
-        and statement[index - 1] == 'print'
-        and len(statement) > index + 1
-        and statement[index + 1] == ','
-    )
-
-
 def apply_spacing_policy(statement, strict=False) -> None:
     """Apply operator spacing policy to one statement."""
-    group_stack: list[tuple[str, bool, bool]] = []
-    callable_or_subscript_depth = 0
-    operator_spec_depth = 0
-    try:
-        declaration_end = statement.index('::')
-    except ValueError:
-        declaration_end = None
-
-    for index, token in enumerate(statement.tokens):
-        if token in GROUP_ENDERS and group_stack:
-            _, in_callable_or_subscript, in_operator_spec = group_stack.pop()
-            if in_callable_or_subscript:
-                callable_or_subscript_depth -= 1
-            if in_operator_spec:
-                operator_spec_depth -= 1
-
-        if token.kind not in BINARY_OPERATOR_KINDS:
-            if token in GROUP_STARTERS:
-                in_callable_or_subscript = opens_callable_or_subscript_group(
-                    statement, index,
-                )
-                in_operator_spec = (
-                    token == '('
-                    and index > 0
-                    and statement[index - 1] == 'operator'
-                )
-                group_stack.append((
-                    str(token), in_callable_or_subscript, in_operator_spec,
-                ))
-                if in_callable_or_subscript:
-                    callable_or_subscript_depth += 1
-                if in_operator_spec:
-                    operator_spec_depth += 1
+    for token in statement.tokens:
+        role = getattr(token, 'operator_role', None)
+        if role is None or role in SKIPPED_OPERATOR_ROLES:
             continue
 
-        if (
-            token == '**'
-            or operator_spec_depth > 0
-            or in_declaration_prefix(statement, index, declaration_end)
-            or (
-                token.kind == TokenKind.ARITHMETIC_OPERATOR
-                and (
-                    callable_or_subscript_depth > 0
-                    or in_do_control(statement, index)
-                    or is_print_format_star(statement, index)
-                )
-            )
-        ):
-            continue
-        if token == '.not.':
+        if role == 'unary_operator' and token == '.not.':
             set_spacing(token, None, ' ') if strict else set_minimum_spacing(
                 token, None, ' ',
             )
-        elif is_unary_sign(statement, index):
+        elif role == 'unary_operator':
             set_spacing(token, None, '')
-        elif strict:
+        elif role == 'binary_operator' and strict:
             set_spacing(token, ' ', ' ')
-        else:
+        elif role == 'binary_operator':
             set_minimum_spacing(token, ' ', ' ')
-
-        if token in GROUP_STARTERS:
-            in_callable_or_subscript = opens_callable_or_subscript_group(
-                statement, index,
-            )
-            in_operator_spec = (
-                token == '('
-                and index > 0
-                and statement[index - 1] == 'operator'
-            )
-            group_stack.append((
-                str(token), in_callable_or_subscript, in_operator_spec,
-            ))
-            if in_callable_or_subscript:
-                callable_or_subscript_depth += 1
-            if in_operator_spec:
-                operator_spec_depth += 1
 
 
 def changed_lines(statement, original, formatted, source_lines=None):

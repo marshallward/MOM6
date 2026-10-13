@@ -4,6 +4,7 @@
 The default mode is a dry run over explicit source paths. Assignment operators
 require one or more spaces on each side. Name-value pairs, such as named
 arguments and declaration specifiers, require no spaces around the equals sign.
+Explicit and implied-do control equals signs are left unchanged by default.
 
 Options:
   ``--report`` prints each changed source line with its file and line number.
@@ -11,7 +12,7 @@ Options:
   ``--write`` applies changes in place.
   ``--exclude`` skips matching paths when parsing directory trees.
   ``--strict`` requires exactly one space around assignment operators.
-  ``--do-controls`` also checks do-loop controls such as ``do i=1,n``.
+  ``--do-controls`` also checks explicit and implied-do control equals signs.
 """
 
 from __future__ import annotations
@@ -173,9 +174,11 @@ def report_assignment_spacing(
             do_controls=do_controls,
             strict=strict,
         )
+
         if new != old:
             changed.append(path)
             all_changes.extend(file_changes)
+
             if diff:
                 print(
                     ''.join(
@@ -188,6 +191,7 @@ def report_assignment_spacing(
                     ),
                     end='',
                 )
+
             if write:
                 path.write_text(new, encoding='utf-8')
 
@@ -195,10 +199,13 @@ def report_assignment_spacing(
         seen = set()
         for change in all_changes:
             key = (change.path, change.line_number)
+
             if key in seen:
                 continue
+
             seen.add(key)
             print(f'{change.path}:{change.line_number}: {change.original}')
+
     elif not diff:
         for path in changed:
             print(path)
@@ -209,9 +216,17 @@ def report_assignment_spacing(
 def main() -> int:
     """Parse command-line arguments and run the assignment spacing checker."""
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('paths', nargs='+', type=Path, help='Files to process')
+
     parser.add_argument(
-        '--write', action='store_true', help='Write changes in place',
+        'paths',
+        nargs='+',
+        type=Path,
+        help='Files to process',
+    )
+    parser.add_argument(
+        '--write',
+        action='store_true',
+        help='Write changes in place',
     )
     parser.add_argument(
         '--report',
@@ -239,8 +254,8 @@ def main() -> int:
         default=[],
         help='Directory to exclude; may be repeated',
     )
-
     args = parser.parse_args()
+
     return report_assignment_spacing(
         args.paths,
         write=args.write,
