@@ -48,8 +48,8 @@ contains
 !>  This subroutine computes the freezing point potential temperature [degC] from
 !!  salinity [ppt], and pressure [Pa] using a simple linear expression,
 !!  with coefficients passed in as arguments.
-subroutine calculate_TFreeze_linear_scalar(S, pres, T_Fr, TFr_S0_P0, &
-                                           dTFr_dS, dTFr_dp)
+elemental subroutine calculate_TFreeze_linear_scalar(S, pres, T_Fr, TFr_S0_P0, &
+                                                     dTFr_dS, dTFr_dp)
   real,  intent(in)  :: S         !< salinity [ppt].
   real,  intent(in)  :: pres      !< pressure [Pa].
   real,  intent(out) :: T_Fr      !< Freezing point potential temperature [degC].
@@ -58,6 +58,7 @@ subroutine calculate_TFreeze_linear_scalar(S, pres, T_Fr, TFr_S0_P0, &
                                   !! [degC ppt-1].
   real,  intent(in)  :: dTFr_dp   !< The derivative of freezing point with pressure,
                                   !! [degC Pa-1].
+  !$omp declare target
 
   T_Fr = (TFr_S0_P0 + dTFr_dS*S) + dTFr_dp*pres
 
@@ -81,7 +82,7 @@ subroutine calculate_TFreeze_linear_array(S, pres, T_Fr, start, npts, &
   integer :: j
 
   do j=start,start+npts-1
-    T_Fr(j) = (TFr_S0_P0 + dTFr_dS*S(j)) + dTFr_dp*pres(j)
+    call calculate_TFreeze_linear_scalar(S(j), pres(j), T_Fr(j), TFr_S0_P0, dTFr_dS, dTFr_dp)
   enddo
 
 end subroutine calculate_TFreeze_linear_array
@@ -92,10 +93,11 @@ end subroutine calculate_TFreeze_linear_array
 !! pressure dependence changed from 7.53e-8 to 7.75e-8 to make this an
 !! expression for potential temperature (not in situ temperature), using a
 !! value that is correct at the freezing point at 35 PSU and 5e6 Pa (500 dbar).
-subroutine calculate_TFreeze_Millero_scalar(S, pres, T_Fr)
+elemental subroutine calculate_TFreeze_Millero_scalar(S, pres, T_Fr)
   real,    intent(in)  :: S    !< Salinity [PSU]
   real,    intent(in)  :: pres !< Pressure [Pa]
   real,    intent(out) :: T_Fr !< Freezing point potential temperature [degC]
+  !$omp declare target
 
   ! Local variables
   real, parameter :: cS1 = -0.0575      ! A term in the freezing point fit [degC PSU-1]
@@ -121,15 +123,10 @@ subroutine calculate_TFreeze_Millero_array(S, pres, T_Fr, start, npts)
   integer,             intent(in)  :: npts  !< The number of values to calculate.
 
   ! Local variables
-  real, parameter :: cS1 = -0.0575      ! A term in the freezing point fit [degC PSU-1]
-  real, parameter :: cS3_2 = 1.710523e-3 ! A term in the freezing point fit [degC PSU-3/2]
-  real, parameter :: cS2 = -2.154996e-4 ! A term in the freezing point fit [degC PSU-2]
-  real, parameter :: dTFr_dp = -7.75e-8 ! Derivative of freezing point with pressure [degC Pa-1]
   integer :: j
 
   do j=start,start+npts-1
-    T_Fr(j) = S(j)*(cS1 + (cS3_2 * sqrt(max(S(j), 0.0)) + cS2 * S(j))) + &
-              dTFr_dp*pres(j)
+    call calculate_TFreeze_Millero_scalar(S(j), pres(j), T_Fr(j))
   enddo
 
 end subroutine calculate_TFreeze_Millero_array
@@ -137,36 +134,13 @@ end subroutine calculate_TFreeze_Millero_array
 !> This subroutine computes the freezing point conservative temperature [degC]
 !! from absolute salinity [g kg-1], and pressure [Pa] using a rescaled and
 !! refactored version of the polynomial expressions from the TEOS10 package.
-subroutine calculate_TFreeze_TEOS_poly_scalar(S, pres, T_Fr)
+elemental subroutine calculate_TFreeze_TEOS_poly_scalar(S, pres, T_Fr)
   real,    intent(in)  :: S    !< Absolute salinity [g kg-1].
   real,    intent(in)  :: pres !< Pressure [Pa].
   real,    intent(out) :: T_Fr !< Freezing point conservative temperature [degC].
+  !$omp declare target
 
   ! Local variables
-  real, dimension(1) :: S0    ! Salinity at a point [g kg-1]
-  real, dimension(1) :: pres0 ! Pressure at a point [Pa]
-  real, dimension(1) :: tfr0  ! The freezing temperature [degC]
-
-  S0(1) = S
-  pres0(1) = pres
-
-  call calculate_TFreeze_TEOS_poly_array(S0, pres0, tfr0, 1, 1)
-  T_Fr = tfr0(1)
-
-end subroutine calculate_TFreeze_TEOS_poly_scalar
-
-!> This subroutine computes the freezing point conservative temperature [degC]
-!! from absolute salinity [g kg-1], and pressure [Pa] using a rescaled and
-!! refactored version of the polynomial expressions from the TEOS10 package.
-subroutine calculate_TFreeze_TEOS_poly_array(S, pres, T_Fr, start, npts)
-  real, dimension(:), intent(in)  :: S     !< absolute salinity [g kg-1].
-  real, dimension(:), intent(in)  :: pres  !< Pressure [Pa].
-  real, dimension(:), intent(out) :: T_Fr  !< Freezing point conservative temperature [degC].
-  integer,            intent(in)  :: start !< The starting point in the arrays
-  integer,            intent(in)  :: npts  !< The number of values to calculate
-
-  ! Local variables
-  real :: Sa    ! Absolute salinity [g kg-1] = [ppt]
   real :: rS    ! Square root of salinity [ppt1/2]
   ! The coefficients here use the notation TFab for contributions proportional to S**a/2 * P**b.
   real, parameter :: TF00 =  0.017947064327968736  ! Freezing point coefficient [degC]
@@ -192,14 +166,30 @@ subroutine calculate_TFreeze_TEOS_poly_array(S, pres, T_Fr, start, npts)
   real, parameter :: TF23 = -7.997496801694032e-27 ! Freezing point coefficient [degC ppt-1 Pa-3]
   real, parameter :: TF33 =  8.756340772729538e-28 ! Freezing point coefficient [degC ppt-3/2 Pa-3]
   real, parameter :: TF43 =  1.338002171109174e-29 ! Freezing point coefficient [degC ppt-2 Pa-3]
+
+  rS = sqrt(max(S, 0.0))
+  T_Fr =       (TF00 + S*(TF20 + rS*(TF30 + rS*(TF40 + rS*(TF50 + rS*(TF60 + rS*TF70)))))) &
+      + pres*( (TF01 + S*(TF21 + rS*(TF31 + rS*(TF41 + rS*(TF51 + rS*(TF61 + rS*TF71)))))) &
+       + pres*((TF02 + S*(TF22 + rS*(TF32 + rS*(TF42 + rS* TF52)))) &
+        + pres*(TF03 + S*(TF23 + rS*(TF33 + rS* TF43))) ) )
+
+end subroutine calculate_TFreeze_TEOS_poly_scalar
+
+!> This subroutine computes the freezing point conservative temperature [degC]
+!! from absolute salinity [g kg-1], and pressure [Pa] using a rescaled and
+!! refactored version of the polynomial expressions from the TEOS10 package.
+subroutine calculate_TFreeze_TEOS_poly_array(S, pres, T_Fr, start, npts)
+  real, dimension(:), intent(in)  :: S     !< absolute salinity [g kg-1].
+  real, dimension(:), intent(in)  :: pres  !< Pressure [Pa].
+  real, dimension(:), intent(out) :: T_Fr  !< Freezing point conservative temperature [degC].
+  integer,            intent(in)  :: start !< The starting point in the arrays
+  integer,            intent(in)  :: npts  !< The number of values to calculate
+
+  ! Local variables
   integer :: j
 
   do j=start,start+npts-1
-    rS = sqrt(max(S(j), 0.0))
-    T_Fr(j) =       (TF00 + S(j)*(TF20 + rS*(TF30 + rS*(TF40 + rS*(TF50 + rS*(TF60 + rS*TF70)))))) &
-        + pres(j)*( (TF01 + S(j)*(TF21 + rS*(TF31 + rS*(TF41 + rS*(TF51 + rS*(TF61 + rS*TF71)))))) &
-         + pres(j)*((TF02 + S(j)*(TF22 + rS*(TF32 + rS*(TF42 + rS* TF52)))) &
-          + pres(j)*(TF03 + S(j)*(TF23 + rS*(TF33 + rS* TF43))) ) )
+    call calculate_TFreeze_TEOS_poly_scalar(S(j), pres(j), T_Fr(j))
   enddo
 
 end subroutine calculate_TFreeze_TEOS_poly_array

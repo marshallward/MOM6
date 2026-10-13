@@ -2,6 +2,9 @@
 ! See the LICENSE file for licensing information.
 ! SPDX-License-Identifier: Apache-2.0
 
+#include <MOM_memory.h>
+#include "do_concurrent_compat.h"
+
 !> Provides functions for some diabatic processes such as frazil, brine rejection,
 !! tendency due to surface flux divergence.
 module MOM_diabatic_aux
@@ -29,8 +32,6 @@ use MOM_variables,     only : thermo_var_ptrs
 use MOM_verticalGrid,  only : verticalGrid_type
 
 implicit none ; private
-
-#include <MOM_memory.h>
 
 public diabatic_aux_init, diabatic_aux_end
 public make_frazil, adjust_salt, differential_diffuse_T_S, triDiagTS, triDiagTS_Eulerian
@@ -82,6 +83,9 @@ type, public :: diabatic_aux_CS ; private
                              !! vertical scale used for the brine plume parameterization [nondim].
   real :: check_salt_threshold!< The maximum relative salt change acceptable in a time step [nondim]
 
+  integer :: niblock = 0     !< The i block size used in array calculations [nondim].
+  integer :: njblock = 0     !< The j block size used in array calculations [nondim].
+
   type(time_type), pointer :: Time => NULL() !< A pointer to the ocean model's clock.
   type(diag_ctrl), pointer :: diag !< Structure used to regulate timing of diagnostic output
 
@@ -130,114 +134,210 @@ subroutine make_frazil(h, tv, G, GV, US, CS, p_surf, halo)
   real, dimension(SZI_(G),SZJ_(G)), &
                  optional, intent(in)    :: p_surf !< The pressure at the ocean surface [R L2 T-2 ~> Pa].
   integer,       optional, intent(in)    :: halo !< Halo width over which to calculate frazil
-  ! Local variables
-  real, dimension(SZI_(G)) :: &
-    fraz_col, & ! The accumulated heat requirement due to frazil [Q R Z ~> J m-2].
-    T_freeze, & ! The freezing potential temperature at the current salinity [C ~> degC].
-    ps          ! Surface pressure [R L2 T-2 ~> Pa]
-  real, dimension(SZI_(G),SZK_(GV)) :: &
-    pressure    ! The pressure at the middle of each layer [R L2 T-2 ~> Pa].
-  real :: H_to_RL2_T2  ! A conversion factor from thicknesses in H to pressure [R L2 T-2 H-1 ~> Pa m-1 or Pa m2 kg-1]
-  real :: hc    ! A layer's heat capacity [Q R Z C-1 ~> J m-2 degC-1].
-  logical :: T_fr_set  ! True if the freezing point has been calculated for a
-                       ! row of points.
-  integer :: i, j, k, is, ie, js, je, nz
 
-  is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec ; nz = GV%ke
+  ! Local variables
+  integer :: is, ie, js, je  ! The index bounds of the points to work on.
+  integer :: nii, njj        ! The resolved i- and j-direction block sizes [nondim].
+
+  is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec
   if (present(halo)) then
     is = G%isc-halo ; ie = G%iec+halo ; js = G%jsc-halo ; je = G%jec+halo
   endif
 
+  nii = CS%niblock ; if (nii == 0) nii = ie - is + 1
+  njj = CS%njblock ; if (njj == 0) njj = je - js + 1
+
+  call make_frazil_block(h, tv, G, GV, US, CS, is, ie, js, je, nii, njj, p_surf)
+
+end subroutine make_frazil
+
+!> Form frazil over a range of points, working on one i-j block of columns at a time.
+subroutine make_frazil_block(h, tv, G, GV, US, CS, is, ie, js, je, nii, njj, p_surf)
+  type(ocean_grid_type),   intent(in)    :: G  !< The ocean's grid structure
+  type(verticalGrid_type), intent(in)    :: GV !< The ocean's vertical grid structure
+  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)), &
+                           intent(in)    :: h  !< Layer thicknesses [H ~> m or kg m-2]
+  type(thermo_var_ptrs),   intent(inout) :: tv !< Structure containing pointers to any available
+                                               !! thermodynamic fields.
+  type(unit_scale_type),   intent(in)    :: US !< A dimensional unit scaling type
+  type(diabatic_aux_CS),   intent(in)    :: CS !< The control structure returned by a previous
+                                               !! call to diabatic_aux_init.
+  integer,                 intent(in)    :: is !< The start i-index to work on.
+  integer,                 intent(in)    :: ie !< The end i-index to work on.
+  integer,                 intent(in)    :: js !< The start j-index to work on.
+  integer,                 intent(in)    :: je !< The end j-index to work on.
+  integer,                 intent(in)    :: nii !< Size of the i-block [nondim].
+  integer,                 intent(in)    :: njj !< Size of the j-block [nondim].
+  real, dimension(SZI_(G),SZJ_(G)), &
+                 optional, intent(in)    :: p_surf !< The pressure at the ocean surface [R L2 T-2 ~> Pa].
+
+  ! Local variables
+  real, dimension(nii,njj) :: &
+    fraz_col, & ! The accumulated heat requirement due to frazil [Q R Z ~> J m-2].
+    frazil_mask ! A block-local mask that is 1 on ocean columns that may form or reclaim frazil,
+                ! and hence need their freezing point, and 0 elsewhere [nondim].
+  real, dimension(nii,njj,SZK_(GV)) :: &
+    pressure, & ! The pressure at the middle of each layer [R L2 T-2 ~> Pa].
+    T_freeze, & ! The freezing potential temperature at the current salinity [C ~> degC].
+    S_block     ! A block-local copy of tv%S, correctly aligned with pressure and T_freeze
+                ! [S ~> ppt].
+
+  real :: H_to_RL2_T2  ! A conversion factor from thicknesses in H to pressure [R L2 T-2 H-1 ~> Pa m-1 or Pa m2 kg-1]
+  real :: hc    ! A layer's heat capacity [Q R Z C-1 ~> J m-2 degC-1].
+  logical :: p_surf_is_present  ! True if p_surf is present. Used to determine if p_surf is used
+                                ! when calculating pressure for pressure dependent frazil.
+  logical :: any_frazil  ! True if any column in the current block may form or reclaim frazil.
+  integer :: EOSdom(3,2) ! The computational domain for the equation of state within the blocked
+                         ! pressure and T_freeze arrays, taking into account that the arrays inside
+                         ! the EOS routines start at 1.
+  integer :: i, j, k, nz
+  integer :: isb, ieb    ! The i-index bounds of the current block.
+  integer :: jsb, jeb    ! The j-index bounds of the current block.
+  integer :: ii, jj      ! Block-local i- and j-index loop variables.
+  integer :: iie, jje    ! The i- and j-extents of the current block.
+
+  nz = GV%ke
+  p_surf_is_present = present(p_surf)
+  H_to_RL2_T2 = GV%H_to_RZ * GV%g_Earth
+
   call cpu_clock_begin(id_clock_frazil)
 
-  if (.not.CS%pressure_dependent_frazil) then
-    do k=1,nz ; do i=is,ie ; pressure(i,k) = 0.0 ; enddo ; enddo
-  else
-    H_to_RL2_T2 = GV%H_to_RZ * GV%g_Earth
-  endif
-  !$OMP parallel do default(shared) private(fraz_col,T_fr_set,T_freeze,hc,ps)  &
-  !$OMP                             firstprivate(pressure) ! pressure might be set above, so should be firstprivate
-  do j=js,je
-    ps(:) = 0.0
-    if (PRESENT(p_surf)) then ; do i=is,ie
-      ps(i) = p_surf(i,j)
-    enddo ; endif
+  !$omp target enter data map(alloc: pressure, T_freeze, fraz_col, S_block, frazil_mask, any_frazil)
 
-    do i=is,ie ; fraz_col(i) = 0.0 ; enddo
+  do jsb=js,je,njj ; do isb=is,ie,nii
+    jeb = min(je, jsb+njj-1) ; ieb = min(ie, isb+nii-1)
+    iie = ieb - isb + 1 ; jje = jeb - jsb + 1
+
+    EOSdom(1,1) = 1 ; EOSdom(1,2) = iie
+    EOSdom(2,1) = 1 ; EOSdom(2,2) = jje
+    EOSdom(3,1) = 1 ; EOSdom(3,2) = nz
+
+    ! Only work on the columns that can be changed below.  fraz_col starts at 0 and can only become
+    ! positive below a layer with T < 0, so a column with no negative temperatures and no frazil to
+    ! reclaim is left untouched, and its freezing point is never needed.  frazil_mask is set at every
+    ! point in the block, including land, since calculate_TFreeze indexes it block-locally.
+    do concurrent( jj=1:jje ) DO_LOCALITY(local(j))
+      j = jsb + jj - 1
+      do concurrent( ii=1:iie ) DO_LOCALITY(local(i))
+        i = isb + ii - 1
+        frazil_mask(ii,jj) = 0.0
+        if (CS%reclaim_frazil) then
+          if ((G%mask2dT(i,j) > 0.0) .and. (tv%frazil(i,j) > 0.0)) frazil_mask(ii,jj) = 1.0
+        endif
+      enddo
+      do k=1,nz
+        do concurrent( ii=1:iie, G%mask2dT(isb+ii-1,j) > 0.0 ) DO_LOCALITY(local(i))
+          i = isb + ii - 1
+          if (tv%T(i,j,k) < 0.0) frazil_mask(ii,jj) = 1.0
+        enddo
+      enddo
+    enddo
+
+    ! Skip this block entirely if none of its columns can form or reclaim frazil.
+    ! Doing this in the above kernel seems to serialize on the gpu
+    any_frazil = .false.
+    do concurrent( jj=1:jje, ii=1:iie ) DO_LOCALITY(reduce(.or.: any_frazil))
+      any_frazil = any_frazil .or. (frazil_mask(ii,jj) > 0.0)
+    enddo
+    if (.not.any_frazil) cycle
+
+    do concurrent( k=1:nz, jj=1:jje, ii=1:iie, frazil_mask(ii,jj) > 0.0 ) DO_LOCALITY(local(i,j))
+        i = isb + ii - 1 ; j = jsb + jj - 1
+        ! Block sized S helps cpu performance, but unfortunately adds an extra 3-D on the GPU
+        S_block(ii,jj,k) = tv%S(i,j,k)
+        if (.not.CS%pressure_dependent_frazil) then
+          pressure(ii,jj,k) = 0.0
+        endif
+    enddo
 
     if (CS%pressure_dependent_frazil) then
-      do i=is,ie
-        pressure(i,1) = ps(i) + (0.5*H_to_RL2_T2)*h(i,j,1)
-      enddo
-      do k=2,nz ; do i=is,ie
-        pressure(i,k) = pressure(i,k-1) + (0.5*H_to_RL2_T2) * (h(i,j,k) + h(i,j,k-1))
-      enddo ; enddo
-    endif
-
-    if (CS%reclaim_frazil) then
-      T_fr_set = .false.
-      do i=is,ie ; if (tv%frazil(i,j) > 0.0) then
-        if (.not.T_fr_set) then
-          call calculate_TFreeze(tv%S(i:ie,j,1), pressure(i:ie,1), T_freeze(i:ie), &
-                                 tv%eqn_of_state)
-          T_fr_set = .true.
-        endif
-
-        if (tv%T(i,j,1) > T_freeze(i)) then
-    ! If frazil had previously been formed, but the surface temperature is now
-    ! above freezing, cool the surface layer with the frazil heat deficit.
-          hc = (tv%C_p*GV%H_to_RZ) * h(i,j,1)
-          if (tv%frazil(i,j) - hc * (tv%T(i,j,1) - T_freeze(i)) <= 0.0) then
-            tv%T(i,j,1) = tv%T(i,j,1) - tv%frazil(i,j) / hc
-            tv%frazil(i,j) = 0.0
+      do concurrent( jj=1:jje ) DO_LOCALITY(local(j))
+        j = jsb + jj - 1
+        do concurrent( ii=1:iie, frazil_mask(ii,jj) > 0.0 ) DO_LOCALITY(local(i))
+          i = isb + ii - 1
+          if (p_surf_is_present) then
+            pressure(ii,jj,1) = p_surf(i,j) + (0.5*H_to_RL2_T2)*h(i,j,1)
           else
-            tv%frazil(i,j) = tv%frazil(i,j) - hc * (tv%T(i,j,1) - T_freeze(i))
-            tv%T(i,j,1) = T_freeze(i)
+            pressure(ii,jj,1) = (0.5*H_to_RL2_T2)*h(i,j,1)
           endif
-        endif
-      endif ; enddo
+        enddo
+        do k=2,nz
+          do concurrent( ii=1:iie, frazil_mask(ii,jj) > 0.0 ) DO_LOCALITY(local(i))
+            i = isb + ii - 1
+            pressure(ii,jj,k) = pressure(ii,jj,k-1) + (0.5*H_to_RL2_T2) * (h(i,j,k) + h(i,j,k-1))
+          enddo
+        enddo
+      enddo
     endif
 
-    do k=nz,1,-1
-      T_fr_set = .false.
-      do i=is,ie
-        if ((G%mask2dT(i,j) > 0.0) .and. &
-            ((tv%T(i,j,k) < 0.0) .or. (fraz_col(i) > 0.0))) then
-          if (.not.T_fr_set) then
-            call calculate_TFreeze(tv%S(i:ie,j,k), pressure(i:ie,k), T_freeze(i:ie), &
-                                   tv%eqn_of_state)
-            T_fr_set = .true.
-          endif
+    ! Calculate the freezing point temperature in the columns that need it.
+    call calculate_TFreeze(S_block, pressure, T_freeze, tv%eqn_of_state, &
+                           EOSdom, frazil_mask, nii, njj, nz)
 
-          hc = (tv%C_p*GV%H_to_RZ) * h(i,j,k)
-          if (h(i,j,k) <= 10.0*(GV%Angstrom_H + GV%H_subroundoff)) then
-            ! Very thin layers should not be cooled by the frazil flux.
-            if (tv%T(i,j,k) < T_freeze(i)) then
-              fraz_col(i) = fraz_col(i) + hc * (T_freeze(i) - tv%T(i,j,k))
-              tv%T(i,j,k) = T_freeze(i)
-            endif
-          elseif ((fraz_col(i) > 0.0) .or. (tv%T(i,j,k) < T_freeze(i))) then
-            if (fraz_col(i) + hc * (T_freeze(i) - tv%T(i,j,k)) < 0.0) then
-              tv%T(i,j,k) = tv%T(i,j,k) - fraz_col(i) / hc
-              fraz_col(i) = 0.0
-            else
-              fraz_col(i) = fraz_col(i) + hc * (T_freeze(i) - tv%T(i,j,k))
-              tv%T(i,j,k) = T_freeze(i)
+    do concurrent( jj=1:jje ) DO_LOCALITY(local(j))
+      j = jsb + jj - 1
+      do concurrent( ii=1:iie, frazil_mask(ii,jj) > 0.0 ) DO_LOCALITY(local(hc,i))
+        i = isb + ii - 1
+
+        fraz_col(ii,jj) = 0.0
+
+        if (CS%reclaim_frazil) then
+          if (tv%frazil(i,j) > 0.0) then
+            if (tv%T(i,j,1) > T_freeze(ii,jj,1)) then
+              ! If frazil had previously been formed, but the surface temperature is now
+              ! above freezing, cool the surface layer with the frazil heat deficit.
+              hc = (tv%C_p*GV%H_to_RZ) * h(i,j,1)
+              if (tv%frazil(i,j) - hc * (tv%T(i,j,1) - T_freeze(ii,jj,1)) <= 0.0) then
+                tv%T(i,j,1) = tv%T(i,j,1) - tv%frazil(i,j) / hc
+                tv%frazil(i,j) = 0.0
+              else
+                tv%frazil(i,j) = tv%frazil(i,j) - hc * (tv%T(i,j,1) - T_freeze(ii,jj,1))
+                tv%T(i,j,1) = T_freeze(ii,jj,1)
+              endif
             endif
           endif
         endif
       enddo
-    enddo
-    do i=is,ie
-      tv%frazil(i,j) = tv%frazil(i,j) + fraz_col(i)
-    enddo
-  enddo
+
+      do k=nz,1,-1
+        do concurrent( ii=1:iie, frazil_mask(ii,jj) > 0.0 ) DO_LOCALITY(local(hc,i))
+          i = isb + ii - 1
+          if ((tv%T(i,j,k) < 0.0) .or. (fraz_col(ii,jj) > 0.0)) then
+            hc = (tv%C_p*GV%H_to_RZ) * h(i,j,k)
+            if (h(i,j,k) <= 10.0*(GV%Angstrom_H + GV%H_subroundoff)) then
+              ! Very thin layers should not be cooled by the frazil flux.
+              if (tv%T(i,j,k) < T_freeze(ii,jj,k)) then
+                fraz_col(ii,jj) = fraz_col(ii,jj) + hc * (T_freeze(ii,jj,k) - tv%T(i,j,k))
+                tv%T(i,j,k) = T_freeze(ii,jj,k)
+              endif
+            elseif ((fraz_col(ii,jj) > 0.0) .or. (tv%T(i,j,k) < T_freeze(ii,jj,k))) then
+              if (fraz_col(ii,jj) + hc * (T_freeze(ii,jj,k) - tv%T(i,j,k)) < 0.0) then
+                tv%T(i,j,k) = tv%T(i,j,k) - fraz_col(ii,jj) / hc
+                fraz_col(ii,jj) = 0.0
+              else
+                fraz_col(ii,jj) = fraz_col(ii,jj) + hc * (T_freeze(ii,jj,k) - tv%T(i,j,k))
+                tv%T(i,j,k) = T_freeze(ii,jj,k)
+              endif
+            endif
+          endif
+        enddo
+      enddo ! k-loop
+
+      do concurrent( ii=1:iie, frazil_mask(ii,jj) > 0.0 ) DO_LOCALITY(local(i))
+        i = isb + ii - 1
+        tv%frazil(i,j) = tv%frazil(i,j) + fraz_col(ii,jj)
+      enddo
+    enddo ! j-loop
+
+  enddo ; enddo ! ij block loop
 
   tv%frazil_was_reset = .false.
 
+  !$omp target exit data map(delete: pressure, T_freeze, fraz_col, S_block, frazil_mask, any_frazil)
+
   call cpu_clock_end(id_clock_frazil)
 
-end subroutine make_frazil
+end subroutine make_frazil_block
 
 !> This subroutine applies double diffusion to T & S, assuming no diapycnal mass
 !! fluxes, using a simple tridiagonal solver.
@@ -401,9 +501,11 @@ end subroutine adjust_salt
 
 !> This is a simple tri-diagonal solver for T and S.
 !! "Simple" means it only uses arrays hold, ea and eb.
-subroutine triDiagTS(G, GV, is, ie, js, je, hold, ea, eb, T, S)
+subroutine triDiagTS(G, GV, CS, is, ie, js, je, hold, ea, eb, T, S)
   type(ocean_grid_type),                     intent(in)    :: G  !< The ocean's grid structure
   type(verticalGrid_type),                   intent(in)    :: GV !< The ocean's vertical grid structure
+  type(diabatic_aux_CS),                     intent(in)    :: CS !< The control structure returned by a
+                                                                 !! previous call to diabatic_aux_init.
   integer,                                   intent(in)    :: is !< The start i-index to work on.
   integer,                                   intent(in)    :: ie !< The end i-index to work on.
   integer,                                   intent(in)    :: js !< The start j-index to work on.
@@ -418,42 +520,91 @@ subroutine triDiagTS(G, GV, is, ie, js, je, hold, ea, eb, T, S)
   real, dimension(SZI_(G),SZJ_(G),SZK_(GV)), intent(inout) :: S  !< Layer salinities [S ~> ppt].
 
   ! Local variables
-  real :: b1(SZIB_(G))          ! A variable used by the tridiagonal solver [H-1 ~> m-1 or m2 kg-1].
-  real :: d1(SZIB_(G))          ! A variable used by the tridiagonal solver [nondim].
-  real :: c1(SZIB_(G),SZK_(GV)) ! A variable used by the tridiagonal solver [nondim].
+  integer :: nii, njj  ! The resolved i- and j-direction block sizes [nondim].
+
+  nii = CS%niblock ; if (nii == 0) nii = ie - is + 1
+  njj = CS%njblock ; if (njj == 0) njj = je - js + 1
+
+  call triDiagTS_block(G, GV, is, ie, js, je, nii, njj, hold, ea, eb, T, S)
+
+end subroutine triDiagTS
+
+!> Solve the simple tri-diagonal system for T and S, working on one i-j block of columns at a time.
+subroutine triDiagTS_block(G, GV, is, ie, js, je, nii, njj, hold, ea, eb, T, S)
+  type(ocean_grid_type),                     intent(in)    :: G  !< The ocean's grid structure
+  type(verticalGrid_type),                   intent(in)    :: GV !< The ocean's vertical grid structure
+  integer,                                   intent(in)    :: is !< The start i-index to work on.
+  integer,                                   intent(in)    :: ie !< The end i-index to work on.
+  integer,                                   intent(in)    :: js !< The start j-index to work on.
+  integer,                                   intent(in)    :: je !< The end j-index to work on.
+  integer,                                   intent(in)    :: nii !< Size of the i-block [nondim].
+  integer,                                   intent(in)    :: njj !< Size of the j-block [nondim].
+  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)), intent(in)    :: hold !< The layer thicknesses before entrainment,
+                                                                 !! [H ~> m or kg m-2].
+  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)), intent(in)    :: ea !< The amount of fluid entrained from the layer
+                                                                 !! above within this time step [H ~> m or kg m-2]
+  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)), intent(in)    :: eb !< The amount of fluid entrained from the layer
+                                                                 !! below within this time step [H ~> m or kg m-2]
+  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)), intent(inout) :: T  !< Layer potential temperatures [C ~> degC].
+  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)), intent(inout) :: S  !< Layer salinities [S ~> ppt].
+
+  ! Local variables
+  real :: b1(nii,njj)           ! A variable used by the tridiagonal solver [H-1 ~> m-1 or m2 kg-1].
+  real :: d1(nii,njj)           ! A variable used by the tridiagonal solver [nondim].
+  real :: c1(nii,njj,SZK_(GV))  ! A variable used by the tridiagonal solver [nondim].
   real :: h_tr, b_denom_1       ! Two temporary thicknesses [H ~> m or kg m-2].
   integer :: i, j, k
+  integer :: isb, ieb           ! The i-index bounds of the current block.
+  integer :: jsb, jeb           ! The j-index bounds of the current block.
+  integer :: ii, jj             ! Block-local i- and j-index loop variables.
+  integer :: iie, jje           ! The i- and j-extents of the current block.
 
-  !$OMP parallel do default(shared) private(h_tr,b1,d1,c1,b_denom_1)
-  do j=js,je
-    do i=is,ie
-      h_tr = hold(i,j,1) + GV%H_subroundoff
-      b1(i) = 1.0 / (h_tr + eb(i,j,1))
-      d1(i) = h_tr * b1(i)
-      T(i,j,1) = (b1(i)*h_tr)*T(i,j,1)
-      S(i,j,1) = (b1(i)*h_tr)*S(i,j,1)
+  !$omp target enter data map(alloc: b1, d1, c1)
+
+  do jsb=js,je,njj ; do isb=is,ie,nii
+    jeb = min(je, jsb+njj-1) ; ieb = min(ie, isb+nii-1)
+
+    iie = ieb - isb + 1 ; jje = jeb - jsb + 1
+
+    do concurrent( jj=1:jje ) DO_LOCALITY(local(j))
+      j = jsb + jj - 1
+      do concurrent( ii=1:iie ) DO_LOCALITY(local(h_tr,i))
+        i = isb + ii - 1
+        h_tr = hold(i,j,1) + GV%H_subroundoff
+        b1(ii,jj) = 1.0 / (h_tr + eb(i,j,1))
+        d1(ii,jj) = h_tr * b1(ii,jj)
+        T(i,j,1) = (b1(ii,jj)*h_tr)*T(i,j,1)
+        S(i,j,1) = (b1(ii,jj)*h_tr)*S(i,j,1)
+      enddo
+      do k=2,GV%ke ; do concurrent( ii=1:iie ) DO_LOCALITY(local(h_tr,b_denom_1,i))
+        i = isb + ii - 1
+        c1(ii,jj,k) = eb(i,j,k-1) * b1(ii,jj)
+        h_tr = hold(i,j,k) + GV%H_subroundoff
+        b_denom_1 = h_tr + d1(ii,jj)*ea(i,j,k)
+        b1(ii,jj) = 1.0 / (b_denom_1 + eb(i,j,k))
+        d1(ii,jj) = b_denom_1 * b1(ii,jj)
+        T(i,j,k) = b1(ii,jj) * (h_tr*T(i,j,k) + ea(i,j,k)*T(i,j,k-1))
+        S(i,j,k) = b1(ii,jj) * (h_tr*S(i,j,k) + ea(i,j,k)*S(i,j,k-1))
+      enddo ; enddo
+      do k=GV%ke-1,1,-1 ; do concurrent( ii=1:iie ) DO_LOCALITY(local(i))
+        i = isb + ii - 1
+        T(i,j,k) = T(i,j,k) + c1(ii,jj,k+1)*T(i,j,k+1)
+        S(i,j,k) = S(i,j,k) + c1(ii,jj,k+1)*S(i,j,k+1)
+      enddo ; enddo
     enddo
-    do k=2,GV%ke ; do i=is,ie
-      c1(i,k) = eb(i,j,k-1) * b1(i)
-      h_tr = hold(i,j,k) + GV%H_subroundoff
-      b_denom_1 = h_tr + d1(i)*ea(i,j,k)
-      b1(i) = 1.0 / (b_denom_1 + eb(i,j,k))
-      d1(i) = b_denom_1 * b1(i)
-      T(i,j,k) = b1(i) * (h_tr*T(i,j,k) + ea(i,j,k)*T(i,j,k-1))
-      S(i,j,k) = b1(i) * (h_tr*S(i,j,k) + ea(i,j,k)*S(i,j,k-1))
-    enddo ; enddo
-    do k=GV%ke-1,1,-1 ; do i=is,ie
-      T(i,j,k) = T(i,j,k) + c1(i,k+1)*T(i,j,k+1)
-      S(i,j,k) = S(i,j,k) + c1(i,k+1)*S(i,j,k+1)
-    enddo ; enddo
-  enddo
-end subroutine triDiagTS
+  enddo ; enddo ! ij block loop
+
+  !$omp target exit data map(delete: b1, d1, c1)
+
+end subroutine triDiagTS_block
 
 !> This is a simple tri-diagonal solver for T and S, with mixing across interfaces but no net
 !! transfer of mass.
-subroutine triDiagTS_Eulerian(G, GV, is, ie, js, je, hold, ent, T, S)
+subroutine triDiagTS_Eulerian(G, GV, CS, is, ie, js, je, hold, ent, T, S)
   type(ocean_grid_type),                     intent(in)    :: G    !< The ocean's grid structure
   type(verticalGrid_type),                   intent(in)    :: GV   !< The ocean's vertical grid structure
+  type(diabatic_aux_CS),                     intent(in)    :: CS   !< The control structure returned by a
+                                                                   !! previous call to diabatic_aux_init.
   integer,                                   intent(in)    :: is   !< The start i-index to work on.
   integer,                                   intent(in)    :: ie   !< The end i-index to work on.
   integer,                                   intent(in)    :: js   !< The start j-index to work on.
@@ -466,36 +617,81 @@ subroutine triDiagTS_Eulerian(G, GV, is, ie, js, je, hold, ent, T, S)
   real, dimension(SZI_(G),SZJ_(G),SZK_(GV)), intent(inout) :: S    !< Layer salinities [S ~> ppt].
 
   ! Local variables
-  real :: b1(SZIB_(G))          ! A variable used by the tridiagonal solver [H-1 ~> m-1 or m2 kg-1].
-  real :: d1(SZIB_(G))          ! A variable used by the tridiagonal solver [nondim].
-  real :: c1(SZIB_(G),SZK_(GV)) ! A variable used by the tridiagonal solver [nondim].
+  integer :: nii, njj  ! The resolved i- and j-direction block sizes [nondim].
+
+  nii = CS%niblock ; if (nii == 0) nii = ie - is + 1
+  njj = CS%njblock ; if (njj == 0) njj = je - js + 1
+
+  call triDiagTS_Eulerian_block(G, GV, is, ie, js, je, nii, njj, hold, ent, T, S)
+
+end subroutine triDiagTS_Eulerian
+
+!> Solve the Eulerian tri-diagonal system for T and S, working on one i-j block of columns at a time.
+subroutine triDiagTS_Eulerian_block(G, GV, is, ie, js, je, nii, njj, hold, ent, T, S)
+  type(ocean_grid_type),                     intent(in)    :: G    !< The ocean's grid structure
+  type(verticalGrid_type),                   intent(in)    :: GV   !< The ocean's vertical grid structure
+  integer,                                   intent(in)    :: is   !< The start i-index to work on.
+  integer,                                   intent(in)    :: ie   !< The end i-index to work on.
+  integer,                                   intent(in)    :: js   !< The start j-index to work on.
+  integer,                                   intent(in)    :: je   !< The end j-index to work on.
+  integer,                                   intent(in)    :: nii  !< Size of the i-block [nondim].
+  integer,                                   intent(in)    :: njj  !< Size of the j-block [nondim].
+  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)), intent(in)    :: hold !< The layer thicknesses before entrainment,
+                                                                   !! [H ~> m or kg m-2].
+  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)+1), intent(in)  :: ent  !< The amount of fluid mixed across an interface
+                                                                   !! within this time step [H ~> m or kg m-2]
+  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)), intent(inout) :: T    !< Layer potential temperatures [C ~> degC].
+  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)), intent(inout) :: S    !< Layer salinities [S ~> ppt].
+
+  ! Local variables
+  real :: b1(nii,njj)           ! A variable used by the tridiagonal solver [H-1 ~> m-1 or m2 kg-1].
+  real :: d1(nii,njj)           ! A variable used by the tridiagonal solver [nondim].
+  real :: c1(nii,njj,SZK_(GV))  ! A variable used by the tridiagonal solver [nondim].
   real :: h_tr, b_denom_1       ! Two temporary thicknesses [H ~> m or kg m-2].
   integer :: i, j, k
+  integer :: isb, ieb           ! The i-index bounds of the current block.
+  integer :: jsb, jeb           ! The j-index bounds of the current block.
+  integer :: ii, jj             ! Block-local i- and j-index loop variables.
+  integer :: iie, jje           ! The i- and j-extents of the current block.
 
-  !$OMP parallel do default(shared) private(h_tr,b1,d1,c1,b_denom_1)
-  do j=js,je
-    do i=is,ie
-      h_tr = hold(i,j,1) + GV%H_subroundoff
-      b1(i) = 1.0 / (h_tr + ent(i,j,2))
-      d1(i) = h_tr * b1(i)
-      T(i,j,1) = (b1(i)*h_tr)*T(i,j,1)
-      S(i,j,1) = (b1(i)*h_tr)*S(i,j,1)
+  !$omp target enter data map(alloc: b1, d1, c1)
+
+  do jsb=js,je,njj ; do isb=is,ie,nii
+    jeb = min(je, jsb+njj-1) ; ieb = min(ie, isb+nii-1)
+
+    iie = ieb - isb + 1 ; jje = jeb - jsb + 1
+
+    do concurrent( jj=1:jje ) DO_LOCALITY(local(j))
+      j = jsb + jj - 1
+      do concurrent( ii=1:iie ) DO_LOCALITY(local(h_tr,i))
+        i = isb + ii - 1
+        h_tr = hold(i,j,1) + GV%H_subroundoff
+        b1(ii,jj) = 1.0 / (h_tr + ent(i,j,2))
+        d1(ii,jj) = h_tr * b1(ii,jj)
+        T(i,j,1) = (b1(ii,jj)*h_tr)*T(i,j,1)
+        S(i,j,1) = (b1(ii,jj)*h_tr)*S(i,j,1)
+      enddo
+      do k=2,GV%ke ; do concurrent( ii=1:iie ) DO_LOCALITY(local(h_tr,b_denom_1,i))
+        i = isb + ii - 1
+        c1(ii,jj,k) = ent(i,j,K) * b1(ii,jj)
+        h_tr = hold(i,j,k) + GV%H_subroundoff
+        b_denom_1 = h_tr + d1(ii,jj)*ent(i,j,K)
+        b1(ii,jj) = 1.0 / (b_denom_1 + ent(i,j,K+1))
+        d1(ii,jj) = b_denom_1 * b1(ii,jj)
+        T(i,j,k) = b1(ii,jj) * (h_tr*T(i,j,k) + ent(i,j,K)*T(i,j,k-1))
+        S(i,j,k) = b1(ii,jj) * (h_tr*S(i,j,k) + ent(i,j,K)*S(i,j,k-1))
+      enddo ; enddo
+      do k=GV%ke-1,1,-1 ; do concurrent( ii=1:iie ) DO_LOCALITY(local(i))
+        i = isb + ii - 1
+        T(i,j,k) = T(i,j,k) + c1(ii,jj,k+1)*T(i,j,k+1)
+        S(i,j,k) = S(i,j,k) + c1(ii,jj,k+1)*S(i,j,k+1)
+      enddo ; enddo
     enddo
-    do k=2,GV%ke ; do i=is,ie
-      c1(i,k) = ent(i,j,K) * b1(i)
-      h_tr = hold(i,j,k) + GV%H_subroundoff
-      b_denom_1 = h_tr + d1(i)*ent(i,j,K)
-      b1(i) = 1.0 / (b_denom_1 + ent(i,j,K+1))
-      d1(i) = b_denom_1 * b1(i)
-      T(i,j,k) = b1(i) * (h_tr*T(i,j,k) + ent(i,j,K)*T(i,j,k-1))
-      S(i,j,k) = b1(i) * (h_tr*S(i,j,k) + ent(i,j,K)*S(i,j,k-1))
-    enddo ; enddo
-    do k=GV%ke-1,1,-1 ; do i=is,ie
-      T(i,j,k) = T(i,j,k) + c1(i,k+1)*T(i,j,k+1)
-      S(i,j,k) = S(i,j,k) + c1(i,k+1)*S(i,j,k+1)
-    enddo ; enddo
-  enddo
-end subroutine triDiagTS_Eulerian
+  enddo ; enddo ! ij block loop
+
+  !$omp target exit data map(delete: b1, d1, c1)
+
+end subroutine triDiagTS_Eulerian_block
 
 
 !>   This subroutine calculates u_h and v_h (velocities at thickness
@@ -681,8 +877,11 @@ subroutine set_pen_shortwave(optics, fluxes, G, GV, US, CS, opacity, tracer_flow
                        fluxes%sw_nir_dir, fluxes%sw_nir_dif, G, GV, US, opacity, chl_3d=chl_3d)
     endif
   else
+    ! TODO: Where should the fluxes pointer be pushed to the device?
+    !$omp target enter data map(to: fluxes, fluxes%sw )
     call set_opacity(optics, fluxes%sw, fluxes%sw_vis_dir, fluxes%sw_vis_dif, &
                      fluxes%sw_nir_dir, fluxes%sw_nir_dif, G, GV, US, opacity)
+    !$omp target exit data map(release: fluxes%sw, fluxes)
   endif
 
 end subroutine set_pen_shortwave
@@ -1485,6 +1684,14 @@ subroutine diabatic_aux_init(Time, G, GV, US, param_file, diag, CS, useALEalgori
   character(len=32)  :: chl_varname ! Name of chl_a variable in chl_file.
   logical :: use_temperature     ! True if thermodynamics are enabled.
   integer :: isd, ied, jsd, jed, IsdB, IedB, JsdB, JedB, nz
+  integer, parameter :: default_niblock = 0 ! Default i block size for array calculations [nondim].
+#ifdef __NVCOMPILER_OPENMP_GPU
+  integer, parameter :: default_njblock = 0 ! Default j block size for array calculations [nondim].
+#else
+  ! A single row at a time recovers the loop structure and work array sizes that predate the
+  ! promotion of the row-sized work arrays in this module to whole-domain arrays.
+  integer, parameter :: default_njblock = 1 ! Default j block size for array calculations [nondim].
+#endif
   isd  = G%isd  ; ied  = G%ied  ; jsd  = G%jsd  ; jed  = G%jed ; nz = GV%ke
   IsdB = G%IsdB ; IedB = G%IedB ; JsdB = G%JsdB ; JedB = G%JedB
 
@@ -1505,6 +1712,21 @@ subroutine diabatic_aux_init(Time, G, GV, US, param_file, diag, CS, useALEalgori
 
   call get_param(param_file, mdl, "ENABLE_THERMODYNAMICS", use_temperature, &
                  "If true, temperature and salinity are used as state variables.", default=.true.)
+
+  call get_param(param_file, mdl, "DIABATIC_AUX_NIBLOCK", CS%niblock, &
+                 "The i-direction block size used in the auxiliary diabatic calculations. "//&
+                 "The default 0 setting is dynamic and fits the "//&
+                 "full computational i-domain length.", default=default_niblock, layoutParam=.true.)
+  call get_param(param_file, mdl, "DIABATIC_AUX_NJBLOCK", CS%njblock, &
+                 "The j-direction block size used in the auxiliary diabatic calculations. "//&
+                 "The default 0 setting is dynamic and fits the "//&
+                 "full computational j-domain length.", default=default_njblock, layoutParam=.true.)
+  if (CS%niblock < 0) &
+    call MOM_error(FATAL, "DIABATIC_AUX_NIBLOCK must be nonnegative; "//&
+                          "use 0 to select the default block size.")
+  if (CS%njblock < 0) &
+    call MOM_error(FATAL, "DIABATIC_AUX_NJBLOCK must be nonnegative; "//&
+                          "use 0 to select the default block size.")
 
   call get_param(param_file, mdl, "RECLAIM_FRAZIL", CS%reclaim_frazil, &
                  "If true, try to use any frazil heat deficit to cool any "//&

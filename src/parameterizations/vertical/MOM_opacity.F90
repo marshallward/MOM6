@@ -147,6 +147,8 @@ subroutine set_opacity(optics, sw_total, sw_vis_dir, sw_vis_dif, sw_nir_dir, sw_
                             ! from op to 1/op_diag_len * tanh(op * op_diag_len)
   is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec ; nz = GV%ke
 
+  !$omp target enter data map(alloc: Pen_SW_tot)
+
   if (present(chl_2d) .or. present(chl_3d)) then
     ! The optical properties are based on chlorophyll concentrations.
     call opacity_from_chl(optics, sw_total, sw_vis_dir, sw_vis_dif, sw_nir_dir, sw_nir_dif, &
@@ -178,57 +180,56 @@ subroutine set_opacity(optics, sw_total, sw_vis_dir, sw_vis_dif, sw_nir_dir, sw_
         enddo ; enddo
       endif
     else
-      do k=1,nz ; do j=js,je ; do i=is,ie  ; do n=1,optics%nbands
+      do concurrent( k=1:nz, j=js:je, i=is:ie, n=1:optics%nbands )
         optics%opacity_band(n,i,j,k) = inv_sw_pen_scale
-      enddo ; enddo ; enddo ; enddo
+      enddo
       if (.not.associated(sw_total) .or. (CS%pen_SW_scale <= 0.0)) then
-        !$OMP parallel do default(shared)
-        do j=js,je ; do i=is,ie ; do n=1,optics%nbands
+        do concurrent( j=js:je, i=is:ie, n=1:optics%nbands )
           optics%sw_pen_band(n,i,j) = 0.0
-        enddo ; enddo ; enddo
+        enddo
       else
-        !$OMP parallel do default(shared)
-        do j=js,je ; do i=is,ie ; do n=1,optics%nbands
+        do concurrent( j=js:je, i=is:ie, n=1:optics%nbands )
           optics%sw_pen_band(n,i,j) = CS%pen_SW_frac * Inv_nbands * sw_total(i,j)
-        enddo ; enddo ; enddo
+        enddo
       endif
+      !$omp target update from(optics%opacity_band, optics%sw_pen_band)
     endif
   endif
 
   if (query_averaging_enabled(CS%diag)) then
     if (CS%id_sw_pen > 0) then
-      !$OMP parallel do default(shared)
-      do j=js,je ; do i=is,ie
+      do concurrent( j=js:je, i=is:ie )
         Pen_SW_tot(i,j) = 0.0
         do n=1,optics%nbands
           Pen_SW_tot(i,j) = Pen_SW_tot(i,j) + optics%sw_pen_band(n,i,j)
         enddo
-      enddo ; enddo
+      enddo
+      !$omp target update from(Pen_SW_tot)
       call post_data(CS%id_sw_pen, Pen_SW_tot, CS%diag)
     endif
     if (CS%id_sw_vis_pen > 0) then
       if (CS%opacity_scheme == MANIZZA_05) then
-        !$OMP parallel do default(shared)
-        do j=js,je ; do i=is,ie
+        do concurrent( j=js:je, i=is:ie )
           Pen_SW_tot(i,j) = 0.0
           do n=1,min(optics%nbands,2)
             Pen_SW_tot(i,j) = Pen_SW_tot(i,j) + optics%sw_pen_band(n,i,j)
           enddo
-        enddo ; enddo
+        enddo
       else
-        !$OMP parallel do default(shared)
-        do j=js,je ; do i=is,ie
+        do concurrent( j=js:je, i=is:ie )
           Pen_SW_tot(i,j) = 0.0
           do n=1,optics%nbands
             Pen_SW_tot(i,j) = Pen_SW_tot(i,j) + optics%sw_pen_band(n,i,j)
           enddo
-        enddo ; enddo
+        enddo
       endif
+      !$omp target update from(Pen_SW_tot)
       call post_data(CS%id_sw_vis_pen, Pen_SW_tot, CS%diag)
     endif
     do n=1,optics%nbands ; if (CS%id_opacity(n) > 0) then
       op_diag_len = 1.0e-10*US%m_to_Z ! A minimal extinction depth to constrain the range of opacity [Z ~> m]
       !$OMP parallel do default(shared)
+      ! NOTE: Unported due to tanh call
       do k=1,nz ; do j=js,je ; do i=is,ie
         ! Remap opacity (op) to 1/L * tanh(op * L) where L is one Angstrom.
         ! This gives a nearly identical value when op << 1/L but allows one to
@@ -238,6 +239,8 @@ subroutine set_opacity(optics, sw_total, sw_vis_dir, sw_vis_dif, sw_nir_dir, sw_
       call post_data(CS%id_opacity(n), tmp, CS%diag)
     endif ; enddo
   endif
+
+  !$omp target exit data map(delete: Pen_SW_tot)
 
 end subroutine set_opacity
 
@@ -1313,6 +1316,9 @@ subroutine opacity_init(Time, G, GV, US, param_file, diag, CS, optics)
      ! Set up the lookup table
      call init_ohlmann_table(optics)
   endif
+
+  !$omp target enter data map(to: optics)
+  !$omp target enter data map(alloc: optics%opacity_band, optics%sw_pen_band)
 
 end subroutine opacity_init
 

@@ -389,11 +389,17 @@ subroutine diabatic(u, v, h, tv, BLD, fluxes, visc, ADp, CDp, dt, Time_end, &
       enddo ; enddo ; enddo
     endif
 
+    !$omp target enter data map(to: tv, tv%T, tv%frazil, tv%S)
+    !$omp target update to( h )
     if (associated(fluxes%p_surf_full)) then
+      !$omp target enter data map(to: fluxes%p_surf_full )
       call make_frazil(h, tv, G, GV, US, CS%diabatic_aux_CSp, fluxes%p_surf_full, halo=CS%halo_TS_diff)
+      !$omp target exit data map(release: fluxes%p_surf_full)
     else
       call make_frazil(h, tv, G, GV, US, CS%diabatic_aux_CSp, halo=CS%halo_TS_diff)
     endif
+    !$omp target update from( tv%frazil, tv%T )
+    !$omp target exit data map(release: tv%T, tv%S, tv%frazil, tv)
     if (showCallTree) call callTree_waypoint("done with 1st make_frazil (diabatic)")
 
     if (CS%frazil_tendency_diag) then
@@ -449,11 +455,17 @@ subroutine diabatic(u, v, h, tv, BLD, fluxes, visc, ADp, CDp, dt, Time_end, &
       enddo ; enddo ; enddo
     endif
 
+    !$omp target enter data map(to: tv, tv%T, tv%frazil, tv%S)
+    !$omp target update to( h )
     if (associated(fluxes%p_surf_full)) then
+      !$omp target enter data map(to: fluxes%p_surf_full)
       call make_frazil(h, tv, G, GV, US, CS%diabatic_aux_CSp, fluxes%p_surf_full)
+      !$omp target exit data map(release: fluxes%p_surf_full)
     else
       call make_frazil(h, tv, G, GV, US, CS%diabatic_aux_CSp)
     endif
+    !$omp target update from( tv%frazil, tv%T )
+    !$omp target exit data map(release: tv, tv%T, tv%frazil, tv%S)
 
     if (CS%frazil_tendency_diag) then
       call diagnose_frazil_tendency(tv, h, temp_diag, 0.5*dt, G, GV, US, CS)
@@ -1059,7 +1071,11 @@ subroutine diabatic_ALE_legacy(u, v, h, tv, BLD, fluxes, visc, ADp, CDp, dt, Tim
       call tracer_vertdiff_Eulerian(h, ent_t, dt, tv%T, G, GV)
       call tracer_vertdiff_Eulerian(h, ent_s, dt, tv%S, G, GV)
     else
-      call triDiagTS_Eulerian(G, GV, is, ie, js, je, h, ent_s, tv%T, tv%S)
+      !$omp target update to( h )
+      !$omp target enter data map(to: ent_s, tv, tv%T, tv%S)
+      call triDiagTS_Eulerian(G, GV, CS%diabatic_aux_CSp, is, ie, js, je, h, ent_s, tv%T, tv%S)
+      !$omp target update from( tv%T, tv%S )
+      !$omp target exit data map(release: ent_s, tv, tv%T, tv%S)
     endif
 
     ! diagnose temperature, salinity, heat, and salt tendencies
@@ -2487,7 +2503,12 @@ subroutine layered_diabatic(u, v, h, tv, BLD, fluxes, visc, ADp, CDp, dt, Time_e
           call tracer_vertdiff(hold, ea, eb, dt, tv%T, G, GV)
           call tracer_vertdiff(hold, ea, eb, dt, tv%S, G, GV)
         else
-          call triDiagTS(G, GV, is, ie, js, je, hold, ea, eb, tv%T, tv%S)
+          !$omp target enter data map(to: hold, ea, eb)
+          !$omp target enter data map(to: tv, tv%T, tv%S)
+          call triDiagTS(G, GV, CS%diabatic_aux_CSp, is, ie, js, je, hold, ea, eb, tv%T, tv%S)
+          !$omp target exit data map(delete: hold, ea, eb)
+          !$omp target update from(tv%T, tv%S)
+          !$omp target exit data map(release: tv%T, tv%S, tv)
         endif
       endif ! massless_match_targets
       call cpu_clock_end(id_clock_tridiag)
@@ -2577,7 +2598,12 @@ subroutine layered_diabatic(u, v, h, tv, BLD, fluxes, visc, ADp, CDp, dt, Time_e
         call tracer_vertdiff(hold, ea, eb, dt, tv%T, G, GV)
         call tracer_vertdiff(hold, ea, eb, dt, tv%S, G, GV)
       else
-        call triDiagTS(G, GV, is, ie, js, je, hold, ea, eb, tv%T, tv%S)
+        !$omp target enter data map(to: hold, ea, eb)
+        !$omp target enter data map(to: tv, tv%T, tv%S)
+        call triDiagTS(G, GV, CS%diabatic_aux_CSp, is, ie, js, je, hold, ea, eb, tv%T, tv%S)
+        !$omp target exit data map(delete: hold, ea, eb)
+        !$omp target update from(tv%T, tv%S)
+        !$omp target exit data map(release: tv%T, tv%S, tv)
       endif
 
       ! diagnose temperature, salinity, heat, and salt tendencies
