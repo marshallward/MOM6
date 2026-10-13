@@ -1,0 +1,191 @@
+# This file is part of MOM6, the Modular Ocean Model version 6.
+# See the LICENSE file for licensing information.
+# SPDX-License-Identifier: Apache-2.0
+
+name: Source verification
+
+on: [push, pull_request]
+
+jobs:
+  check-style:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v7
+
+    - name: Install flint
+      run: |
+        python3 -m pip install git+https://github.com/marshallward/flint.git
+
+    - name: Check white space
+      id: whitespace
+      run: |
+        set +e
+        ./.testing/trailer.py -e TEOS10 -l 120 src config_src 2>&1 | tee style_errors
+        status=${PIPESTATUS[0]}
+        set -e
+        exit ${status}
+
+    - name: Check assignment spacing
+      id: assignment_spacing
+      if: always()
+      run: |
+        set +e
+        ./.testing/tools/report_assignment_spacing.py src config_src \
+          --exclude src/equation_of_state/TEOS10 \
+          --exclude config_src/drivers/STALE_mct_cap \
+          --exclude config_src/drivers/nuopc_cap \
+          --report 2>&1 | tee assignment_spacing_errors
+        status=${PIPESTATUS[0]}
+        set -e
+        nerrors=$(wc -l < assignment_spacing_errors)
+        echo "Assignment spacing issues: ${nerrors}"
+        if [ "${nerrors}" -gt 0 ]; then
+          {
+            echo
+            echo "To fix assignment spacing locally, run:"
+            echo "  ./.testing/tools/report_assignment_spacing.py src config_src \\"
+            echo "    --exclude src/equation_of_state/TEOS10 \\"
+            echo "    --exclude config_src/drivers/STALE_mct_cap \\"
+            echo "    --exclude config_src/drivers/nuopc_cap \\"
+            echo "    --write"
+          } | tee -a assignment_spacing_errors
+        fi
+        exit ${status}
+
+    - name: Check callable comma spacing
+      id: callable_comma_spacing
+      if: always()
+      run: |
+        set +e
+        ./.testing/tools/report_callable_comma_spacing.py src config_src \
+          --exclude src/equation_of_state/TEOS10 \
+          --exclude config_src/drivers/STALE_mct_cap \
+          --exclude config_src/drivers/nuopc_cap \
+          --report 2>&1 | tee callable_comma_spacing_errors
+        status=${PIPESTATUS[0]}
+        set -e
+        nerrors=$(wc -l < callable_comma_spacing_errors)
+        echo "Callable comma spacing issues: ${nerrors}"
+        if [ "${nerrors}" -gt 0 ]; then
+          {
+            echo
+            echo "To fix callable comma spacing locally, run:"
+            echo "  ./.testing/tools/report_callable_comma_spacing.py src config_src \\"
+            echo "    --exclude src/equation_of_state/TEOS10 \\"
+            echo "    --exclude config_src/drivers/STALE_mct_cap \\"
+            echo "    --exclude config_src/drivers/nuopc_cap \\"
+            echo "    --write"
+          } | tee -a callable_comma_spacing_errors
+        fi
+        exit ${status}
+
+    - name: Check operator spacing
+      id: operator_spacing
+      if: always()
+      run: |
+        set +e
+        ./.testing/tools/report_operator_spacing.py src config_src \
+          --exclude src/equation_of_state/TEOS10 \
+          --exclude config_src/drivers/STALE_mct_cap \
+          --exclude config_src/drivers/nuopc_cap \
+          --report 2>&1 | tee operator_spacing_errors
+        status=${PIPESTATUS[0]}
+        set -e
+        nerrors=$(wc -l < operator_spacing_errors)
+        echo "Operator spacing issues: ${nerrors}"
+        if [ "${nerrors}" -gt 0 ]; then
+          {
+            echo
+            echo "To fix operator spacing locally, run:"
+            echo "  ./.testing/tools/report_operator_spacing.py src config_src \\"
+            echo "    --exclude src/equation_of_state/TEOS10 \\"
+            echo "    --exclude config_src/drivers/STALE_mct_cap \\"
+            echo "    --exclude config_src/drivers/nuopc_cap \\"
+            echo "    --write"
+          } | tee -a operator_spacing_errors
+        fi
+        exit ${status}
+
+    - name: Preview real variable units
+      id: real_units
+      if: always()
+      run: |
+        set +e
+        ./.testing/tools/report_real_units.py src config_src \
+          --exclude src/framework \
+          --exclude src/equation_of_state/TEOS10 \
+          --exclude config_src/drivers/STALE_mct_cap \
+          --exclude config_src/drivers/nuopc_cap \
+          --report 2>&1 | tee real_units_errors
+        status=${PIPESTATUS[0]}
+        set -e
+        nerrors=$(grep -E '^[^[:space:]].*:[0-9]+: [^[:space:]]+: ' real_units_errors | wc -l) || nerrors=0
+        echo "Real variable unit issues: ${nerrors}"
+        if [ "${nerrors}" -gt 0 ]; then
+          {
+            echo
+            echo "Preview only: real variable declarations should have bracketed units."
+            echo "To check real variable units locally, run:"
+            echo "  ./.testing/tools/report_real_units.py src config_src \\"
+            echo "    --exclude src/framework \\"
+            echo "    --exclude src/equation_of_state/TEOS10 \\"
+            echo "    --exclude config_src/drivers/STALE_mct_cap \\"
+            echo "    --exclude config_src/drivers/nuopc_cap \\"
+            echo "    --report"
+          } | tee -a real_units_errors
+        fi
+        exit 0
+
+    - name: Report style failures
+      if: always()
+      run: |
+        {
+          echo "Style check outcomes:"
+          echo "  whitespace: ${{ steps.whitespace.outcome }}"
+          echo "  assignment spacing: ${{ steps.assignment_spacing.outcome }}"
+          echo "  callable comma spacing: ${{ steps.callable_comma_spacing.outcome }}"
+          echo "  operator spacing: ${{ steps.operator_spacing.outcome }}"
+          echo "  real variable units preview: ${{ steps.real_units.outcome }}"
+        } | tee -a "$GITHUB_STEP_SUMMARY"
+
+  check-docstrings:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v7
+
+    - name: Install packages used when generating documentation
+      if: always()
+      run: |
+        sudo apt-get update
+        sudo apt-get install python3-sphinx python3-lxml perl
+        sudo apt-get install texlive-binaries texlive-base bibtool tex-common texlive-bibtex-extra
+        sudo apt-get install graphviz
+
+    - name: Build doxygen HTML
+      if: always()
+      run: |
+        cd docs
+        perl -e 'print "perl version $^V" . "\n"'
+        mkdir _build && make nortd DOXYGEN_RELEASE=Release_1_8_13 UPDATEHTMLEQS=Y
+        cat _build/doxygen_warn_nortd_log.txt
+
+    - name: Report doxygen errors
+      id: doxygen
+      if: always()
+      run: |
+        if [ -f docs/_build/doxygen_warn_nortd_log.txt ]; then
+          grep "warning:" docs/_build/doxygen_warn_nortd_log.txt | grep -v "as part of a" | tee doxy_errors
+        else
+          touch doxy_errors
+        fi
+        test ! -s doxy_errors
+
+    - name: Report documentation failures
+      if: always()
+      run: |
+        {
+          echo "Documentation check outcomes:"
+          echo "  doxygen: ${{ steps.doxygen.outcome }}"
+        } | tee -a "$GITHUB_STEP_SUMMARY"
