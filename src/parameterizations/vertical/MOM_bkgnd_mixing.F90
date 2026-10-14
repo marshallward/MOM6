@@ -308,6 +308,8 @@ subroutine bkgnd_mixing_init(Time, G, GV, US, param_file, diag, CS, physical_OBL
 
 !  call closeParameterBlock(param_file)
 
+  !$omp target enter data map(to: CS)
+
 end subroutine bkgnd_mixing_init
 
 !> Calculates the vertical background diffusivities/viscosities
@@ -560,6 +562,7 @@ subroutine bkgnd_mixing_end(CS)
                                        !! will be deallocated in this subroutine
 
   if (.not. associated(CS)) return
+  !$omp target exit data map(delete: CS)
   deallocate(CS)
 
 end subroutine bkgnd_mixing_end

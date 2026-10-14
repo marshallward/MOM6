@@ -392,17 +392,32 @@ subroutine set_diffusivity(u, v, h, u_h, v_h, tv, fluxes, optics, visc, dt, Kd_i
                     CS%use_int_tides .or. &
                    (CS%bottomdraglaw .and. .not.CS%use_LOTW_BBL_diffusivity))
 
+  ! fluxes%ustar and fluxes%tau_mag are read only on the host, in
+  ! add_MLrad_diffusivity, and so are deliberately left off the device.
+  !$omp target enter data map(alloc: T_f, S_f)
+  !$omp target enter data map(to: fluxes)
+  !$omp target enter data map(to: fluxes%p_surf) if (associated(fluxes%p_surf))
+  !$omp target enter data map(to: fluxes%ustar_tidal) if (associated(fluxes%ustar_tidal))
+  !$omp target enter data map(to: fluxes%BBL_tidal_dis) if (associated(fluxes%BBL_tidal_dis))
+
   ! Set Kd_lay, Kd_int and Kv_slow to constant values, mostly to fill the halos.
   ! TODO: tile/port whole-domain output and viscosity initializations.
-  if (present(Kd_lay)) Kd_lay(:,:,:) = CS%Kd
+  if (present(Kd_lay)) then
+    do concurrent (k=1:nz, j=jsd:jed, i=isd:ied)
+      Kd_lay(i,j,k) = CS%Kd
+    enddo
+  endif
   !$omp target enter data map(alloc: Kd_int)
-  do concurrent (k=1:nz, j=G%jsd:G%jed, i=G%isd:G%ied)
-    Kd_int(i,j,k) = CS%Kd
+  do concurrent (K=1:nz+1, j=jsd:jed, i=isd:ied)
+    Kd_int(i,j,K) = CS%Kd
   enddo
   if (present(Kd_extra_T)) Kd_extra_T(:,:,:) = 0.0
   if (present(Kd_extra_S)) Kd_extra_S(:,:,:) = 0.0
-  if (associated(visc%Kv_slow)) visc%Kv_slow(:,:,:) = CS%Kv
-
+  if (associated(visc%Kv_slow)) then
+    do concurrent( k=1:nz, j=jsd:jed, i=isd:ied)
+      visc%Kv_slow(i,j,k) = CS%Kv
+    enddo
+  endif
   ! Set up arrays for diagnostics.
   ! TODO: tile/port diagnostic allocation source initializations for device coverage.
 
@@ -443,22 +458,20 @@ subroutine set_diffusivity(u, v, h, u_h, v_h, tv, fluxes, optics, visc, dt, Kd_i
 
   if (CS%useKappaShear) then
     if (CS%debug) then
+      !$omp target update from(u_h, v_h)
       call hchksum_pair("before calc_KS [uv]_h", u_h, v_h, G%HI, unscale=US%L_T_to_m_s)
     endif
     call cpu_clock_begin(id_clock_kappaShear)
     if (CS%Vertex_shear) then
       call full_convection(G, GV, US, h, tv, T_f, S_f, fluxes%p_surf, &
                            kappa_dt_fill, halo=1)
+      ! TOOD: full_convection  is still on the host so below transfer is still required
+      !$omp target update to(T_f, S_f)
 
-      !$omp target enter data map(to: T_f, S_f, tv, tv%T, tv%S, tv%eqn_of_state)
-      !$omp target enter data map(to: fluxes%p_surf) if (associated(fluxes%p_surf))
-      !$omp target enter data map(alloc: visc%Kd_shear, visc%TKE_turb)
       call calc_kappa_shear_vertex(u, v, h, T_f, S_f, tv, fluxes%p_surf, visc%Kd_shear, &
                                    visc%TKE_turb, visc%Kv_shear_Bu, dt, G, GV, US, CS%kappaShear_CSp)
       !$omp target update from(visc%Kv_shear_Bu) if (associated(visc%Kv_shear_Bu))
-      !$omp target exit data map(from: visc%Kd_shear, visc%TKE_turb)
-      !$omp target exit data map(release: T_f, S_f, tv, tv%T, tv%S, tv%eqn_of_state)
-      !$omp target exit data map(release: fluxes%p_surf) if (associated(fluxes%p_surf))
+      !$omp target update from(visc%Kd_shear, visc%TKE_turb)
       ! TODO: tile/port whole-domain Kv_shear initialization.
       if (associated(visc%Kv_shear)) visc%Kv_shear(:,:,:) = 0.0 ! needed for other parameterizations
       if (CS%debug) then
@@ -468,15 +481,11 @@ subroutine set_diffusivity(u, v, h, u_h, v_h, tv, fluxes, optics, visc, dt, Kd_i
       endif
     else
       ! Changes: visc%Kd_shear ;  Sets: visc%Kv_shear and visc%TKE_turb
-      !$omp target enter data map(to: u_h, v_h, h, tv, tv%T, tv%S, tv%eqn_of_state)
-      !$omp target enter data map(to: fluxes%p_surf) if (associated(fluxes%p_surf))
-      !$omp target enter data map(alloc: visc%Kd_shear, visc%TKE_turb)
       call calculate_kappa_shear(u_h, v_h, h, tv, fluxes%p_surf, visc%Kd_shear, visc%TKE_turb, &
                                  visc%Kv_shear, dt, G, GV, US, CS%kappaShear_CSp)
+      ! See the note in the branch above; Kv_shear is the persistently resident array here.
       !$omp target update from(visc%Kv_shear) if (associated(visc%Kv_shear))
-      !$omp target exit data map(from: visc%Kd_shear, visc%TKE_turb)
-      !$omp target exit data map(release: u_h, v_h, h, tv, tv%T, tv%S, tv%eqn_of_state)
-      !$omp target exit data map(release: fluxes%p_surf) if (associated(fluxes%p_surf))
+      !$omp target update from(visc%Kd_shear, visc%TKE_turb)
       if (CS%debug) then
         call hchksum(visc%Kd_shear, "after calc_KS visc%Kd_shear", G%HI, unscale=GV%HZ_T_to_m2_s)
         call hchksum(visc%Kv_shear, "after calc_KS visc%Kv_shear", G%HI, unscale=GV%HZ_T_to_m2_s)
@@ -491,7 +500,10 @@ subroutine set_diffusivity(u, v, h, u_h, v_h, tv, fluxes, optics, visc, dt, Kd_i
     enddo ; enddo ; enddo ; endif
   elseif (CS%use_CVMix_shear) then
     !NOTE{BGR}: this needs to be cleaned up.  It works in 1D case, but has not been tested outside.
+    !$omp target update from(u_h, v_h)
     call calculate_CVMix_shear(u_h, v_h, h, tv, visc%Kd_shear, visc%Kv_shear, G, GV, US, CS%CVMix_shear_CSp)
+    !$omp target update to(visc%Kd_shear)
+    !$omp target update to(visc%Kv_shear) if (associated(visc%Kv_shear))
     if (CS%debug) then
       call hchksum(visc%Kd_shear, "after CVMix_shear visc%Kd_shear", G%HI, unscale=GV%HZ_T_to_m2_s)
       call hchksum(visc%Kv_shear, "after CVMix_shear visc%Kv_shear", G%HI, unscale=GV%HZ_T_to_m2_s)
@@ -502,11 +514,8 @@ subroutine set_diffusivity(u, v, h, u_h, v_h, tv, fluxes, optics, visc, dt, Kd_i
   endif
 
   !$omp target enter data &
-  !$omp   map(to: T_f, S_f, tv, tv%T, tv%S, CS, CS%bkgnd_mixing_csp, visc, visc%Kd_shear) &
   !$omp   map(alloc: dRho_int, N2_lay, N2_int, N2_bot, rho_bot, h_bot, k_bot, Kd_lay_bkgnd, &
   !$omp     Kd_int_bkgnd, Kv_bkgnd, Kd_lay_2d, Kd_int_2d, kb, maxTKE, TKE_to_Kd, dz)
-  !$omp target enter data if(associated(fluxes%p_surf)) &
-  !$omp   map(to: fluxes, fluxes%p_surf)
 
   ! Smooth the properties through massless layers.
   if (use_EOS) then
@@ -578,7 +587,7 @@ subroutine set_diffusivity(u, v, h, u_h, v_h, tv, fluxes, optics, visc, dt, Kd_i
 
     ! Double-diffusion (old method)
     if (CS%double_diffusion) then
-      !$omp target update from(Kd_lay_2d, Kd_extra_T, Kd_extra_S, KT_extra, KS_extra)
+      !$omp target update from(Kd_lay_2d)
       call double_diffusion(tv, h, T_f, S_f, isb, ieb, jsb, jeb, nii, njj, G, GV, US, CS, KT_extra, KS_extra)
       ! One of Kd_extra_T and Kd_extra_S is always 0. Kd_extra_S is positive for salt fingering.
       ! Kd_extra_T is positive for double diffusive convection.
@@ -617,13 +626,13 @@ subroutine set_diffusivity(u, v, h, u_h, v_h, tv, fluxes, optics, visc, dt, Kd_i
         j = jsb+jj-1 ; i = isb+ii-1
         VBF%Kd_ddiff_S(i,j,K) = KS_extra(ii,jj,K)
       enddo ; enddo ; enddo ; endif
+      !$omp target update to(Kd_lay_2d)
     endif
 
     ! Apply double diffusion via CVMix
     ! GMM, we need to pass HBL to compute_ddiff_coeffs, but it is not yet available.
     ! TODO: tile/port CVMix double-diffusion row path and diagnostics.
     if (CS%use_CVMix_ddiff) then
-      !$omp target update from(KD_extra_T, KD_extra_S, KT_extra)
       call cpu_clock_begin(id_clock_CVMix_ddiff)
       do j=jsb,jeb
         jj = j-jsb+1
@@ -641,7 +650,6 @@ subroutine set_diffusivity(u, v, h, u_h, v_h, tv, fluxes, optics, visc, dt, Kd_i
         enddo ; enddo ; endif
       enddo
       call cpu_clock_end(id_clock_CVMix_ddiff)
-      !$omp target update to(KD_extra_T, KD_extra_S)
     endif
 
     ! Calculate conversion ratios from TKE to layer diffusivities.
@@ -684,18 +692,24 @@ subroutine set_diffusivity(u, v, h, u_h, v_h, tv, fluxes, optics, visc, dt, Kd_i
 
     ! Add the ML_Rad diffusivity.
     if (CS%ML_radiation) then
+      !$omp target update from(Kd_lay_2d, Kd_int_2d)
       call add_MLrad_diffusivity(dz, fluxes, tv, isb, ieb, jsb, jeb, nii, njj, Kd_int_2d, G, GV, US, CS, &
                                  TKE_to_Kd, Kd_lay_2d)
+      !$omp target update to(Kd_lay_2d, Kd_int_2d)
     endif
 
     ! Add the Nikurashin and / or tidal bottom-driven mixing
-    if (CS%use_tidal_mixing) &
+    if (CS%use_tidal_mixing) then
+      !$omp target update from(Kd_lay_2d, Kd_int_2d)
       call calculate_tidal_mixing(dz, isb, ieb, jsb, jeb, nii, njj, N2_bot, rho_bot, N2_lay, N2_int, &
                                   TKE_to_Kd, maxTKE, G, GV, US, CS%tidal_mixing, &
                                   CS%Kd_max, visc%Kv_slow, Kd_lay_2d, Kd_int_2d, VBF)
+      !$omp target update to(Kd_lay_2d, Kd_int_2d)
+    endif
 
     ! Add diffusivity from internal tides ray tracing
     if (CS%use_int_tides) then
+      !$omp target update from(Kd_lay_2d, Kd_int_2d)
       call get_lowmode_diffusivity(G, GV, h, tv, US, h_bot, k_bot, isb, ieb, jsb, jeb, nii, njj, &
                                    N2_lay, N2_int, TKE_to_Kd, CS%Kd_max, CS%int_tide_CSp, Kd_leak_2d, &
                                    Kd_quad_2d, Kd_itidal_2d, Kd_Froude_2d, Kd_slope_2d, Kd_lay_2d, Kd_int_2d, &
@@ -756,6 +770,7 @@ subroutine set_diffusivity(u, v, h, u_h, v_h, tv, fluxes, optics, visc, dt, Kd_i
           dd%prof_slope(i,j,k) = prof_slope_2d(ii,jj,k)
         enddo ; enddo ; endif
       enddo
+      !$omp target update to(Kd_lay_2d, Kd_int_2d)
     endif
 
     ! This adds the diffusion sustained by the energy extracted from the flow by the bottom drag.
@@ -847,24 +862,32 @@ subroutine set_diffusivity(u, v, h, u_h, v_h, tv, fluxes, optics, visc, dt, Kd_i
     enddo ; endif
   enddo ; enddo ! ij-loop
 
-  !$omp target update from(Kd_lay)
-
   if (CS%user_change_diff) then
-    !$omp target update from(Kd_int)
+    !$omp target update from(Kd_int, T_f, S_f)
+    !$omp target update from(Kd_lay) if (present(Kd_lay))
     call user_change_diff(h, tv, G, GV, US, CS%user_change_diff_CSp, Kd_lay, Kd_int, &
                           T_f, S_f, dd%Kd_user)
+    !$omp target update to(Kd_int)
+    !$omp target update to(Kd_lay) if (present(Kd_lay))
   endif
 
+  !$omp target update from(visc%Kv_slow) if (associated(visc%Kv_slow))
   !$omp target exit data &
-  !$omp   map(release: T_f, S_f, tv, tv%T, tv%S,dRho_int, N2_lay, N2_int, N2_bot, rho_bot, h_bot, &
-  !$omp     k_bot, Kd_lay_bkgnd, Kd_int_bkgnd, Kv_bkgnd, CS, CS%bkgnd_mixing_csp, Kd_lay_2d, &
-  !$omp     Kd_int_2d, kb, maxTKE, TKE_to_Kd, visc, visc%Kd_shear, dz) &
+  !$omp   map(release: dRho_int, N2_lay, N2_int, N2_bot, rho_bot, h_bot, &
+  !$omp     k_bot, Kd_lay_bkgnd, Kd_int_bkgnd, Kv_bkgnd, Kd_lay_2d, &
+  !$omp     Kd_int_2d, kb, maxTKE, TKE_to_Kd, dz) &
   !$omp   map(from: Kd_int)
-  !$omp target exit data if(associated(fluxes%p_surf)) &
-  !$omp   map(release: fluxes, fluxes%p_surf)
+  !$omp target exit data map(delete: T_f, S_f)
+  !$omp target exit data map(release: fluxes%BBL_tidal_dis) if (associated(fluxes%BBL_tidal_dis))
+  !$omp target exit data map(release: fluxes%ustar_tidal) if (associated(fluxes%ustar_tidal))
+  !$omp target exit data map(release: fluxes%p_surf) if (associated(fluxes%p_surf))
+  !$omp target exit data map(release: fluxes)
 
   if (CS%debug) then
-    if (present(Kd_lay)) call hchksum(Kd_lay, "Kd_lay", G%HI, haloshift=0, unscale=GV%HZ_T_to_m2_s)
+    if (present(Kd_lay)) then
+      !$omp target update from(Kd_lay)
+      call hchksum(Kd_lay, "Kd_lay", G%HI, haloshift=0, unscale=GV%HZ_T_to_m2_s)
+    endif
 
     if (CS%useKappaShear) call hchksum(visc%Kd_shear, "Turbulent Kd", G%HI, haloshift=0, unscale=GV%HZ_T_to_m2_s)
 
@@ -1339,7 +1362,7 @@ subroutine find_N2(h, tv, T_f, S_f, fluxes, isb, ieb, jsb, jeb, nii, njj, dz, G,
   !$omp   map(alloc: dRho_dT, dRho_dS, pres, Temp_Int, Salin_Int, h_amp, dRho_int, N2_int, N2_lay, &
   !$omp     dRho_int_unfilt, drho_bot, dz_BBL_avg, hb, z_from_bot, do_i, N2_bot, Rho_bot, &
   !$omp     h_bot, k_bot) &
-  !$omp   map(to: CS, dz)
+  !$omp   map(to: dz)
 
   ! Find the (limited) density jump across each interface.
   do concurrent (jj=1:jje, ii=1:iie)
@@ -1512,7 +1535,7 @@ subroutine find_N2(h, tv, T_f, S_f, fluxes, isb, ieb, jsb, jeb, nii, njj, dz, G,
   !$omp target exit data &
   !$omp   map(from: dRho_int, N2_int, N2_lay, N2_bot, Rho_bot, h_bot, k_bot) &
   !$omp   map(release: dRho_dT, dRho_dS, Temp_Int, Salin_Int, h_amp, dRho_int_unfilt, drho_bot, &
-  !$omp     hb, z_from_bot, do_i, CS, pres, dz, dz_BBL_avg)
+  !$omp     hb, z_from_bot, do_i, pres, dz, dz_BBL_avg)
 
 end subroutine find_N2
 
@@ -1978,8 +2001,6 @@ subroutine add_LOTW_BBL_diffusivity(h, u, v, tv, fluxes, visc, isb, ieb, jsb, je
   cdrag_sqrt = sqrt(CS%cdrag)
 
   ! TODO: tile/port single-row LOTW BBL routine and column temporaries.
-  !$omp target enter data map(to: CS, visc%ustar_BBL, visc%BBL_meanKE_loss)
-  !$omp target enter data map(to: visc%Ray_u, visc%Ray_v) if (Rayleigh_drag)
   !$omp target teams loop LOOP_BIND_TEAMS_PARALLEL collapse(2) private( &
   !$omp   dz_above, TKE_column, BBL_meanKE_dis, TKE_remaining, TKE_consumed, &
   !$omp   TKE_Kd_wall, ustar, ustar2, absf, dz_int, z_bot, h_bot, D_minus_z, &
@@ -2097,8 +2118,6 @@ subroutine add_LOTW_BBL_diffusivity(h, u, v, tv, fluxes, visc, isb, ieb, jsb, je
       if (do_diag_Kd_BBL) Kd_BBL(i,j,K) = Kd_wall
     enddo ! k
   enddo ; enddo ! ij
-  !$omp target exit data map(release: CS, visc%ustar_BBL, visc%BBL_meanKE_loss)
-  !$omp target exit data map(release: visc%Ray_u, visc%Ray_v) if (Rayleigh_drag)
 
 end subroutine add_LOTW_BBL_diffusivity
 
@@ -2336,6 +2355,9 @@ subroutine set_BBL_TKE(u, v, h, tv, fluxes, visc, G, GV, US, CS, OBC)
     if (allocated(visc%BBL_meanKE_loss_sqrtCd)) then
       do j=js,je ; do i=is,ie ; visc%BBL_meanKE_loss_sqrtCd(i,j) = 0.0 ; enddo ; enddo
     endif
+    !$omp target update to(visc%ustar_BBL) if (allocated(visc%ustar_BBL))
+    !$omp target update to(visc%BBL_meanKE_loss) if (allocated(visc%BBL_meanKE_loss))
+    !$omp target update to(visc%BBL_meanKE_loss_sqrtCd) if (allocated(visc%BBL_meanKE_loss_sqrtCd))
     return
   endif
 
@@ -2469,6 +2491,8 @@ subroutine set_BBL_TKE(u, v, h, tv, fluxes, visc, G, GV, US, CS, OBC)
     enddo
   enddo
   !$OMP end parallel
+
+  !$omp target update to(visc%ustar_BBL, visc%BBL_meanKE_loss, visc%BBL_meanKE_loss_sqrtCd)
 
 end subroutine set_BBL_TKE
 
@@ -3043,6 +3067,8 @@ subroutine set_diffusivity_init(Time, G, GV, US, param_file, diag, CS, int_tide_
 
   double_diffuse = (CS%double_diffusion .or. CS%use_CVMix_ddiff)
 
+  !$omp target enter data map(to: CS)
+
 end subroutine set_diffusivity_init
 
 !> Clear pointers and deallocate memory
@@ -3064,8 +3090,9 @@ subroutine set_diffusivity_end(CS)
   endif
 
   ! NOTE: CS%kappaShear_CSp is always allocated, even if unused
-  ! !$omp target exit data map(delete: CS%kappaShear_CSp)
   deallocate(CS%kappaShear_CSp)
+
+  !$omp target exit data map(delete: CS)
 end subroutine set_diffusivity_end
 
 end module MOM_set_diffusivity
