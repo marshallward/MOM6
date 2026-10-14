@@ -21,6 +21,7 @@ from typing import NamedTuple
 
 import flint
 from flint.intrinsics import intrinsic_fns
+from flint.formatting.spacing import format_spacing, propose_edit, spacing_edits
 
 
 NON_CALLABLE_PAREN_NAMES = {
@@ -38,7 +39,7 @@ NON_CALLABLE_PAREN_NAMES = {
 
 
 class Change(NamedTuple):
-    """Description of one source line with callable comma changes."""
+    """A line diagnostic with its source path attached for reporting."""
 
     path: Path
     line_number: int
@@ -52,16 +53,8 @@ class Context(NamedTuple):
     callables: set[str]
 
 
-def simple_liminals(liminals: list[str]) -> bool:
-    """Return True if liminals are simple same-line whitespace."""
-    return all(
-        (item == '' or item.isspace()) and '\n' not in item
-        for item in liminals
-    )
-
-
-def set_comma_spacing(token) -> None:
-    """Require exactly one same-line space after a comma token."""
+def comma_spacing_edits(token):
+    """Propose one space after a comma, including before a continuation."""
     newline_indices = [
         index for index, item in enumerate(token.tail) if '\n' in item
     ]
@@ -71,24 +64,9 @@ def set_comma_spacing(token) -> None:
         if '&' in prefix and all(
             item.isspace() or item == '&' for item in prefix
         ):
-            token.tail[:] = [' ', '&'] + token.tail[newline_index:]
-        return
-    if simple_liminals(token.tail):
-        token.tail[:] = [' ']
-
-
-def render(statements) -> str:
-    """Render a sequence of flint statements back to source text."""
-    output: list[str] = []
-    first = True
-    for statement in statements:
-        if first:
-            output.append(''.join(statement[0].head))
-            first = False
-        for token in statement:
-            output.append(str(token))
-            output.append(''.join(token.tail))
-    return ''.join(output)
+            return propose_edit(token.tail, [' ', '&'] + token.tail[newline_index:])
+        return []
+    return spacing_edits(token, after=' ')
 
 
 def collect_contexts(unit, contexts: dict[int, Context]) -> None:
@@ -145,8 +123,11 @@ def opens_callable_group(statement, index: int, context: Context) -> bool:
     return is_known_callable(str(prior), context)
 
 
-def apply_spacing_policy(statement, context: Context) -> None:
-    """Apply callable comma spacing policy to one statement."""
+def collect_spacing_edits(statement, context: Context):
+    """Return callable comma proposals without changing parsed tokens."""
+    if statement.kind == 'declaration':
+        return []
+    edits = []
     paren_stack: list[bool] = []
     for index, token in enumerate(statement.tokens):
         if token == '(':
@@ -157,24 +138,8 @@ def apply_spacing_policy(statement, context: Context) -> None:
             if paren_stack:
                 paren_stack.pop()
         elif token == ',' and paren_stack and paren_stack[-1]:
-            set_comma_spacing(token)
-
-
-def changed_lines(statement, original, formatted, source_lines=None):
-    """Return physical source lines changed by formatting."""
-    original_lines = original.splitlines()
-    formatted_lines = formatted.splitlines()
-
-    for offset, original_line in enumerate(original_lines):
-        if (
-            offset >= len(formatted_lines)
-            or original_line != formatted_lines[offset]
-        ):
-            line_number = statement.line_number + offset
-            if source_lines and line_number <= len(source_lines):
-                yield line_number, source_lines[line_number - 1]
-            else:
-                yield line_number, original_line
+            edits.extend(comma_spacing_edits(token))
+    return edits
 
 
 def format_statements(
@@ -184,40 +149,16 @@ def format_statements(
     source_lines=None,
 ) -> tuple[str, list[Change]]:
     """Format parsed statements and return rendered source plus changes."""
-    changes: list[Change] = []
-
-    for statement in statements:
-        if not getattr(statement, 'source_visible', True):
-            continue
-
-        original_statement = statement.source_text()
-        if not original_statement:
-            continue
-        if statement.kind == 'declaration':
-            continue
-
-        context = contexts.get(id(statement), Context(set(), set()))
-        original_body = statement.source_line()
-
-        apply_spacing_policy(statement, context)
-
-        formatted_statement = statement.source_text()
-        if formatted_statement != original_statement:
-            for line_number, original_line in changed_lines(
-                statement,
-                original_body,
-                statement.source_line(),
-                source_lines,
-            ):
-                changes.append(
-                    Change(
-                        path=path,
-                        line_number=line_number,
-                        original=original_line,
-                    )
-                )
-
-    return render(statements), changes
+    formatted, changes = format_spacing(
+        statements,
+        lambda statement: collect_spacing_edits(
+            statement, contexts.get(id(statement), Context(set(), set())),
+        ),
+        source_lines,
+    )
+    return formatted, [
+        Change(path, change.line_number, change.original) for change in changes
+    ]
 
 
 def report_callable_comma_spacing(

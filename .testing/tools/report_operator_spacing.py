@@ -23,6 +23,15 @@ from pathlib import Path
 from typing import NamedTuple
 
 import flint
+from flint.formatting.spacing import format_spacing, spacing_edits
+
+
+class Change(NamedTuple):
+    """A line diagnostic with its source path attached for reporting."""
+
+    path: Path
+    line_number: int
+    original: str
 
 
 SKIPPED_OPERATOR_ROLES = {
@@ -36,94 +45,21 @@ SKIPPED_OPERATOR_ROLES = {
 }
 
 
-class Change(NamedTuple):
-    """Description of one source line with operator spacing changes."""
-
-    path: Path
-    line_number: int
-    original: str
-
-
-def simple_liminals(liminals: list[str]) -> bool:
-    """Return True if liminals are simple same-line whitespace."""
-    return all(
-        (item == '' or item.isspace()) and '\n' not in item
-        for item in liminals
-    )
-
-
-def set_spacing(token, before: str | None, after: str | None) -> None:
-    """Set spacing around a token when current liminals are simple."""
-    if before is not None and simple_liminals(token.head):
-        token.head[:] = [before] if before else []
-    if after is not None and simple_liminals(token.tail):
-        token.tail[:] = [after] if after else []
-
-
-def set_minimum_spacing(token, before: str | None, after: str | None) -> None:
-    """Ensure at least the requested spacing around a token."""
-    if (
-        before is not None
-        and simple_liminals(token.head)
-        and not ''.join(token.head)
-    ):
-        token.head[:] = [before]
-    if (
-        after is not None
-        and simple_liminals(token.tail)
-        and not ''.join(token.tail)
-    ):
-        token.tail[:] = [after]
-
-
-def render(statements) -> str:
-    """Render a sequence of flint statements back to source text."""
-    output: list[str] = []
-    first = True
-    for statement in statements:
-        if first:
-            output.append(''.join(statement[0].head))
-            first = False
-        for token in statement:
-            output.append(str(token))
-            output.append(''.join(token.tail))
-    return ''.join(output)
-
-
-def apply_spacing_policy(statement, strict=False) -> None:
-    """Apply operator spacing policy to one statement."""
+def collect_spacing_edits(statement, strict=False):
+    """Return operator spacing proposals without changing parsed tokens."""
+    edits = []
     for token in statement.tokens:
         role = getattr(token, 'operator_role', None)
         if role is None or role in SKIPPED_OPERATOR_ROLES:
             continue
 
         if role == 'unary_operator' and token == '.not.':
-            set_spacing(token, None, ' ') if strict else set_minimum_spacing(
-                token, None, ' ',
-            )
+            edits.extend(spacing_edits(token, after=' ', minimum=not strict))
         elif role == 'unary_operator':
-            set_spacing(token, None, '')
-        elif role == 'binary_operator' and strict:
-            set_spacing(token, ' ', ' ')
+            edits.extend(spacing_edits(token, after=''))
         elif role == 'binary_operator':
-            set_minimum_spacing(token, ' ', ' ')
-
-
-def changed_lines(statement, original, formatted, source_lines=None):
-    """Return physical source lines changed by formatting."""
-    original_lines = original.splitlines()
-    formatted_lines = formatted.splitlines()
-
-    for offset, original_line in enumerate(original_lines):
-        if (
-            offset >= len(formatted_lines)
-            or original_line != formatted_lines[offset]
-        ):
-            line_number = statement.line_number + offset
-            if source_lines and line_number <= len(source_lines):
-                yield line_number, source_lines[line_number - 1]
-            else:
-                yield line_number, original_line
+            edits.extend(spacing_edits(token, ' ', ' ', minimum=not strict))
+    return edits
 
 
 def format_statements(
@@ -133,36 +69,14 @@ def format_statements(
     strict=False,
 ) -> tuple[str, list[Change]]:
     """Format parsed statements and return rendered source plus changes."""
-    changes: list[Change] = []
-
-    for statement in statements:
-        if not getattr(statement, 'source_visible', True):
-            continue
-
-        original_statement = statement.source_text()
-        if not original_statement:
-            continue
-
-        original_body = statement.source_line()
-        apply_spacing_policy(statement, strict=strict)
-
-        formatted_statement = statement.source_text()
-        if formatted_statement != original_statement:
-            for line_number, original_line in changed_lines(
-                statement,
-                original_body,
-                statement.source_line(),
-                source_lines,
-            ):
-                changes.append(
-                    Change(
-                        path=path,
-                        line_number=line_number,
-                        original=original_line,
-                    )
-                )
-
-    return render(statements), changes
+    formatted, changes = format_spacing(
+        statements,
+        lambda statement: collect_spacing_edits(statement, strict=strict),
+        source_lines,
+    )
+    return formatted, [
+        Change(path, change.line_number, change.original) for change in changes
+    ]
 
 
 def report_operator_spacing(

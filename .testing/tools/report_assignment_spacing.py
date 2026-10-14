@@ -23,88 +23,33 @@ from pathlib import Path
 from typing import NamedTuple
 
 import flint
+from flint.formatting.spacing import format_spacing, spacing_edits
 
 
 class Change(NamedTuple):
-    """Description of one source line with assignment spacing changes."""
+    """A line diagnostic with its source path attached for reporting."""
 
     path: Path
     line_number: int
     original: str
 
 
-def simple_liminals(liminals: list[str]) -> bool:
-    """Return True if liminals are simple same-line whitespace."""
-    return all(
-        (item == '' or item.isspace()) and '\n' not in item
-        for item in liminals
-    )
-
-
-def set_spacing(token, before: str, after: str) -> None:
-    """Set spacing around a token when current liminals are simple."""
-    if simple_liminals(token.head):
-        token.head[:] = [before] if before else []
-    if simple_liminals(token.tail):
-        token.tail[:] = [after] if after else []
-
-
-def set_minimum_spacing(token, before: str, after: str) -> None:
-    """Ensure at least the requested spacing around a token."""
-    if simple_liminals(token.head) and not ''.join(token.head):
-        token.head[:] = [before]
-    if simple_liminals(token.tail) and not ''.join(token.tail):
-        token.tail[:] = [after]
-
-
-def render(statements) -> str:
-    """Render a sequence of flint statements back to source text."""
-    output: list[str] = []
-    first = True
-    for statement in statements:
-        if first:
-            output.append(''.join(statement[0].head))
-            first = False
-        for token in statement:
-            output.append(str(token))
-            output.append(''.join(token.tail))
-    return ''.join(output)
-
-
-def apply_spacing_policy(statement, do_controls=False, strict=False) -> None:
-    """Apply MOM6 assignment spacing policy to one statement."""
+def collect_spacing_edits(statement, do_controls=False, strict=False):
+    """Return assignment spacing proposals without changing parsed tokens."""
+    edits = []
     for token in statement.tokens:
         if token.syntax_role == 'assignment':
-            if strict:
-                set_spacing(token, ' ', ' ')
-            else:
-                set_minimum_spacing(token, ' ', ' ')
+            edits.extend(spacing_edits(token, ' ', ' ', minimum=not strict))
         elif token.syntax_role == 'name_value':
-            set_spacing(token, '', '')
+            edits.extend(spacing_edits(token, '', ''))
         elif token.syntax_role == 'do_control' and do_controls:
-            set_spacing(token, '', '')
+            edits.extend(spacing_edits(token, '', ''))
 
     if do_controls and statement.is_do_statement():
         for token in statement:
-            if str(token) == ',' and simple_liminals(token.tail):
-                token.tail[:] = []
-
-
-def changed_lines(statement, original, formatted, source_lines=None):
-    """Return physical source lines changed by formatting."""
-    original_lines = original.splitlines()
-    formatted_lines = formatted.splitlines()
-
-    for offset, original_line in enumerate(original_lines):
-        if (
-            offset >= len(formatted_lines)
-            or original_line != formatted_lines[offset]
-        ):
-            line_number = statement.line_number + offset
-            if source_lines and line_number <= len(source_lines):
-                yield line_number, source_lines[line_number - 1]
-            else:
-                yield line_number, original_line
+            if str(token) == ',':
+                edits.extend(spacing_edits(token, after=''))
+    return edits
 
 
 def format_statements(
@@ -115,37 +60,16 @@ def format_statements(
     strict=False,
 ) -> tuple[str, list[Change]]:
     """Format parsed statements and return rendered source plus changes."""
-    changes: list[Change] = []
-
-    for statement in statements:
-        if not getattr(statement, 'source_visible', True):
-            continue
-
-        original_statement = statement.source_text()
-        if not original_statement:
-            continue
-
-        original_body = statement.source_line()
-
-        apply_spacing_policy(statement, do_controls=do_controls, strict=strict)
-
-        formatted_statement = statement.source_text()
-        if formatted_statement != original_statement:
-            for line_number, original_line in changed_lines(
-                statement,
-                original_body,
-                statement.source_line(),
-                source_lines,
-            ):
-                changes.append(
-                    Change(
-                        path=path,
-                        line_number=line_number,
-                        original=original_line,
-                    )
-                )
-
-    return render(statements), changes
+    formatted, changes = format_spacing(
+        statements,
+        lambda statement: collect_spacing_edits(
+            statement, do_controls=do_controls, strict=strict,
+        ),
+        source_lines,
+    )
+    return formatted, [
+        Change(path, change.line_number, change.original) for change in changes
+    ]
 
 
 def report_assignment_spacing(
