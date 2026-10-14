@@ -62,6 +62,12 @@ jobs:
           --exclude src/equation_of_state/TEOS10 \
           --exclude config_src/drivers/STALE_mct_cap \
           --exclude config_src/drivers/nuopc_cap \
+          --exclude-function min \
+          --exclude-function max \
+          --exclude-function sign \
+          --exclude-function mod \
+          --exclude-function modulo \
+          --exclude-function size \
           --report 2>&1 | tee callable_comma_spacing_errors
         status=${PIPESTATUS[0]}
         set -e
@@ -75,6 +81,12 @@ jobs:
             echo "    --exclude src/equation_of_state/TEOS10 \\"
             echo "    --exclude config_src/drivers/STALE_mct_cap \\"
             echo "    --exclude config_src/drivers/nuopc_cap \\"
+            echo "    --exclude-function min \\"
+            echo "    --exclude-function max \\"
+            echo "    --exclude-function sign \\"
+            echo "    --exclude-function mod \\"
+            echo "    --exclude-function modulo \\"
+            echo "    --exclude-function size \\"
             echo "    --write"
           } | tee -a callable_comma_spacing_errors
         fi

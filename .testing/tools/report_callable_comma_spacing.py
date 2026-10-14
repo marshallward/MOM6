@@ -2,14 +2,17 @@
 """Report Fortran callable comma spacing inconsistencies.
 
 The default mode is a dry run over explicit source paths. Commas separating
-known function or subroutine arguments require one following space. Commas in
-known array references, such as ``A(i,j,k)``, are left unchanged.
+known function or subroutine arguments require at least one following space.
+Extra alignment spaces and spacing before a continuation marker are tolerated.
+Commas in known array references, such as ``A(i,j,k)``, are left unchanged.
 
 Options:
   ``--report`` prints each changed source line with its file and line number.
   ``--diff`` prints unified diffs for proposed changes.
   ``--write`` applies changes in place.
   ``--exclude`` skips matching paths when parsing directory trees.
+  ``--strict`` requires exactly one space, including before continuation ``&``.
+  ``--exclude-function`` skips comma checks for a named callable; repeatable.
 """
 
 from __future__ import annotations
@@ -53,12 +56,19 @@ class Context(NamedTuple):
     callables: set[str]
 
 
-def comma_spacing_edits(token):
-    """Propose one space after a comma, including before a continuation."""
+def comma_spacing_edits(token, strict=False):
+    """Propose minimum spacing, or exact spacing when strict is requested.
+
+    Non-strict checks leave continuation gaps untouched, including ``,&``.
+    Strict checks normalize simple spacing before a continuation marker but
+    preserve comments and the subsequent newline and indentation.
+    """
     newline_indices = [
         index for index, item in enumerate(token.tail) if '\n' in item
     ]
     if newline_indices:
+        if not strict:
+            return []
         newline_index = newline_indices[0]
         prefix = token.tail[:newline_index]
         if '&' in prefix and all(
@@ -66,7 +76,7 @@ def comma_spacing_edits(token):
         ):
             return propose_edit(token.tail, [' ', '&'] + token.tail[newline_index:])
         return []
-    return spacing_edits(token, after=' ')
+    return spacing_edits(token, after=' ', minimum=not strict)
 
 
 def collect_contexts(unit, contexts: dict[int, Context]) -> None:
@@ -123,22 +133,32 @@ def opens_callable_group(statement, index: int, context: Context) -> bool:
     return is_known_callable(str(prior), context)
 
 
-def collect_spacing_edits(statement, context: Context):
-    """Return callable comma proposals without changing parsed tokens."""
+def collect_spacing_edits(
+    statement, context: Context, strict=False, excluded_functions=(),
+):
+    """Return callable comma proposals without changing parsed tokens.
+
+    Exclusions match callable names case-insensitively and only skip that
+    call's own commas. Nested calls are checked independently.
+    """
     if statement.kind == 'declaration':
         return []
     edits = []
+    excluded = {name.lower() for name in excluded_functions}
     paren_stack: list[bool] = []
     for index, token in enumerate(statement.tokens):
         if token == '(':
-            paren_stack.append(opens_callable_group(statement, index, context))
+            check_commas = opens_callable_group(statement, index, context)
+            if check_commas and str(statement[index - 1]).lower() in excluded:
+                check_commas = False
+            paren_stack.append(check_commas)
         elif token in ('[', '{', '(/'):
             paren_stack.append(False)
         elif token in (')', ']', '}', '/)'):
             if paren_stack:
                 paren_stack.pop()
         elif token == ',' and paren_stack and paren_stack[-1]:
-            edits.extend(comma_spacing_edits(token))
+            edits.extend(comma_spacing_edits(token, strict=strict))
     return edits
 
 
@@ -147,12 +167,15 @@ def format_statements(
     statements,
     contexts: dict[int, Context],
     source_lines=None,
+    strict=False,
+    excluded_functions=(),
 ) -> tuple[str, list[Change]]:
     """Format parsed statements and return rendered source plus changes."""
     formatted, changes = format_spacing(
         statements,
         lambda statement: collect_spacing_edits(
             statement, contexts.get(id(statement), Context(set(), set())),
+            strict=strict, excluded_functions=excluded_functions,
         ),
         source_lines,
     )
@@ -167,6 +190,8 @@ def report_callable_comma_spacing(
     report=False,
     diff=False,
     excludes=(),
+    strict=False,
+    excluded_functions=(),
 ) -> int:
     """Report or fix callable comma spacing in parsed flint sources."""
     changed: list[Path] = []
@@ -183,6 +208,8 @@ def report_callable_comma_spacing(
             source.statements,
             statement_contexts(source),
             source_lines,
+            strict=strict,
+            excluded_functions=excluded_functions,
         )
 
         if new != old:
@@ -238,6 +265,18 @@ def main() -> int:
         help='Print unified diffs for proposed changes',
     )
     parser.add_argument(
+        '--strict',
+        action='store_true',
+        help='Require exactly one space after commas, including before continuation &',
+    )
+    parser.add_argument(
+        '--exclude-function',
+        action='append',
+        default=[],
+        metavar='NAME',
+        help='Skip comma checks for this callable name (case-insensitive); may be repeated',
+    )
+    parser.add_argument(
         '--exclude',
         action='append',
         default=[],
@@ -251,6 +290,8 @@ def main() -> int:
         report=args.report,
         diff=args.diff,
         excludes=args.exclude,
+        strict=args.strict,
+        excluded_functions=args.exclude_function,
     )
 
 
