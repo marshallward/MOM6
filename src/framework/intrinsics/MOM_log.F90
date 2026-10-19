@@ -37,6 +37,10 @@ module procedure log_repro
     !< Exponent adjustment used to normalize subnormal inputs
   integer(kind=int_kind), parameter :: log_table_step_bits = exp_stride / log_ndiv
     !< Spacing in integer representation between adjacent log table entries
+  integer, parameter :: log_table_shift = trailz(log_table_step_bits)
+    !< Arithmetic right shift for floor division by the power-of-two table spacing
+  integer(kind=int_kind), parameter :: log_index_mask = int(log_ndiv - 1, int_kind)
+    !< Low-bit mask for modulo the power-of-two number of table subdivisions
   integer(kind=int_kind), parameter :: log_offset_bits = transfer(log_table_start, int_mold)
     !< Bit pattern for the lower end of the log table range, 0.6875 (=11/16)
 
@@ -119,10 +123,11 @@ module procedure log_repro
   ! Use the lower bound of the table as an offset to determine the bin
   tmp = xb - log_offset_bits
 
-  ! TODO: Replace these modulo() calls
-  table_bin = floor_div_int(tmp, log_table_step_bits)
-  idiv = int(modulo(table_bin, int(log_ndiv, int_kind)))
-  K = floor_div_int(tmp, exp_stride)
+  ! Arithmetic shifts round down even for negative offsets.  With a power-of-two
+  ! number of table subdivisions, masking gives the nonnegative modulo index.
+  table_bin = shifta(tmp, log_table_shift)
+  idiv = int(iand(table_bin, log_index_mask))
+  K = shifta(tmp, expbit)
 
   mb = xb - K * exp_stride
   z = transfer(mb, real_mold)
@@ -142,19 +147,6 @@ module procedure log_repro
 
   a = hi + (lo + log1p_remez_tail_4(r))
 end procedure log_repro
-
-
-!> Floor division of signed integers for a positive denominator.
-pure function floor_div_int(n, d) result(q)
-  integer(kind=int_kind), intent(in) :: n
-    !< Numerator
-  integer(kind=int_kind), intent(in) :: d
-    !< Positive denominator
-  integer(kind=int_kind) :: q
-    !< floor(n / d)
-
-  q = (n - modulo(n, d)) / d
-end function floor_div_int
 
 
 !> Taylor estimate of log1p(x) - x over the log_repro() table-reduced range.
