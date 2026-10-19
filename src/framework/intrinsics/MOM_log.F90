@@ -30,6 +30,43 @@ contains
 !! Compute log(x) with bitwise reproducibility across platforms.
 module procedure log_repro
   real, parameter :: ln2_hi = 0.69314718036912381649017333984375
+  real, parameter :: ln2_lo = 1.90821492927058770002e-10
+  integer, parameter :: table_shift = trailz(exp_stride / log_ndiv)
+  integer(kind=int_kind), parameter :: index_mask = int(log_ndiv - 1, int_kind)
+  integer(kind=int_kind), parameter :: offset_bits = transfer(log_table_start, int_mold)
+  integer(kind=int_kind), parameter :: near_lo = transfer(0.9375, int_mold)
+  integer(kind=int_kind), parameter :: near_hi = transfer(1.064697265625, int_mold)
+  integer(kind=int_kind) :: xb, tmp, table_bin, K, mb
+  integer :: idiv
+  real :: z, r, w, hi, lo
+
+  xb = transfer(x, int_mold)
+  if ((xb < exp_stride) .or. (xb >= ishft(expmask, expbit)) .or. &
+      ((xb >= near_lo) .and. (xb <= near_hi))) then
+    a = log_fallback(x)
+  else
+    tmp = xb - offset_bits
+    table_bin = shifta(tmp, table_shift)
+    idiv = int(iand(table_bin, index_mask))
+    K = shifta(tmp, expbit)
+    mb = xb - K * exp_stride
+    z = transfer(mb, real_mold)
+    r = ((z - log_chi_lookup(idiv)) - log_clo_lookup(idiv)) * log_invc_lookup(idiv)
+    w = real(K) * ln2_hi + logc_lookup(idiv)
+    hi = w + r
+    hi = hi + (0. * hi)
+    lo = ((w - hi) + r) + real(K) * ln2_lo
+    a = hi + (lo + log1p_remez_tail_4(r))
+  endif
+end procedure log_repro
+
+
+!> Original implementation retained as a pure scalar fallback.
+pure function log_fallback(x) result(a)
+  !DIR$ ATTRIBUTES NOINLINE :: log_fallback
+  real, intent(in) :: x
+  real :: a
+  real, parameter :: ln2_hi = 0.69314718036912381649017333984375
     !< Upper 32 bits of ln2: 6.93147180369123816490e-01 [nondim]
   real, parameter :: ln2_lo = 1.90821492927058770002e-10
     !< Lower precision bits of ln2: 1.90821492927058770002e-10 [nondim]
@@ -146,7 +183,7 @@ module procedure log_repro
   lo = ((w - hi) + r) + real(K) * ln2_lo
 
   a = hi + (lo + log1p_remez_tail_4(r))
-end procedure log_repro
+end function log_fallback
 
 
 !> Taylor estimate of log1p(x) - x over the log_repro() table-reduced range.
