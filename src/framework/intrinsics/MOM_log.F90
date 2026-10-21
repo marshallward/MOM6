@@ -217,10 +217,10 @@ pure function log1p_remez_tail_4(x) result(a)
   x2 = x * x
   x4 = x2 * x2
 
-  p01 = c(0) + (x * c(1))
-  p23 = c(2) + (x * c(3))
+  p01 = c(0) + x * c(1)
+  p23 = c(2) + x * c(3)
 
-  a = x2 * ((p01 + (x2 * p23)) + (x4 * c(4)))
+  a = x2 * ((p01 + x2 * p23) + x4 * c(4))
 end function log1p_remez_tail_4
 
 
