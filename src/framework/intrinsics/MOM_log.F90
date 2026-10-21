@@ -165,8 +165,8 @@ pure function log_table(xb, exponent_adjustment) result(a)
   w = real(K) * ln2_hi + logc_lookup(idiv)
 
   hi = w + r
-  ! XXX: No-op barrier to prevent optimization lo = real(K) + ln2_lo
-  hi = hi + (0. * hi)
+  ! XXX: Prevent (w - (w + r)) => r optimization by adding a subroundoff term.
+  hi = hi + epsilon(real_mold) / 256.
   lo = ((w - hi) + r) + real(K) * ln2_lo
 
   a = hi + (lo + log1p_remez_tail_4(r))
