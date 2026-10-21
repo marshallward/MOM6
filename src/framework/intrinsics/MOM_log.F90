@@ -29,82 +29,40 @@ contains
 !!
 !! Compute log(x) with bitwise reproducibility across platforms.
 module procedure log_repro
-  real, parameter :: ln2_hi = 0.69314718036912381649017333984375
-  real, parameter :: ln2_lo = 1.90821492927058770002e-10
-  integer, parameter :: table_shift = trailz(exp_stride / log_ndiv)
-  integer(kind=int_kind), parameter :: index_mask = int(log_ndiv - 1, int_kind)
-  integer(kind=int_kind), parameter :: offset_bits = transfer(log_table_start, int_mold)
   integer(kind=int_kind), parameter :: near_lo = transfer(0.9375, int_mold)
   integer(kind=int_kind), parameter :: near_hi = transfer(1.064697265625, int_mold)
-  integer(kind=int_kind) :: xb, tmp, table_bin, K, mb
-  integer :: idiv
-  real :: z, r, w, hi, lo
+  integer(kind=int_kind) :: xb
+    !< Bit representation of x
 
   xb = transfer(x, int_mold)
   if ((xb < exp_stride) .or. (xb >= ishft(expmask, expbit)) .or. &
       ((xb >= near_lo) .and. (xb <= near_hi))) then
     a = log_fallback(x)
   else
-    tmp = xb - offset_bits
-    table_bin = shifta(tmp, table_shift)
-    idiv = int(iand(table_bin, index_mask))
-    K = shifta(tmp, expbit)
-    mb = xb - K * exp_stride
-    z = transfer(mb, real_mold)
-    r = ((z - log_chi_lookup(idiv)) - log_clo_lookup(idiv)) * log_invc_lookup(idiv)
-    w = real(K) * ln2_hi + logc_lookup(idiv)
-    hi = w + r
-    hi = hi + (0. * hi)
-    lo = ((w - hi) + r) + real(K) * ln2_lo
-    a = hi + (lo + log1p_remez_tail_4(r))
+    a = log_table(xb, 0_int_kind)
   endif
 end procedure log_repro
 
 
-!> Original implementation retained as a pure scalar fallback.
+!> Scalar fallback for exceptional, near-one, and subnormal inputs.
 pure function log_fallback(x) result(a)
   !DIR$ ATTRIBUTES NOINLINE :: log_fallback
   real, intent(in) :: x
   real :: a
-  real, parameter :: ln2_hi = 0.69314718036912381649017333984375
-    !< Upper 32 bits of ln2: 6.93147180369123816490e-01 [nondim]
-  real, parameter :: ln2_lo = 1.90821492927058770002e-10
-    !< Lower precision bits of ln2: 1.90821492927058770002e-10 [nondim]
   integer(kind=int_kind), parameter :: Kbias = maxexponent(real_mold) - 2
     !< Exponent adjustment used to normalize subnormal inputs
-  integer(kind=int_kind), parameter :: log_table_step_bits = exp_stride / log_ndiv
-    !< Spacing in integer representation between adjacent log table entries
-  integer, parameter :: log_table_shift = trailz(log_table_step_bits)
-    !< Arithmetic right shift for floor division by the power-of-two table spacing
-  integer(kind=int_kind), parameter :: log_index_mask = int(log_ndiv - 1, int_kind)
-    !< Low-bit mask for modulo the power-of-two number of table subdivisions
-  integer(kind=int_kind), parameter :: log_offset_bits = transfer(log_table_start, int_mold)
-    !< Bit pattern for the lower end of the log table range, 0.6875 (=11/16)
-
-  integer(kind=int_kind) :: xb, mb
-    ! Bit representations of x and its normalized significand
-  integer(kind=int_kind) :: tmp, table_bin
-    ! Offset from log table base and table-scale bin number
+  integer(kind=int_kind) :: xb
+    ! Bit representation of x
+  integer(kind=int_kind) :: exponent_adjustment
+    ! Correction to the normalized exponent for subnormal inputs
   integer(kind=int_kind) :: raw_exp
     ! Biased IEEE exponent field
   integer(kind=int_kind) :: frac_bits
     ! Fraction bits of a subnormal input
-  integer(kind=int_kind) :: K
-    ! Binary exponent in x = 2**K m [nondim]
   integer :: top_frac_bit
     ! Highest set fraction bit of a subnormal input
-  integer :: idiv
-    ! Lookup table subdivision index
-  real :: z
-    ! Significand of x, adjusted into the log table interval [nondim]
-  real :: r
-    ! Reduced argument, r = z / c - 1 [nondim]
   real :: u
     ! Difference from 1 for near-one log1p path [nondim]
-  real :: w, hi, lo
-    ! Double-real partial sums for log(x) [nondim]
-  logical :: scaled_subnormal
-    ! True if x was scaled up to normalize a subnormal input
 
   xb = transfer(x, int_mold)
 
@@ -137,11 +95,9 @@ pure function log_fallback(x) result(a)
     return
   endif
 
-  ! Range reduction: decompose x = 2**K z with z in the lookup table interval.
-  ! Subnormals are first multiplied by an exact power of two, then compensated
-  ! in K after the table decomposition.
-  scaled_subnormal = raw_exp == 0_int_kind
-  if (scaled_subnormal) then
+  ! Normalize subnormals before entering the shared table solver.
+  exponent_adjustment = 0_int_kind
+  if (raw_exp == 0_int_kind) then
     ! Normalize subnormal inputs using integer bit operations rather than
     ! arithmetic scaling, which can be defeated by flush-to-zero modes.
     frac_bits = iand(xb, exp_stride - 1_int_kind)
@@ -150,8 +106,39 @@ pure function log_fallback(x) result(a)
     enddo
     xb = ishft(int(expbias - expbit + top_frac_bit, int_kind), expbit) + &
         ishft(frac_bits - ishft(1_int_kind, top_frac_bit), expbit - top_frac_bit)
-    raw_exp = iand(ishft(xb, -expbit), expmask)
+    exponent_adjustment = -Kbias
   endif
+
+  a = log_table(xb, exponent_adjustment)
+end function log_fallback
+
+
+!> Shared table solver for positive normal or normalized subnormal inputs.
+pure function log_table(xb, exponent_adjustment) result(a)
+  integer(kind=int_kind), intent(in) :: xb
+    !< Bit representation of the positive normal input
+  integer(kind=int_kind), intent(in) :: exponent_adjustment
+    !< Correction to the exponent after subnormal normalization; zero for normal inputs
+  real :: a
+    !< Natural logarithm of the original input [nondim]
+  real, parameter :: ln2_hi = 0.69314718036912381649017333984375
+    !< Upper 32 bits of ln2 [nondim]
+  real, parameter :: ln2_lo = 1.90821492927058770002e-10
+    !< Remaining bits of ln2 [nondim]
+  integer, parameter :: log_table_shift = trailz(exp_stride / log_ndiv)
+    !< Arithmetic shift for floor division by the table spacing
+  integer(kind=int_kind), parameter :: log_index_mask = int(log_ndiv - 1, int_kind)
+    !< Mask for the table subdivision index
+  integer(kind=int_kind), parameter :: log_offset_bits = transfer(log_table_start, int_mold)
+    !< Bit pattern for the lower end of the table range
+  integer(kind=int_kind) :: tmp, table_bin, K, mb
+    !< Offset bits, table bin, binary exponent, and reduced significand bits
+  integer :: idiv
+    !< Lookup table subdivision index
+  real :: z, r
+    !< Reduced significand and reduced log1p argument [nondim]
+  real :: w, hi, lo
+    !< Compensated partial sums for log(x) [nondim]
 
   ! Table reduction uses the ordered bit pattern of positive normal floats,
   ! xb = biased_exp * 2**52 + frac, so one exponent step is an integer stride
@@ -168,7 +155,7 @@ pure function log_fallback(x) result(a)
 
   mb = xb - K * exp_stride
   z = transfer(mb, real_mold)
-  if (scaled_subnormal) K = K - Kbias
+  K = K + exponent_adjustment
 
   ! log(x) = K*ln2 + log(c) + log(1+r), where r = z/c - 1.
 
@@ -183,7 +170,7 @@ pure function log_fallback(x) result(a)
   lo = ((w - hi) + r) + real(K) * ln2_lo
 
   a = hi + (lo + log1p_remez_tail_4(r))
-end function log_fallback
+end function log_table
 
 
 !> Taylor estimate of log1p(x) - x over the log_repro() table-reduced range.
