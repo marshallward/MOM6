@@ -322,6 +322,8 @@ subroutine tracer_column_physics(h_old, h_new,  ea,  eb, fluxes, dt, G, GV, US, 
   if (.not.associated(CS)) return
   h_neglect = GV%H_subroundoff
 
+  !$omp target update from(h_old, ea, eb)
+
   do j=js,je
     do i=is,ie
 !   The following line is appropriate for quantities like salinity

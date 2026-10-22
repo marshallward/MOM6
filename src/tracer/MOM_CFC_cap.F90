@@ -370,6 +370,7 @@ subroutine CFC_cap_column_physics(h_old, h_new, ea, eb, fluxes, dt, G, GV, US, C
 
   if (.not.associated(CS)) return
 
+  !$omp target update from(h_old)
   ! Compute KPP nonlocal term if necessary
   if (present(KPP_CSp)) then
     if (associated(KPP_CSp) .and. present(nonLocalTrans)) then

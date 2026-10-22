@@ -351,6 +351,7 @@ subroutine ideal_age_tracer_column_physics(h_old, h_new, ea, eb, fluxes, dt, G, 
   endif
 
   if (CS%use_real_BL_depth .and. present(Hbl)) then
+    !$omp target update from(h_old)
     call count_BL_layers(G, GV, h_old, Hbl, BL_layers)
   endif
 

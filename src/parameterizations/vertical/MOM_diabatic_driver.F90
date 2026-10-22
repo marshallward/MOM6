@@ -1323,9 +1323,9 @@ subroutine diabatic_ALE_legacy(u, v, h, tv, BLD, fluxes, visc, ADp, CDp, dt, Tim
   !$omp target update to(ent_s) &
   !$omp   if(CS%mix_boundary_tracer_ALE .or. (CS%double_diffuse .and. .not.CS%mix_boundary_tracers))
 
-  !   Some tracer packages read their inputs on the host, so the host copies are made current here,
-  ! and the rest of the routine is on the host.
-  !$omp target update from(h, tv%T, tv%S, h_orig, ent_s)
+  !   The rest of the routine is on the host.  The tracer packages copy back the h_orig and ent_s
+  ! that they read on the host themselves.
+  !$omp target update from(h, tv%T, tv%S)
   !$omp target update from(tv%TempxPmE) if(associated(tv%TempxPmE))
   !$omp target update from(tv%internal_heat) if(associated(tv%internal_heat))
   !$omp target update from(fluxes%netMassIn, fluxes%netMassOut)

@@ -323,6 +323,7 @@ subroutine dye_tracer_column_physics(h_old, h_new, ea, eb, fluxes, dt, G, GV, US
 
   Idt = 1.0 / dt
 
+  !$omp target update from(h_old, ea, eb)
   if (present(evap_CFL_limit) .and. present(minimum_forcing_depth)) then
     do m=1,CS%ntr
       do k=1,nz ; do j=js,je ; do i=is,ie

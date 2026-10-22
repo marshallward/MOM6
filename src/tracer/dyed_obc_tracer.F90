@@ -260,6 +260,7 @@ subroutine dyed_obc_tracer_column_physics(h_old, h_new,  ea,  eb, fluxes, dt, G,
   if (CS%ntr < 1) return
 
   if (present(evap_CFL_limit) .and. present(minimum_forcing_depth)) then
+    !$omp target update from(h_old)
     do m=1,CS%ntr
       do k=1,nz ;do j=js,je ; do i=is,ie
         h_work(i,j,k) = h_old(i,j,k)

@@ -1369,6 +1369,7 @@ subroutine MARBL_tracers_column_physics(h_old, ea, eb, fluxes, dt, G, GV, US, CS
 
   if (.not.associated(CS)) return
 
+  !$omp target update from(h_old)
   ! (1) Compute surface fluxes and interior tendencies
   ! FIXME: MARBL can handle computing surface fluxes for all columns simultaneously
   !        I was just thinking going column-by-column at first might be easier

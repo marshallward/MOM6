@@ -214,6 +214,7 @@ subroutine pseudo_salt_tracer_column_physics(h_old, h_new, ea, eb, fluxes, dt, G
 
   if (.not.associated(CS)) return
   if (.not.associated(CS%ps)) return
+  !$omp target update from(h_old)
 
   if (debug) then
     call hchksum(tv%S,"salt pre pseudo-salt vertdiff", G%HI, unscale=US%S_to_ppt)

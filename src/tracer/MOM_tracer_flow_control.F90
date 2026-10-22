@@ -471,6 +471,9 @@ subroutine call_tracer_set_forcing(sfc_state, fluxes, day_start, day_interval, G
 end subroutine call_tracer_set_forcing
 
 !> This subroutine calls all registered tracer column physics subroutines.
+!! h_old, ea and eb must be on the device and current there, but may be stale on the host, so the
+!! packages that read them on the host copy them back first.  h_new, tv and the forcing must be
+!! current on the host.
 subroutine call_tracer_column_fns(h_old, h_new, ea, eb, fluxes, mld, dt, G, GV, US, tv, optics, CS, &
                                   debug, KPP_CSp, nonLocalTrans, evap_CFL_limit, minimum_forcing_depth, &
                                   h_BL, prediabatic_T, prediabatic_S)
