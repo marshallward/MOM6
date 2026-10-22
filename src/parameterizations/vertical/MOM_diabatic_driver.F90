@@ -705,8 +705,8 @@ subroutine diabatic_ALE_legacy(u, v, h, tv, BLD, fluxes, visc, ADp, CDp, dt, Tim
 
   if (CS%Use_KdWork_diag) call Allocate_VBF_CS(G, GV, CS%VBF)
 
-  !   The state, the forcing and the column work arrays stay on the device from here until after
-  ! energetic_PBL, which is still on the host.
+  !   The state, the forcing and the column work arrays stay on the device from here through the
+  ! tracer column physics.
   !$omp target update to(h)
   ! Mapping tv%eqn_of_state alone with an if clause crashes gfortran 16.2, so map it with tv.
   !$omp target enter data map(to: tv, tv%eqn_of_state) if (associated(tv%eqn_of_state))
@@ -1053,28 +1053,10 @@ subroutine diabatic_ALE_legacy(u, v, h, tv, BLD, fluxes, visc, ADp, CDp, dt, Tim
 
   endif   ! endif for CS%use_energetic_PBL
 
-  !$omp target update from(h, tv%T, tv%S, ent_s, ent_t, Kd_int, Kd_heat, Kd_salt, Kd_ePBL, dz, h_orig)
-  !$omp target update from(tv%TempxPmE) if(associated(tv%TempxPmE))
-  !$omp target update from(tv%internal_heat) if(associated(tv%internal_heat))
-  !$omp target update from(fluxes%netMassIn, fluxes%netMassOut)
-  call extract_fluxes_update_host(fluxes)
-  !$omp target update from(visc%Kv_shear) if(CS%use_energetic_PBL .and. associated(visc%Kv_shear))
-  !$omp target exit data map(delete: ent_s, ent_t, Kd_int, Kd_heat, Kd_salt, Kd_ePBL, dz, h_orig, &
-  !$omp                              u_h, v_h, cTKE, dSV_dT, dSV_dS, SkinBuoyFlux, BBL_BuoyFlux)
-  !$omp target exit data map(release: visc%h_ML_param) if(associated(visc%h_ML_param))
-  !$omp target exit data map(release: fluxes%salt_left_behind) if(associated(fluxes%salt_left_behind))
-  !$omp target exit data map(release: fluxes%netMassOut, fluxes%netMassIn)
-  call extract_fluxes_exit_data(fluxes)
-  !$omp target exit data map(release: tv%internal_heat) if(associated(tv%internal_heat))
-  !$omp target exit data map(release: tv%TempxPmE) if(associated(tv%TempxPmE))
-  !$omp target exit data map(release: tv%SpV_avg) if(allocated(tv%SpV_avg))
-  !$omp target exit data map(release: tv%p_surf) if(associated(tv%p_surf))
-  !$omp target exit data map(release: tv%S, tv%T, tv)
-  !$omp target exit data map(release: tv%eqn_of_state, tv) if (associated(tv%eqn_of_state))
-
   ! diagnose the tendencies due to boundary forcing
   ! At this point, the diagnostic grids have not been updated since the call to the boundary layer scheme
   !  so all tendency diagnostics need to be posted on h_orig, and grids rebuilt afterwards
+  !$omp target update from(h, tv%T, tv%S, h_orig) if(CS%boundary_forcing_tendency_diag)
   if (CS%boundary_forcing_tendency_diag) then
     call diagnose_boundary_forcing_tendency(tv, h, temp_diag, saln_diag, h_orig, dt, G, GV, US, CS)
     if (CS%id_boundary_forcing_h > 0) call post_data(CS%id_boundary_forcing_h, h, CS%diag, alt_h=h_orig)
@@ -1082,6 +1064,9 @@ subroutine diabatic_ALE_legacy(u, v, h, tv, BLD, fluxes, visc, ADp, CDp, dt, Tim
   ! Boundary fluxes may have changed T, S, and h
   call diag_update_remap_grids(CS%diag)
   call cpu_clock_end(id_clock_remap)
+  !$omp target update from(h, tv%T, tv%S) if(CS%debug .or. CS%debugConservation)
+  !$omp target update from(tv%TempxPmE) if(CS%debug .and. associated(tv%TempxPmE))
+  if (CS%debug) call extract_fluxes_update_host(fluxes)
   if (CS%debug) then
     call MOM_forcing_chksum("after applyBoundaryFluxes ", fluxes, G, US, haloshift=0)
     call MOM_thermovar_chksum("after applyBoundaryFluxes ", tv, G, US)
@@ -1101,6 +1086,7 @@ subroutine diabatic_ALE_legacy(u, v, h, tv, BLD, fluxes, visc, ADp, CDp, dt, Tim
   ! calculate change in temperature & salinity due to dia-coordinate surface diffusion
   if (associated(tv%T)) then
 
+    !$omp target update from(ent_t, ent_s) if(CS%debug)
     if (CS%debug) then
       call hchksum(ent_t, "before triDiagTS ent_t ", G%HI, haloshift=0, unscale=GV%H_to_MKS)
       call hchksum(ent_s, "before triDiagTS ent_s ", G%HI, haloshift=0, unscale=GV%H_to_MKS)
@@ -1113,9 +1099,13 @@ subroutine diabatic_ALE_legacy(u, v, h, tv, BLD, fluxes, visc, ADp, CDp, dt, Tim
     !  from this limitation, in which case we can let salinity=0 and still
     !  have salt conserved with SIS2 ice. So for SIS2, we can run with
     !  BOUND_SALINITY=False in MOM.F90.
-    if (associated(tv%S) .and. associated(tv%salt_deficit)) &
+    if (associated(tv%S) .and. associated(tv%salt_deficit)) then
+      !$omp target update from(h, tv%S)
       call adjust_salt(h, tv, G, GV, CS%diabatic_aux_CSp)
+      !$omp target update to(tv%S)
+    endif
 
+    !$omp target update from(tv%T, tv%S) if(CS%diabatic_diff_tendency_diag)
     if (CS%diabatic_diff_tendency_diag) then
       do k=1,nz ; do j=js,je ; do i=is,ie
         temp_diag(i,j,k) = tv%T(i,j,k)
@@ -1124,21 +1114,20 @@ subroutine diabatic_ALE_legacy(u, v, h, tv, BLD, fluxes, visc, ADp, CDp, dt, Tim
     endif
 
     ! Changes T and S via the tridiagonal solver; no change to h
-    do k=1,nz ; do j=js,je ; do i=is,ie
-      ent_t(i,j,K) = ent_s(i,j,K) ; ent_t(i,j,K+1) = ent_s(i,j,K+1)
-    enddo ; enddo ; enddo
+    do concurrent (K=1:nz+1, j=js:je, i=is:ie)
+      ent_t(i,j,K) = ent_s(i,j,K)
+    enddo
     if (CS%tracer_tridiag) then
+      !$omp target update from(h, ent_t, ent_s, tv%T, tv%S)
       call tracer_vertdiff_Eulerian(h, ent_t, dt, tv%T, G, GV)
       call tracer_vertdiff_Eulerian(h, ent_s, dt, tv%S, G, GV)
+      !$omp target update to(tv%T, tv%S)
     else
-      !$omp target update to( h )
-      !$omp target enter data map(to: ent_s, tv, tv%T, tv%S)
       call triDiagTS_Eulerian(G, GV, CS%diabatic_aux_CSp, is, ie, js, je, h, ent_s, tv%T, tv%S)
-      !$omp target update from( tv%T, tv%S )
-      !$omp target exit data map(release: ent_s, tv, tv%T, tv%S)
     endif
 
     ! diagnose temperature, salinity, heat, and salt tendencies
+    !$omp target update from(h, tv%T, tv%S) if(CS%diabatic_diff_tendency_diag)
     if (CS%diabatic_diff_tendency_diag) then
       call diagnose_diabatic_diff_tendency(tv, h, temp_diag, saln_diag, dt, G, GV, US, CS)
       if (CS%id_diabatic_diff_h > 0) call post_data(CS%id_diabatic_diff_h, h, CS%diag, alt_h=h)
@@ -1150,6 +1139,8 @@ subroutine diabatic_ALE_legacy(u, v, h, tv, BLD, fluxes, visc, ADp, CDp, dt, Tim
 
   endif  ! endif corresponding to if (associated(tv%T))
 
+  !$omp target update from(h, tv%T, tv%S) if(CS%debug .or. CS%debugConservation)
+  !$omp target update from(tv%TempxPmE) if(CS%debug .and. associated(tv%TempxPmE))
   if (CS%debugConservation) call MOM_state_stats('triDiagTS', u, v, h, tv%T, tv%S, G, GV, US)
 
   if (CS%debug) then
@@ -1162,6 +1153,10 @@ subroutine diabatic_ALE_legacy(u, v, h, tv, BLD, fluxes, visc, ADp, CDp, dt, Tim
   call diag_update_remap_grids(CS%diag)
 
   ! Set diffusivities for VBF diagnostics if enabled
+  !$omp target update from(Kd_ePBL) if(associated(CS%VBF%Kd_ePBL) .or. (CS%id_Kd_ePBL > 0))
+  !$omp target update from(Kd_heat) if(associated(CS%VBF%Kd_temp) .or. (CS%id_Kd_heat > 0))
+  !$omp target update from(Kd_salt) if(associated(CS%VBF%Kd_salt) .or. (CS%id_Kd_salt > 0))
+  !$omp target update from(Kd_int) if(CS%id_Kd_int > 0)
   if (CS%use_energetic_PBL .and. associated(CS%VBF%Kd_ePBL)) CS%VBF%Kd_ePBL(:,:,:) = Kd_ePBL(:,:,:)
   if (associated(CS%VBF%Kd_temp)) CS%VBF%Kd_temp(:,:,:) = Kd_heat(:,:,:)
   if (associated(CS%VBF%Kd_salt)) CS%VBF%Kd_salt(:,:,:) = Kd_salt(:,:,:)
@@ -1173,6 +1168,10 @@ subroutine diabatic_ALE_legacy(u, v, h, tv, BLD, fluxes, visc, ADp, CDp, dt, Tim
   if (CS%id_Kd_salt > 0) call post_data(CS%id_Kd_salt, Kd_salt, CS%diag)
   if (CS%id_Kd_ePBL > 0) call post_data(CS%id_Kd_ePBL, Kd_ePBL, CS%diag)
 
+  !$omp target update from(ent_s) if((CS%id_ea > 0) .or. (CS%id_eb > 0) .or. (CS%id_ea_s > 0) .or. &
+  !$omp                              (CS%id_eb_s > 0) .or. (CS%id_Sdif > 0))
+  !$omp target update from(ent_t) if((CS%id_ea_t > 0) .or. (CS%id_eb_t > 0) .or. (CS%id_Tdif > 0))
+  !$omp target update from(tv%T, tv%S) if((CS%id_Tdif > 0) .or. (CS%id_Sdif > 0))
   if (CS%id_ea   > 0) call post_data(CS%id_ea,   ent_s(:,:,1:nz), CS%diag)
   if (CS%id_eb   > 0) call post_data(CS%id_eb,   ent_s(:,:,2:nz+1), CS%diag)
   if (CS%id_ea_t > 0) call post_data(CS%id_ea_t, ent_t(:,:,1:nz), CS%diag)
@@ -1201,6 +1200,7 @@ subroutine diabatic_ALE_legacy(u, v, h, tv, BLD, fluxes, visc, ADp, CDp, dt, Tim
     if (CS%id_Sdif > 0) call post_data(CS%id_Sdif, Sdif_flx, CS%diag)
   endif
 
+  !$omp target update from(h, tv%T, tv%S, dz) if(CS%Use_KdWork_diag .or. CS%Use_N2_diag)
   if (CS%Use_KdWork_diag .or. CS%Use_N2_diag) then
     N2_salt(:,:,:) = 0.0
     N2_temp(:,:,:) = 0.0
@@ -1266,6 +1266,8 @@ subroutine diabatic_ALE_legacy(u, v, h, tv, BLD, fluxes, visc, ADp, CDp, dt, Tim
   ! mixing of passive tracers from massless boundary layers to interior
   call cpu_clock_begin(id_clock_tracers)
 
+  !$omp target update from(h, ent_s, dz) &
+  !$omp   if(CS%mix_boundary_tracer_ALE .or. (CS%double_diffuse .and. .not.CS%mix_boundary_tracers))
   if (CS%mix_boundary_tracer_ALE) then
     Tr_ea_BBL = sqrt(dt * CS%Kd_BBL_tr)
 
@@ -1318,12 +1320,19 @@ subroutine diabatic_ALE_legacy(u, v, h, tv, BLD, fluxes, visc, ADp, CDp, dt, Tim
       ent_s(i,j,K) = ent_s(i,j,K) + add_ent
     enddo ; enddo ; enddo
   endif  ! (CS%mix_boundary_tracers)
+  !$omp target update to(ent_s) &
+  !$omp   if(CS%mix_boundary_tracer_ALE .or. (CS%double_diffuse .and. .not.CS%mix_boundary_tracers))
+
+  !   Some tracer packages read their inputs on the host, so the host copies are made current here,
+  ! and the rest of the routine is on the host.
+  !$omp target update from(h, tv%T, tv%S, h_orig, ent_s)
+  !$omp target update from(tv%TempxPmE) if(associated(tv%TempxPmE))
+  !$omp target update from(tv%internal_heat) if(associated(tv%internal_heat))
+  !$omp target update from(fluxes%netMassIn, fluxes%netMassOut)
+  call extract_fluxes_update_host(fluxes)
+  !$omp target update from(visc%Kv_shear) if(CS%use_energetic_PBL .and. associated(visc%Kv_shear))
 
   ! For passive tracers, the changes in thickness due to boundary fluxes has yet to be applied
-  !   ent_s is mapped as a whole, because the two overlapping sections of it that are passed as
-  ! ea and eb could not be mapped separately.
-  !$omp target update to(h)
-  !$omp target enter data map(to: h_orig, ent_s)
   call call_tracer_column_fns(h_orig, h, ent_s(:,:,1:nz), ent_s(:,:,2:nz+1), fluxes, BLD, dt, &
                               G, GV, US, tv, CS%optics, CS%tracer_flow_CSp, CS%debug, &
                               KPP_CSp=CS%KPP_CSp, &
@@ -1331,7 +1340,19 @@ subroutine diabatic_ALE_legacy(u, v, h, tv, BLD, fluxes, visc, ADp, CDp, dt, Tim
                               evap_CFL_limit=CS%evap_CFL_limit, &
                               minimum_forcing_depth=CS%minimum_forcing_depth, h_BL=visc%h_ML, &
                               prediabatic_T=CS%prediabatic_T, prediabatic_S=CS%prediabatic_S)
-  !$omp target exit data map(delete: h_orig, ent_s)
+
+  !$omp target exit data map(delete: ent_s, ent_t, Kd_int, Kd_heat, Kd_salt, Kd_ePBL, dz, h_orig, &
+  !$omp                              u_h, v_h, cTKE, dSV_dT, dSV_dS, SkinBuoyFlux, BBL_BuoyFlux)
+  !$omp target exit data map(release: visc%h_ML_param) if(associated(visc%h_ML_param))
+  !$omp target exit data map(release: fluxes%salt_left_behind) if(associated(fluxes%salt_left_behind))
+  !$omp target exit data map(release: fluxes%netMassOut, fluxes%netMassIn)
+  call extract_fluxes_exit_data(fluxes)
+  !$omp target exit data map(release: tv%internal_heat) if(associated(tv%internal_heat))
+  !$omp target exit data map(release: tv%TempxPmE) if(associated(tv%TempxPmE))
+  !$omp target exit data map(release: tv%SpV_avg) if(allocated(tv%SpV_avg))
+  !$omp target exit data map(release: tv%p_surf) if(associated(tv%p_surf))
+  !$omp target exit data map(release: tv%S, tv%T, tv)
+  !$omp target exit data map(release: tv%eqn_of_state, tv) if (associated(tv%eqn_of_state))
 
   call cpu_clock_end(id_clock_tracers)
 
