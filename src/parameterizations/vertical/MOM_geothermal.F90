@@ -21,12 +21,23 @@ use MOM_EOS,           only : calculate_specific_vol_derivs
 implicit none ; private
 
 #include <MOM_memory.h>
+#include "do_concurrent_compat.h"
 
 public geothermal_entraining, geothermal_in_place, geothermal_init, geothermal_end
+
+integer, parameter :: default_niblock = 0 !< Default i block size for geothermal_in_place [nondim]
+#ifdef __NVCOMPILER_OPENMP_GPU
+integer, parameter :: default_njblock = 0 !< Default j block size for geothermal_in_place [nondim]
+#else
+integer, parameter :: default_njblock = 1 !< Default j block size for geothermal_in_place, which works on one
+                                          !! row at a time, as this routine did before it was blocked [nondim]
+#endif
 
 !> Control structure for geothermal heating
 type, public :: geothermal_CS ; private
   logical :: initialized = .false. !< True if this control structure has been initialized.
+  integer :: niblock = default_niblock !< The i block size used in geothermal_in_place [nondim].
+  integer :: njblock = default_njblock !< The j block size used in geothermal_in_place [nondim].
   real    :: dRcv_dT_inplace  !< The value of dRcv_dT above which (dRcv_dT is negative) the
                               !! water is heated in place instead of moving upward between
                               !! layers in non-ALE layered mode [R C-1 ~> kg m-3 degC-1]
@@ -376,16 +387,52 @@ subroutine geothermal_in_place(h, tv, dt, G, GV, US, CS, BFlx_geothermal, halo)
                                                                  !! in [Z2 T-3 ~> m2 s-3]
   integer,                         optional, intent(in)    :: halo !< Halo width over which to work
 
+  ! Local variables
+  integer :: nii, njj  ! The resolved i- and j-direction block sizes [nondim].
+  integer :: is, ie, js, je
+
+  is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec
+  if (present(halo)) then
+    is = G%isc-halo ; ie = G%iec+halo ; js = G%jsc-halo ; je = G%jec+halo
+  endif
+
+  nii = CS%niblock ; if (nii == 0) nii = ie - is + 1
+  njj = CS%njblock ; if (njj == 0) njj = je - js + 1
+
+  call geothermal_in_place_block(h, tv, dt, G, GV, US, CS, BFlx_geothermal, is, ie, js, je, nii, njj)
+
+end subroutine geothermal_in_place
+
+!> Apply the geothermal heating of geothermal_in_place, working on one i-j block of columns at a time.
+subroutine geothermal_in_place_block(h, tv, dt, G, GV, US, CS, BFlx_geothermal, is, ie, js, je, nii, njj)
+  type(ocean_grid_type),                     intent(inout) :: G  !< The ocean's grid structure.
+  type(verticalGrid_type),                   intent(in)    :: GV !< The ocean's vertical grid structure.
+  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)), intent(in)    :: h  !< Layer thicknesses [H ~> m or kg m-2]
+  type(thermo_var_ptrs),                     intent(inout) :: tv !< A structure containing pointers
+                                                                 !! to any available thermodynamic fields.
+  real,                                      intent(in)    :: dt !< Time increment [T ~> s].
+  type(unit_scale_type),                     intent(in)    :: US !< A dimensional unit scaling type
+  type(geothermal_CS),                       intent(in)    :: CS !< Geothermal heating control struct
+  real, dimension(SZI_(G), SZJ_(G)),         intent(out)   :: BFlx_geothermal !< Geothermal buoyancy flux
+                                                                 !! in [Z2 T-3 ~> m2 s-3]
+  integer,                                   intent(in)    :: is  !< The start i-index to work on.
+  integer,                                   intent(in)    :: ie  !< The end i-index to work on.
+  integer,                                   intent(in)    :: js  !< The start j-index to work on.
+  integer,                                   intent(in)    :: je  !< The end j-index to work on.
+  integer,                                   intent(in)    :: nii !< Size of the i-block [nondim].
+  integer,                                   intent(in)    :: njj !< Size of the j-block [nondim].
 
   ! Local variables
-  real, dimension(SZI_(G)) :: &
+  real, dimension(nii,njj) :: &
     heat_rem,  & ! remaining heat [H C ~> m degC or kg degC m-2]
-    h_geo_rem, & ! remaining thickness to apply geothermal heating [H ~> m or kg m-2]
     bottom_pressure, & ! Hydrostatic pressure in bottom layer [R L2 T-2 ~> Pa]
+    T_bot, &     ! A block-local copy of the bottom layer temperature [C ~> degC]
+    S_bot, &     ! A block-local copy of the bottom layer salinity [S ~> ppt]
     dRhodT, &    ! Partial derivative of density with temperature [R C-1 ~> kg m-3 degC-1]
     dRhodS, &    ! Partial derivative of density with salinity [R S-1 ~> kg m-3 ppt-1]
     dSpVdT, &    ! Partial derivative of specific volume with temperature [R-1 C-1 ~> m3 kg-1 degC-1]
     dSpVdS       ! Partial derivative of specific volume with salinity [R-1 S-1 ~> m3 kg-1 ppt-1]
+  real :: h_geo_rem     ! remaining thickness to apply geothermal heating [H ~> m or kg m-2]
 
   real :: Angstrom, H_neglect  ! small thicknesses [H ~> m or kg m-2]
   real :: heat_here     ! heating applied to the present layer [C H ~> degC m or degC kg m-2]
@@ -400,16 +447,14 @@ subroutine geothermal_in_place(h, tv, dt, G, GV, US, CS, BFlx_geothermal, halo)
   real :: H_to_Pres     ! A conversion factor from thicknesses to pressure [R L2 T-2 H-1 ~> Pa m-1 or Pa m2 kg-1]
   real :: I_Cp          ! 1.0 / C_p [C Q-1 ~> kg degC J-1]
   real :: I_Rho0Squared ! 1.0 / rho_0^2 (Boussinesq only) [R-2 ~> m6 kg-2]
-  logical :: do_any     ! True if there is more to be done on the current j-row.
   logical :: calc_diags ! True if diagnostic tendencies are needed.
   logical :: nonBous    ! If true, do not make the Boussinesq approximation.
-  integer, dimension(2) :: EOSdom ! The i-computational domain for the equation of state
-  integer :: i, j, k, is, ie, js, je, nz, isj, iej
+  integer :: EOSdom(2,2) ! The block-local domain for the equation of state
+  integer :: i, j, k, nz
+  integer :: isb, ieb, jsb, jeb ! The index bounds of the current block.
+  integer :: ii, jj, iie, jje   ! Block-local indices and extents.
 
-  is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec ; nz = GV%ke
-  if (present(halo)) then
-    is = G%isc-halo ; ie = G%iec+halo ; js = G%jsc-halo ; je = G%jec+halo
-  endif
+  nz = GV%ke
 
   if (.not. CS%initialized) call MOM_error(FATAL, "MOM_geothermal: "//&
          "Module must be initialized before it is used.")
@@ -423,7 +468,6 @@ subroutine geothermal_in_place(h, tv, dt, G, GV, US, CS, BFlx_geothermal, halo)
   H_to_pres = GV%H_to_RZ * GV%g_Earth
   I_Cp = 1. /tv%C_p
   if (.not.nonBous) I_Rho0squared = 1. / (GV%Rho0**2)
-  EOSdom(:) = EOS_domain(G%HI)
 
   if (.not.associated(tv%T)) call MOM_error(FATAL, "MOM geothermal_in_place: "//&
       "Geothermal heating can only be applied if T & S are state variables.")
@@ -434,31 +478,62 @@ subroutine geothermal_in_place(h, tv, dt, G, GV, US, CS, BFlx_geothermal, halo)
 
   ! Conditionals for tracking diagnostic depdendencies
   calc_diags = (CS%id_internal_heat_heat_tendency > 0) .or. (CS%id_internal_heat_temp_tendency > 0)
-  BFlx_geothermal(:,:) = 0.0
 
-  if (calc_diags) dTdt_diag(:,:,:) = 0.0
+  !   h, tv%T, tv%S, tv%internal_heat and BFlx_geothermal are mapped to the device by the caller.
+  !$omp target enter data map(alloc: heat_rem, bottom_pressure, T_bot, S_bot, dRhodT, dRhodS, &
+  !$omp                              dSpVdT, dSpVdS, dTdt_diag)
 
-  !$OMP parallel do default(shared) private(heat_rem,do_any,h_geo_rem,isj,iej,heat_here,dTemp)
-  do j=js,je
-    bottom_pressure(:) = 0.0
-    do k=1,nz ; do i=is,ie
-      bottom_pressure(i) = bottom_pressure(i) + H_to_pres * h(i,j,k)
-    enddo ; enddo
+  do concurrent (j=G%jsd:G%jed, i=G%isd:G%ied)
+    BFlx_geothermal(i,j) = 0.0
+  enddo
+
+  if (calc_diags) then
+    do concurrent (k=1:nz, j=G%jsd:G%jed, i=G%isd:G%ied)
+      dTdt_diag(i,j,k) = 0.0
+    enddo
+  endif
+
+  do jsb=js,je,njj ; do isb=is,ie,nii
+    jeb = min(je, jsb+njj-1) ; ieb = min(ie, isb+nii-1)
+    iie = ieb - isb + 1 ; jje = jeb - jsb + 1
+
+    ! As before blocking, the equation of state is only used within the computational i-domain.
+    EOSdom(1,1) = max(isb, G%isc) - isb + 1 ; EOSdom(1,2) = min(ieb, G%iec) - isb + 1
+    EOSdom(2,1) = 1 ; EOSdom(2,2) = jje
+
+    do concurrent (jj=1:jje) DO_LOCALITY(local(j))
+      j = jsb + jj - 1
+      do concurrent (ii=1:iie)
+        bottom_pressure(ii,jj) = 0.0
+      enddo
+      do k=1,nz ; do concurrent (ii=1:iie) DO_LOCALITY(local(i))
+        i = isb + ii - 1
+        bottom_pressure(ii,jj) = bottom_pressure(ii,jj) + H_to_pres * h(i,j,k)
+      enddo ; enddo
+    enddo
+
+    do concurrent (jj=1:jje, ii=1:iie) DO_LOCALITY(local(i, j))
+      i = isb + ii - 1 ; j = jsb + jj - 1
+      T_bot(ii,jj) = tv%T(i,j,nz) ; S_bot(ii,jj) = tv%S(i,j,nz)
+      dRhodT(ii,jj) = 0.0 ; dRhodS(ii,jj) = 0.0
+      dSpVdT(ii,jj) = 0.0 ; dSpVdS(ii,jj) = 0.0
+    enddo
+
     if (nonBous) then
-      dSpVdT(:) = 0.0
-      dSpVdS(:) = 0.0
-      call calculate_specific_vol_derivs(tv%T(:,j,nz), tv%S(:,j,nz), bottom_pressure, dSpVdT, dSpVdS, &
-                                         tv%eqn_of_state, EOSdom)
-      do i=is,ie
-        BFlx_geothermal(i,j) = ( (GV%g_Earth_Z_T2 * dSpVdT(i)) * (CS%geo_heat(i,j)*I_Cp) ) * G%mask2dT(i,j)
+      if (EOSdom(1,2) >= EOSdom(1,1)) &
+        call calculate_specific_vol_derivs(T_bot, S_bot, bottom_pressure, dSpVdT, dSpVdS, &
+                                           tv%eqn_of_state, EOSdom)
+      do concurrent (jj=1:jje, ii=1:iie) DO_LOCALITY(local(i, j))
+        i = isb + ii - 1 ; j = jsb + jj - 1
+        BFlx_geothermal(i,j) = ( (GV%g_Earth_Z_T2 * dSpVdT(ii,jj)) * (CS%geo_heat(i,j)*I_Cp) ) * G%mask2dT(i,j)
       enddo
     else
-      dRhodT(:) = 0.0
-      dRhodS(:) = 0.0
-      call calculate_density_derivs(tv%T(:,j,nz), tv%S(:,j,nz), bottom_pressure, dRhodT, dRhodS, &
-                                    tv%eqn_of_state, EOSdom)
-      do i=is,ie
-        BFlx_geothermal(i,j) = - ( (GV%g_Earth_Z_T2*I_Rho0squared) * ((I_Cp*dRhodT(i))*CS%geo_heat(i,j)) ) &
+      if (EOSdom(1,2) >= EOSdom(1,1)) &
+        call calculate_density_derivs(T_bot, S_bot, bottom_pressure, dRhodT, dRhodS, &
+                                      tv%eqn_of_state, EOSdom)
+      do concurrent (jj=1:jje, ii=1:iie) DO_LOCALITY(local(i, j))
+        i = isb + ii - 1 ; j = jsb + jj - 1
+        BFlx_geothermal(i,j) = - ( (GV%g_Earth_Z_T2*I_Rho0squared) * ((I_Cp*dRhodT(ii,jj))*CS%geo_heat(i,j)) ) &
                                  * G%mask2dT(i,j)
       enddo
     endif
@@ -470,32 +545,28 @@ subroutine geothermal_in_place(h, tv, dt, G, GV, US, CS, BFlx_geothermal, halo)
     ! If there is not enough mass in the ocean, pass some of the heat up
     ! from the ocean via the frazil field?
 
-    do_any = .false.
-    do i=is,ie
-      heat_rem(i) = G%mask2dT(i,j) * (CS%geo_heat(i,j) * (dt*Irho_cp))
-      if (heat_rem(i) > 0.0) do_any = .true.
-      h_geo_rem(i) = CS%Geothermal_thick
+    do concurrent (jj=1:jje, ii=1:iie) DO_LOCALITY(local(i, j))
+      i = isb + ii - 1 ; j = jsb + jj - 1
+      heat_rem(ii,jj) = G%mask2dT(i,j) * (CS%geo_heat(i,j) * (dt*Irho_cp))
     enddo
-    if (.not.do_any) cycle
 
-    ! Find the first and last columns that need to be worked on.
-    isj = ie+1 ; do i=is,ie ; if (heat_rem(i) > 0.0) then ; isj = i ; exit ; endif ; enddo
-    iej = is-1 ; do i=ie,is,-1 ; if (heat_rem(i) > 0.0) then ; iej = i ; exit ; endif ; enddo
-
-    do k=nz,1,-1
-      do_any = .false.
-      do i=isj,iej
-        if ((heat_rem(i) > 0.0) .and. (h(i,j,k) > Angstrom)) then
+    !   Each column works up from the bottom until its heat is used up, rather than each row
+    ! continuing until all of its columns are done, which gives the same answers.
+    do concurrent (jj=1:jje, ii=1:iie) DO_LOCALITY(local(i, j, k, h_geo_rem, heat_here, dTemp))
+      i = isb + ii - 1 ; j = jsb + jj - 1
+      h_geo_rem = CS%Geothermal_thick
+      do k=nz,1,-1
+        if ((heat_rem(ii,jj) > 0.0) .and. (h(i,j,k) > Angstrom)) then
           ! Apply some or all of the remaining heat to this layer.
           ! Convective adjustment occurs outside of this module if necessary.
-          if ((h(i,j,k)-Angstrom) >= h_geo_rem(i)) then
-            heat_here = heat_rem(i)
-            h_geo_rem(i) = 0.0
-            heat_rem(i) = 0.0
+          if ((h(i,j,k)-Angstrom) >= h_geo_rem) then
+            heat_here = heat_rem(ii,jj)
+            h_geo_rem = 0.0
+            heat_rem(ii,jj) = 0.0
           else
-            heat_here = heat_rem(i) * ((h(i,j,k)-Angstrom) / (h_geo_rem(i) + H_neglect))
-            h_geo_rem(i) = h_geo_rem(i) - (h(i,j,k)-Angstrom)
-            heat_rem(i) = heat_rem(i) - heat_here
+            heat_here = heat_rem(ii,jj) * ((h(i,j,k)-Angstrom) / (h_geo_rem + H_neglect))
+            h_geo_rem = h_geo_rem - (h(i,j,k)-Angstrom)
+            heat_rem(ii,jj) = heat_rem(ii,jj) - heat_here
           endif
 
           dTemp = heat_here / (h(i,j,k) + H_neglect)
@@ -503,17 +574,23 @@ subroutine geothermal_in_place(h, tv, dt, G, GV, US, CS, BFlx_geothermal, halo)
           if (calc_diags) dTdt_diag(i,j,k) = dTemp * Idt
         endif
 
-        if (heat_rem(i) > 0.0) do_any= .true.
+        if (.not.(heat_rem(ii,jj) > 0.0)) exit
+      enddo ! k-loop
+    enddo
+
+    if (associated(tv%internal_heat)) then
+      do concurrent (jj=1:jje, ii=1:iie) DO_LOCALITY(local(i, j))
+        i = isb + ii - 1 ; j = jsb + jj - 1
+        tv%internal_heat(i,j) = tv%internal_heat(i,j) + GV%H_to_RZ * &
+             (G%mask2dT(i,j) * (CS%geo_heat(i,j) * (dt*Irho_cp)) - heat_rem(ii,jj))
       enddo
+    endif
+  enddo ; enddo ! ij block loop
 
-      if (.not.do_any) exit
-    enddo ! k-loop
-
-    if (associated(tv%internal_heat)) then ; do i=is,ie
-      tv%internal_heat(i,j) = tv%internal_heat(i,j) + GV%H_to_RZ * &
-           (G%mask2dT(i,j) * (CS%geo_heat(i,j) * (dt*Irho_cp)) - heat_rem(i))
-    enddo ; endif
-  enddo ! j-loop
+  !$omp target update from(dTdt_diag) if(calc_diags)
+  !$omp target update from(BFlx_geothermal) if(CS%id_geothermal_buoyancy_flux > 0)
+  !$omp target exit data map(delete: heat_rem, bottom_pressure, T_bot, S_bot, dRhodT, dRhodS, &
+  !$omp                              dSpVdT, dSpVdS, dTdt_diag)
 
   ! Post diagnostics of 3D tendencies of heat and temperature due to geothermal heat
   if (CS%id_internal_heat_temp_tendency > 0) then
@@ -535,7 +612,7 @@ subroutine geothermal_in_place(h, tv, dt, G, GV, US, CS, BFlx_geothermal, halo)
 !           (G%mask2dT(i,j) * (CS%geo_heat(i,j) * (dt*Irho_cp)))
 !  enddo ; enddo
 
-end subroutine geothermal_in_place
+end subroutine geothermal_in_place_block
 
 !> Initialize parameters and allocate memory associated with the geothermal heating module.
 subroutine geothermal_init(Time, G, GV, US, param_file, diag, CS, useALEalgorithm)
@@ -610,6 +687,24 @@ subroutine geothermal_init(Time, G, GV, US, param_file, diag, CS, useALEalgorith
   endif
   call pass_var(CS%geo_heat, G%domain)
 
+  call get_param(param_file, mdl, "GEOTHERMAL_NIBLOCK", CS%niblock, &
+                 "The i-direction block size used in the in-place geothermal heating calculations. "//&
+                 "The default 0 setting is dynamic and fits the "//&
+                 "full i-domain length.", default=default_niblock, layoutParam=.true.)
+  call get_param(param_file, mdl, "GEOTHERMAL_NJBLOCK", CS%njblock, &
+                 "The j-direction block size used in the in-place geothermal heating calculations. "//&
+                 "The default 0 setting is dynamic and fits the "//&
+                 "full j-domain length.", default=default_njblock, layoutParam=.true.)
+  if (CS%niblock < 0) &
+    call MOM_error(FATAL, "MOM_geothermal, geothermal_init: "//&
+                          "GEOTHERMAL_NIBLOCK must be nonnegative; use 0 to select the default block size.")
+  if (CS%njblock < 0) &
+    call MOM_error(FATAL, "MOM_geothermal, geothermal_init: "//&
+                          "GEOTHERMAL_NJBLOCK must be nonnegative; use 0 to select the default block size.")
+
+  ! CS is a component of the diabatic control structure, so mapping it would make that partially present.
+  !$omp target enter data map(to: CS%geo_heat)
+
   thickness_units = get_thickness_units(GV)
 
   ! post the static geothermal heating field
@@ -647,6 +742,7 @@ end subroutine geothermal_init
 !> Clean up and deallocate memory associated with the geothermal heating module.
 subroutine geothermal_end(CS)
   type(geothermal_CS), intent(inout) :: CS !< Geothermal heating control struct
+  !$omp target exit data map(delete: CS%geo_heat) if(allocated(CS%geo_heat))
   if (allocated(CS%geo_heat)) deallocate(CS%geo_heat)
 end subroutine geothermal_end
 

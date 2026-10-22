@@ -708,7 +708,14 @@ subroutine diabatic_ALE_legacy(u, v, h, tv, BLD, fluxes, visc, ADp, CDp, dt, Tim
 
   if (CS%use_geothermal) then
     call cpu_clock_begin(id_clock_geothermal)
+    !$omp target update to(h)
+    !$omp target enter data map(to: tv, tv%T, tv%S) map(alloc: BBL_BuoyFlux)
+    !$omp target enter data map(to: tv%internal_heat) if(associated(tv%internal_heat))
     call geothermal_in_place(h, tv, dt, G, GV, US, CS%geothermal, BBL_BuoyFlux, halo=CS%halo_TS_diff)
+    !$omp target update from(tv%T, BBL_BuoyFlux)
+    !$omp target update from(tv%internal_heat) if(associated(tv%internal_heat))
+    !$omp target exit data map(release: tv%internal_heat) if(associated(tv%internal_heat))
+    !$omp target exit data map(release: BBL_BuoyFlux, tv%S, tv%T, tv)
     call cpu_clock_end(id_clock_geothermal)
     if (showCallTree) call callTree_waypoint("geothermal (diabatic)")
     if (CS%debugConservation) call MOM_state_stats('geothermal', u, v, h, tv%T, tv%S, G, GV, US)
@@ -1502,7 +1509,14 @@ subroutine diabatic_ALE(u, v, h, tv, BLD, fluxes, visc, ADp, CDp, dt, Time_end, 
 
   if (CS%use_geothermal) then
     call cpu_clock_begin(id_clock_geothermal)
+    !$omp target update to(h)
+    !$omp target enter data map(to: tv, tv%T, tv%S) map(alloc: BBL_buoyflux)
+    !$omp target enter data map(to: tv%internal_heat) if(associated(tv%internal_heat))
     call geothermal_in_place(h, tv, dt, G, GV, US, CS%geothermal, BBL_buoyflux, halo=CS%halo_TS_diff)
+    !$omp target update from(tv%T, BBL_buoyflux)
+    !$omp target update from(tv%internal_heat) if(associated(tv%internal_heat))
+    !$omp target exit data map(release: tv%internal_heat) if(associated(tv%internal_heat))
+    !$omp target exit data map(release: BBL_buoyflux, tv%S, tv%T, tv)
     call cpu_clock_end(id_clock_geothermal)
     if (showCallTree) call callTree_waypoint("geothermal (diabatic)")
     if (CS%debugConservation) call MOM_state_stats('geothermal', u, v, h, tv%T, tv%S, G, GV, US)
