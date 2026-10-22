@@ -737,7 +737,7 @@ subroutine diabatic_ALE_legacy(u, v, h, tv, BLD, fluxes, visc, ADp, CDp, dt, Tim
 
   ! Whenever thickness changes let the diag manager know, target grids
   ! for vertical remapping may need to be regenerated.
-  call diag_update_remap_grids(CS%diag)
+  call diag_update_remap_grids(CS%diag, state_on_device=.true.)
 
   ! Set_pen_shortwave estimates the optical properties of the water column.
   ! It will need to be modified later to include information about the
@@ -1062,7 +1062,7 @@ subroutine diabatic_ALE_legacy(u, v, h, tv, BLD, fluxes, visc, ADp, CDp, dt, Tim
     if (CS%id_boundary_forcing_h > 0) call post_data(CS%id_boundary_forcing_h, h, CS%diag, alt_h=h_orig)
   endif
   ! Boundary fluxes may have changed T, S, and h
-  call diag_update_remap_grids(CS%diag)
+  call diag_update_remap_grids(CS%diag, state_on_device=.true.)
   call cpu_clock_end(id_clock_remap)
   !$omp target update from(h, tv%T, tv%S) if(CS%debug .or. CS%debugConservation)
   !$omp target update from(tv%TempxPmE) if(CS%debug .and. associated(tv%TempxPmE))
@@ -1150,7 +1150,7 @@ subroutine diabatic_ALE_legacy(u, v, h, tv, BLD, fluxes, visc, ADp, CDp, dt, Tim
 
   ! Whenever thickness changes let the diag manager know, as the
   ! target grids for vertical remapping may need to be regenerated.
-  call diag_update_remap_grids(CS%diag)
+  call diag_update_remap_grids(CS%diag, state_on_device=.true.)
 
   ! Set diffusivities for VBF diagnostics if enabled
   !$omp target update from(Kd_ePBL) if(associated(CS%VBF%Kd_ePBL) .or. (CS%id_Kd_ePBL > 0))

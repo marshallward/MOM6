@@ -39,6 +39,7 @@ use MOM_unit_scaling,     only : unit_scale_type
 use MOM_variables,        only : thermo_var_ptrs
 use MOM_verticalGrid,     only : verticalGrid_type
 use MOM_domains,          only : get_domain_extent, clone_MOM_domain
+use regrid_consts,        only : coordinateMode
 
 implicit none ; private
 
@@ -3784,7 +3785,8 @@ end subroutine
 !> Build/update vertical grids for diagnostic remapping.
 !! \note The target grids need to be updated whenever sea surface
 !! height changes.
-subroutine diag_update_remap_grids(diag_cs, alt_h, alt_T, alt_S, update_intensive, update_extensive )
+subroutine diag_update_remap_grids(diag_cs, alt_h, alt_T, alt_S, update_intensive, update_extensive, &
+                                   state_on_device)
   type(diag_ctrl),        intent(inout) :: diag_cs      !< Diagnostics control structure
   real, target, optional, intent(in   ) :: alt_h(:,:,:) !< Used if remapped grids should be something other than
                                                         !! the current thicknesses [H ~> m or kg m-2]
@@ -3796,11 +3798,17 @@ subroutine diag_update_remap_grids(diag_cs, alt_h, alt_T, alt_S, update_intensiv
                                                             !! intensive diagnostics
   logical, optional,      intent(in   ) :: update_extensive !< If true (not default), update the grids used for
                                                             !! intensive diagnostics
+  logical, optional,      intent(in   ) :: state_on_device !< If true, the device copies of the thicknesses,
+                                                           !! temperatures, salinities and specific volumes are
+                                                           !! current, so those that the active coordinates use
+                                                           !! are copied to the host first.  Default false.
   ! Local variables
   integer :: m
   real, dimension(:,:,:), pointer :: h_diag => NULL() ! The layer thicknesses for diagnostics [H ~> m or kg m-2]
   real, dimension(:,:,:), pointer :: T_diag => NULL() ! The layer temperatures for diagnostics [C ~> degC]
   real, dimension(:,:,:), pointer :: S_diag => NULL() ! The layer salinities for diagnostics [S ~> ppt]
+  real, dimension(:,:,:), pointer :: SpV_diag => NULL() ! The layer specific volumes for diagnostics [R-1 ~> m3 kg-1]
+  logical :: copy_h, copy_TS, copy_SpV ! Which device fields to copy to the host
   real, dimension(diag_cs%G%isd:diag_cS%G%ied, diag_cs%G%jsd:diag_cS%G%jed, diag_cs%GV%ke) :: &
     dz_diag     ! Layer vertical extents for remapping [Z ~> m]
   logical :: update_intensive_local, update_extensive_local, dz_diag_needed
@@ -3834,6 +3842,23 @@ subroutine diag_update_remap_grids(diag_cs, alt_h, alt_T, alt_S, update_intensiv
   if (present(update_intensive)) update_intensive_local = update_intensive
   update_extensive_local = .false.
   if (present(update_extensive)) update_extensive_local = update_extensive
+
+  !   Callers opt in only where the device copies are the newer ones, because h is always on the device.
+  ! A field that is not on the device is not copied.  Remove state_on_device once this routine is ported.
+  copy_h = .false. ; copy_TS = .false. ; copy_SpV = .false.
+  if (present(state_on_device)) then ; if (state_on_device) then
+    do m=1,diag_cs%num_diag_coords ; if (diag_remap_axes_configured(diag_cs%diag_remap_cs(m))) then
+      copy_h = .true.
+      if (diag_cs%diag_remap_cs(m)%vertical_coord == coordinateMode('RHO')) copy_TS = .true.
+      if (diag_cs%diag_remap_cs(m)%Z_based_coord) copy_SpV = .true.
+    endif ; enddo
+  endif ; endif
+  !$omp target update from(h_diag) if(copy_h)
+  !$omp target update from(T_diag, S_diag) if(copy_TS)
+  if (copy_SpV) then ; if (allocated(diag_cs%tv%SpV_avg)) then
+    SpV_diag => diag_cs%tv%SpV_avg
+    !$omp target update from(SpV_diag)
+  endif ; endif
 
   if (id_clock_diag_grid_updates>0) call cpu_clock_begin(id_clock_diag_grid_updates)
 

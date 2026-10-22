@@ -1154,7 +1154,7 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
 
   ! Whenever thickness changes let the diag manager know, target grids
   ! for vertical remapping may need to be regenerated.
-  call diag_update_remap_grids(CS%diag)
+  call diag_update_remap_grids(CS%diag, state_on_device=.true.)
   if (showCallTree) call callTree_wayPoint("done with continuity (step_MOM_dyn_split_RK2)")
 
   if (G%nonblocking_updates) then
