@@ -423,8 +423,30 @@ subroutine diabatic(u, v, h, tv, BLD, fluxes, visc, ADp, CDp, dt, Time_end, &
   endif ! end CS%use_int_tides
 
   if (CS%useALEalgorithm .and. CS%use_legacy_diabatic) then
+    !$omp target update to(h)
+    ! Mapping tv%eqn_of_state alone with an if clause crashes gfortran 16.2, so map it with tv.
+    !$omp target enter data map(to: tv, tv%eqn_of_state) if (associated(tv%eqn_of_state))
+    !$omp target enter data map(to: tv, tv%T, tv%S)
+    !$omp target enter data map(to: tv%p_surf) if(associated(tv%p_surf))
+    !$omp target enter data map(to: tv%SpV_avg) if(allocated(tv%SpV_avg))
+    !$omp target enter data map(to: tv%TempxPmE) if(associated(tv%TempxPmE))
+    !$omp target enter data map(to: tv%internal_heat) if(associated(tv%internal_heat))
+    call extract_fluxes_enter_data(fluxes)
+    !$omp target enter data map(to: fluxes%netMassOut, fluxes%netMassIn)
+    !$omp target enter data map(to: fluxes%salt_left_behind) if(associated(fluxes%salt_left_behind))
+    !$omp target enter data map(to: visc%h_ML_param) if(associated(visc%h_ML_param))
     call diabatic_ALE_legacy(u, v, h, tv, BLD, fluxes, visc, ADp, CDp, dt, Time_end, &
                       G, GV, US, CS, stoch_CS, Waves)
+    !$omp target exit data map(release: visc%h_ML_param) if(associated(visc%h_ML_param))
+    !$omp target exit data map(release: fluxes%salt_left_behind) if(associated(fluxes%salt_left_behind))
+    !$omp target exit data map(release: fluxes%netMassOut, fluxes%netMassIn)
+    call extract_fluxes_exit_data(fluxes)
+    !$omp target exit data map(release: tv%internal_heat) if(associated(tv%internal_heat))
+    !$omp target exit data map(release: tv%TempxPmE) if(associated(tv%TempxPmE))
+    !$omp target exit data map(release: tv%SpV_avg) if(allocated(tv%SpV_avg))
+    !$omp target exit data map(release: tv%p_surf) if(associated(tv%p_surf))
+    !$omp target exit data map(release: tv%S, tv%T, tv)
+    !$omp target exit data map(release: tv%eqn_of_state, tv) if (associated(tv%eqn_of_state))
   elseif (CS%useALEalgorithm) then
     call diabatic_ALE(u, v, h, tv, BLD, fluxes, visc, ADp, CDp, dt, Time_end, &
                       G, GV, US, CS, stoch_CS, Waves)
@@ -705,20 +727,8 @@ subroutine diabatic_ALE_legacy(u, v, h, tv, BLD, fluxes, visc, ADp, CDp, dt, Tim
 
   if (CS%Use_KdWork_diag) call Allocate_VBF_CS(G, GV, CS%VBF)
 
-  !   The state, the forcing and the column work arrays stay on the device from here through the
-  ! tracer column physics.
-  !$omp target update to(h)
-  ! Mapping tv%eqn_of_state alone with an if clause crashes gfortran 16.2, so map it with tv.
-  !$omp target enter data map(to: tv, tv%eqn_of_state) if (associated(tv%eqn_of_state))
-  !$omp target enter data map(to: tv, tv%T, tv%S)
-  !$omp target enter data map(to: tv%p_surf) if(associated(tv%p_surf))
-  !$omp target enter data map(to: tv%SpV_avg) if(allocated(tv%SpV_avg))
-  !$omp target enter data map(to: tv%TempxPmE) if(associated(tv%TempxPmE))
-  !$omp target enter data map(to: tv%internal_heat) if(associated(tv%internal_heat))
-  call extract_fluxes_enter_data(fluxes)
-  !$omp target enter data map(to: fluxes%netMassOut, fluxes%netMassIn)
-  !$omp target enter data map(to: fluxes%salt_left_behind) if(associated(fluxes%salt_left_behind))
-  !$omp target enter data map(to: visc%h_ML_param) if(associated(visc%h_ML_param))
+  !   The column work arrays stay on the device from here through the tracer column physics.  The
+  ! state and the forcing are mapped in diabatic.
   !$omp target enter data map(alloc: ent_s, ent_t, Kd_int, Kd_heat, Kd_salt, Kd_ePBL, dz, h_orig, &
   !$omp                              u_h, v_h, cTKE, dSV_dT, dSV_dS, SkinBuoyFlux, BBL_BuoyFlux)
 
@@ -1343,16 +1353,6 @@ subroutine diabatic_ALE_legacy(u, v, h, tv, BLD, fluxes, visc, ADp, CDp, dt, Tim
 
   !$omp target exit data map(delete: ent_s, ent_t, Kd_int, Kd_heat, Kd_salt, Kd_ePBL, dz, h_orig, &
   !$omp                              u_h, v_h, cTKE, dSV_dT, dSV_dS, SkinBuoyFlux, BBL_BuoyFlux)
-  !$omp target exit data map(release: visc%h_ML_param) if(associated(visc%h_ML_param))
-  !$omp target exit data map(release: fluxes%salt_left_behind) if(associated(fluxes%salt_left_behind))
-  !$omp target exit data map(release: fluxes%netMassOut, fluxes%netMassIn)
-  call extract_fluxes_exit_data(fluxes)
-  !$omp target exit data map(release: tv%internal_heat) if(associated(tv%internal_heat))
-  !$omp target exit data map(release: tv%TempxPmE) if(associated(tv%TempxPmE))
-  !$omp target exit data map(release: tv%SpV_avg) if(allocated(tv%SpV_avg))
-  !$omp target exit data map(release: tv%p_surf) if(associated(tv%p_surf))
-  !$omp target exit data map(release: tv%S, tv%T, tv)
-  !$omp target exit data map(release: tv%eqn_of_state, tv) if (associated(tv%eqn_of_state))
 
   call cpu_clock_end(id_clock_tracers)
 
