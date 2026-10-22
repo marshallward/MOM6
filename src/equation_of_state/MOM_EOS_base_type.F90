@@ -68,6 +68,10 @@ contains
   procedure :: calculate_density_second_derivs_2d => a_calculate_density_second_derivs_2d
   !> Calculates the derivatives of specific volume for array inputs
   procedure :: calculate_specvol_derivs_array => a_calculate_specvol_derivs_array
+  !> Calculates the derivatives of specific volume for 2d array inputs
+  procedure :: calculate_specvol_derivs_2d => a_calculate_specvol_derivs_2d
+  !> Calculates the derivatives of specific volume for 3d array inputs
+  procedure :: calculate_specvol_derivs_3d => a_calculate_specvol_derivs_3d
   !> Calculates the compressibility for array inputs
   procedure :: calculate_compress_array => a_calculate_compress_array
 
@@ -587,6 +591,63 @@ contains
                                             dSV_dT(js:je), dSV_dS(js:je))
 
   end subroutine a_calculate_specvol_derivs_array
+
+  !> Calculate the partial derivatives of specific volume with respect to temperature
+  !! and salinity for 2d array inputs
+  subroutine a_calculate_specvol_derivs_2d(this, T, S, pressure, dSV_dT, dSV_dS, dom)
+    class(EOS_base), intent(in) :: this
+      !< This EOS
+    real, intent(in) :: T(:,:)
+      !< Potential temperature relative to the surface [degC]
+    real, intent(in) :: S(:,:)
+      !< Salinity [PSU]
+    real, intent(in) :: pressure(:,:)
+      !< Pressure [Pa]
+    real, intent(inout) :: dSV_dT(:,:)
+      !< The partial derivative of specific volume with potential temperature
+      !! [m3 kg-1 degC-1]
+    real, intent(inout) :: dSV_dS(:,:)
+      !< The partial derivative of specific volume with salinity [m3 kg-1 PSU-1]
+    integer, intent(in) :: dom(2,2)
+      !< Index bounds of domain.  First index is rank, second is bounds
+
+    integer :: is, ie, js, je
+
+    is = dom(1,1) ; ie = dom(1,2)
+    js = dom(2,1) ; je = dom(2,2)
+
+    call this%calculate_specvol_derivs_elem(T(is:ie, js:je), S(is:ie, js:je), &
+        pressure(is:ie, js:je), dSV_dT(is:ie, js:je), dSV_dS(is:ie, js:je))
+  end subroutine a_calculate_specvol_derivs_2d
+
+  !> Calculate the partial derivatives of specific volume with respect to temperature
+  !! and salinity for 3d array inputs
+  subroutine a_calculate_specvol_derivs_3d(this, T, S, pressure, dSV_dT, dSV_dS, dom)
+    class(EOS_base), intent(in) :: this
+      !< This EOS
+    real, intent(in) :: T(:,:,:)
+      !< Potential temperature relative to the surface [degC]
+    real, intent(in) :: S(:,:,:)
+      !< Salinity [PSU]
+    real, intent(in) :: pressure(:,:,:)
+      !< Pressure [Pa]
+    real, intent(inout) :: dSV_dT(:,:,:)
+      !< The partial derivative of specific volume with potential temperature
+      !! [m3 kg-1 degC-1]
+    real, intent(inout) :: dSV_dS(:,:,:)
+      !< The partial derivative of specific volume with salinity [m3 kg-1 PSU-1]
+    integer, intent(in) :: dom(3,2)
+      !< Index bounds of domain.  First index is rank, second is bounds
+
+    integer :: is, ie, js, je, ks, ke
+
+    is = dom(1,1) ; ie = dom(1,2)
+    js = dom(2,1) ; je = dom(2,2)
+    ks = dom(3,1) ; ke = dom(3,2)
+
+    call this%calculate_specvol_derivs_elem(T(is:ie, js:je, ks:ke), S(is:ie, js:je, ks:ke), &
+        pressure(is:ie, js:je, ks:ke), dSV_dT(is:ie, js:je, ks:ke), dSV_dS(is:ie, js:je, ks:ke))
+  end subroutine a_calculate_specvol_derivs_3d
 
   !> Compute the in situ density of sea water (rho) and the compressibility (drho/dp == C_sound^-2)
   !! at the given salinity, potential temperature and pressure for array inputs

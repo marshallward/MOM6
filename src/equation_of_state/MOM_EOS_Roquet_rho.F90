@@ -191,6 +191,10 @@ contains
   procedure :: calculate_density_derivs_2d => calculate_density_derivs_2d_Roquet_rho
   !> Local implementation of generic calculate_density_derivs_3d for efficiency
   procedure :: calculate_density_derivs_3d => calculate_density_derivs_3d_Roquet_rho
+  !> Local implementation of generic calculate_specvol_derivs_2d for efficiency
+  procedure :: calculate_specvol_derivs_2d => calculate_specvol_derivs_2d_Roquet_rho
+  !> Local implementation of generic calculate_specvol_derivs_3d for efficiency
+  procedure :: calculate_specvol_derivs_3d => calculate_specvol_derivs_3d_Roquet_rho
   !> Local implementation of generic calculate_density_second_derivs_2d for efficiency
   procedure :: calculate_density_second_derivs_2d => calculate_density_second_derivs_2d_Roquet_rho
 
@@ -579,6 +583,29 @@ end subroutine calculate_density_second_derivs_elem_Roquet_rho
 
 !> Calculate the partial derivatives of specific volume with temperature and salinity
 !! using the density polynomial fit EOS from Roquet et al. (2015).
+elemental subroutine calculate_specvol_derivs_elem_Roquet_rho_loc(T, S, pressure, dSV_dT, dSV_dS)
+  real, intent(in)    :: T        !< Conservative temperature [degC]
+  real, intent(in)    :: S        !< Absolute salinity [g kg-1]
+  real, intent(in)    :: pressure !< Pressure [Pa]
+  real, intent(inout) :: dSV_dT   !< The partial derivative of specific volume with
+                                  !! potential temperature [m3 kg-1 degC-1]
+  real, intent(inout) :: dSV_dS   !< The partial derivative of specific volume with
+                                  !! salinity [m3 kg-1 ppt-1]
+  ! Local variables
+  real :: rho     ! In situ density [kg m-3]
+  real :: dRho_dT ! Derivative of density with temperature [kg m-3 degC-1]
+  real :: dRho_dS ! Derivative of density with salinity [kg m-3 ppt-1]
+
+  call calculate_density_derivs_elem_Roquet_rho_loc(T, S, pressure, drho_dT, drho_dS)
+  rho = density_elem_Roquet_rho_loc(T, S, pressure)
+  dSV_dT = -dRho_DT/(rho**2)
+  dSV_dS = -dRho_DS/(rho**2)
+
+end subroutine calculate_specvol_derivs_elem_Roquet_rho_loc
+
+!> Wrapper for calculate_specvol_derivs_elem_Roquet_rho_loc created to preserve API while
+!! calling calculate_specvol_derivs_elem_Roquet_rho without "this" variable that causes
+!! runtime errors on gpu runs with nvfortran.
 elemental subroutine calculate_specvol_derivs_elem_Roquet_rho(this, T, S, pressure, dSV_dT, dSV_dS)
   class(Roquet_rho_EOS), intent(in)    :: this     !< This EOS
   real,                  intent(in)    :: T        !< Conservative temperature [degC]
@@ -588,15 +615,8 @@ elemental subroutine calculate_specvol_derivs_elem_Roquet_rho(this, T, S, pressu
                                                    !! potential temperature [m3 kg-1 degC-1]
   real,                  intent(inout) :: dSV_dS   !< The partial derivative of specific volume with
                                                    !! salinity [m3 kg-1 ppt-1]
-  ! Local variables
-  real :: rho     ! In situ density [kg m-3]
-  real :: dRho_dT ! Derivative of density with temperature [kg m-3 degC-1]
-  real :: dRho_dS ! Derivative of density with salinity [kg m-3 ppt-1]
 
-  call this%calculate_density_derivs_elem(T, S, pressure, drho_dT, drho_dS)
-  rho = this%density_elem(T, S, pressure)
-  dSV_dT = -dRho_DT/(rho**2)
-  dSV_dS = -dRho_DS/(rho**2)
+  call calculate_specvol_derivs_elem_Roquet_rho_loc(T, S, pressure, dSV_dT, dSV_dS)
 
 end subroutine calculate_specvol_derivs_elem_Roquet_rho
 
@@ -855,6 +875,75 @@ subroutine calculate_density_derivs_3d_Roquet_rho(this, T, S, pressure, &
         pressure(i,j,k), drho_dT(i,j,k), drho_dS(i,j,k))
   enddo
 end subroutine calculate_density_derivs_3d_Roquet_rho
+
+!> Calculate the partial derivatives of specific volume with respect to temperature and
+!! salinity for 2d array inputs using the density polynomial fit EOS from Roquet et al. (2015).
+subroutine calculate_specvol_derivs_2d_Roquet_rho(this, T, S, pressure, &
+    dSV_dT, dSV_dS, dom)
+  class(Roquet_rho_EOS), intent(in) :: this
+    !< This EOS
+  real, intent(in)  :: T(:,:)
+    !< Conservative temperature [degC]
+  real, intent(in)  :: S(:,:)
+    !< Absolute salinity [g kg-1]
+  real, intent(in)  :: pressure(:,:)
+    !< Pressure [Pa]
+  real, intent(inout) :: dSV_dT(:,:)
+    !< Partial derivative of specific volume with potential temperature [m3 kg-1 degC-1]
+  real, intent(inout) :: dSV_dS(:,:)
+    !< Partial derivative of specific volume with salinity [m3 kg-1 ppt-1]
+  integer, intent(in) :: dom(2,2)
+    !< Index bounds of domain.  First index is rank, second is bounds
+
+  integer :: is, ie, js, je
+  integer :: i, j
+
+  is = dom(1,1) ; ie = dom(1,2)
+  js = dom(2,1) ; je = dom(2,2)
+
+  ! The element subroutine is called via its free-function (_loc) form rather than
+  ! through the polymorphic "this" binding, which causes runtime errors in do concurrent
+  ! regions offloaded to the GPU with nvfortran.
+  do concurrent (j=js:je, i=is:ie)
+    call calculate_specvol_derivs_elem_Roquet_rho_loc(T(i,j), S(i,j), &
+        pressure(i,j), dSV_dT(i,j), dSV_dS(i,j))
+  enddo
+end subroutine calculate_specvol_derivs_2d_Roquet_rho
+
+!> Calculate the partial derivatives of specific volume with respect to temperature and
+!! salinity for 3d array inputs using the density polynomial fit EOS from Roquet et al. (2015).
+subroutine calculate_specvol_derivs_3d_Roquet_rho(this, T, S, pressure, &
+    dSV_dT, dSV_dS, dom)
+  class(Roquet_rho_EOS), intent(in) :: this
+    !< This EOS
+  real, intent(in)  :: T(:,:,:)
+    !< Conservative temperature [degC]
+  real, intent(in)  :: S(:,:,:)
+    !< Absolute salinity [g kg-1]
+  real, intent(in)  :: pressure(:,:,:)
+    !< Pressure [Pa]
+  real, intent(inout) :: dSV_dT(:,:,:)
+    !< Partial derivative of specific volume with potential temperature [m3 kg-1 degC-1]
+  real, intent(inout) :: dSV_dS(:,:,:)
+    !< Partial derivative of specific volume with salinity [m3 kg-1 ppt-1]
+  integer, intent(in) :: dom(3,2)
+    !< Index bounds of domain.  First index is rank, second is bounds
+
+  integer :: is, ie, js, je, ks, ke
+  integer :: i, j, k
+
+  is = dom(1,1) ; ie = dom(1,2)
+  js = dom(2,1) ; je = dom(2,2)
+  ks = dom(3,1) ; ke = dom(3,2)
+
+  ! The element subroutine is called via its free-function (_loc) form rather than
+  ! through the polymorphic "this" binding, which causes runtime errors in do concurrent
+  ! regions offloaded to the GPU with nvfortran.
+  do concurrent (k=ks:ke, j=js:je, i=is:ie)
+    call calculate_specvol_derivs_elem_Roquet_rho_loc(T(i,j,k), S(i,j,k), &
+        pressure(i,j,k), dSV_dT(i,j,k), dSV_dS(i,j,k))
+  enddo
+end subroutine calculate_specvol_derivs_3d_Roquet_rho
 
 !> Calculate the second derivatives of density for 2D array inputs and outputs.
 subroutine calculate_density_second_derivs_2d_Roquet_rho(this, T, S, pressure, &

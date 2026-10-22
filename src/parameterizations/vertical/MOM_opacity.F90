@@ -2,6 +2,9 @@
 ! See the LICENSE file for licensing information.
 ! SPDX-License-Identifier: Apache-2.0
 
+#include <MOM_memory.h>
+#include "do_concurrent_compat.h"
+
 !> Routines used to calculate the opacity of the ocean.
 module MOM_opacity
 
@@ -14,14 +17,13 @@ use MOM_grid,          only : ocean_grid_type
 use MOM_unit_scaling,  only : unit_scale_type
 use MOM_variables,     only : thermo_var_ptrs
 use MOM_verticalGrid,  only : verticalGrid_type
+use MOM_intrinsic_functions, only : exp_repro
 
 implicit none ; private
 
-#include <MOM_memory.h>
-
 public set_opacity, opacity_init, opacity_end
 public extract_optics_slice, extract_optics_fields, optics_nbands
-public absorbRemainingSW, sumSWoverBands
+public absorbRemainingSW, absorbRemainingSW_3d, sumSWoverBands
 
 !> This type is used to store information about ocean optical properties
 type, public :: optics_type
@@ -870,6 +872,293 @@ subroutine absorbRemainingSW(G, GV, US, h, opacity_band, nsw, optics, j, dt, H_l
   endif ! absorbAllSW .or. adjustAbsorptionProfile
 
 end subroutine absorbRemainingSW
+
+!> Apply shortwave heating below the boundary layer for a 3-d array of columns.
+!!
+!! This is the 3-d counterpart of absorbRemainingSW.  It works on a horizontal block of
+!! columns rather than a single j-slice, so that the horizontal indices can be parallelized
+!! on a GPU while the vertical recurrences carried by h_heat, Pen_SW_bnd and T_chg stay
+!! sequential within each column.  The ksort, eps, htot and Ttot options of
+!! absorbRemainingSW are not supported here, because the only caller that uses them
+!! (MOM_bulk_mixed_layer) still works in j-slices and should keep calling absorbRemainingSW.
+subroutine absorbRemainingSW_3d(G, GV, US, h, opacity_band, nsw, optics, dt, H_limit_fluxes, &
+                                adjustAbsorptionProfile, absorbAllSW, T, Pen_SW_bnd, dom, wb, &
+                                TKE, dSV_dT)
+
+  type(ocean_grid_type),   intent(in)    :: G    !< The ocean's grid structure.
+  type(verticalGrid_type), intent(in)    :: GV   !< The ocean's vertical grid structure.
+  type(unit_scale_type),   intent(in)    :: US   !< A dimensional unit scaling type
+  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)), &
+                           intent(in)    :: h    !< Layer thicknesses [H ~> m or kg m-2].
+  integer,                 intent(in)    :: nsw  !< Number of bands of penetrating
+                                                 !! shortwave radiation.
+  integer,                 intent(in)    :: wb(2,2) !< The declared i- and j-bounds of opacity_band
+                                                 !! and Pen_SW_bnd, which may be a block of the
+                                                 !! domain.  Unlike dom, these are array bounds,
+                                                 !! not the range of points worked on.  The first
+                                                 !! index is the rank (i, j) and the second is the
+                                                 !! bound (1 = lower, 2 = upper).
+  real, dimension(max(1,nsw),wb(1,1):wb(1,2),wb(2,1):wb(2,2),SZK_(GV)), &
+                           intent(in)    :: opacity_band !< Opacity in each band of penetrating
+                                                 !! shortwave radiation [H-1 ~> m-1 or m2 kg-1].
+                                                 !! The indices are band, i, j, k.
+  type(optics_type),       intent(in)    :: optics !< An optics structure that has values of
+                                                 !! opacities and shortwave fluxes.
+  real,                    intent(in)    :: dt   !< Time step [T ~> s].
+  real,                    intent(in)    :: H_limit_fluxes !< If the total ocean depth is
+                                                 !! less than this, they are scaled away
+                                                 !! to avoid numerical instabilities
+                                                 !! [H ~> m or kg m-2]. This would
+                                                 !! not be necessary if a finite heat
+                                                 !! capacity mud-layer were added.
+  logical,                 intent(in)    :: adjustAbsorptionProfile !< If true, apply
+                                                 !! heating above the layers in which it
+                                                 !! should have occurred to get the
+                                                 !! correct mean depth (and potential
+                                                 !! energy change) of the shortwave that
+                                                 !! should be absorbed by each layer.
+  logical,                 intent(in)    :: absorbAllSW !< If true, apply heating above the
+                                                 !! layers in which it should have occurred
+                                                 !! to get the correct mean depth (and
+                                                 !! potential energy change) of the
+                                                 !! shortwave that should be absorbed by
+                                                 !! each layer.
+  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)), &
+                           intent(inout) :: T    !< Layer potential/conservative
+                                                 !! temperatures [C ~> degC]
+  real, dimension(max(1,nsw),wb(1,1):wb(1,2),wb(2,1):wb(2,2)), &
+                           intent(inout) :: Pen_SW_bnd !< Penetrating shortwave heating in
+                                                 !! each band that hits the bottom and will
+                                                 !! will be redistributed through the water
+                                                 !! column [C H ~> degC m or degC kg m-2],
+                                                 !! size nsw by the bounds in wb.
+  integer,                 intent(in)    :: dom(3,2) !< The domain of indices to work on, taking
+                                                 !! into account that arrays start at 1.  The
+                                                 !! first index is the rank (i, j, k) and the
+                                                 !! second is the bound (1 = lower, 2 = upper).
+  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)), &
+                 optional, intent(in)    :: dSV_dT !< The partial derivative of specific volume
+                                                 !! with temperature [R-1 C-1 ~> m3 kg-1 degC-1]
+  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)), &
+                 optional, intent(inout) :: TKE !< The TKE sink from mixing the heating
+                                                 !! throughout a layer, which is added to the
+                                                 !! incoming values [R Z3 T-2 ~> J m-2].
+
+  ! Local variables
+  real, dimension(wb(1,1):wb(1,2),wb(2,1):wb(2,2),SZK_(GV)) :: &
+    T_chg_above      ! A temperature change that will be applied to all the thick layers above a
+                     ! given layer [C ~> degC].  This is only nonzero if adjustAbsorptionProfile
+                     ! is true, in which case the net change in the temperature of a layer is the
+                     ! sum of the direct heating of that layer plus T_chg_above from all of the
+                     ! layers below, plus any contribution from absorbing radiation that hits the
+                     ! bottom.
+  real :: TKE_lay           ! The TKE sink from mixing the heating by all bands throughout a layer
+                            ! [R Z3 T-2 ~> J m-2]
+  real :: SW_trans          ! fraction of shortwave radiation that is not
+                            ! absorbed in a layer [nondim]
+  real :: unabsorbed        ! fraction of the shortwave radiation that
+                            ! is not absorbed because the layers are too thin [nondim]
+  real :: Ih_limit          ! inverse of the total depth at which the
+                            ! surface fluxes start to be limited [H-1 ~> m-1 or m2 kg-1]
+  real :: h_min_heat        ! minimum thickness layer that should get heated [H ~> m or kg m-2]
+  real :: opt_depth         ! optical depth of a layer [nondim]
+  real :: exp_OD            ! exp(-opt_depth) [nondim]
+  real :: heat_bnd          ! heating due to absorption in the current
+                            ! layer by the current band, including any piece that
+                            ! is moved upward [C H ~> degC m or degC kg m-2]
+  real :: SWa               ! fraction of the absorbed shortwave that is
+                            ! moved to layers above with adjustAbsorptionProfile [nondim]
+  real :: coSWa_frac        ! The fraction of SWa that is actually moved upward [nondim]
+  real :: min_SW_heat       ! A minimum remaining shortwave heating within a timestep that will be simply
+                            ! absorbed in the next layer for computational efficiency, instead of
+                            ! continuing to penetrate [C H ~> degC m or degC kg m-2].
+  real :: I_Habs            ! The inverse of the absorption length for a minimal flux [H-1 ~> m-1 or m2 kg-1]
+  real :: g_Hconv2          ! A conversion factor for use in the TKE calculation
+                            ! in units of [Z3 R2 T-2 H-2 ~> kg2 m-5 s-2 or m s-2].
+  real :: h_heat            ! The thickness of the water column that will be heated by
+                            ! any remaining shortwave radiation [H ~> m or kg m-2].
+  real :: T_chg             ! The temperature change of thick layers due to the remaining
+                            ! shortwave radiation and contributions from T_chg_above [C ~> degC].
+  real :: Pen_SW_rem        ! The sum across all wavelength bands of the penetrating shortwave
+                            ! heating that hits the bottom and will be redistributed through
+                            ! the water column [C H ~> degC m or degC kg m-2]
+  logical :: TKE_calc       ! If true, calculate the implications to the
+                            ! TKE budget of the shortwave heating.
+  real :: C1_6, C1_60       ! Rational fractions [nondim]
+  integer :: is, ie, js, je, ks, ke, i, j, k, n
+  integer :: ii, jj      ! Block-local i- and j-indices.
+  integer :: iie, jje    ! The i- and j-extents of the block being worked on.
+
+  if (nsw < 1) return
+
+  is = dom(1,1) ; ie = dom(1,2)
+  js = dom(2,1) ; je = dom(2,2)
+  ks = dom(3,1) ; ke = dom(3,2)
+  iie = ie - is + 1 ; jje = je - js + 1
+
+  min_SW_heat = optics%PenSW_flux_absorb * dt
+  I_Habs = optics%PenSW_absorb_Invlen
+
+  h_min_heat = 2.0*GV%Angstrom_H + GV%H_subroundoff
+  C1_6 = 1.0 / 6.0 ; C1_60 = 1.0 / 60.0
+
+  ! As in absorbRemainingSW, Ih_limit is only used when absorbAllSW is true, and it is only
+  ! evaluated in that case so that a zero H_limit_fluxes cannot raise a division by zero.
+  Ih_limit = 0.0 ; if (absorbAllSW) Ih_limit = 1.0 / H_limit_fluxes
+
+  TKE_calc = (present(TKE) .and. present(dSV_dT))
+
+  if (optics%answer_date < 20190101) then
+    g_Hconv2 = (GV%g_Earth_Z_T2 * GV%H_to_RZ) * GV%H_to_RZ
+  else
+    g_Hconv2 = GV%g_Earth_Z_T2 * GV%H_to_RZ**2
+  endif
+
+  !$omp target enter data map(alloc: T_chg_above)
+
+  ! The whole column sweep is done inside a single kernel over the horizontal indices, so that
+  ! h_heat, T_chg and Pen_SW_rem stay thread-local scalars and the vertical recurrences that
+  ! they carry remain sequential.  T_chg_above spans both vertical sweeps, so it is a 3-d array
+  ! rather than a per-thread automatic.
+  do concurrent (jj=1:jje, ii=1:iie) DO_LOCALITY(local(i, j, k, n, h_heat, T_chg, Pen_SW_rem, SW_trans )) &
+                                   & DO_LOCALITY(local(unabsorbed, opt_depth, exp_OD, heat_bnd, SWa)) &
+                                   & DO_LOCALITY(local(coSWa_frac, TKE_lay))
+    i = is + ii - 1 ; j = js + jj - 1
+    h_heat = 0.0
+
+    ! Apply penetrating SW radiation to remaining parts of layers.
+    ! Excessively thin layers are not heated to avoid runaway temps.
+    do k=ks,ke
+      T_chg_above(i,j,k) = 0.0
+      TKE_lay = 0.0
+
+      ! In absorbRemainingSW this test is h > 1.5*eps, with eps defaulting to zero.
+      if (h(i,j,k) > 0.0) then
+        do n=1,nsw ; if (Pen_SW_bnd(n,i,j) > 0.0) then
+          ! SW_trans is the SW that is transmitted THROUGH the layer
+          opt_depth = h(i,j,k) * opacity_band(n,i,j,k)
+          exp_OD = exp_repro(-opt_depth)
+          SW_trans = exp_OD
+
+          ! Heating at a very small rate can be absorbed by a sufficiently thick layer or several
+          ! thin layers without further penetration.
+          if (optics%answer_date < 20190101) then
+            if (nsw*Pen_SW_bnd(n,i,j)*SW_trans < min_SW_heat*min(1.0, I_Habs*h(i,j,k)) ) SW_trans = 0.0
+          elseif ((nsw*Pen_SW_bnd(n,i,j)*SW_trans < min_SW_heat) .and. (h(i,j,k) > h_min_heat)) then
+            if (nsw*Pen_SW_bnd(n,i,j) <= min_SW_heat * (I_Habs*(h(i,j,k) - h_min_heat))) then
+              SW_trans = 0.0
+            else
+              SW_trans = min(SW_trans, &
+                             1.0 - (min_SW_heat*(I_Habs*(h(i,j,k) - h_min_heat))) / (nsw*Pen_SW_bnd(n,i,j)))
+            endif
+          endif
+
+          Heat_bnd = Pen_SW_bnd(n,i,j) * (1.0 - SW_trans)
+          if (adjustAbsorptionProfile .and. (h_heat > 0.0)) then
+            !   In this case, a fraction of the heating is applied to the
+            ! overlying water so that the mean pressure at which the shortwave
+            ! heating occurs is exactly what it would have been with a careful
+            ! pressure-weighted averaging of the exponential heating profile,
+            ! hence there should be no TKE budget requirements due to this
+            ! layer.  Very clever, but this is also limited so that the
+            ! water above is not heated at a faster rate than the layer
+            ! actually being heated, i.e., SWA <= h_heat / (h_heat + h(i,j,k))
+            ! and takes the energetics of the rest of the heating into account.
+            ! (-RWH, ~7 years later.)
+            if (opt_depth > 1e-5) then
+              SWa = ((opt_depth + (opt_depth + 2.0)*exp_OD) - 2.0) / &
+                ((opt_depth + opacity_band(n,i,j,k) * h_heat) * &
+                 (1.0 - exp_OD))
+            else
+              ! Use Taylor series expansion of the expression above for a
+              ! more accurate form with very small layer optical depths.
+              SWa = h(i,j,k) * (opt_depth * (1.0 - opt_depth)) / &
+                ((h_heat + h(i,j,k)) * (6.0 - 3.0*opt_depth))
+            endif
+            coSWa_frac = 0.0
+            if (SWa*(h_heat + h(i,j,k)) > h_heat) then
+              coSWa_frac = (SWa*(h_heat + h(i,j,k)) - h_heat ) / &
+                           (SWa*(h_heat + h(i,j,k)))
+              SWa = h_heat / (h_heat + h(i,j,k))
+            endif
+
+            T_chg_above(i,j,k) = T_chg_above(i,j,k) + (SWa * Heat_bnd) / h_heat
+            T(i,j,k) = T(i,j,k) + ((1.0 - SWa) * Heat_bnd) / h(i,j,k)
+          else
+            coSWa_frac = 1.0
+            T(i,j,k) = T(i,j,k) + Pen_SW_bnd(n,i,j) * (1.0 - SW_trans) / h(i,j,k)
+          endif
+
+          if (TKE_calc) then
+            if (opt_depth > 1e-2) then
+              TKE_lay = TKE_lay - coSWa_frac*Heat_bnd*dSV_dT(i,j,k)* &
+                 (0.5*h(i,j,k)*g_Hconv2) * &
+                 (opt_depth*(1.0+exp_OD) - 2.0*(1.0-exp_OD)) / (opt_depth*(1.0-exp_OD))
+            else
+              ! Use Taylor series-derived approximation to the above expression
+              ! that is well behaved and more accurate when opt_depth is small.
+              TKE_lay = TKE_lay - coSWa_frac*Heat_bnd*dSV_dT(i,j,k)* &
+                 (0.5*h(i,j,k)*g_Hconv2) * &
+                 (C1_6*opt_depth * (1.0 - C1_60*opt_depth**2))
+            endif
+          endif
+
+          Pen_SW_bnd(n,i,j) = Pen_SW_bnd(n,i,j) * SW_trans
+        endif ; enddo ! n-loop over the shortwave bands
+      endif
+
+      ! Adding the layer's total to TKE, rather than accumulating each band directly, keeps the
+      ! answers identical to those from a workspace that starts at zero.
+      if (TKE_calc) TKE(i,j,k) = TKE(i,j,k) + TKE_lay
+
+      ! Add to the accumulated thickness above that could be heated.
+      ! Only layers greater than h_min_heat thick should get heated.
+      if (h(i,j,k) >= 2.0*h_min_heat) then
+        h_heat = h_heat + h(i,j,k)
+      elseif (h(i,j,k) > h_min_heat) then
+        h_heat = h_heat + (2.0*h(i,j,k) - 2.0*h_min_heat)
+      endif
+    enddo ! k-loop of the downward sweep
+
+    ! Unless modified, there is no temperature change due to fluxes from the bottom.
+    T_chg = 0.0
+
+    if (absorbAllSW) then
+      ! If there is still shortwave radiation at this point, it could go into
+      ! the bottom (with a bottom mud model), or it could be redistributed back
+      ! through the water column.
+      Pen_SW_rem = Pen_SW_bnd(1,i,j)
+      do n=2,nsw ; Pen_SW_rem = Pen_SW_rem + Pen_SW_bnd(n,i,j) ; enddo
+
+      if ((Pen_SW_rem > 0.0) .and. (h_heat > 0.0)) then
+        if (h_heat*Ih_limit >= 1.0) then
+          T_chg = Pen_SW_rem / h_heat ; unabsorbed = 0.0
+        else
+          T_chg = Pen_SW_rem * Ih_limit
+          unabsorbed = 1.0 - h_heat*Ih_limit
+        endif
+        do n=1,nsw ; Pen_SW_bnd(n,i,j) = unabsorbed * Pen_SW_bnd(n,i,j) ; enddo
+      endif
+    endif ! absorbAllSW
+
+    if (absorbAllSW .or. adjustAbsorptionProfile) then
+      do k=ke,ks,-1
+        if (T_chg > 0.0) then
+          ! Only layers greater than h_min_heat thick should get heated.
+          if (h(i,j,k) >= 2.0*h_min_heat) then ; T(i,j,k) = T(i,j,k) + T_chg
+          elseif (h(i,j,k) > h_min_heat) then
+            T(i,j,k) = T(i,j,k) + T_chg * (2.0 - 2.0*h_min_heat/h(i,j,k))
+          endif
+        endif
+        ! Increase the heating for layers above.
+        T_chg = T_chg + T_chg_above(i,j,k)
+      enddo ! k-loop of the upward sweep
+    endif ! absorbAllSW .or. adjustAbsorptionProfile
+  enddo ! i- and j-loop over columns
+
+  !$omp target exit data map(delete: T_chg_above)
+
+end subroutine absorbRemainingSW_3d
 
 
 !> This subroutine calculates the total shortwave heat flux integrated over
