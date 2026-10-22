@@ -81,6 +81,7 @@ use MOM_stochastics,         only : stochastic_CS
 implicit none ; private
 
 #include <MOM_memory.h>
+#include "do_concurrent_compat.h"
 
 public diabatic
 public diabatic_driver_init
@@ -680,8 +681,6 @@ subroutine diabatic_ALE_legacy(u, v, h, tv, BLD, fluxes, visc, ADp, CDp, dt, Tim
   H_to_pres = GV%H_to_RZ * GV%g_Earth
   alt_H_to_pres = H_to_pres * US%L_to_Z**2 * GV%Z_to_H
 
-  Kd_heat(:,:,:) = 0.0 ; Kd_salt(:,:,:) = 0.0
-
   showCallTree = callTree_showQuery()
   if (showCallTree) call callTree_enter("diabatic_ALE_legacy(), MOM_diabatic_driver.F90")
 
@@ -706,18 +705,33 @@ subroutine diabatic_ALE_legacy(u, v, h, tv, BLD, fluxes, visc, ADp, CDp, dt, Tim
 
   if (CS%Use_KdWork_diag) call Allocate_VBF_CS(G, GV, CS%VBF)
 
+  !   The state, the forcing and the column work arrays stay on the device from here until after
+  ! energetic_PBL, which is still on the host.
+  !$omp target update to(h)
+  ! Mapping tv%eqn_of_state alone with an if clause crashes gfortran 16.2, so map it with tv.
+  !$omp target enter data map(to: tv, tv%eqn_of_state) if (associated(tv%eqn_of_state))
+  !$omp target enter data map(to: tv, tv%T, tv%S)
+  !$omp target enter data map(to: tv%p_surf) if(associated(tv%p_surf))
+  !$omp target enter data map(to: tv%SpV_avg) if(allocated(tv%SpV_avg))
+  !$omp target enter data map(to: tv%TempxPmE) if(associated(tv%TempxPmE))
+  !$omp target enter data map(to: tv%internal_heat) if(associated(tv%internal_heat))
+  call extract_fluxes_enter_data(fluxes)
+  !$omp target enter data map(to: fluxes%netMassOut, fluxes%netMassIn)
+  !$omp target enter data map(to: fluxes%salt_left_behind) if(associated(fluxes%salt_left_behind))
+  !$omp target enter data map(to: visc%h_ML_param) if(associated(visc%h_ML_param))
+  !$omp target enter data map(alloc: ent_s, ent_t, Kd_int, Kd_heat, Kd_salt, Kd_ePBL, dz, h_orig, &
+  !$omp                              u_h, v_h, cTKE, dSV_dT, dSV_dS, SkinBuoyFlux, BBL_BuoyFlux)
+
+  do concurrent (K=1:nz+1, j=G%jsd:G%jed, i=G%isd:G%ied)
+    Kd_heat(i,j,K) = 0.0 ; Kd_salt(i,j,K) = 0.0
+  enddo
+
   if (CS%use_geothermal) then
     call cpu_clock_begin(id_clock_geothermal)
-    !$omp target update to(h)
-    !$omp target enter data map(to: tv, tv%T, tv%S) map(alloc: BBL_BuoyFlux)
-    !$omp target enter data map(to: tv%internal_heat) if(associated(tv%internal_heat))
     call geothermal_in_place(h, tv, dt, G, GV, US, CS%geothermal, BBL_BuoyFlux, halo=CS%halo_TS_diff)
-    !$omp target update from(tv%T, BBL_BuoyFlux)
-    !$omp target update from(tv%internal_heat) if(associated(tv%internal_heat))
-    !$omp target exit data map(release: tv%internal_heat) if(associated(tv%internal_heat))
-    !$omp target exit data map(release: BBL_BuoyFlux, tv%S, tv%T, tv)
     call cpu_clock_end(id_clock_geothermal)
     if (showCallTree) call callTree_waypoint("geothermal (diabatic)")
+    !$omp target update from(tv%T) if(CS%debugConservation)
     if (CS%debugConservation) call MOM_state_stats('geothermal', u, v, h, tv%T, tv%S, G, GV, US)
   endif
 
@@ -733,7 +747,6 @@ subroutine diabatic_ALE_legacy(u, v, h, tv, BLD, fluxes, visc, ADp, CDp, dt, Tim
 
   if (CS%debug) call MOM_state_chksum("before find_uv_at_h", u, v, h, G, GV, US, haloshift=0)
 
-  !$omp target enter data map(alloc: u_h, v_h) if (CS%use_kappa_shear .or. CS%use_CVMix_shear)
   if (CS%use_kappa_shear .or. CS%use_CVMix_shear) then
     if (CS%use_geothermal) then
       call find_uv_at_h(u, v, h, u_h, v_h, G, GV, US, zero_mix=.true.)
@@ -746,13 +759,9 @@ subroutine diabatic_ALE_legacy(u, v, h, tv, BLD, fluxes, visc, ADp, CDp, dt, Tim
   call cpu_clock_begin(id_clock_set_diffusivity)
   ! Sets: Kd_int, Kd_extra_T, Kd_extra_S and visc%TKE_turb
   ! Also changes: visc%Kd_shear, visc%Kv_shear and visc%Kv_slow
+  !$omp target update from(tv%T, tv%S) if(CS%debug)
   if (CS%debug) &
     call MOM_state_chksum("before set_diffusivity", u, v, h, G, GV, US, haloshift=CS%halo_TS_diff)
-  ! Mapping tv%eqn_of_state alone with an if clause crashes gfortran 16.2, so map it with tv.
-  !$omp target enter data map(to: tv, tv%eqn_of_state) if (associated(tv%eqn_of_state))
-  !$omp target enter data map(to: tv%T, tv%S) if (associated(tv%T))
-  !$omp target enter data map(to: tv%p_surf) if (associated(tv%p_surf))
-  !$omp target enter data map(to: tv%SpV_avg) if (allocated(tv%SpV_avg))
   if (CS%double_diffuse) then
     call set_diffusivity(u, v, h, u_h, v_h, tv, fluxes, CS%optics, visc, dt, Kd_int, G, GV, US, &
                          CS%set_diff_CSp, CS%VBF, Kd_extra_T=Kd_extra_T, Kd_extra_S=Kd_extra_S)
@@ -760,21 +769,21 @@ subroutine diabatic_ALE_legacy(u, v, h, tv, BLD, fluxes, visc, ADp, CDp, dt, Tim
     call set_diffusivity(u, v, h, u_h, v_h, tv, fluxes, CS%optics, visc, dt, Kd_int, G, GV, US, &
                          CS%set_diff_CSp, CS%VBF)
   endif
-  !$omp target exit data map(release: tv%SpV_avg) if (allocated(tv%SpV_avg))
-  !$omp target exit data map(release: tv%p_surf) if (associated(tv%p_surf))
-  !$omp target exit data map(release: tv%T, tv%S) if (associated(tv%T))
-  !$omp target exit data map(release: tv%eqn_of_state, tv) if (associated(tv%eqn_of_state))
-  !$omp target exit data map(delete: u_h, v_h) if (CS%use_kappa_shear .or. CS%use_CVMix_shear)
   call cpu_clock_end(id_clock_set_diffusivity)
   if (showCallTree) call callTree_waypoint("done with set_diffusivity (diabatic)")
 
 
+  !$omp target update from(tv%T, tv%S, Kd_int) if(CS%debug)
   if (CS%debug) then
     call MOM_state_chksum("after set_diffusivity ", u, v, h, G, GV, US, haloshift=0)
     call MOM_forcing_chksum("after set_diffusivity ", fluxes, G, US, haloshift=0)
     call MOM_thermovar_chksum("after set_diffusivity ", tv, G, US)
     call hchksum(Kd_Int, "after set_diffusivity Kd_Int", G%HI, haloshift=0, unscale=GV%HZ_T_to_m2_s)
   endif
+
+  ! KPP, double diffusion and CVMix convection are not ported, so they work on host copies.
+  !$omp target update from(tv%T, tv%S, Kd_int, Kd_heat, Kd_salt) &
+  !$omp   if(CS%useKPP .or. CS%double_diffuse .or. CS%use_CVMix_conv)
 
   ! Set diffusivities for heat and salt separately
   if (CS%useKPP) then
@@ -919,22 +928,25 @@ subroutine diabatic_ALE_legacy(u, v, h, tv, BLD, fluxes, visc, ADp, CDp, dt, Tim
     call calculate_CVMix_conv(h, tv, G, GV, US, CS%CVMix_conv, BLD, Kd_int, visc%Kv_shear)
   endif
 
+  !$omp target update to(tv%T, tv%S, Kd_int, Kd_heat, Kd_salt) &
+  !$omp   if(CS%useKPP .or. CS%double_diffuse .or. CS%use_CVMix_conv)
+
   ! Find the vertical distances across layers.
-  call thickness_to_dz(h, tv, dz, G, GV, US)
+  call thickness_to_dz(h, tv, dz, G, GV, US, do_offload=.true.)
 
   ! This block sets ent_t and ent_s from h and Kd_int.
-  do j=js,je ; do i=is,ie
+  do concurrent (j=js:je, i=is:ie)
     ent_s(i,j,1) = 0.0 ; ent_s(i,j,nz+1) = 0.0
     ent_t(i,j,1) = 0.0 ; ent_t(i,j,nz+1) = 0.0
-  enddo ; enddo
-  !$OMP parallel do default(shared)  private(I_dzval)
-  do K=2,nz ; do j=js,je ; do i=is,ie
+  enddo
+  do concurrent (K=2:nz, j=js:je, i=is:ie) DO_LOCALITY(local(I_dzval))
     I_dzval = 1.0 / (dz_neglect + 0.5*(dz(i,j,k-1) + dz(i,j,k)))
     ent_s(i,j,K) = dt * I_dzval * Kd_int(i,j,K)
     ent_t(i,j,K) = ent_s(i,j,K)
-  enddo ; enddo ; enddo
+  enddo
   if (showCallTree) call callTree_waypoint("done setting ent_s and ent_t from Kd_int (diabatic)")
 
+  !$omp target update from(ent_s) if(CS%debug)
   if (CS%debug) then
     call MOM_forcing_chksum("after calc_entrain ", fluxes, G, US, haloshift=0)
     call MOM_thermovar_chksum("after calc_entrain ", tv, G, US)
@@ -943,9 +955,10 @@ subroutine diabatic_ALE_legacy(u, v, h, tv, BLD, fluxes, visc, ADp, CDp, dt, Tim
   endif
 
   ! Save fields before boundary forcing is applied for tendency diagnostics
-  do k=1,nz ; do j=js,je ; do i=is,ie
+  do concurrent (k=1:nz, j=js:je, i=is:ie)
     h_orig(i,j,k) = h(i,j,k)
-  enddo ; enddo ; enddo
+  enddo
+  !$omp target update from(tv%T, tv%S) if(CS%boundary_forcing_tendency_diag)
   if (CS%boundary_forcing_tendency_diag) then
     do k=1,nz ; do j=js,je ; do i=is,ie
       temp_diag(i,j,k) = tv%T(i,j,k)
@@ -957,34 +970,19 @@ subroutine diabatic_ALE_legacy(u, v, h, tv, BLD, fluxes, visc, ADp, CDp, dt, Tim
   ! Changes made to following fields:  h, tv%T and tv%S.
   call cpu_clock_begin(id_clock_remap)
 
-  !   The state and the forcing fields that applyBoundaryFluxesInOut works with are moved onto
-  ! the device here, rather than inside that routine, so that the transfers that remain are
-  ! visible at the call site.  Each pointer or allocatable component is mapped under the same
-  ! test that gates its use, because an unassociated pointer component can not be mapped.
-  !$omp target update to(h)
-  !$omp target enter data map(to: tv, tv%T, tv%S)
-  !$omp target enter data map(to: tv%p_surf) if(associated(tv%p_surf))
-  !$omp target enter data map(to: tv%SpV_avg) if(allocated(tv%SpV_avg))
-  !$omp target enter data map(to: tv%TempxPmE) if(associated(tv%TempxPmE))
-  call extract_fluxes_enter_data(fluxes)
-  !$omp target enter data map(to: fluxes%netMassOut, fluxes%netMassIn)
-  !$omp target enter data map(to: fluxes%salt_left_behind) if(associated(fluxes%salt_left_behind))
-  !$omp target enter data map(to: visc%h_ML_param) if(associated(visc%h_ML_param))
   if (CS%use_energetic_PBL) then
 
-    skinbuoyflux(:,:) = 0.0
-    !   cTKE, dSV_dT, dSV_dS and SkinBuoyFlux are outputs of applyBoundaryFluxesInOut, which
-    ! sets them all on the device, so they only need device storage here.
-    !$omp target enter data map(alloc: SkinBuoyFlux, cTKE, dSV_dT, dSV_dS)
+    do concurrent (j=G%jsd:G%jed, i=G%isd:G%ied)
+      SkinBuoyFlux(i,j) = 0.0
+    enddo
     call applyBoundaryFluxesInOut(CS%diabatic_aux_CSp, G, GV, US, dt, fluxes, CS%optics, &
             optics_nbands(CS%optics), h, tv, CS%aggregate_FW_forcing, CS%evap_CFL_limit, &
             CS%minimum_forcing_depth, cTKE, dSV_dT, dSV_dS, SkinBuoyFlux=SkinBuoyFlux, MLD_h=visc%h_ML_param)
-    !$omp target update from(SkinBuoyFlux, cTKE, dSV_dT, dSV_dS)
-    !$omp target update from(tv%T, tv%S, h)
-    !$omp target update from(fluxes%netMassIn, fluxes%netMassOut)
-    !$omp target update from(tv%TempxPmE) if(associated(tv%TempxPmE))
-    call extract_fluxes_update_host(fluxes)
-    !$omp target exit data map(delete: SkinBuoyFlux, cTKE, dSV_dT, dSV_dS)
+
+    !   energetic_PBL and the routines that use its mixed layer depth are not ported yet, so they
+    ! work on host copies of their inputs.
+    !$omp target update from(h, tv%T, tv%S, cTKE, dSV_dT, dSV_dS, SkinBuoyFlux, BBL_BuoyFlux)
+    !$omp target update from(ent_t, ent_s) if(CS%debug)
     if (CS%debug) then
       call hchksum(ent_t, "after applyBoundaryFluxes ent_t", G%HI, haloshift=0, unscale=GV%H_to_mks)
       call hchksum(ent_s, "after applyBoundaryFluxes ent_s", G%HI, haloshift=0, unscale=GV%H_to_mks)
@@ -1002,6 +1000,7 @@ subroutine diabatic_ALE_legacy(u, v, h, tv, BLD, fluxes, visc, ADp, CDp, dt, Tim
     endif
 
     call find_uv_at_h(u, v, h, u_h, v_h, G, GV, US)
+    !$omp target update from(u_h, v_h)
     call energetic_PBL(h, u_h, v_h, tv, fluxes, visc, dt, Kd_ePBL, G, GV, US, &
                        CS%ePBL, stoch_CS, dSV_dT, dSV_dS, cTKE, SkinBuoyFlux, BBL_BuoyFlux, waves=waves)
 
@@ -1011,12 +1010,14 @@ subroutine diabatic_ALE_legacy(u, v, h, tv, BLD, fluxes, visc, ADp, CDp, dt, Tim
     if (associated(visc%MLD)) visc%MLD(:,:) = BLD(:,:)
     if (CS%MLD_param_ePBL) visc%h_ML_param = visc%h_ML
     if (associated(visc%sfc_buoy_flx)) visc%sfc_buoy_flx(:,:) = SkinBuoyFlux(:,:)
+    ! set_diffusivity zeroes visc%Kv_shear on the host, so its device copy is stale here.
+    !$omp target update to(Kd_ePBL, visc%Kv_shear)
 
     ! Find the vertical distances across layers, which may have been modified by the net surface flux
-    call thickness_to_dz(h, tv, dz, G, GV, US)
+    call thickness_to_dz(h, tv, dz, G, GV, US, do_offload=.true.)
 
     ! Augment the diffusivities and viscosity due to those diagnosed in energetic_PBL.
-    do K=2,nz ; do j=js,je ; do i=is,ie
+    do concurrent (K=2:nz, j=js:je, i=is:ie) DO_LOCALITY(local(Kd_add_here, Ent_int))
       if (CS%ePBL_is_additive) then
         Kd_add_here = Kd_ePBL(i,j,K)
         visc%Kv_shear(i,j,K) = visc%Kv_shear(i,j,K) + CS%ePBL_Prandtl*Kd_ePBL(i,j,K)
@@ -1033,8 +1034,9 @@ subroutine diabatic_ALE_legacy(u, v, h, tv, BLD, fluxes, visc, ADp, CDp, dt, Tim
       Kd_heat(i,j,K) = Kd_heat(i,j,K) + Kd_int(i,j,K)
       Kd_salt(i,j,K) = Kd_salt(i,j,K) + Kd_int(i,j,K)
 
-    enddo ; enddo ; enddo
+    enddo
 
+    !$omp target update from(ent_t, ent_s, Kd_ePBL) if(CS%debug)
     if (CS%debug) then
       call hchksum(ent_t, "after ePBL ent_t", G%HI, haloshift=0, unscale=GV%H_to_MKS)
       call hchksum(ent_s, "after ePBL ent_s", G%HI, haloshift=0, unscale=GV%H_to_MKS)
@@ -1045,26 +1047,30 @@ subroutine diabatic_ALE_legacy(u, v, h, tv, BLD, fluxes, visc, ADp, CDp, dt, Tim
     call applyBoundaryFluxesInOut(CS%diabatic_aux_CSp, G, GV, US, dt, fluxes, CS%optics, &
                                   optics_nbands(CS%optics), h, tv, CS%aggregate_FW_forcing, &
                                   CS%evap_CFL_limit, CS%minimum_forcing_depth, MLD_h=visc%h_ML_param)
-    !$omp target update from(tv%T, tv%S, h)
-    !$omp target update from(fluxes%netMassIn, fluxes%netMassOut)
-    !$omp target update from(tv%TempxPmE) if(associated(tv%TempxPmE))
-    call extract_fluxes_update_host(fluxes)
 
     ! Find the vertical distances across layers, which may have been modified by the net surface flux
-    call thickness_to_dz(h, tv, dz, G, GV, US)
+    call thickness_to_dz(h, tv, dz, G, GV, US, do_offload=.true.)
 
   endif   ! endif for CS%use_energetic_PBL
-  !   Release the state and the forcing, in the reverse of the order in which they were mapped.
-  ! Nothing is copied back here, because everything that the device wrote has already been
-  ! brought back with a target update above.
+
+  !$omp target update from(h, tv%T, tv%S, ent_s, ent_t, Kd_int, Kd_heat, Kd_salt, Kd_ePBL, dz, h_orig)
+  !$omp target update from(tv%TempxPmE) if(associated(tv%TempxPmE))
+  !$omp target update from(tv%internal_heat) if(associated(tv%internal_heat))
+  !$omp target update from(fluxes%netMassIn, fluxes%netMassOut)
+  call extract_fluxes_update_host(fluxes)
+  !$omp target update from(visc%Kv_shear) if(CS%use_energetic_PBL .and. associated(visc%Kv_shear))
+  !$omp target exit data map(delete: ent_s, ent_t, Kd_int, Kd_heat, Kd_salt, Kd_ePBL, dz, h_orig, &
+  !$omp                              u_h, v_h, cTKE, dSV_dT, dSV_dS, SkinBuoyFlux, BBL_BuoyFlux)
   !$omp target exit data map(release: visc%h_ML_param) if(associated(visc%h_ML_param))
   !$omp target exit data map(release: fluxes%salt_left_behind) if(associated(fluxes%salt_left_behind))
   !$omp target exit data map(release: fluxes%netMassOut, fluxes%netMassIn)
   call extract_fluxes_exit_data(fluxes)
+  !$omp target exit data map(release: tv%internal_heat) if(associated(tv%internal_heat))
   !$omp target exit data map(release: tv%TempxPmE) if(associated(tv%TempxPmE))
   !$omp target exit data map(release: tv%SpV_avg) if(allocated(tv%SpV_avg))
   !$omp target exit data map(release: tv%p_surf) if(associated(tv%p_surf))
   !$omp target exit data map(release: tv%S, tv%T, tv)
+  !$omp target exit data map(release: tv%eqn_of_state, tv) if (associated(tv%eqn_of_state))
 
   ! diagnose the tendencies due to boundary forcing
   ! At this point, the diagnostic grids have not been updated since the call to the boundary layer scheme
