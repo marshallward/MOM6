@@ -14,16 +14,16 @@ use MOM_exp_data_n128, only : ndiv, idiv_scale_lookup, idiv_residual_lookup
 implicit none
 
 ! IEEE 754 special values
-integer(kind=int_kind), parameter :: pos_inf_bits &
+integer(kind=int_rsize), parameter :: pos_inf_bits &
     = ishft(expmask, expbit)
   !< IEEE +Inf bit pattern
-integer(kind=int_kind), parameter :: neg_inf_bits &
-    = ior(pos_inf_bits, ishft(-1_int_kind, signbit))
+integer(kind=int_rsize), parameter :: neg_inf_bits &
+    = ior(pos_inf_bits, ishft(-1_int_rsize, signbit))
   !< IEEE -Inf bit pattern
 ! Fast integer rounding offset
-real, parameter :: round_bias = 1.5 * 2_int_kind**(digits(real_mold) - 1)
+real, parameter :: round_bias = 1.5 * 2_int_rsize**(digits(real_mold) - 1)
   !< Binary offset used to trigger rounding of fractional values
-integer(int_kind), parameter :: round_bias_bits &
+integer(int_rsize), parameter :: round_bias_bits &
     = transfer(round_bias, int_mold)
   !< Bit representation of rounding bias
 
@@ -65,7 +65,7 @@ module procedure exp_repro
     !< Upper 32 bits of ln2 / ndiv [nondim]
   real, parameter :: ln2_ndiv_lo = I_ndiv * ln2_lo
     !< Lower precision bits of ln2 / ndiv [nondim]
-  integer(int_kind), parameter :: idiv_mask = int(ndiv - 1, int_kind)
+  integer(int_rsize), parameter :: idiv_mask = int(ndiv - 1, int_rsize)
     !< Used for fast modulo of ndiv
 
   ! Range of K for which direct exponent scaling is safe.
@@ -77,26 +77,26 @@ module procedure exp_repro
   integer, parameter :: Kmax = maxexponent(real_mold) - 2
     !< Maximum K before overflow scaling is needed
     !! Kmax = (maxexponent() - 1) - 0 (max exp(r)) (-1 safety buffer)
-  integer(kind=int_kind), parameter :: Kbias = maxexponent(real_mold) - 2
+  integer(kind=int_rsize), parameter :: Kbias = maxexponent(real_mold) - 2
     !< Exponent adjustment used for overflow and subnormal scaling
     !! Any bias which rescales 2**K exp(r) to O(1) works here.
 
   ! Nonfinite testing
   logical :: nonfinite
     ! True if input is a nonfinite float (+/-Inf, NaN)
-  integer(kind=int_kind) :: xb
+  integer(kind=int_rsize) :: xb
     ! Bit representation of x
 
   ! Range-reduction variables
 
   real :: xc
     ! x clamped between xmin and xmax [nondim]
-  integer(kind=int_kind) :: K
+  integer(kind=int_rsize) :: K
     ! Nearest IEEE-rounded integer to x/ln2 [nondim]
   real :: Z
     ! Nearest integer to ndiv * K + idiv for ndiv subdivisions
     ! NOTE: Z is stored as real to avoid int-real type conversions.
-  integer(kind=int_kind) :: Zi
+  integer(kind=int_rsize) :: Zi
     ! Integer representation of Z
   integer :: idiv
     ! Subdivision index
@@ -116,11 +116,11 @@ module procedure exp_repro
 
   ! Descaling and subnormal handling
 
-  integer(kind=int_kind) :: eb
+  integer(kind=int_rsize) :: eb
     ! Bit representations of e
-  integer(kind=int_kind) :: j
+  integer(kind=int_rsize) :: j
     ! Bias added to K to compensate for exponent K beyond {-1022,..,+1023}.
-  integer(kind=int_kind) :: fb
+  integer(kind=int_rsize) :: fb
     ! Bit representation 2**j, the K exponent rescale
 
   ! 1. Nonfinite handling
@@ -154,7 +154,7 @@ module procedure exp_repro
 
   ! Compute the subdivision index and integer offset K
   idiv = iand(Zi, idiv_mask)
-  K = (Zi - int(idiv, int_kind)) / ndiv
+  K = (Zi - int(idiv, int_rsize)) / ndiv
 
   ! Since Z ~ x N / ln2, the terms in r will nearly cancel and there is some
   ! expected loss of precision.  To compensate, we use a Cody-Waite correction.
@@ -184,7 +184,7 @@ module procedure exp_repro
   ! Determine if K is outside the supported exponent range.
   ! If so, then apply a bias j to normalize the exponent.
   ! Kbias is chosen so that the exponent is "something near 1".
-  j = merge(Kbias, 0_int_kind, K < Kmin) + merge(-Kbias, 0_int_kind, K > Kmax)
+  j = merge(Kbias, 0_int_rsize, K < Kmin) + merge(-Kbias, 0_int_rsize, K > Kmax)
 
   ! Get the bit representation of e
   eb = transfer(e, int_mold)
@@ -198,7 +198,7 @@ module procedure exp_repro
   ! - For subnormals, this will force subnormal estimation (if enabled).
   ! - For resolvable K beyond this range, it triggers an over/underflow.
   ! - Extreme values of K have already been filtered out by the min/max step.
-  fb = ishft(int(expbias, int_kind) - j, expbit)
+  fb = ishft(int(expbias, int_rsize) - j, expbit)
   a = a * transfer(fb, real_mold)
 end procedure exp_repro
 

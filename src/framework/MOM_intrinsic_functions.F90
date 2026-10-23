@@ -42,26 +42,25 @@ end interface
 
 real, parameter :: real_mold = 0.
   !< Real mold for numerical format queries [nondim]
-integer, parameter :: int_kind &
+integer, parameter :: int_rsize &
     = merge(int64, int32, storage_size(real_mold) > storage_size(0_int32))
   !< Integer kind with the same storage size as default real
-integer(kind=int_kind), parameter :: int_mold = 0
+integer(kind=int_rsize), parameter :: int_mold = 0
   !< Integer mold value
 
 ! Floating point layout
 integer, parameter :: expbit = digits(real_mold) - 1
   !< Position of lowest exponent bit
-  ! NOTE: digits() includes the implicit leading digit
 integer, parameter :: signbit = storage_size(real_mold) - 1
   !< Position of sign bit
 integer, parameter :: expwidth = signbit - expbit
   !< Number of exponent bits
 integer, parameter :: expbias = maxexponent(real_mold) - 1
   !< Exponent bias
-integer(kind=int_kind), parameter :: expmask = 2_int_kind**expwidth - 1_int_kind
-  !< Mask for the biased exponent value
-integer(kind=int_kind), parameter :: exp_stride = 2_int_kind**expbit
-  !< Integer bit-pattern stride between adjacent IEEE exponent values
+integer(kind=int_rsize), parameter :: expmask = 2_int_rsize**expwidth - 1
+  !< Exponent field mask
+integer(kind=int_rsize), parameter :: expstep = 2_int_rsize**expbit
+  !< Step between encoded exponent values in IEEE format
 
 contains
 

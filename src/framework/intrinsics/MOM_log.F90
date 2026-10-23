@@ -13,14 +13,14 @@ use MOM_log_data_n128, only : log_chi_lookup, log_clo_lookup
 implicit none
 
 ! IEEE 754 masks
-integer(kind=int_kind), parameter :: sign_mask = ishft(-1_int_kind, signbit)
+integer(kind=int_rsize), parameter :: sign_mask = ishft(-1_int_rsize, signbit)
   !< Mask for the sign bit
 
-integer(kind=int_kind), parameter :: sum_mask = not(1_int_kind)
+integer(kind=int_rsize), parameter :: sum_mask = not(1_int_rsize)
   !< Clear the lowest significand bit.
 
-integer(kind=int_kind), parameter :: split_mask = &
-    -(2_int_kind**((digits(real_mold) + 1) / 2))
+integer(kind=int_rsize), parameter :: split_mask = &
+    -(2_int_rsize**((digits(real_mold) + 1) / 2))
   !< Retain at most half the significant bits, making x_hi*x_hi exact.
 
 contains
@@ -29,17 +29,17 @@ contains
 !!
 !! Compute log(x) with bitwise reproducibility across platforms.
 module procedure log_repro
-  integer(kind=int_kind), parameter :: near_lo = transfer(0.9375, int_mold)
-  integer(kind=int_kind), parameter :: near_hi = transfer(1.064697265625, int_mold)
-  integer(kind=int_kind) :: xb
+  integer(kind=int_rsize), parameter :: near_lo = transfer(0.9375, int_mold)
+  integer(kind=int_rsize), parameter :: near_hi = transfer(1.064697265625, int_mold)
+  integer(kind=int_rsize) :: xb
     !< Bit representation of x
 
   xb = transfer(x, int_mold)
-  if ((xb < exp_stride) .or. (xb >= ishft(expmask, expbit)) .or. &
+  if ((xb < expstep) .or. (xb >= ishft(expmask, expbit)) .or. &
       ((xb >= near_lo) .and. (xb <= near_hi))) then
     a = log_fallback(x)
   else
-    a = log_table(xb, 0_int_kind)
+    a = log_table(xb, 0_int_rsize)
   endif
 end procedure log_repro
 
@@ -49,15 +49,15 @@ pure function log_fallback(x) result(a)
   !DIR$ ATTRIBUTES NOINLINE :: log_fallback
   real, intent(in) :: x
   real :: a
-  integer(kind=int_kind), parameter :: Kbias = maxexponent(real_mold) - 2
+  integer(kind=int_rsize), parameter :: Kbias = maxexponent(real_mold) - 2
     !< Exponent adjustment used to normalize subnormal inputs
-  integer(kind=int_kind) :: xb
+  integer(kind=int_rsize) :: xb
     ! Bit representation of x
-  integer(kind=int_kind) :: exponent_adjustment
+  integer(kind=int_rsize) :: exponent_adjustment
     ! Correction to the normalized exponent for subnormal inputs
-  integer(kind=int_kind) :: raw_exp
+  integer(kind=int_rsize) :: raw_exp
     ! Biased IEEE exponent field
-  integer(kind=int_kind) :: frac_bits
+  integer(kind=int_rsize) :: frac_bits
     ! Fraction bits of a subnormal input
   integer :: top_frac_bit
     ! Highest set fraction bit of a subnormal input
@@ -69,12 +69,12 @@ pure function log_fallback(x) result(a)
   ! Handle exceptional values before arithmetic range reduction.  This gives
   ! log(0) = -Inf with divide-by-zero, log(negative) = NaN with invalid,
   ! log(+Inf) = +Inf, and NaNs pass through with the usual signaling behavior.
-  if (iand(xb, not(sign_mask)) == 0_int_kind) then
+  if (iand(xb, not(sign_mask)) == 0_int_rsize) then
     a = -1. / abs(x)
     return
   endif
 
-  if (iand(xb, sign_mask) /= 0_int_kind) then
+  if (iand(xb, sign_mask) /= 0_int_rsize) then
     a = (x - x) / (x - x)
     return
   endif
@@ -96,16 +96,16 @@ pure function log_fallback(x) result(a)
   endif
 
   ! Normalize subnormals before entering the shared table solver.
-  exponent_adjustment = 0_int_kind
-  if (raw_exp == 0_int_kind) then
+  exponent_adjustment = 0_int_rsize
+  if (raw_exp == 0_int_rsize) then
     ! Normalize subnormal inputs using integer bit operations rather than
     ! arithmetic scaling, which can be defeated by flush-to-zero modes.
-    frac_bits = iand(xb, exp_stride - 1_int_kind)
+    frac_bits = iand(xb, expstep - 1_int_rsize)
     do top_frac_bit = expbit - 1, 0, -1
       if (btest(frac_bits, top_frac_bit)) exit
     enddo
-    xb = ishft(int(expbias - expbit + top_frac_bit, int_kind), expbit) + &
-        ishft(frac_bits - ishft(1_int_kind, top_frac_bit), expbit - top_frac_bit)
+    xb = ishft(int(expbias - expbit + top_frac_bit, int_rsize), expbit) + &
+        ishft(frac_bits - ishft(1_int_rsize, top_frac_bit), expbit - top_frac_bit)
     exponent_adjustment = -Kbias
   endif
 
@@ -115,9 +115,9 @@ end function log_fallback
 
 !> Shared table solver for positive normal or normalized subnormal inputs.
 pure function log_table(xb, exponent_adjustment) result(a)
-  integer(kind=int_kind), intent(in) :: xb
+  integer(kind=int_rsize), intent(in) :: xb
     !< Bit representation of the positive normal input
-  integer(kind=int_kind), intent(in) :: exponent_adjustment
+  integer(kind=int_rsize), intent(in) :: exponent_adjustment
     !< Correction to the exponent after subnormal normalization; zero for normal inputs
   real :: a
     !< Natural logarithm of the original input [nondim]
@@ -125,13 +125,13 @@ pure function log_table(xb, exponent_adjustment) result(a)
     !< Upper 32 bits of ln2 [nondim]
   real, parameter :: ln2_lo = 1.90821492927058770002e-10
     !< Remaining bits of ln2 [nondim]
-  integer, parameter :: log_table_shift = trailz(exp_stride / log_ndiv)
+  integer, parameter :: log_table_shift = trailz(expstep / log_ndiv)
     !< Arithmetic shift for floor division by the table spacing
-  integer(kind=int_kind), parameter :: log_index_mask = int(log_ndiv - 1, int_kind)
+  integer(kind=int_rsize), parameter :: log_index_mask = int(log_ndiv - 1, int_rsize)
     !< Mask for the table subdivision index
-  integer(kind=int_kind), parameter :: log_offset_bits = transfer(log_table_start, int_mold)
+  integer(kind=int_rsize), parameter :: log_offset_bits = transfer(log_table_start, int_mold)
     !< Bit pattern for the lower end of the table range
-  integer(kind=int_kind) :: tmp, table_bin, K, mb
+  integer(kind=int_rsize) :: tmp, table_bin, K, mb
     !< Offset bits, table bin, binary exponent, and reduced significand bits
   integer :: idiv
     !< Lookup table subdivision index
@@ -153,7 +153,7 @@ pure function log_table(xb, exponent_adjustment) result(a)
   idiv = int(iand(table_bin, log_index_mask))
   K = shifta(tmp, expbit)
 
-  mb = xb - K * exp_stride
+  mb = xb - K * expstep
   z = transfer(mb, real_mold)
   K = K + exponent_adjustment
 
