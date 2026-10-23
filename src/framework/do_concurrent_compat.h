@@ -3,7 +3,7 @@
 
 ! This macro conditionally applies the locality specifier of a do concurrent
 ! loop if supported by the compiler.
-#ifdef HAVE_FC_DO_CONCURRENT_LOCAL
+#ifdef HAVE_FC_DO_CONCURRENT_LOCALITY
 #define DO_LOCALITY(X) X
 #else
 #define DO_LOCALITY(X) ;
