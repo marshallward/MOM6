@@ -184,7 +184,7 @@ AS_IF(
 
 
 # Do concurrent configuration
-MOM6_FC_DO_CONCURRENT_LOCAL
+MOM6_FC_DO_CONCURRENT_LOCALITY
 
 
 # Detect if parentheses are honored in floating point arithmetic
