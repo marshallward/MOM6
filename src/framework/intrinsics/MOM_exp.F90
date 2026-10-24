@@ -15,7 +15,7 @@ implicit none
 
 ! IEEE 754 special values
 integer(kind=int_rsize), parameter :: pos_inf_bits &
-    = ishft(expmask, expbit)
+    = expmask
   !< IEEE +Inf bit pattern
 integer(kind=int_rsize), parameter :: neg_inf_bits &
     = ior(pos_inf_bits, signmask)

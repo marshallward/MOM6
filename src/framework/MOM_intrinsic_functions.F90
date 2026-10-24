@@ -59,10 +59,13 @@ integer, parameter :: expbias = maxexponent(real_mold) - 1
   !< Exponent bias
 integer(kind=int_rsize), parameter :: signmask = ibset(0_int_rsize, signbit)
   !< Sign bit mask
-integer(kind=int_rsize), parameter :: expmask = 2_int_rsize**expwidth - 1
+integer(kind=int_rsize), parameter :: expmax = 2_int_rsize**expwidth - 1
+  !< Maximum encoded exponent value; reserved for infinity and NaN
+integer(kind=int_rsize), parameter :: expmask = ishft(expmax, expbit)
   !< Exponent field mask
 integer(kind=int_rsize), parameter :: expstep = 2_int_rsize**expbit
-  !< Step between encoded exponent values in IEEE format
+  !< Step between encoded exponent values.
+  !! Also the smallest (non-subnormal) representable value.
 
 contains
 

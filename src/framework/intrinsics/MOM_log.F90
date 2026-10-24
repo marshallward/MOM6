@@ -24,8 +24,25 @@ module procedure log_repro
     !< Bit representation of x
 
   xb = transfer(x, int_mold)
-  if ((xb < expstep) .or. (xb >= ishft(expmask, expbit)) .or. &
-      ((xb >= near_lo) .and. (xb <= near_hi))) then
+
+  ! If x is a normal float away from x=1, then use the faster implementation,
+  ! log_table().  For exceptional values, use log_fallback().
+
+  ! xb < expstep (x < 2**-1023) tests for
+  ! * Zero
+  ! * Negative, including -Inf
+  ! * (Positive) subnormal
+  ! * -NaN
+
+  ! xb >= expmask (x >= 2**1024) tests for
+  ! * +Inf
+  ! * +NaN
+
+  ! near_lo <= xb <= near_hi tests if x is near 1 and requires a higher
+  ! precision polynomial.
+
+  if (xb < expstep .or. xb >= expmask &
+      .or. (xb >= near_lo .and. xb <= near_hi)) then
     a = log_fallback(x)
   else
     a = log_table(xb, 0_int_rsize)
@@ -68,9 +85,9 @@ pure function log_fallback(x) result(a)
     return
   endif
 
-  raw_exp = iand(ishft(xb, -expbit), expmask)
+  raw_exp = iand(ishft(xb, -expbit), expmax)
 
-  if (raw_exp == expmask) then
+  if (raw_exp == expmax) then
     a = x + x
     return
   endif
