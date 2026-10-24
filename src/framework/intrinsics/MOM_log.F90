@@ -285,7 +285,7 @@ pure function log1p_compensated_near(x) result(a)
   w = -0.5 * (x_hi * x_hi)
   hi = x + w
   ! Clear the lowest bit to prevent (x - (x + w)) => -w optimization
-  hi = transfer(iand(transfer(hi, int_mold), not(1_int_rsize), real_mold)
+  hi = transfer(iand(transfer(hi, int_mold), not(1_int_rsize)), real_mold)
   lo = ((x - hi) + w) + ((-0.5 * x_lo) * (x_hi + x))
 
   a = (tail + lo) + hi
