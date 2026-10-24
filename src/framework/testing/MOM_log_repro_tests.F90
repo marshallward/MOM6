@@ -1129,9 +1129,11 @@ subroutine check_log_dump_grid(x, x_bits, start_bits, end_bits)
   real, intent(in) :: x(:)
     !< Generated input values [nondim]
   integer(kind=int_kind), intent(in) :: x_bits(:)
-    !< Generated input bit patterns.
-  integer(kind=int_kind), intent(in) :: start_bits, end_bits
-    !< Expected endpoint bit patterns.
+    !< Generated input bit patterns
+  integer(kind=int_kind), intent(in) :: start_bits
+    !< Expected start bit pattern
+  integer(kind=int_kind), intent(in) :: end_bits
+    !< Expected end bit pattern
 
   integer(kind=int_kind) :: denom, step, rem, offset, expected_bits, actual_bits
     !< Host grid spacing, coordinate, and expected and observed bit patterns.
