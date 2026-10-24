@@ -19,27 +19,27 @@ contains
 !! Compute log(x) with bitwise reproducibility across platforms.
 module procedure log_repro
   integer(kind=int_rsize), parameter :: near_lo = transfer(0.9375, int_mold)
+    ! Below |log(x)| = 1/16, ULP spacing halves, doubling a fixed absolute
+    ! error in ULPs.  The lower bound x = 1 - 1/16 keeps these small results in
+    ! the compensated path, since log(1 - 1/16) < -1/16.  The cutoff is an
+    ! error-budget choice, not a requirement.
+    ! TODO: Come back to this
   integer(kind=int_rsize), parameter :: near_hi = transfer(1.064697265625, int_mold)
   integer(kind=int_rsize) :: xb
     !< Bit representation of x
 
   xb = transfer(x, int_mold)
 
-  ! If x is a normal float away from x=1, then use the faster implementation,
-  ! log_table().  For exceptional values, use log_fallback().
-
-  ! xb < expstep (x < 2**-1023) tests for
-  ! * Zero
-  ! * Negative, including -Inf
-  ! * (Positive) subnormal
-  ! * -NaN
-
-  ! xb >= expmask (x >= 2**1024) tests for
-  ! * +Inf
-  ! * +NaN
-
-  ! near_lo <= xb <= near_hi tests if x is near 1 and requires a higher
-  ! precision polynomial.
+  ! Use log_table() for positive normal inputs away from 1.
+  !
+  ! Otherwise use log_fallback():
+  !   xb < expstep:
+  !     zeros, negatives (including -Inf), positive subnormals, and -NaN
+  !
+  !   xb >= expmask:
+  !     +Inf and +NaN
+  !   near_lo <= xb <= near_hi:
+  !     near-one inputs needing the compensated polynomial
 
   if (xb < expstep .or. xb >= expmask &
       .or. (xb >= near_lo .and. xb <= near_hi)) then
@@ -145,6 +145,10 @@ pure function log_table(xb, exponent_adjustment) result(a)
     !< Reduced significand and reduced log1p argument [nondim]
   real :: w, hi, lo
     !< Compensated partial sums for log(x) [nondim]
+
+  ! For encoding x = 2**N * u (1 ≤ u < 2),
+  !   log(x) = N * ln2 + log(u)
+  ! But this would require an asymmetric evaluation around u=1.
 
   ! Table reduction uses the ordered bit pattern of positive normal floats,
   ! xb = biased_exp * 2**52 + frac, so one exponent step is an integer stride
