@@ -24,13 +24,13 @@ import struct
 from decimal import Decimal, ROUND_HALF_EVEN, getcontext
 
 
-## Number of lookup-table subdivisions.
+# Number of lookup-table subdivisions.
 LOG_NDIV = 128
-## Lower bound of the factor-of-two table interval, 11/16.
+# Lower bound of the factor-of-two table interval, 11/16.
 LOG_TABLE_START = 0.6875
-## Bit-pattern step between adjacent binary64 exponents.
+# Bit-pattern step between adjacent binary64 exponents.
 EXP_STRIDE = 2**52
-## Spacing of the grid used to choose log(c).
+# Spacing of the grid used to choose log(c).
 LOGC_GRID = Decimal(2) ** -43
 
 
