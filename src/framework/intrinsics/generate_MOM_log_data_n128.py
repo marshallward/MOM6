@@ -7,12 +7,20 @@ table-reduction strategy described in MOM_log_data_n128.F90:
   * cover the conventional normalized-significand interval [1, 2),
   * divide one positive-normal binary64 exponent stride into 128 equal bins in
     the ordered floating-point bit grid,
-  * choose log(c) on a 2**-43 grid near each nominal bin center,
-  * derive c = exp(log(c)), invc = 1/c, and a high/low split of c.
+  * search representable reciprocals near each nominal bin center's reciprocal,
+  * define c = 1/invc and choose candidates whose -log(invc) nearly lies on a
+    2**-43 grid, keeping the tabulated log(c) on that grid,
+  * derive a high/low split of c for the non-FMA argument reduction.
 
-The default search rule chooses the nearest 2**-43 log(c) grid point to the
-nominal bin-center logarithm.  Use --search-radius and --objective to explore
-nearby grid points explicitly.
+The default reciprocal-first strategy keeps the reciprocal and split center
+consistent while retaining grid-aligned log(c).  It screens candidate grid
+crossings in extended precision and selects the best high-precision result
+among the finalists; the search is not exhaustive over all reciprocal values.
+Use --strategy log-first for the original method: choose log(c) on the grid,
+then derive c = exp(log(c)) and round 1/c.  The --search-radius and --objective
+options explore nearby grid points for that method.
+Reciprocal searches require NumPy with extended-precision longdouble for
+screening; final candidates are evaluated with Decimal at --precision digits.
 
 The generated tables are printed to stdout as a complete Fortran module.
 """
@@ -100,7 +108,48 @@ def choose_logc(c0: Decimal, search_radius: int, objective: str) -> Decimal:
     return Decimal(best_q) * LOGC_GRID
 
 
-def generate_tables(search_radius: int, objective: str):
+def choose_reciprocal(c0: Decimal, radius: int):
+    """Screen log-grid crossings in extended precision, then refine with Decimal."""
+
+    import numpy as np
+
+    if np.finfo(np.longdouble).nmant < 63:
+        raise ValueError("reciprocal searches need extended-precision NumPy longdouble")
+    center_bits = float_to_bits(float(1 / c0))
+    first_bits = center_bits - radius
+    last_bits = center_bits + radius
+    qlo = nearest_integer(-getcontext().ln(Decimal.from_float(bits_to_float(last_bits))) / LOGC_GRID)
+    qhi = nearest_integer(-getcontext().ln(Decimal.from_float(bits_to_float(first_bits))) / LOGC_GRID)
+
+    # Near a log-grid crossing, only the closest binary64 reciprocals can win.
+    # Screen these crossings rather than examining every reciprocal bit pattern.
+    grid = np.arange(qlo, qhi + 1, dtype=np.int64).astype(np.longdouble) * np.longdouble(2)**-43
+    target = np.exp(-grid)
+    rounded = target.astype(np.float64)
+    scores = np.abs(target - rounded.astype(np.longdouble)) / target
+    nbest = min(256, len(scores))
+    shortlist = np.argpartition(scores, nbest - 1)[:nbest]
+
+    candidates = {first_bits, center_bits, last_bits}
+    for index in shortlist:
+        bits = float_to_bits(float(rounded[index]))
+        candidates.update(b for b in (bits - 1, bits, bits + 1) if first_bits <= b <= last_bits)
+
+    best = None
+    best_key = None
+    for bits in sorted(candidates):
+        v_float = bits_to_float(bits)
+        v = Decimal.from_float(v_float)
+        exact_logc = -getcontext().ln(v)
+        logc = Decimal(nearest_integer(exact_logc / LOGC_GRID)) * LOGC_GRID
+        key = (abs(exact_logc - logc), abs(bits - center_bits))
+        if best_key is None or key < best_key:
+            best_key = key
+            best = (v_float, logc, 1 / v)
+    return best
+
+
+def generate_tables(search_radius: int, objective: str, strategy="reciprocal-first", reciprocal_radius=2**29):
     """Generate log table arrays."""
 
     invc = []
@@ -110,12 +159,16 @@ def generate_tables(search_radius: int, objective: str):
 
     for j in range(LOG_NDIV):
         c0 = nominal_center(j)
-        logcj = choose_logc(c0, search_radius, objective)
-        cj = getcontext().exp(logcj)
+        if strategy == "reciprocal-first":
+            invcj, logcj, cj = choose_reciprocal(c0, reciprocal_radius)
+        else:
+            logcj = choose_logc(c0, search_radius, objective)
+            cj = getcontext().exp(logcj)
+            invcj = float(1 / cj)
         chij, cloj = split_high_low(cj)
 
         logc.append(float(logcj))
-        invc.append(float(1 / cj))
+        invc.append(invcj)
         chi.append(chij)
         clo.append(cloj)
 
@@ -136,7 +189,8 @@ def format_array(name: str, values: list[float], comment: str) -> str:
     return "\n".join(lines)
 
 
-def print_module(invc, logc, chi, clo, objective: str, search_radius: int):
+def print_module(invc, logc, chi, clo, objective: str, search_radius: int,
+                 strategy="reciprocal-first", reciprocal_radius=2**29):
     """Print a complete Fortran table module."""
 
     print("! This file is part of MOM6, the Modular Ocean Model version 6.")
@@ -145,7 +199,10 @@ def print_module(invc, logc, chi, clo, objective: str, search_radius: int):
     print()
     print("!> Lookup tables for the reproducible log() function, assuming real64 precision.")
     print("!! Generated by generate_MOM_log_data_n128.py.")
-    print(f"!! log(c) search objective: {objective}; search radius: {search_radius} grid steps.")
+    if strategy == "reciprocal-first":
+        print(f"!! Reciprocal-first search; radius: {reciprocal_radius} binary64 steps on each side.")
+    else:
+        print(f"!! log(c) search objective: {objective}; search radius: {search_radius} grid steps.")
     print("module MOM_log_data_n128")
     print()
     print("implicit none ; private")
@@ -179,6 +236,10 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--precision", type=int, default=100,
                         help="decimal working precision")
+    parser.add_argument("--strategy", choices=["log-first", "reciprocal-first"], default="reciprocal-first",
+                        help="choose grid-aligned logarithms first, or search representable reciprocals")
+    parser.add_argument("--reciprocal-radius", type=int, default=2**29,
+                        help="binary64 reciprocal steps to search on each side for reciprocal-first")
     parser.add_argument("--search-radius", type=int, default=0,
                         help="number of 2**-43 log(c) grid points to search on each side")
     parser.add_argument("--objective", default="nearest-log",
@@ -186,12 +247,19 @@ def main() -> None:
                         help="criterion for selecting among searched log(c) grid points")
     args = parser.parse_args()
 
+    if args.reciprocal_radius < 0 or args.search_radius < 0:
+        parser.error("search radii must be nonnegative")
+    if args.strategy == "reciprocal-first" and (args.search_radius != 0 or args.objective != "nearest-log"):
+        parser.error("--search-radius and --objective apply only to log-first")
+
     if EXP_STRIDE % LOG_NDIV != 0:
         raise SystemExit("LOG_NDIV must evenly divide one binary64 exponent stride")
 
     getcontext().prec = args.precision
-    invc, logc, chi, clo = generate_tables(args.search_radius, args.objective)
-    print_module(invc, logc, chi, clo, args.objective, args.search_radius)
+    invc, logc, chi, clo = generate_tables(args.search_radius, args.objective,
+                                        args.strategy, args.reciprocal_radius)
+    print_module(invc, logc, chi, clo, args.objective, args.search_radius,
+                 args.strategy, args.reciprocal_radius)
 
 
 if __name__ == "__main__":
