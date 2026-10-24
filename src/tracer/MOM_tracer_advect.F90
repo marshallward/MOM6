@@ -42,6 +42,8 @@ type, public :: tracer_advect_CS ; private
                                    !! This is provided for compatibility with legacy simuations.
   type(group_pass_type) :: pass_uhr_vhr_t_hprev !< A structure used for group passes
   integer :: default_advect_scheme = -1 !< Determines which reconstruction to use
+  integer :: nkblock               !< The k-direction block size used in tracer advection calculations,
+                                   !! or 0 to use the full vertical column [nondim].
 end type tracer_advect_CS
 
 !>@{ CPU time clocks
@@ -131,6 +133,7 @@ subroutine advect_tracer(h_end, uhtr, vhtr, OBC, dt, G, GV, US, CS, Reg, x_first
   integer :: stencil_local          ! Stencil for the local adection scheme
   integer :: local_advect_scheme(Reg%ntr) ! contains the list of the advection for each tracer
   integer :: domore_k_tmp
+  integer :: nkk                ! The number of layers in each k block [nondim].
 
   is  = G%isc ; ie  = G%iec ; js  = G%jsc ; je  = G%jec ; nz = GV%ke
   isd = G%isd ; ied = G%ied ; jsd = G%jsd ; jed = G%jed
@@ -146,6 +149,9 @@ subroutine advect_tracer(h_end, uhtr, vhtr, OBC, dt, G, GV, US, CS, Reg, x_first
   if (.not. associated(Reg)) call MOM_error(FATAL, "MOM_tracer_advect: "// &
        "register_tracer must be called before advect_tracer.")
   if (Reg%ntr==0) return
+
+  nkk = CS%nkblock
+  if (nkk == 0) nkk = nz
 
   !$omp target enter data map(to: OBC, Reg, Reg%Tr(:))
   !$omp target enter data map(alloc: domore_u, domore_v, uhr, vhr, &
@@ -1405,6 +1411,7 @@ subroutine tracer_advect_init(Time, G, US, param_file, diag, CS)
 # include "version_variable.h"
   character(len=40)  :: mdl = "MOM_tracer_advect" ! This module's name.
   character(len=256) :: mesg    ! Message for error messages.
+  integer, parameter :: default_nkblock = 1 ! The default k block size [nondim].
 
   if (associated(CS)) then
     call MOM_error(WARNING, "tracer_advect_init called with associated control structure.")
@@ -1419,6 +1426,12 @@ subroutine tracer_advect_init(Time, G, US, param_file, diag, CS)
   call get_param(param_file, mdl, "DT", CS%dt, fail_if_missing=.true., &
           desc="The (baroclinic) dynamics time step.", units="s", scale=US%s_to_T)
   call get_param(param_file, mdl, "DEBUG", CS%debug, default=.false.)
+  call get_param(param_file, mdl, "TRACER_ADVECT_NKBLOCK", CS%nkblock, &
+          desc="The k-direction block size used in tracer advection calculations. "//&
+          "The default 0 setting dynamically uses the full vertical column.", &
+          default=default_nkblock, layoutParam=.true.)
+  if (CS%nkblock < 0) call MOM_error(FATAL, "MOM_tracer_advect, tracer_advect_init: "//&
+          "TRACER_ADVECT_NKBLOCK must be nonnegative; use 0 to select the full vertical column.")
   call get_param(param_file, mdl, "TRACER_ADVECTION_SCHEME", mesg, &
           desc="The horizontal transport scheme for tracers:\n"//&
           trim(TracerAdvectionSchemeDoc), default='PLM')
