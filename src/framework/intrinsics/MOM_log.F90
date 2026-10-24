@@ -13,9 +13,6 @@ use MOM_log_data_n128, only : log_chi_lookup, log_clo_lookup
 implicit none
 
 ! IEEE 754 masks
-integer(kind=int_rsize), parameter :: sign_mask = ishft(-1_int_rsize, signbit)
-  !< Mask for the sign bit
-
 integer(kind=int_rsize), parameter :: sum_mask = not(1_int_rsize)
   !< Clear the lowest significand bit.
 
@@ -69,12 +66,12 @@ pure function log_fallback(x) result(a)
   ! Handle exceptional values before arithmetic range reduction.  This gives
   ! log(0) = -Inf with divide-by-zero, log(negative) = NaN with invalid,
   ! log(+Inf) = +Inf, and NaNs pass through with the usual signaling behavior.
-  if (iand(xb, not(sign_mask)) == 0_int_rsize) then
+  if (iand(xb, not(signmask)) == 0_int_rsize) then
     a = -1. / abs(x)
     return
   endif
 
-  if (iand(xb, sign_mask) /= 0_int_rsize) then
+  if (iand(xb, signmask) /= 0_int_rsize) then
     a = (x - x) / (x - x)
     return
   endif

@@ -18,7 +18,7 @@ integer(kind=int_rsize), parameter :: pos_inf_bits &
     = ishft(expmask, expbit)
   !< IEEE +Inf bit pattern
 integer(kind=int_rsize), parameter :: neg_inf_bits &
-    = ior(pos_inf_bits, ishft(-1_int_rsize, signbit))
+    = ior(pos_inf_bits, signmask)
   !< IEEE -Inf bit pattern
 ! Fast integer rounding offset
 real, parameter :: round_bias = 1.5 * 2_int_rsize**(digits(real_mold) - 1)

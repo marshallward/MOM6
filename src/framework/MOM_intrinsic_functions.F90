@@ -57,6 +57,8 @@ integer, parameter :: expwidth = signbit - expbit
   !< Number of exponent bits
 integer, parameter :: expbias = maxexponent(real_mold) - 1
   !< Exponent bias
+integer(kind=int_rsize), parameter :: signmask = ibset(0_int_rsize, signbit)
+  !< Sign bit mask
 integer(kind=int_rsize), parameter :: expmask = 2_int_rsize**expwidth - 1
   !< Exponent field mask
 integer(kind=int_rsize), parameter :: expstep = 2_int_rsize**expbit
