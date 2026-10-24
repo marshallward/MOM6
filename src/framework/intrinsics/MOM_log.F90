@@ -12,14 +12,6 @@ use MOM_log_data_n128, only : log_chi_lookup, log_clo_lookup
 
 implicit none
 
-! IEEE 754 masks
-integer(kind=int_rsize), parameter :: sum_mask = not(1_int_rsize)
-  !< Clear the lowest significand bit.
-
-integer(kind=int_rsize), parameter :: split_mask = &
-    -(2_int_rsize**((digits(real_mold) + 1) / 2))
-  !< Retain at most half the significant bits, making x_hi*x_hi exact.
-
 contains
 
 !> Reproducible natural logarithm function
@@ -243,6 +235,9 @@ pure function log1p_compensated_near(x) result(a)
       -8.42729367861804930413103634851785932895197979844461832654488007987301762e-2, &
        7.684686137510498609385153891204008164960977636361018003750735920585730455e-2]
     !< Remez coefficients for log1p(x) - x + x*x/2 on [-1/16, 265/4096] [nondim]
+  integer(kind=int_rsize), parameter :: split_mask = &
+      -(2_int_rsize**((digits(real_mold) + 1) / 2))
+    !< Retain at most half the significant bits, making x_hi*x_hi exact.
 
   real :: x2, x3
     !< Powers of the reduced argument [nondim]
@@ -271,7 +266,9 @@ pure function log1p_compensated_near(x) result(a)
   x_lo = x - x_hi
 
   w = -0.5 * (x_hi * x_hi)
-  hi = transfer(iand(transfer(x + w, int_mold), sum_mask), real_mold)
+  hi = x + w
+  ! Clear the lowest bit to prevent (x - (x + w)) => -w optimization
+  hi = transfer(iand(transfer(hi, int_mold), not(1_int_rsize), real_mold)
   lo = ((x - hi) + w) + ((-0.5 * x_lo) * (x_hi + x))
 
   a = (tail + lo) + hi
