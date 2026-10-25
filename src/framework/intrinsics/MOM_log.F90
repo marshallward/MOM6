@@ -141,9 +141,9 @@ pure function log_table(xb, exponent_adjustment) result(a)
 
   ! Using z = 1 + r permits a Taylor-like Remez approximation of log(1 + r).
   ! This can be improved by decomposing [1,2) over N subintervals:
-  !   z ∈ [ 1 + idiv / ndiv, 1 + (idiv + 1) / ndiv )
+  !   z ∈ [ 1 + idiv/ndiv, 1 + (idiv + 1)/ndiv )
 
-  ! Extract the fraction once; its top bits select the subdivision.
+  ! Extract the fractional part of x, and use its top bits to determine idiv.
   frac = iand(xb, expstep - 1)
   idiv = int(shiftr(frac, binshift))
 
@@ -153,12 +153,32 @@ pure function log_table(xb, exponent_adjustment) result(a)
   z = transfer(mb, real_mold)
   K = K + exponent_adjustment
 
-  ! log(x) = K*ln2 + log(c) + log(1+r), where r = z/c - 1.
+  ! Use idiv to rescale z to z' = z/c = 1 + r so that 1 + r is close to 1
+  ! (rather than the idiv interval).
+
+  ! After scaling, log(x) = K ln2 + log(c) + log(1 + r)
+
+  ! NOTE: There are many options for choosing c; see the log data table module.
 
   ! Compute r as ((z - c_hi) - c_lo)) * (1/c) to avoid precision loss near c.
   r = ((z - log_chi_lookup(idiv)) - log_clo_lookup(idiv)) * log_invc_lookup(idiv)
-  ! NOTE: The following is more accurate if evaluated by FMA.
+
+  ! TODO: The following is more accurate, faster, and does not need c_hi and
+  !   c_lo lookups, but must be evaluated by FMA, which cannot be ensured.
   ! r = z * log_invc_lookup(idiv) - 1
+
+  ! Evaluate log(x) using split-precision of upper and lower bits.
+  !
+  ! Using:
+  ! * log(1 + r) = r + log1p(r)
+  ! * K ln2 = K ln2_hi + K ln2_lo
+  !
+  ! logx_hi = (K_ln2_hi + log_c) + r
+  ! logx_lo = [logx_hi residual] + K ln2_lo + log1p(x)
+  ! log(x) = logx_hi + logx_lo
+
+  ! TODO: Explain why log_c does not need to be split
+  ! TODO: Explain the logx_hi resuidal
 
   w = real(K) * ln2_hi + logc_lookup(idiv)
 
