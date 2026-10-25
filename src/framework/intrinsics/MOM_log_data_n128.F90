@@ -10,13 +10,13 @@ module MOM_log_data_n128
 implicit none ; private
 
 public :: ndiv
-public :: log_invc_lookup, logc_lookup, log_chi_lookup, log_clo_lookup
+public :: inv_c, log_c, c_hi, c_lo
 
 !> Number of subdivisions in the log table interval.
 integer, parameter :: ndiv = 128
 
 !> Lookup table of 1 / c for log_repro() table interval centers [nondim]
-real, parameter :: log_invc_lookup(0:ndiv-1) = [ &
+real, parameter :: inv_c(0:ndiv-1) = [ &
      9.96108986590457546e-01,  9.88416979609432311e-01,  9.80842919100529675e-01,  9.73383974314603551e-01, &
      9.66037795056946424e-01,  9.58801514056573212e-01,  9.51672908020454567e-01,  9.44649455374588887e-01, &
      9.37728920637861507e-01,  9.30909084604738535e-01,  9.24187672388699477e-01,  9.17562741791512093e-01, &
@@ -52,7 +52,7 @@ real, parameter :: log_invc_lookup(0:ndiv-1) = [ &
 ]
 
 !> Lookup table of log(c) for log_repro() table interval centers [nondim]
-real, parameter :: logc_lookup(0:ndiv-1) = [ &
+real, parameter :: log_c(0:ndiv-1) = [ &
      3.89860309633149882e-03,  1.16506261307449677e-02,  1.93429554789190661e-02,  2.69766453359352454e-02, &
      3.45523202172444144e-02,  4.20711973069956002e-02,  4.95338872414095022e-02,  5.69413669996947647e-02, &
      6.42943689314279254e-02,  7.15936599592623679e-02,  7.88401193184427029e-02,  8.60343179674600833e-02, &
@@ -88,7 +88,7 @@ real, parameter :: logc_lookup(0:ndiv-1) = [ &
 ]
 
 !> Lookup table of high parts of c for log_repro() table interval centers [nondim]
-real, parameter :: log_chi_lookup(0:ndiv-1) = [ &
+real, parameter :: c_hi(0:ndiv-1) = [ &
      1.00390621253489631e+00,  1.01171875901519281e+00,  1.01953124249195581e+00,  1.02734380921376656e+00, &
      1.03515618655588071e+00,  1.04296873267243906e+00,  1.05078119968768369e+00,  1.05859374004874907e+00, &
      1.06640626943635319e+00,  1.07421875727488181e+00,  1.08203131233654348e+00,  1.08984372888499359e+00, &
@@ -124,7 +124,7 @@ real, parameter :: log_chi_lookup(0:ndiv-1) = [ &
 ]
 
 !> Lookup table of low parts of c for log_repro() table interval centers [nondim]
-real, parameter :: log_clo_lookup(0:ndiv-1) = [ &
+real, parameter :: c_lo(0:ndiv-1) = [ &
     -5.55359976040754837e-17,  1.55654840809894770e-18,  8.23992701475781148e-17,  8.57577208222087585e-17, &
     -9.06213875438847788e-17,  7.67585664138214260e-17,  1.05042357450122898e-16,  7.53705405051301018e-17, &
      8.16292665170198967e-19, -4.02809794728349184e-17, -7.65435490597655646e-18, -9.07295117468648905e-17, &

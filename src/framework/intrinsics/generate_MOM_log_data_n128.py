@@ -206,21 +206,21 @@ def print_module(invc, logc, chi, clo, objective: str, search_radius: int,
     print("implicit none ; private")
     print()
     print("public :: ndiv")
-    print("public :: log_invc_lookup, logc_lookup, log_chi_lookup, log_clo_lookup")
+    print("public :: inv_c, log_c, c_hi, c_lo")
     print()
     print("!> Number of subdivisions in the log table interval.")
     print(f"integer, parameter :: ndiv = {LOG_NDIV}")
     print()
-    print(format_array("log_invc_lookup", invc,
+    print(format_array("inv_c", invc,
                        "!> Lookup table of 1 / c for log_repro() table interval centers [nondim]"))
     print()
-    print(format_array("logc_lookup", logc,
+    print(format_array("log_c", logc,
                        "!> Lookup table of log(c) for log_repro() table interval centers [nondim]"))
     print()
-    print(format_array("log_chi_lookup", chi,
+    print(format_array("c_hi", chi,
                        "!> Lookup table of high parts of c for log_repro() table interval centers [nondim]"))
     print()
-    print(format_array("log_clo_lookup", clo,
+    print(format_array("c_lo", clo,
                        "!> Lookup table of low parts of c for log_repro() table interval centers [nondim]"))
     print()
     print("end module MOM_log_data_n128")

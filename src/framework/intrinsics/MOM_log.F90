@@ -7,8 +7,8 @@
 submodule (MOM_intrinsic_functions) MOM_log
 
 use MOM_log_data_n128, only : ndiv
-use MOM_log_data_n128, only : log_invc_lookup, logc_lookup
-use MOM_log_data_n128, only : log_chi_lookup, log_clo_lookup
+use MOM_log_data_n128, only : inv_c, log_c
+use MOM_log_data_n128, only : c_hi, c_lo
 
 implicit none
 
@@ -153,41 +153,40 @@ pure function log_table(xb, exponent_adjustment) result(a)
   z = transfer(mb, real_mold)
   K = K + exponent_adjustment
 
-  ! Use idiv to rescale z to z' = z/c = 1 + r so that 1 + r is close to 1
-  ! (rather than the idiv interval).
+  ! Use idiv to rescale z to z' = z/c = 1 + r so that 1 + r is close to 1.
+  ! After scaling, log(x) = K ln2 + log(c) + log(1 + r).
 
-  ! After scaling, log(x) = K ln2 + log(c) + log(1 + r)
-
-  ! NOTE: There are many options for choosing c; see the log data table module.
+  ! NOTE: See log data table module for c(idiv) explanation.
 
   ! Compute r as ((z - c_hi) - c_lo)) * (1/c) to avoid precision loss near c.
-  r = ((z - log_chi_lookup(idiv)) - log_clo_lookup(idiv)) * log_invc_lookup(idiv)
+  r = ((z - c_hi(idiv)) - c_lo(idiv)) * inv_c(idiv)
 
   ! TODO: The following is more accurate, faster, and does not need c_hi and
   !   c_lo lookups, but must be evaluated by FMA, which cannot be ensured.
-  ! r = z * log_invc_lookup(idiv) - 1
+  ! r = z * inv_c(idiv) - 1
 
   ! Evaluate log(x) using split-precision of upper and lower bits.
   !
   ! Using:
-  ! * log(1 + r) = r + log1p(r)
+  ! * log(1 + r) = r + log1p_tail(r)
   ! * K ln2 = K ln2_hi + K ln2_lo
   !
   ! logx_hi = (K_ln2_hi + log_c) + r
   ! logx_lo = [logx_hi residual] + K ln2_lo + log1p(x)
+  !
   ! log(x) = logx_hi + logx_lo
 
   ! TODO: Explain why log_c does not need to be split
   ! TODO: Explain the logx_hi resuidal
 
-  w = real(K) * ln2_hi + logc_lookup(idiv)
+  w = real(K) * ln2_hi + log_c(idiv)
 
   hi = w + r
   ! XXX: Prevent (w - (w + r)) => r optimization by adding a subroundoff term.
   hi = hi + epsilon(real_mold) / 256.
   lo = ((w - hi) + r) + real(K) * ln2_lo
 
-  a = hi + (lo + log1p_remez_tail_4(r))
+  a = hi + (lo + log1p_tail_remez_4(r))
 end function log_table
 
 
@@ -213,7 +212,7 @@ end function log1p_taylor_tail_6
 !> Remez estimate of log1p(x) - x over the log_repro() table-reduced range.
 !! Uses a degree-4 polynomial for (log1p(x) - x) / x**2, giving a total
 !! degree-6 approximation to log1p(x) - x.
-pure function log1p_remez_tail_4(x) result(a)
+pure function log1p_tail_remez_4(x) result(a)
   real, intent(in) :: x
     !< Input value; expected range is approximately [-0.004, 0.004] [nondim]
   real :: a
@@ -240,7 +239,7 @@ pure function log1p_remez_tail_4(x) result(a)
   p23 = c(2) + x * c(3)
 
   a = x2 * ((p01 + x2 * p23) + x4 * c(4))
-end function log1p_remez_tail_4
+end function log1p_tail_remez_4
 
 
 !> Compensated near-one estimate of log1p(x).
@@ -303,6 +302,5 @@ pure function log1p_compensated_near(x) result(a)
 
   a = (tail + lo) + hi
 end function log1p_compensated_near
-
 
 end submodule MOM_log
