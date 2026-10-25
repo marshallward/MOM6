@@ -58,8 +58,8 @@ def nearest_integer(x: Decimal) -> int:
     return int(x.to_integral_value(rounding=ROUND_HALF_EVEN))
 
 
-def nominal_center(j: int) -> Decimal:
-    """Return the nominal c value at the center of table bin j."""
+def bin_midpoint(j: int) -> Decimal:
+    """Return the exact midpoint of table bin j."""
 
     start_bits = float_to_bits(1.0)
     step_bits = EXP_STRIDE // LOG_NDIV
@@ -70,9 +70,9 @@ def nominal_center(j: int) -> Decimal:
 def split_high_low(c: Decimal) -> tuple[float, float]:
     """Split c into a binary64 high part and residual low part."""
 
-    chi = float(c)
-    clo = float(c - Decimal.from_float(chi))
-    return chi, clo
+    c_hi = float(c)
+    c_lo = float(c - Decimal.from_float(c_hi))
+    return c_hi, c_lo
 
 
 def choose_logc(c0: Decimal, search_radius: int, objective: str) -> Decimal:
@@ -86,16 +86,16 @@ def choose_logc(c0: Decimal, search_radius: int, objective: str) -> Decimal:
     for q in range(q0 - search_radius, q0 + search_radius + 1):
         logc = Decimal(q) * LOGC_GRID
         c = getcontext().exp(logc)
-        chi, clo = split_high_low(c)
+        c_hi, c_lo = split_high_low(c)
 
         if objective == "nearest-log":
             score = abs(logc - logc0)
         elif objective == "nearest-c":
             score = abs(c - c0)
         elif objective == "nearest-chi":
-            score = abs(Decimal.from_float(chi) - c0)
+            score = abs(Decimal.from_float(c_hi) - c0)
         elif objective == "smallest-clo":
-            score = abs(Decimal.from_float(clo))
+            score = abs(Decimal.from_float(c_lo))
         else:
             raise ValueError(f"unknown objective {objective!r}")
 
@@ -152,25 +152,25 @@ def generate_tables(search_radius: int, objective: str, strategy="reciprocal-fir
 
     invc = []
     logc = []
-    chi = []
-    clo = []
+    c_hi = []
+    c_lo = []
 
     for j in range(LOG_NDIV):
-        c0 = nominal_center(j)
+        c0 = bin_midpoint(j)
         if strategy == "reciprocal-first":
             invcj, logcj, cj = choose_reciprocal(c0, reciprocal_radius)
         else:
             logcj = choose_logc(c0, search_radius, objective)
             cj = getcontext().exp(logcj)
             invcj = float(1 / cj)
-        chij, cloj = split_high_low(cj)
+        c_hi_j, c_lo_j = split_high_low(cj)
 
         logc.append(float(logcj))
         invc.append(invcj)
-        chi.append(chij)
-        clo.append(cloj)
+        c_hi.append(c_hi_j)
+        c_lo.append(c_lo_j)
 
-    return invc, logc, chi, clo
+    return invc, logc, c_hi, c_lo
 
 
 def format_array(name: str, values: list[float], comment: str) -> str:
@@ -187,7 +187,7 @@ def format_array(name: str, values: list[float], comment: str) -> str:
     return "\n".join(lines)
 
 
-def print_module(invc, logc, chi, clo, objective: str, search_radius: int,
+def print_module(invc, logc, c_hi, c_lo, objective: str, search_radius: int,
                  strategy="reciprocal-first", reciprocal_radius=2**29):
     """Print a complete Fortran table module."""
 
@@ -217,10 +217,10 @@ def print_module(invc, logc, chi, clo, objective: str, search_radius: int,
     print(format_array("log_c", logc,
                        "!> Lookup table of log(c) for log_repro() table interval centers [nondim]"))
     print()
-    print(format_array("c_hi", chi,
+    print(format_array("c_hi", c_hi,
                        "!> Lookup table of high parts of c for log_repro() table interval centers [nondim]"))
     print()
-    print(format_array("c_lo", clo,
+    print(format_array("c_lo", c_lo,
                        "!> Lookup table of low parts of c for log_repro() table interval centers [nondim]"))
     print()
     print("end module MOM_log_data_n128")
@@ -251,9 +251,9 @@ def main() -> None:
         raise SystemExit("LOG_NDIV must evenly divide one binary64 exponent stride")
 
     getcontext().prec = args.precision
-    invc, logc, chi, clo = generate_tables(args.search_radius, args.objective,
+    invc, logc, c_hi, c_lo = generate_tables(args.search_radius, args.objective,
                                         args.strategy, args.reciprocal_radius)
-    print_module(invc, logc, chi, clo, args.objective, args.search_radius,
+    print_module(invc, logc, c_hi, c_lo, args.objective, args.search_radius,
                  args.strategy, args.reciprocal_radius)
 
 
