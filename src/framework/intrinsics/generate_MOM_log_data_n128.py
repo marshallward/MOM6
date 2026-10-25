@@ -177,7 +177,7 @@ def format_array(name: str, values: list[float], comment: str) -> str:
     """Return a Fortran parameter array definition."""
 
     lines = [comment]
-    lines.append(f"real, parameter :: {name}(0:log_ndiv-1) = [ &")
+    lines.append(f"real, parameter :: {name}(0:ndiv-1) = [ &")
     for i in range(0, len(values), 4):
         chunk = values[i : i + 4]
         suffix = ", &" if i + 4 < len(values) else " &"
@@ -205,11 +205,11 @@ def print_module(invc, logc, chi, clo, objective: str, search_radius: int,
     print()
     print("implicit none ; private")
     print()
-    print("public :: log_ndiv")
+    print("public :: ndiv")
     print("public :: log_invc_lookup, logc_lookup, log_chi_lookup, log_clo_lookup")
     print()
     print("!> Number of subdivisions in the log table interval.")
-    print(f"integer, parameter :: log_ndiv = {LOG_NDIV}")
+    print(f"integer, parameter :: ndiv = {LOG_NDIV}")
     print()
     print(format_array("log_invc_lookup", invc,
                        "!> Lookup table of 1 / c for log_repro() table interval centers [nondim]"))

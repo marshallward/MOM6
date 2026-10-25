@@ -6,7 +6,7 @@
 
 submodule (MOM_intrinsic_functions) MOM_log
 
-use MOM_log_data_n128, only : log_ndiv
+use MOM_log_data_n128, only : ndiv
 use MOM_log_data_n128, only : log_invc_lookup, logc_lookup
 use MOM_log_data_n128, only : log_chi_lookup, log_clo_lookup
 
@@ -19,23 +19,16 @@ contains
 !! Compute log(x) with bitwise reproducibility across platforms.
 module procedure log_repro
   integer(kind=int_rsize), parameter :: near_lo = transfer(0.9375, int_mold)
-    ! Below |log(x)| = 1/16, ULP spacing halves, doubling a fixed absolute
-    ! error in ULPs.  The lower bound x = 1 - 1/16 keeps these small results in
-    ! the compensated path, since log(1 - 1/16) < -1/16.  The cutoff is an
-    ! error-budget choice, not a requirement.
-    ! TODO: Come back to this
   integer(kind=int_rsize), parameter :: near_hi = transfer(1.064697265625, int_mold)
   integer(kind=int_rsize) :: xb
-    !< Bit representation of x
+    ! Bit representation of x
 
   xb = transfer(x, int_mold)
 
   ! Use log_table() for positive normal inputs away from 1.
-  !
   ! Otherwise use log_fallback():
   !   xb < expstep:
   !     zeros, negatives (including -Inf), positive subnormals, and -NaN
-  !
   !   xb >= expmask:
   !     +Inf and +NaN
   !   near_lo <= xb <= near_hi:
@@ -124,16 +117,17 @@ pure function log_table(xb, exponent_adjustment) result(a)
   integer(kind=int_rsize), intent(in) :: xb
     !< Bit representation of the positive normal input
   integer(kind=int_rsize), intent(in) :: exponent_adjustment
-    !< Correction to the exponent after subnormal normalization; zero for normal inputs
+    !< Subnormal exponent correction; zero for normal inputs
   real :: a
     !< Natural logarithm of the original input [nondim]
+
   real, parameter :: ln2_hi = 0.69314718036912381649017333984375
     !< Upper 32 bits of ln2 [nondim]
   real, parameter :: ln2_lo = 1.90821492927058770002e-10
     !< Remaining bits of ln2 [nondim]
-  integer, parameter :: log_table_shift = trailz(expstep / log_ndiv)
-    !< Shift to retain the fraction bits used for the table index
-  integer(kind=int_rsize), parameter :: log_index_mask = int(log_ndiv - 1, int_rsize)
+  integer, parameter :: binshift = expbit - trailz(ndiv)
+    !< Shift to move fraction subdivision index (idiv) to lowest bits
+  integer(kind=int_rsize), parameter :: binmask = int(ndiv - 1, int_rsize)
     !< Mask for the table subdivision index
   integer(kind=int_rsize) :: K, mb
     !< Binary exponent and normalized significand bits
@@ -144,8 +138,16 @@ pure function log_table(xb, exponent_adjustment) result(a)
   real :: w, hi, lo
     !< Compensated partial sums for log(x) [nondim]
 
-  ! The top fraction bits select the bin in [1, 2).
-  idiv = int(iand(shiftr(xb, log_table_shift), log_index_mask))
+  ! For encoding x = 2**K z, z ∈ [1,2)
+  !   log(x) = K ln2 + log(z)
+
+  ! Using z = 1 + r permits a Taylor-like Remez approximation of log(1 + r).
+  ! This can be improved by decomposing [1,2) over N subintervals:
+  !   z ∈ [ 1 + idiv / ndiv, 1 + (idiv + 1) / ndiv )
+
+  ! Determine subdivision index (idiv) by shifting it to the lowest bits, then
+  ! mask out all higher bits.
+  idiv = int(iand(shiftr(xb, binshift), binmask))
 
   ! x = 2**K z: remove the exponent bias and set z's exponent to that of 1.
   K = shiftr(xb, expbit) - expbias
@@ -158,7 +160,7 @@ pure function log_table(xb, exponent_adjustment) result(a)
   ! Compute r as ((z - c_hi) - c_lo)) * (1/c) to avoid precision loss near c.
   r = ((z - log_chi_lookup(idiv)) - log_clo_lookup(idiv)) * log_invc_lookup(idiv)
   ! NOTE: The following is more accurate if evaluated by FMA.
-  !r = z * log_invc_lookup(idiv) - 1
+  ! r = z * log_invc_lookup(idiv) - 1
 
   w = real(K) * ln2_hi + logc_lookup(idiv)
 
