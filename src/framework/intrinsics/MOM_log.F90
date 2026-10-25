@@ -147,10 +147,12 @@ pure function log_table(xb, exponent_adjustment) result(a)
   frac = iand(xb, expstep - 1)
   idiv = int(shiftr(frac, binshift))
 
-  ! x = 2**K z: remove the exponent bias and set z's exponent to that of 1.
+  ! Extract the exponent and significand from xb
   K = shiftr(xb, expbit) - expbias
   mb = ior(frac, transfer(1., int_mold))
   z = transfer(mb, real_mold)
+
+  ! Apply the subnormal rescaling if present.
   K = K + exponent_adjustment
 
   ! Use idiv to rescale z to z' = z/c = 1 + r so that 1 + r is close to 1.
@@ -169,7 +171,6 @@ pure function log_table(xb, exponent_adjustment) result(a)
   ! Reconstruct log(x) with compensated high and low parts.
 
   ! Compute the upper part of log(x)
-  ! TODO: Explain why log_c does not need to be split
   w = real(K) * ln2_hi + log_c(idiv)
   hi = w + r
 
@@ -177,6 +178,7 @@ pure function log_table(xb, exponent_adjustment) result(a)
   hi = hi + epsilon(real_mold) / 256.
 
   ! Recover the rounding residual of hi, and append K ln2_lo.
+  ! Cancel w first, since it is the larger of w + r.
   lo = ((w - hi) + r) + real(K) * ln2_lo
 
   ! Apply the complete residual to hi to recover log(x).
