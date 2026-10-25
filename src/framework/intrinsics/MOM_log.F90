@@ -136,7 +136,7 @@ pure function log_table(xb, exponent_adjustment) result(a)
   real :: w, hi, lo
     !< Compensated partial sums for log(x) [nondim]
 
-  ! For encoding x = 2**K z, z ∈ [1,2)
+  ! For encoding x = 2**K z, z ∈ [1,2),
   !   log(x) = K ln2 + log(z)
 
   ! Using z = 1 + r permits a Taylor-like Remez approximation of log(1 + r).
@@ -154,59 +154,34 @@ pure function log_table(xb, exponent_adjustment) result(a)
   K = K + exponent_adjustment
 
   ! Use idiv to rescale z to z' = z/c = 1 + r so that 1 + r is close to 1.
-  ! After scaling, log(x) = K ln2 + log(c) + log(1 + r).
+  ! After scaling,
+  !   log(x) = K ln2 + log(c) + log(1 + r).
 
-  ! NOTE: See log data table module for c(idiv) explanation.
+  ! NOTE: See log data table module for c(idiv) derivation.
 
-  ! Compute r as ((z - c_hi) - c_lo)) * (1/c) to avoid precision loss near c.
+  ! Compute r as ((z - c_hi) - c_lo) * (1/c) to avoid precision loss near c.
   r = ((z - c_hi(idiv)) - c_lo(idiv)) * inv_c(idiv)
 
-  ! TODO: The following is more accurate, faster, and does not need c_hi and
-  !   c_lo lookups, but must be evaluated by FMA, which cannot be ensured.
+  ! NOTE: The following can be more accurate, faster, and does not need c_hi
+  !   and c_lo lookups, but must be evaluated by FMA, which cannot be ensured.
   ! r = z * inv_c(idiv) - 1
 
-  ! Evaluate log(x) using split-precision of upper and lower bits.
-  !
-  ! Using:
-  ! * log(1 + r) = r + log1p_tail(r)
-  ! * K ln2 = K ln2_hi + K ln2_lo
-  !
-  ! logx_hi = (K_ln2_hi + log_c) + r
-  ! logx_lo = [logx_hi residual] + K ln2_lo + log1p(x)
-  !
-  ! log(x) = logx_hi + logx_lo
+  ! Reconstruct log(x) with compensated high and low parts.
 
+  ! Compute the upper part of log(x)
   ! TODO: Explain why log_c does not need to be split
-  ! TODO: Explain the logx_hi resuidal
-
   w = real(K) * ln2_hi + log_c(idiv)
-
   hi = w + r
-  ! XXX: Prevent (w - (w + r)) => r optimization by adding a subroundoff term.
+
+  ! XXX: Prevent (w - (w + r)) ~> r optimization by adding a subroundoff term.
   hi = hi + epsilon(real_mold) / 256.
+
+  ! Recover the rounding residual of hi, and append K ln2_lo.
   lo = ((w - hi) + r) + real(K) * ln2_lo
 
+  ! Apply the complete residual to hi to recover log(x).
   a = hi + (lo + log1p_tail_remez_4(r))
 end function log_table
-
-
-!> Taylor estimate of log1p(x) - x over the log_repro() table-reduced range.
-pure function log1p_taylor_tail_6(x) result(a)
-  real, intent(in) :: x
-    !< Input value; expected range is approximately [-0.004, 0.004] [nondim]
-  real :: a
-    !< Approximation of log1p(x) - x [nondim]
-
-  real, parameter :: c(2:6) = [ &
-      -0.5, &
-       0.33333333333333333333333333333333333333333333333333, &
-      -0.25, &
-       0.20000000000000000000000000000000000000000000000000, &
-      -0.16666666666666666666666666666666666666666666666667]
-    !< Taylor coefficients for log1p(x) - x through degree 6 [nondim]
-
-  a = x * x * (c(2) + x * (c(3) + x * (c(4) + x * (c(5) + x * c(6)))))
-end function log1p_taylor_tail_6
 
 
 !> Remez estimate of log1p(x) - x over the log_repro() table-reduced range.
