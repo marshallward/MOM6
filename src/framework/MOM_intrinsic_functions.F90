@@ -67,6 +67,14 @@ integer(kind=int_rsize), parameter :: expstep = 2_int_rsize**expbit
   !< Step between encoded exponent values.
   !! Also the smallest (non-subnormal) representable value.
 
+! Mathematical constants (assuming real64)
+real, parameter :: ln2 = 0.693147180559945309417232121458176568
+  !< Natural logarithm of 2 [nondim]
+real, parameter :: ln2_hi = 0.69314718036912381649017333984375
+  !< Upper 32 bits of ln2 [nondim]
+real, parameter :: ln2_lo = 1.90821492927058770002e-10
+  !< Remaining bits of ln2 [nondim]
+
 contains
 
 !> Evaluate the inverse cosh, either using a math library or an

@@ -33,9 +33,6 @@ contains
 !!
 !! Compute exp(x) with bitwise reproducibility across platforms.
 module procedure exp_repro
-  ! ln2 estimates
-  real, parameter :: ln2 = 0.693147180559945309417232121458176568
-    !< ln2: 0.693147180559945309417232... [nondim]
   real, parameter :: I_ln2 = 1.44269504088896340735992468100189214
     !< 1 / ln2: 1.4426950408889634073599... [nondim]
 
@@ -46,13 +43,6 @@ module procedure exp_repro
   real, parameter :: xmin &
       = real(minexponent(real_mold) - digits(real_mold) - 1) * ln2
     !< Smallest x value before exp(x) underflow [nondim]
-
-  ! Double-real precision of ln2 used in Cody-Waite range reduction
-  ! NOTE: This split assumes real64 precision.
-  real, parameter :: ln2_hi = 0.69314718036912381649017333984375
-    !< Upper 32 bits of ln2: 6.93147180369123816490e-01 [nondim]
-  real, parameter :: ln2_lo = 1.90821492927058770002e-10
-    !< Lower precision bits of ln2: 1.90821492927058770002e-10 [nondim]
 
   ! Subdivide [-ln2/2, ln2/2] into ndiv subintervals to reduce approximation range.
   ! This allows for a smaller polynomial at the cost of a lookup table.

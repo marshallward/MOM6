@@ -121,10 +121,6 @@ pure function log_table(xb, exponent_adjustment) result(a)
   real :: a
     !< Natural logarithm of the original input [nondim]
 
-  real, parameter :: ln2_hi = 0.69314718036912381649017333984375
-    !< Upper 32 bits of ln2 [nondim]
-  real, parameter :: ln2_lo = 1.90821492927058770002e-10
-    !< Remaining bits of ln2 [nondim]
   integer, parameter :: binshift = expbit - trailz(ndiv)
     !< Shift to move fraction subdivision index (idiv) to lowest bits
   integer(kind=int_rsize) :: K, mb, frac
