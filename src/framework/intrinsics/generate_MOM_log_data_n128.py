@@ -34,8 +34,6 @@ from decimal import Decimal, ROUND_HALF_EVEN, getcontext
 
 # Number of lookup-table subdivisions.
 LOG_NDIV = 128
-# Lower bound of the conventional normalized-significand interval [1, 2).
-LOG_TABLE_START = 1.0
 # Bit-pattern step between adjacent binary64 exponents.
 EXP_STRIDE = 2**52
 # Spacing of the grid used to choose log(c).
@@ -63,7 +61,7 @@ def nearest_integer(x: Decimal) -> int:
 def nominal_center(j: int) -> Decimal:
     """Return the nominal c value at the center of table bin j."""
 
-    start_bits = float_to_bits(LOG_TABLE_START)
+    start_bits = float_to_bits(1.0)
     step_bits = EXP_STRIDE // LOG_NDIV
     center_bits = start_bits + j * step_bits + step_bits // 2
     return Decimal.from_float(bits_to_float(center_bits))
@@ -207,14 +205,11 @@ def print_module(invc, logc, chi, clo, objective: str, search_radius: int,
     print()
     print("implicit none ; private")
     print()
-    print("public :: log_ndiv, log_table_start")
+    print("public :: log_ndiv")
     print("public :: log_invc_lookup, logc_lookup, log_chi_lookup, log_clo_lookup")
     print()
     print("!> Number of subdivisions in the log table interval.")
     print(f"integer, parameter :: log_ndiv = {LOG_NDIV}")
-    print()
-    print("!> Lower end of the normalized-significand interval [1, 2) [nondim]")
-    print(f"real, parameter :: log_table_start = {LOG_TABLE_START:.17g}")
     print()
     print(format_array("log_invc_lookup", invc,
                        "!> Lookup table of 1 / c for log_repro() table interval centers [nondim]"))

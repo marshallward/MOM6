@@ -6,7 +6,7 @@
 
 submodule (MOM_intrinsic_functions) MOM_log
 
-use MOM_log_data_n128, only : log_ndiv, log_table_start
+use MOM_log_data_n128, only : log_ndiv
 use MOM_log_data_n128, only : log_invc_lookup, logc_lookup
 use MOM_log_data_n128, only : log_chi_lookup, log_clo_lookup
 
@@ -132,13 +132,11 @@ pure function log_table(xb, exponent_adjustment) result(a)
   real, parameter :: ln2_lo = 1.90821492927058770002e-10
     !< Remaining bits of ln2 [nondim]
   integer, parameter :: log_table_shift = trailz(expstep / log_ndiv)
-    !< Arithmetic shift for floor division by the table spacing
+    !< Shift to retain the fraction bits used for the table index
   integer(kind=int_rsize), parameter :: log_index_mask = int(log_ndiv - 1, int_rsize)
     !< Mask for the table subdivision index
-  integer(kind=int_rsize), parameter :: log_offset_bits = transfer(log_table_start, int_mold)
-    !< Bit pattern for the lower end of the table range
-  integer(kind=int_rsize) :: tmp, table_bin, K, mb
-    !< Offset bits, table bin, binary exponent, and reduced significand bits
+  integer(kind=int_rsize) :: K, mb
+    !< Binary exponent and normalized significand bits
   integer :: idiv
     !< Lookup table subdivision index
   real :: z, r
@@ -146,25 +144,12 @@ pure function log_table(xb, exponent_adjustment) result(a)
   real :: w, hi, lo
     !< Compensated partial sums for log(x) [nondim]
 
-  ! For encoding x = 2**N * u (1 ≤ u < 2),
-  !   log(x) = N * ln2 + log(u)
-  ! But this would require an asymmetric evaluation around u=1.
+  ! The top fraction bits select the bin in [1, 2).
+  idiv = int(iand(shiftr(xb, log_table_shift), log_index_mask))
 
-  ! Reduce x = 2**K z with 1 <= z < 2, the conventional normalized significand.
-  ! Table reduction uses the ordered bit pattern of positive normal floats,
-  ! xb = biased_exp * 2**52 + frac, so one exponent step is an integer stride
-  ! of 2**52 and the table bins subdivide that stride.
-
-  ! Use the lower bound of the table as an offset to determine the bin
-  tmp = xb - log_offset_bits
-
-  ! Arithmetic shifts round down even for negative offsets.  With a power-of-two
-  ! number of table subdivisions, masking gives the nonnegative modulo index.
-  table_bin = shifta(tmp, log_table_shift)
-  idiv = int(iand(table_bin, log_index_mask))
-  K = shifta(tmp, expbit)
-
-  mb = xb - K * expstep
+  ! x = 2**K z: remove the exponent bias and set z's exponent to that of 1.
+  K = shiftr(xb, expbit) - expbias
+  mb = ior(iand(xb, expstep - 1), transfer(1., int_mold))
   z = transfer(mb, real_mold)
   K = K + exponent_adjustment
 
@@ -172,6 +157,8 @@ pure function log_table(xb, exponent_adjustment) result(a)
 
   ! Compute r as ((z - c_hi) - c_lo)) * (1/c) to avoid precision loss near c.
   r = ((z - log_chi_lookup(idiv)) - log_clo_lookup(idiv)) * log_invc_lookup(idiv)
+  ! NOTE: The following is more accurate if evaluated by FMA.
+  !r = z * log_invc_lookup(idiv) - 1
 
   w = real(K) * ln2_hi + logc_lookup(idiv)
 

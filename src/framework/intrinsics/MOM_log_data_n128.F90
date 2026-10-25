@@ -9,14 +9,11 @@ module MOM_log_data_n128
 
 implicit none ; private
 
-public :: log_ndiv, log_table_start
+public :: log_ndiv
 public :: log_invc_lookup, logc_lookup, log_chi_lookup, log_clo_lookup
 
 !> Number of subdivisions in the log table interval.
 integer, parameter :: log_ndiv = 128
-
-!> Lower end of the normalized-significand interval [1, 2) [nondim]
-real, parameter :: log_table_start = 1
 
 !> Lookup table of 1 / c for log_repro() table interval centers [nondim]
 real, parameter :: log_invc_lookup(0:log_ndiv-1) = [ &
