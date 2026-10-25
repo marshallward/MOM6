@@ -127,10 +127,8 @@ pure function log_table(xb, exponent_adjustment) result(a)
     !< Remaining bits of ln2 [nondim]
   integer, parameter :: binshift = expbit - trailz(ndiv)
     !< Shift to move fraction subdivision index (idiv) to lowest bits
-  integer(kind=int_rsize), parameter :: binmask = int(ndiv - 1, int_rsize)
-    !< Mask for the table subdivision index
-  integer(kind=int_rsize) :: K, mb
-    !< Binary exponent and normalized significand bits
+  integer(kind=int_rsize) :: K, mb, frac
+    !< Binary exponent, normalized significand bits, and fraction bits
   integer :: idiv
     !< Lookup table subdivision index
   real :: z, r
@@ -145,13 +143,13 @@ pure function log_table(xb, exponent_adjustment) result(a)
   ! This can be improved by decomposing [1,2) over N subintervals:
   !   z ∈ [ 1 + idiv / ndiv, 1 + (idiv + 1) / ndiv )
 
-  ! Determine subdivision index (idiv) by shifting it to the lowest bits, then
-  ! mask out all higher bits.
-  idiv = int(iand(shiftr(xb, binshift), binmask))
+  ! Extract the fraction once; its top bits select the subdivision.
+  frac = iand(xb, expstep - 1)
+  idiv = int(shiftr(frac, binshift))
 
   ! x = 2**K z: remove the exponent bias and set z's exponent to that of 1.
   K = shiftr(xb, expbit) - expbias
-  mb = ior(iand(xb, expstep - 1), transfer(1., int_mold))
+  mb = ior(frac, transfer(1., int_mold))
   z = transfer(mb, real_mold)
   K = K + exponent_adjustment
 
