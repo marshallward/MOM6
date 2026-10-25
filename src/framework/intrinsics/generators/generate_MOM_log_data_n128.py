@@ -1,26 +1,41 @@
 #!/usr/bin/env python3
 """Generate lookup tables for MOM_log_data_n128.F90.
 
-This script documents and regenerates a log_repro lookup table using the
-table-reduction strategy described in MOM_log_data_n128.F90:
+Divide [1, 2) into 128 equal bins. For each bin, choose a nearby representative
+c and produce four entries: inv_c, log_c, c_hi, and c_lo.
 
-  * cover the conventional normalized-significand interval [1, 2),
-  * divide one positive-normal binary64 exponent stride into 128 equal bins in
-    the ordered floating-point bit grid,
-  * search representable reciprocals near each nominal bin center's reciprocal,
-  * define c = 1/invc and choose candidates whose -log(invc) nearly lies on a
-    2**-43 grid, keeping the tabulated log(c) on that grid,
-  * derive a high/low split of c for the non-FMA argument reduction.
+The default reciprocal-first method seeks a representable reciprocal v = 1/c,
+near the reciprocal of the bin midpoint, whose -log(v) is especially close to
+a multiple of 2**-43.
 
-The default reciprocal-first strategy keeps the reciprocal and split center
-consistent while retaining grid-aligned log(c).  It screens candidate grid
-crossings in extended precision and selects the best high-precision result
-among the finalists; the search is not exhaustive over all reciprocal values.
-Use --strategy log-first for the original method: choose log(c) on the grid,
-then derive c = exp(log(c)) and round 1/c.  The --search-radius and --objective
-options explore nearby grid points for that method.
-Reciprocal searches require NumPy with extended-precision longdouble for
-screening; final candidates are evaluated with Decimal at --precision digits.
+To find candidates, start from logarithm-grid points L = q * 2**-43. Compute
+exp(-L), then round it to binary64 to obtain a candidate reciprocal v. Before
+rounding, -log(exp(-L)) would equal L; after rounding, -log(v) generally misses
+the grid slightly. Compare that distance for promising candidates and choose
+the smallest. Store the winning v as inv_c, the nearby grid point as log_c,
+and split c = 1/v into c_hi and c_lo.
+
+For speed, use NumPy extended precision to identify promising candidates,
+then evaluate those with Decimal at --precision digits. The search does not
+examine every representable reciprocal in the search range.
+
+Both methods adjust c slightly away from the bin midpoint to make the table
+values convenient to store:
+
+  * Log-first chooses log(c) exactly on the logarithm grid, then defines
+    c = exp(log(c)) in high precision and rounds 1/c for storage.
+  * Reciprocal-first chooses a binary64 reciprocal v and defines c = 1/v in
+    high precision. Thus the stored reciprocal defines the center exactly;
+    the search seeks v for which -log(v) nearly lands on the logarithm grid.
+
+This is why there is no log_c_lo table. Log-first puts the chosen logarithm
+directly on the grid. Reciprocal-first leaves a tiny nonzero difference
+between -log(v) and the stored grid value, but searches to make that error
+small enough for the solver's accuracy target. This does not guarantee correct
+rounding of the complete logarithm.
+
+Use --strategy log-first for the alternative method. The --search-radius and
+--objective options apply to that method.
 
 The generated tables are printed to stdout as a complete Fortran module.
 """
@@ -76,7 +91,7 @@ def split_high_low(c: Decimal) -> tuple[float, float]:
 
 
 def choose_logc(c0: Decimal, search_radius: int, objective: str) -> Decimal:
-    """Choose log(c) on the 2**-43 grid near the nominal bin center."""
+    """Choose a grid-aligned logarithm near log(c0), for midpoint c0."""
 
     logc0 = getcontext().ln(c0)
     q0 = nearest_integer(logc0 / LOGC_GRID)
@@ -84,6 +99,7 @@ def choose_logc(c0: Decimal, search_radius: int, objective: str) -> Decimal:
     best_q = q0
     best_score = None
     for q in range(q0 - search_radius, q0 + search_radius + 1):
+        # Choose a candidate logarithm first, then derive its center.
         logc = Decimal(q) * LOGC_GRID
         c = getcontext().exp(logc)
         c_hi, c_lo = split_high_low(c)
@@ -107,7 +123,12 @@ def choose_logc(c0: Decimal, search_radius: int, objective: str) -> Decimal:
 
 
 def choose_reciprocal(c0: Decimal, radius: int):
-    """Screen log-grid crossings, then refine with Decimal."""
+    """Choose a reciprocal v whose -log(v) nearly falls on the 2**-43 grid.
+
+    c0 is the bin midpoint. Search within radius binary64 bit-pattern steps
+    of its rounded reciprocal. Return the winning v, its nearby logarithm-grid
+    value, and the corresponding high-precision center c = 1/v.
+    """
 
     import numpy as np
 
@@ -115,9 +136,13 @@ def choose_reciprocal(c0: Decimal, radius: int):
         raise ValueError(
             "reciprocal searches need extended-precision NumPy longdouble"
         )
+    # Start at the midpoint's rounded reciprocal and bound the search range.
     center_bits = float_to_bits(float(1 / c0))
     first_bits = center_bits - radius
     last_bits = center_bits + radius
+
+    # Find logarithm-grid indices covering that range. The order reverses
+    # because -log(v) decreases as the reciprocal v increases.
     qlo = nearest_integer(
         -getcontext().ln(Decimal.from_float(bits_to_float(last_bits)))
         / LOGC_GRID
@@ -127,18 +152,23 @@ def choose_reciprocal(c0: Decimal, radius: int):
         / LOGC_GRID
     )
 
-    # Near a log-grid crossing, only the closest binary64 reciprocals can win.
-    # Screen crossings instead of examining every reciprocal bit pattern.
+    # Each L on this grid defines an ideal reciprocal exp(-L). Round that
+    # reciprocal to binary64; its negative logarithm will now miss L slightly.
     grid = (
         np.arange(qlo, qhi + 1, dtype=np.int64).astype(np.longdouble)
         * np.longdouble(2) ** -43
     )
     target = np.exp(-grid)
     rounded = target.astype(np.float64)
+
+    # Relative reciprocal-rounding error estimates the logarithm-grid distance.
+    # Use this inexpensive estimate to retain 256 promising grid points.
     scores = np.abs(target - rounded.astype(np.longdouble)) / target
     nbest = min(256, len(scores))
     shortlist = np.argpartition(scores, nbest - 1)[:nbest]
 
+    # Include the rounded candidates and their neighbors, since the screening
+    # calculation has limited precision. Also check the center and endpoints.
     candidates = {first_bits, center_bits, last_bits}
     for index in shortlist:
         bits = float_to_bits(float(rounded[index]))
@@ -148,6 +178,8 @@ def choose_reciprocal(c0: Decimal, radius: int):
             if first_bits <= b <= last_bits
         )
 
+    # Recompute -log(v) in high precision and measure its distance to the
+    # nearest grid point. Break ties by proximity to the starting reciprocal.
     best = None
     best_key = None
     for bits in sorted(candidates):
@@ -225,9 +257,9 @@ def print_module(
     print()
     print(
         "!> Lookup tables for the reproducible log() function, "
-        "assuming real64 precision."
+        "assumes real64 precision."
     )
-    print("!! Generated by generate_MOM_log_data_n128.py.")
+    print("!! Generated by generators/generate_MOM_log_data_n128.py.")
     if strategy == "reciprocal-first":
         print(
             f"!! Reciprocal-first search; radius: {reciprocal_radius} "
@@ -237,6 +269,19 @@ def print_module(
         print(
             f"!! log(c) search objective: {objective}; "
             f"search radius: {search_radius} grid steps."
+        )
+    print("!! Regenerate from src/framework/intrinsics/:")
+    print("!!   python3 generators/generate_MOM_log_data_n128.py \\")
+    print(f"!!     --precision {getcontext().prec} --strategy {strategy} \\")
+    if strategy == "reciprocal-first":
+        print(
+            f"!!     --reciprocal-radius {reciprocal_radius} "
+            "> MOM_log_data_n128.F90"
+        )
+    else:
+        print(
+            f"!!     --search-radius {search_radius} --objective {objective} "
+            "> MOM_log_data_n128.F90"
         )
     print("module MOM_log_data_n128")
     print()
