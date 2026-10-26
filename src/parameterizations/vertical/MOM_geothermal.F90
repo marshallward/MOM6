@@ -587,30 +587,31 @@ subroutine geothermal_in_place_block(h, tv, dt, G, GV, US, CS, BFlx_geothermal, 
     endif
   enddo ; enddo ! ij block loop
 
-  !$omp target update from(dTdt_diag) if(calc_diags)
-  !$omp target update from(BFlx_geothermal) if(CS%id_geothermal_buoyancy_flux > 0)
-  !$omp target exit data map(delete: heat_rem, bottom_pressure, T_bot, S_bot, dRhodT, dRhodS, &
-  !$omp                              dSpVdT, dSpVdS, dTdt_diag)
-
   ! Post diagnostics of 3D tendencies of heat and temperature due to geothermal heat
   if (CS%id_internal_heat_temp_tendency > 0) then
+    !$omp target update from(dTdt_diag)
     call post_data(CS%id_internal_heat_temp_tendency, dTdt_diag, CS%diag, alt_h=h)
   endif
   if (CS%id_internal_heat_heat_tendency > 0) then
-    do k=1,nz ; do j=js,je ; do i=is,ie
+    do concurrent (k=1:nz, j=js:je, i=is:ie)
       ! Dangerously reuse dTdt_diag for a related variable with different units, going from
       ! units of [C T-1 ~> degC s-1] to units of [Q R Z T-1 ~> W m-2]
       dTdt_diag(i,j,k) = (GV%H_to_RZ*tv%C_p) * (h(i,j,k) * dTdt_diag(i,j,k))
-    enddo ; enddo ; enddo
+    enddo
+    !$omp target update from(dTdt_diag)
     call post_data(CS%id_internal_heat_heat_tendency, dTdt_diag, CS%diag, alt_h=h)
   endif
   if (CS%id_geothermal_buoyancy_flux > 0) then
+    !$omp target update from(BFlx_geothermal)
     call post_data(CS%id_geothermal_buoyancy_flux, BFlx_geothermal, CS%diag)
   endif
 !  do j=js,je ; do i=is,ie
 !    resid(i,j) = tv%internal_heat(i,j) - resid(i,j) - GV%H_to_RZ * &
 !           (G%mask2dT(i,j) * (CS%geo_heat(i,j) * (dt*Irho_cp)))
 !  enddo ; enddo
+
+  !$omp target exit data map(delete: heat_rem, bottom_pressure, T_bot, S_bot, dRhodT, dRhodS, &
+  !$omp                              dSpVdT, dSpVdS, dTdt_diag)
 
 end subroutine geothermal_in_place_block
 
@@ -742,8 +743,10 @@ end subroutine geothermal_init
 !> Clean up and deallocate memory associated with the geothermal heating module.
 subroutine geothermal_end(CS)
   type(geothermal_CS), intent(inout) :: CS !< Geothermal heating control struct
-  !$omp target exit data map(delete: CS%geo_heat) if(allocated(CS%geo_heat))
-  if (allocated(CS%geo_heat)) deallocate(CS%geo_heat)
+  if (allocated(CS%geo_heat)) then
+    !$omp target exit data map(delete: CS%geo_heat)
+    deallocate(CS%geo_heat)
+  endif
 end subroutine geothermal_end
 
 !> \namespace mom_geothermal

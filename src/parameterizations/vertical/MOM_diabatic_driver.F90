@@ -741,8 +741,10 @@ subroutine diabatic_ALE_legacy(u, v, h, tv, BLD, fluxes, visc, ADp, CDp, dt, Tim
     call geothermal_in_place(h, tv, dt, G, GV, US, CS%geothermal, BBL_BuoyFlux, halo=CS%halo_TS_diff)
     call cpu_clock_end(id_clock_geothermal)
     if (showCallTree) call callTree_waypoint("geothermal (diabatic)")
-    !$omp target update from(tv%T) if(CS%debugConservation)
-    if (CS%debugConservation) call MOM_state_stats('geothermal', u, v, h, tv%T, tv%S, G, GV, US)
+    if (CS%debugConservation) then
+      !$omp target update from(tv%T)
+      call MOM_state_stats('geothermal', u, v, h, tv%T, tv%S, G, GV, US)
+    endif
   endif
 
   ! Whenever thickness changes let the diag manager know, target grids
@@ -769,9 +771,10 @@ subroutine diabatic_ALE_legacy(u, v, h, tv, BLD, fluxes, visc, ADp, CDp, dt, Tim
   call cpu_clock_begin(id_clock_set_diffusivity)
   ! Sets: Kd_int, Kd_extra_T, Kd_extra_S and visc%TKE_turb
   ! Also changes: visc%Kd_shear, visc%Kv_shear and visc%Kv_slow
-  !$omp target update from(tv%T, tv%S) if(CS%debug)
-  if (CS%debug) &
+  if (CS%debug) then
+    !$omp target update from(tv%T, tv%S)
     call MOM_state_chksum("before set_diffusivity", u, v, h, G, GV, US, haloshift=CS%halo_TS_diff)
+  endif
   if (CS%double_diffuse) then
     call set_diffusivity(u, v, h, u_h, v_h, tv, fluxes, CS%optics, visc, dt, Kd_int, G, GV, US, &
                          CS%set_diff_CSp, CS%VBF, Kd_extra_T=Kd_extra_T, Kd_extra_S=Kd_extra_S)
@@ -783,8 +786,8 @@ subroutine diabatic_ALE_legacy(u, v, h, tv, BLD, fluxes, visc, ADp, CDp, dt, Tim
   if (showCallTree) call callTree_waypoint("done with set_diffusivity (diabatic)")
 
 
-  !$omp target update from(tv%T, tv%S, Kd_int) if(CS%debug)
   if (CS%debug) then
+    !$omp target update from(tv%T, tv%S, Kd_int)
     call MOM_state_chksum("after set_diffusivity ", u, v, h, G, GV, US, haloshift=0)
     call MOM_forcing_chksum("after set_diffusivity ", fluxes, G, US, haloshift=0)
     call MOM_thermovar_chksum("after set_diffusivity ", tv, G, US)
@@ -956,8 +959,8 @@ subroutine diabatic_ALE_legacy(u, v, h, tv, BLD, fluxes, visc, ADp, CDp, dt, Tim
   enddo
   if (showCallTree) call callTree_waypoint("done setting ent_s and ent_t from Kd_int (diabatic)")
 
-  !$omp target update from(ent_s) if(CS%debug)
   if (CS%debug) then
+    !$omp target update from(ent_s)
     call MOM_forcing_chksum("after calc_entrain ", fluxes, G, US, haloshift=0)
     call MOM_thermovar_chksum("after calc_entrain ", tv, G, US)
     call MOM_state_chksum("after calc_entrain ", u, v, h, G, GV, US, haloshift=0)
@@ -968,8 +971,8 @@ subroutine diabatic_ALE_legacy(u, v, h, tv, BLD, fluxes, visc, ADp, CDp, dt, Tim
   do concurrent (k=1:nz, j=js:je, i=is:ie)
     h_orig(i,j,k) = h(i,j,k)
   enddo
-  !$omp target update from(tv%T, tv%S) if(CS%boundary_forcing_tendency_diag)
   if (CS%boundary_forcing_tendency_diag) then
+    !$omp target update from(tv%T, tv%S)
     do k=1,nz ; do j=js,je ; do i=is,ie
       temp_diag(i,j,k) = tv%T(i,j,k)
       saln_diag(i,j,k) = tv%S(i,j,k)
@@ -992,8 +995,8 @@ subroutine diabatic_ALE_legacy(u, v, h, tv, BLD, fluxes, visc, ADp, CDp, dt, Tim
     !   energetic_PBL and the routines that use its mixed layer depth are not ported yet, so they
     ! work on host copies of their inputs.
     !$omp target update from(h, tv%T, tv%S, cTKE, dSV_dT, dSV_dS, SkinBuoyFlux, BBL_BuoyFlux)
-    !$omp target update from(ent_t, ent_s) if(CS%debug)
     if (CS%debug) then
+      !$omp target update from(ent_t, ent_s)
       call hchksum(ent_t, "after applyBoundaryFluxes ent_t", G%HI, haloshift=0, unscale=GV%H_to_mks)
       call hchksum(ent_s, "after applyBoundaryFluxes ent_s", G%HI, haloshift=0, unscale=GV%H_to_mks)
       call hchksum(cTKE, "after applyBoundaryFluxes cTKE", G%HI, haloshift=0, &
@@ -1046,8 +1049,8 @@ subroutine diabatic_ALE_legacy(u, v, h, tv, BLD, fluxes, visc, ADp, CDp, dt, Tim
 
     enddo
 
-    !$omp target update from(ent_t, ent_s, Kd_ePBL) if(CS%debug)
     if (CS%debug) then
+      !$omp target update from(ent_t, ent_s, Kd_ePBL)
       call hchksum(ent_t, "after ePBL ent_t", G%HI, haloshift=0, unscale=GV%H_to_MKS)
       call hchksum(ent_s, "after ePBL ent_s", G%HI, haloshift=0, unscale=GV%H_to_MKS)
       call hchksum(Kd_ePBL, "after ePBL Kd_ePBL", G%HI, haloshift=0, unscale=GV%HZ_T_to_m2_s)
@@ -1066,24 +1069,27 @@ subroutine diabatic_ALE_legacy(u, v, h, tv, BLD, fluxes, visc, ADp, CDp, dt, Tim
   ! diagnose the tendencies due to boundary forcing
   ! At this point, the diagnostic grids have not been updated since the call to the boundary layer scheme
   !  so all tendency diagnostics need to be posted on h_orig, and grids rebuilt afterwards
-  !$omp target update from(h, tv%T, tv%S, h_orig) if(CS%boundary_forcing_tendency_diag)
   if (CS%boundary_forcing_tendency_diag) then
+    !$omp target update from(h, tv%T, tv%S, h_orig)
     call diagnose_boundary_forcing_tendency(tv, h, temp_diag, saln_diag, h_orig, dt, G, GV, US, CS)
     if (CS%id_boundary_forcing_h > 0) call post_data(CS%id_boundary_forcing_h, h, CS%diag, alt_h=h_orig)
   endif
   ! Boundary fluxes may have changed T, S, and h
   call diag_update_remap_grids(CS%diag, state_on_device=.true.)
   call cpu_clock_end(id_clock_remap)
-  !$omp target update from(h, tv%T, tv%S) if(CS%debug .or. CS%debugConservation)
-  !$omp target update from(tv%TempxPmE) if(CS%debug .and. associated(tv%TempxPmE))
-  if (CS%debug) call extract_fluxes_update_host(fluxes)
   if (CS%debug) then
+    !$omp target update from(h, tv%T, tv%S)
+    !$omp target update from(tv%TempxPmE) if(associated(tv%TempxPmE))
+    call extract_fluxes_update_host(fluxes)
     call MOM_forcing_chksum("after applyBoundaryFluxes ", fluxes, G, US, haloshift=0)
     call MOM_thermovar_chksum("after applyBoundaryFluxes ", tv, G, US)
     call MOM_state_chksum("after applyBoundaryFluxes ", u, v, h, G, GV, US, haloshift=0)
   endif
   if (showCallTree) call callTree_waypoint("done with applyBoundaryFluxes (diabatic)")
-  if (CS%debugConservation)  call MOM_state_stats('applyBoundaryFluxes', u, v, h, tv%T, tv%S, G, GV, US)
+  if (CS%debugConservation) then
+    !$omp target update from(h, tv%T, tv%S)
+    call MOM_state_stats('applyBoundaryFluxes', u, v, h, tv%T, tv%S, G, GV, US)
+  endif
 
   if (CS%debug) then
     call MOM_state_chksum("after negative check ", u, v, h, G, GV, US, haloshift=0)
@@ -1096,8 +1102,8 @@ subroutine diabatic_ALE_legacy(u, v, h, tv, BLD, fluxes, visc, ADp, CDp, dt, Tim
   ! calculate change in temperature & salinity due to dia-coordinate surface diffusion
   if (associated(tv%T)) then
 
-    !$omp target update from(ent_t, ent_s) if(CS%debug)
     if (CS%debug) then
+      !$omp target update from(ent_t, ent_s)
       call hchksum(ent_t, "before triDiagTS ent_t ", G%HI, haloshift=0, unscale=GV%H_to_MKS)
       call hchksum(ent_s, "before triDiagTS ent_s ", G%HI, haloshift=0, unscale=GV%H_to_MKS)
     endif
@@ -1115,8 +1121,8 @@ subroutine diabatic_ALE_legacy(u, v, h, tv, BLD, fluxes, visc, ADp, CDp, dt, Tim
       !$omp target update to(tv%S)
     endif
 
-    !$omp target update from(tv%T, tv%S) if(CS%diabatic_diff_tendency_diag)
     if (CS%diabatic_diff_tendency_diag) then
+      !$omp target update from(tv%T, tv%S)
       do k=1,nz ; do j=js,je ; do i=is,ie
         temp_diag(i,j,k) = tv%T(i,j,k)
         saln_diag(i,j,k) = tv%S(i,j,k)
@@ -1137,8 +1143,8 @@ subroutine diabatic_ALE_legacy(u, v, h, tv, BLD, fluxes, visc, ADp, CDp, dt, Tim
     endif
 
     ! diagnose temperature, salinity, heat, and salt tendencies
-    !$omp target update from(h, tv%T, tv%S) if(CS%diabatic_diff_tendency_diag)
     if (CS%diabatic_diff_tendency_diag) then
+      !$omp target update from(h, tv%T, tv%S)
       call diagnose_diabatic_diff_tendency(tv, h, temp_diag, saln_diag, dt, G, GV, US, CS)
       if (CS%id_diabatic_diff_h > 0) call post_data(CS%id_diabatic_diff_h, h, CS%diag, alt_h=h)
     endif
@@ -1149,11 +1155,14 @@ subroutine diabatic_ALE_legacy(u, v, h, tv, BLD, fluxes, visc, ADp, CDp, dt, Tim
 
   endif  ! endif corresponding to if (associated(tv%T))
 
-  !$omp target update from(h, tv%T, tv%S) if(CS%debug .or. CS%debugConservation)
-  !$omp target update from(tv%TempxPmE) if(CS%debug .and. associated(tv%TempxPmE))
-  if (CS%debugConservation) call MOM_state_stats('triDiagTS', u, v, h, tv%T, tv%S, G, GV, US)
+  if (CS%debugConservation) then
+    !$omp target update from(h, tv%T, tv%S)
+    call MOM_state_stats('triDiagTS', u, v, h, tv%T, tv%S, G, GV, US)
+  endif
 
   if (CS%debug) then
+    !$omp target update from(h, tv%T, tv%S)
+    !$omp target update from(tv%TempxPmE) if(associated(tv%TempxPmE))
     call MOM_state_chksum("after mixed layer ", u, v, h, G, GV, US, haloshift=0)
     call MOM_thermovar_chksum("after mixed layer ", tv, G, US)
   endif
@@ -1210,8 +1219,8 @@ subroutine diabatic_ALE_legacy(u, v, h, tv, BLD, fluxes, visc, ADp, CDp, dt, Tim
     if (CS%id_Sdif > 0) call post_data(CS%id_Sdif, Sdif_flx, CS%diag)
   endif
 
-  !$omp target update from(h, tv%T, tv%S, dz) if(CS%Use_KdWork_diag .or. CS%Use_N2_diag)
   if (CS%Use_KdWork_diag .or. CS%Use_N2_diag) then
+    !$omp target update from(h, tv%T, tv%S, dz)
     N2_salt(:,:,:) = 0.0
     N2_temp(:,:,:) = 0.0
     !Compute N2 and don't mask negatives here
