@@ -12,14 +12,24 @@ use MOM_log_data_n128, only : c_hi, c_lo
 
 implicit none
 
+! The near-one bounds follow glibc.
+! Both are exact binary fractions enclosing the inputs with |log(x)| <= 1/16.
+
+real, parameter :: near_one_lo = 1. - 1. / 16.
+  !< Lower endpoint of the near-one input interval [nondim]
+real, parameter :: near_one_hi = 1. + 265. / 4096.
+  !< Upper endpoint of the near-one input interval [nondim]
+
 contains
 
 !> Reproducible natural logarithm function
 !!
 !! Compute log(x) with bitwise reproducibility across platforms.
 module procedure log_repro
-  integer(kind=int_rsize), parameter :: near_lo = transfer(0.9375, int_mold)
-  integer(kind=int_rsize), parameter :: near_hi = transfer(1.064697265625, int_mold)
+  integer(kind=int_rsize), parameter :: near_lo_bits = transfer(near_one_lo, int_mold)
+    !< Lower endpoint bit pattern
+  integer(kind=int_rsize), parameter :: near_hi_bits = transfer(near_one_hi, int_mold)
+    !< Upper endpoint bit pattern
   integer(kind=int_rsize) :: xb
     ! Bit representation of x
 
@@ -31,11 +41,11 @@ module procedure log_repro
   !     zeros, negatives (including -Inf), positive subnormals, and -NaN
   !   xb >= expmask:
   !     +Inf and +NaN
-  !   near_lo <= xb <= near_hi:
+  !   near_lo_bits <= xb <= near_hi_bits:
   !     near-one inputs needing the compensated polynomial
 
   if (xb < expstep .or. xb >= expmask &
-      .or. (xb >= near_lo .and. xb <= near_hi)) then
+      .or. (xb >= near_lo_bits .and. xb <= near_hi_bits)) then
     a = log_fallback(x)
   else
     a = log_table(xb, 0_int_rsize)
@@ -50,6 +60,10 @@ pure function log_fallback(x) result(a)
   real :: a
   integer(kind=int_rsize), parameter :: Kbias = maxexponent(real_mold) - 2
     !< Exponent adjustment used to normalize subnormal inputs
+  integer(kind=int_rsize), parameter :: near_lo_bits = transfer(near_one_lo, int_mold)
+    !< Lower endpoint bit pattern
+  integer(kind=int_rsize), parameter :: near_hi_bits = transfer(near_one_hi, int_mold)
+    !< Upper endpoint bit pattern
   integer(kind=int_rsize) :: xb
     ! Bit representation of x
   integer(kind=int_rsize) :: exponent_adjustment
@@ -86,10 +100,9 @@ pure function log_fallback(x) result(a)
   endif
 
   ! Avoid table-reduction cancellation for values very close to 1.  The
-  ! dedicated log1p path is accurate over approximately [-1/16, 0.065], and
-  ! x - 1 is exact in this range by Sterbenz's lemma.
+  ! x - 1 is exact throughout the near-one interval by Sterbenz's lemma.
   u = x - 1.
-  if ((u >= -1. / 16.) .and. (u <= 0.064697265625)) then
+  if (xb >= near_lo_bits .and. xb <= near_hi_bits) then
     a = log1p_compensated_near(u)
     return
   endif

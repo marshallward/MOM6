@@ -383,19 +383,18 @@ end subroutine test_log_near_one_sensitive_bit
 
 !> Print an informational accuracy sweep for log_repro near 1.
 !!
-!! The broad log_repro ULP sweep is uniform in log-space and does not sample
-!! values very close to 1 densely.  This diagnostic sweep probes the full
-!! near-one special-case interval and compares log_repro() with intrinsic log()
-!! against the same quad-precision reference without asserting an accuracy
-!! threshold.
+!! The broad bit-pattern sweep does not sample values close to 1 densely.
+!! This diagnostic sweep extends beyond both the original and symmetric
+!! near-one cutoffs, comparing both paths with the same quad-precision reference.
+!! Integer bit coordinates keep the input grid independent of FMA contraction.
 subroutine test_log_near_one_sweep
   integer, parameter :: npts = 100000
-  real, parameter :: umin = -0.0625
-    !< Lower limit of the near-one log_repro() path, -1/16 [nondim]
-  real, parameter :: umax = 0.064697265625
-    !< Upper limit of the near-one log_repro() path, 265/4096 [nondim]
+  real, parameter :: umin = -0.075
+    !< Lower sweep offset, beyond the near-one dispatch boundary [nondim]
+  real, parameter :: umax = 0.075
+    !< Upper sweep offset, beyond either near-one dispatch boundary [nondim]
 
-  real :: u, x, val, val_log
+  real :: x, val, val_log
   real(kind=realq) :: ref
     !< Quad-precision reference estimate [nondim]
   real(kind=realq) :: abs_err, rel_err
@@ -409,7 +408,10 @@ subroutine test_log_near_one_sweep
   real :: x_max_abs, x_max_rel, x_max_ulp
   real :: x_max_abs_log, x_max_rel_log, x_max_ulp_log
   real :: ulp_val
-  real :: I_npts
+  integer(kind=int_kind) :: start_bits, end_bits, span, step, rem, offset, x_bits
+    !< Input bit coordinates and integer-grid spacing
+  integer(kind=int_kind) :: denom
+    !< Number of intervals in the input grid
 
   integer :: i, n_half_ulp, n_half_ulp_log
 
@@ -428,10 +430,16 @@ subroutine test_log_near_one_sweep
   n_half_ulp = 0
   n_half_ulp_log = 0
 
-  I_npts = 1. / (npts - 1)
+  start_bits = transfer(1. + umin, 0_int_kind)
+  end_bits = transfer(1. + umax, 0_int_kind)
+  span = end_bits - start_bits
+  denom = int(npts - 1, int_kind)
+  step = span / denom
+  rem = modulo(span, denom)
   do i = 1, npts
-    u = umin + (i - 1) * ((umax - umin) * I_npts)
-    x = 1. + u
+    offset = int(i - 1, int_kind)
+    x_bits = start_bits + offset * step + (offset * rem) / denom
+    x = transfer(x_bits, 0.)
     val = log_repro(x)
     val_log = log(x)
     ref = log(real(x, realq))
@@ -496,6 +504,28 @@ subroutine test_log_near_one_sweep
       max_ulp_log, x_max_ulp_log
   print '(2x,"log() points > 0.5 ULP:", t34, i12)', n_half_ulp_log
 end subroutine test_log_near_one_sweep
+
+
+!> Check the immediate neighbors of the original and candidate near-one cutoffs.
+subroutine test_log_near_one_boundaries
+  real, parameter :: boundaries(3) = [1. - 1./16., 1. + 1./16., 1. + 265./4096.]
+    !< Original and candidate dispatch cutoffs [nondim]
+  real :: x(3*size(boundaries)), val(3*size(boundaries))
+    !< Boundary inputs and logarithm estimates [nondim]
+  real(kind=realq) :: ref(3*size(boundaries))
+    !< Quad-precision reference values [nondim]
+  integer :: i, j
+
+  do i = 1, size(boundaries)
+    j = 3 * i - 2
+    x(j) = nearest(boundaries(i), -1.)
+    x(j + 1) = boundaries(i)
+    x(j + 2) = nearest(boundaries(i), 1.)
+  enddo
+  val(:) = log_repro(x(:))
+  ref(:) = log(real(x(:), realq))
+  call check_ulp_accuracy(x, val, ref, max_ulp_tol=1.)
+end subroutine test_log_near_one_boundaries
 
 
 !> Test ULP accuracy over a wide range of positive values.
@@ -1210,6 +1240,7 @@ subroutine add_log_repro_tests(suite)
   if (realquad >= 0) then
     call suite%add(test_log_ulp_accuracy, "test_log_ulp_accuracy")
     call suite%add(test_log_near_one_sweep, "test_log_near_one_sweep")
+    call suite%add(test_log_near_one_boundaries, "test_log_near_one_boundaries")
   else
     print '(1x,a)', 'Skipping log_repro near-1 sweep and ULP accuracy test: quad precision is unavailable.'
   endif
