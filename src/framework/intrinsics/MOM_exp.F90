@@ -14,25 +14,11 @@ use MOM_exp_data_n128, only : ndiv, idiv_scale_lookup, idiv_residual_lookup
 
 implicit none
 
-real, parameter :: real_mold = 0.
-  !< Real mold for transfers and numerical format queries
-
 integer, parameter :: int_kind &
     = merge(int64, int32, storage_size(real_mold) > storage_size(0_int32))
   !< Integer kind with the same storage size as default real
 integer(kind=int_kind), parameter :: int_mold = 0
   !< Integer mold value
-
-! Floating point layout
-integer, parameter :: expbit = digits(real_mold) - 1
-  !< Position of lowest exponent bit
-  ! NOTE: digits() includes the implicit leading digit
-integer, parameter :: signbit = storage_size(real_mold) - 1
-  !< Position of sign bit
-integer, parameter :: expwidth = signbit - expbit
-  !< Number of exponent bits
-integer, parameter :: expbias = maxexponent(real_mold) - 1
-  !< Exponent bias
 
 ! IEEE 754 special values
 integer(kind=int_kind), parameter :: pos_inf_bits &
@@ -44,7 +30,7 @@ integer(kind=int_kind), parameter :: neg_inf_bits &
 
 ! Fast integer rounding offset
 real, parameter :: round_bias = 1.5 * 2_int_kind**(digits(real_mold) - 1)
-  !< Binary offset used to trigger rounding of fractional values
+  !< Binary offset used to trigger rounding of fractional values [nondim]
 integer(int_kind), parameter :: round_bias_bits &
     = transfer(round_bias, int_mold)
   !< Bit representation of rounding bias
@@ -78,7 +64,7 @@ module procedure exp_repro
 
   ! Subdivide [-ln2/2, ln2/2] into ndiv subintervals to reduce approximation range.
   ! This allows for a smaller polynomial at the cost of a lookup table.
-  ! ndiv and the lookup tables are imported from MOM_exp_data_r64.
+  ! ndiv and the lookup tables are imported from MOM_exp_data_n128.
   real, parameter :: I_ndiv = 1. / real(ndiv)
     !< 1 / ndiv [nondim]
   real, parameter :: n_ln2 = ndiv * I_ln2
@@ -90,7 +76,7 @@ module procedure exp_repro
   integer(int_kind), parameter :: idiv_mask = int(ndiv - 1, int_kind)
     !< Used for fast modulo of ndiv
 
-  ! Range of K = nint(x / ln2) for which direct exponent scaling is safe.
+  ! Range of K for which direct exponent scaling is safe.
   ! Beyond this range, a bias is applied to handle subnormals and overflow.
   ! NOTE: Fortran exponent is defined as one less than IEEE exponent.
   integer, parameter :: Kmin = minexponent(real_mold) + 1
@@ -116,7 +102,7 @@ module procedure exp_repro
   integer(kind=int_kind) :: K
     ! Nearest IEEE-rounded integer to x/ln2 [nondim]
   real :: Z
-    ! Nearest integer to ndiv * K + idiv for ndiv subdivisions
+    ! Nearest integer to ndiv * K + idiv for ndiv subdivisions [nondim]
     ! NOTE: Z is stored as real to avoid int-real type conversions.
   integer(kind=int_kind) :: Zi
     ! Integer representation of Z
@@ -144,8 +130,6 @@ module procedure exp_repro
     ! Bias added to K to compensate for exponent K beyond {-1022,..,+1023}.
   integer(kind=int_kind) :: fb
     ! Bit representation 2**j, the K exponent rescale
-
-  !$omp declare target
 
   ! 1. Nonfinite handling
   ! ---------------------
@@ -278,9 +262,9 @@ end function exp_remez_expm1_estrin_4
 !! unset, then ieee_rint() is used.
 pure function fast_rint(x) result(n)
   real, intent(in) :: x
-    !< Real value to be rounded to the nearest integer
+    !< Real value to be rounded to the nearest integer [nondim]
   real :: n
-    !< Nearest integer to x, stored as a real
+    !< Nearest integer to x, stored as a real [nondim]
 
   n = (x + round_bias) - round_bias
 end function fast_rint
