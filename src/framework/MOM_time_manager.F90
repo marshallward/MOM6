@@ -2,24 +2,24 @@
 ! See the LICENSE file for licensing information.
 ! SPDX-License-Identifier: Apache-2.0
 
-!> Wraps the FMS time manager functions
+!> Provides infrastructure-independent time utilities and the time manager interface
 module MOM_time_manager
 
-use time_manager_mod, only : time_type, get_time, set_time
-use time_manager_mod, only : time_type_to_real, real_to_time_type
-use time_manager_mod, only : operator(+), operator(-), operator(*), operator(/)
-use time_manager_mod, only : operator(>), operator(<), operator(>=), operator(<=)
-use time_manager_mod, only : operator(==), operator(/=), operator(//)
-use time_manager_mod, only : set_ticks_per_second , get_ticks_per_second
-use time_manager_mod, only : get_date, set_date, increment_date
-use time_manager_mod, only : days_in_month, month_name
-use time_manager_mod, only : set_calendar_type, get_calendar_type
-use time_manager_mod, only : JULIAN, NOLEAP, THIRTY_DAY_MONTHS, GREGORIAN
-use time_manager_mod, only : NO_CALENDAR
+use MOM_time_manager_infra, only : time_type, get_time, set_time
+use MOM_time_manager_infra, only : time_type_to_real, real_to_time_type
+use MOM_time_manager_infra, only : operator(+), operator(-), operator(*), operator(/)
+use MOM_time_manager_infra, only : operator(>), operator(<), operator(>=), operator(<=)
+use MOM_time_manager_infra, only : operator(==), operator(/=), operator(//)
+use MOM_time_manager_infra, only : set_ticks_per_second, get_ticks_per_second
+use MOM_time_manager_infra, only : get_date, set_date, increment_date
+use MOM_time_manager_infra, only : days_in_month, month_name
+use MOM_time_manager_infra, only : set_calendar_type, get_calendar_type
+use MOM_time_manager_infra, only : JULIAN, NOLEAP, THIRTY_DAY_MONTHS, GREGORIAN
+use MOM_time_manager_infra, only : NO_CALENDAR
 
 implicit none ; private
 
-! FMS re-exports
+! Infrastructure re-exports
 public :: time_type, get_time, set_time
 public :: time_type_to_real, real_to_time_type
 public :: set_ticks_per_second, get_ticks_per_second
@@ -80,9 +80,10 @@ end function time_to_real
 !! In contrast, this function returns a negative real number if time_b > time_a,
 !! and a positive real otherwise, as would be expected for subtraction.
 real function time_minus_signed(time_a, time_b, scale)
-  type(time_type), intent(in) :: time_a, time_b !< Two times for calculating time_a - time_b
-  real, optional,  intent(in) :: scale          !< A scaling factor that returned the time is
-                                                !! multiplied by, often in [T s-1 ~> nondim]
+  type(time_type), intent(in) :: time_a   !< First time in time_a - time_b [days, seconds, ticks]
+  type(time_type), intent(in) :: time_b   !< Second time in time_a - time_b [days, seconds, ticks]
+  real, optional,  intent(in) :: scale    !< A scaling factor that returned the time is
+                                          !! multiplied by, often in [T s-1 ~> nondim]
 
   ! Local variables
   real :: abs_diff ! The absolute value of the difference in times [s] or [T ~> s]
