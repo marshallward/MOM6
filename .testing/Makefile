@@ -700,9 +700,12 @@ test.summary:
 # Unit test
 
 .PHONY: run.cov.unit
-run.cov.unit: run.unit
+run.cov.unit: $(BUILD)/unit/gcov.unit.out
+
+$(BUILD)/unit/gcov.unit.out: $(foreach f, $(UNIT_EXECS), $(WORK)/unit/$(f).out)
 	cd $(BUILD)/unit && gcov -b *.gcda > gcov.unit.out
 	find $(BUILD)/unit -name "*.gcov" -exec sed -i -r 's/^( *[0-9]*)\*:/ \1:/g' {} \;
+	touch $@
 
 .PHONY: build.unit
 .NOTPARALLEL: build.unit
