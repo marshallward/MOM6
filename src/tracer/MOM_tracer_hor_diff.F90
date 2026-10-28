@@ -178,7 +178,7 @@ subroutine tracer_hordiff(h, dt, MEKE, VarMix, visc, G, GV, US, CS, Reg, tv, do_
                    ! schemes and [H L2 ~> m3 or kg] for others.
   real :: max_CFL  ! The global maximum of the diffusive CFL number [nondim]
   logical :: use_VarMix, Resoln_scaled, do_online, use_Eady
-  integer :: i, j, k, m, is, ie, js, je, nz, ntr, itt, num_itts
+  integer :: i, j, k, m, is, ie, js, je, Isq, Ieq, Jsq, Jeq, nz, ntr, itt, num_itts
   real :: I_numitts  ! The inverse of the number of iterations, num_itts [nondim]
   real :: scale      ! The fraction of khdt_x or khdt_y that is applied in this
                      ! layer for this iteration [nondim].
@@ -192,6 +192,7 @@ subroutine tracer_hordiff(h, dt, MEKE, VarMix, visc, G, GV, US, CS, Reg, tv, do_
   real :: MEKE_KhTr_fac
 
   is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec ; nz = GV%ke
+  Isq = G%IscB ; Ieq = G%IecB ; Jsq = G%JscB ; Jeq = G%JecB
 
   do_online = .true.
   if (present(do_online_flag)) do_online = do_online_flag
@@ -632,22 +633,30 @@ subroutine tracer_hordiff(h, dt, MEKE, VarMix, visc, G, GV, US, CS, Reg, tv, do_
                 ((Coef_y(i,J-1,1) * (Reg%Tr(m)%t(i,j-1,k) - Reg%Tr(m)%t(i,j,k))) - &
                  (Coef_y(i,J,1) * (Reg%Tr(m)%t(i,j,k) - Reg%Tr(m)%t(i,j+1,k)))) )
           enddo
-          if (associated(Reg%Tr(m)%df_x)) then ; do j=js,je ; do I=G%IscB,G%IecB
-            Reg%Tr(m)%df_x(I,j,k) = Reg%Tr(m)%df_x(I,j,k) + Coef_x(I,j,1) &
-                * (Reg%Tr(m)%t(i,j,k) - Reg%Tr(m)%t(i+1,j,k)) * Idt
-          enddo ; enddo ; endif
-          if (associated(Reg%Tr(m)%df_y)) then ; do J=G%JscB,G%JecB ; do i=is,ie
-            Reg%Tr(m)%df_y(i,J,k) = Reg%Tr(m)%df_y(i,J,k) + Coef_y(i,J,1) &
-                * (Reg%Tr(m)%t(i,j,k) - Reg%Tr(m)%t(i,j+1,k)) * Idt
-          enddo ; enddo ; endif
-          if (associated(Reg%Tr(m)%df2d_x)) then ; do j=js,je ; do I=G%IscB,G%IecB
-            Reg%Tr(m)%df2d_x(I,j) = Reg%Tr(m)%df2d_x(I,j) + Coef_x(I,j,1) &
-                * (Reg%Tr(m)%t(i,j,k) - Reg%Tr(m)%t(i+1,j,k)) * Idt
-          enddo ; enddo ; endif
-          if (associated(Reg%Tr(m)%df2d_y)) then ; do J=G%JscB,G%JecB ; do i=is,ie
-            Reg%Tr(m)%df2d_y(i,J) = Reg%Tr(m)%df2d_y(i,J) + Coef_y(i,J,1) &
-                * (Reg%Tr(m)%t(i,j,k) - Reg%Tr(m)%t(i,j+1,k)) * Idt
-          enddo ; enddo ; endif
+          if (associated(Reg%Tr(m)%df_x)) then
+            do concurrent (j=js:je, I=Isq:Ieq)
+              Reg%Tr(m)%df_x(I,j,k) = Reg%Tr(m)%df_x(I,j,k) + Coef_x(I,j,1) &
+                  * (Reg%Tr(m)%t(i,j,k) - Reg%Tr(m)%t(i+1,j,k)) * Idt
+            enddo
+          endif
+          if (associated(Reg%Tr(m)%df_y)) then
+            do concurrent (J=Jsq:Jeq, i=is:ie)
+              Reg%Tr(m)%df_y(i,J,k) = Reg%Tr(m)%df_y(i,J,k) + Coef_y(i,J,1) &
+                  * (Reg%Tr(m)%t(i,j,k) - Reg%Tr(m)%t(i,j+1,k)) * Idt
+            enddo
+          endif
+          if (associated(Reg%Tr(m)%df2d_x)) then
+            do concurrent (j=js:je, I=Isq:Ieq)
+              Reg%Tr(m)%df2d_x(I,j) = Reg%Tr(m)%df2d_x(I,j) + Coef_x(I,j,1) &
+                  * (Reg%Tr(m)%t(i,j,k) - Reg%Tr(m)%t(i+1,j,k)) * Idt
+            enddo
+          endif
+          if (associated(Reg%Tr(m)%df2d_y)) then
+            do concurrent (J=Jsq:Jeq, i=is:ie)
+              Reg%Tr(m)%df2d_y(i,J) = Reg%Tr(m)%df2d_y(i,J) + Coef_y(i,J,1) &
+                  * (Reg%Tr(m)%t(i,j,k) - Reg%Tr(m)%t(i,j+1,k)) * Idt
+            enddo
+          endif
           do concurrent (j=js:je, i=is:ie)
             Reg%Tr(m)%t(i,j,k) = Reg%Tr(m)%t(i,j,k) + dTr(i,j)
           enddo
