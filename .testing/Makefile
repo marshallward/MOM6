@@ -720,10 +720,10 @@ run.unit: $(foreach f, $(UNIT_EXECS), $(WORK)/unit/$(f).out)
 build.timing: $(foreach f, $(TIMING_EXECS), $(BUILD)/timing/$(f))
 
 .PHONY: run.timing
-run.timing: $(foreach f, $(TIMING_EXECS), work/timing/$(f).out)
+run.timing: $(foreach f, $(TIMING_EXECS), $(WORK)/timing/$(f).out)
 
 .PHONY: show.timing
-show.timing: $(foreach f, $(TIMING_EXECS), work/timing/$(f).show)
+show.timing: $(foreach f, $(TIMING_EXECS), $(WORK)/timing/$(f).show)
 
 $(WORK)/timing/%.show:
 	./tools/disp_timing.py $(@:.show=.out)
@@ -746,11 +746,11 @@ build.timing_target: \
 
 .PHONY: run.timing_target
 run.timing_target: \
-  $(foreach f, $(TIMING_TARGET_EXECS), $(TARGET_CODEBASE)/.testing/work/timing/$(f).out)
+  $(foreach f, $(TIMING_TARGET_EXECS), $(TARGET_CODEBASE)/.testing/$(WORK)/timing/$(f).out)
 
 .PHONY: compare.timing
 compare.timing: \
-  $(foreach f, $(filter $(TIMING_EXECS),$(TIMING_TARGET_EXECS)), work/timing/$(f).compare)
+  $(foreach f, $(filter $(TIMING_EXECS),$(TIMING_TARGET_EXECS)), $(WORK)/timing/$(f).compare)
 $(WORK)/timing/%.compare: \
   $(TARGET_CODEBASE)
 	./tools/disp_timing.py -r $(TARGET_CODEBASE)/.testing/$(@:.compare=.out) $(@:.compare=.out)
