@@ -119,6 +119,33 @@ jobs:
         fi
         exit ${status}
 
+    - name: Check indentation
+      id: indentation
+      if: always()
+      run: |
+        set +e
+        ./.testing/tools/report_indentation.py src config_src \
+          --exclude src/equation_of_state/TEOS10 \
+          --exclude config_src/drivers/STALE_mct_cap \
+          --exclude config_src/drivers/nuopc_cap \
+          --report 2>&1 | tee indentation_errors
+        status=${PIPESTATUS[0]}
+        set -e
+        nerrors=$(grep -Ec '^[^[:space:]].*:[0-9]+: ' indentation_errors) || nerrors=0
+        echo "Indentation issues: ${nerrors}"
+        if [ "${nerrors}" -gt 0 ]; then
+          {
+            echo
+            echo "To check indentation locally, run:"
+            echo "  ./.testing/tools/report_indentation.py src config_src \\"
+            echo "    --exclude src/equation_of_state/TEOS10 \\"
+            echo "    --exclude config_src/drivers/STALE_mct_cap \\"
+            echo "    --exclude config_src/drivers/nuopc_cap \\"
+            echo "    --report"
+          } | tee -a indentation_errors
+        fi
+        exit ${status}
+
     - name: Preview real variable units
       id: real_units
       if: always()
@@ -158,6 +185,7 @@ jobs:
           echo "  assignment spacing: ${{ steps.assignment_spacing.outcome }}"
           echo "  callable comma spacing: ${{ steps.callable_comma_spacing.outcome }}"
           echo "  operator spacing: ${{ steps.operator_spacing.outcome }}"
+          echo "  indentation: ${{ steps.indentation.outcome }}"
           echo "  real variable units preview: ${{ steps.real_units.outcome }}"
         } | tee -a "$GITHUB_STEP_SUMMARY"
 
