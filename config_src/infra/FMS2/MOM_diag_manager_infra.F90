@@ -25,7 +25,7 @@ use diag_manager_mod, only : DIAG_FIELD_NOT_FOUND
 use diag_manager_mod, only : register_diag_field_fms => register_diag_field
 use diag_manager_mod, only : register_static_field_fms => register_static_field
 use diag_manager_mod, only : get_diag_field_id_fms => get_diag_field_id
-use MOM_time_manager, only : time_type, set_time
+use MOM_time_manager_infra, only : time_type, set_time
 use MOM_domain_infra, only : MOM_domain_type
 use MOM_error_infra,  only : MOM_error => MOM_err, FATAL, WARNING
 
