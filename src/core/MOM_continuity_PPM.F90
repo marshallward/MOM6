@@ -1494,14 +1494,12 @@ subroutine zonal_flux_adjust(u, h_in, h_W, h_E, uhbt, uh_tot_0, duhdu_tot_0, &
 
   tol_vel = CS%tol_vel
 
-  !$omp target
-  !$omp loop collapse(2)
-  do jj=1,jje ; do II=1,IIe
+  do concurrent (jj=1:jje, II=1:IIe)
     du(II,jj) = 0.0 ; do_ij(II,jj) = do_ij_in(II,jj)
     du_max(II,jj) = du_max_CFL(II,jj) ; du_min(II,jj) = du_min_CFL(II,jj)
     uh_err(II,jj) = uh_tot_0(II,jj) - uhbt(II,jj) ; duhdu_tot(II,jj) = duhdu_tot_0(II,jj)
     uh_err_best(II,jj) = abs(uh_err(II,jj))
-  enddo ; enddo
+  enddo
 
   do itt=1,max_itts
     select case (itt)
@@ -1511,19 +1509,15 @@ subroutine zonal_flux_adjust(u, h_in, h_W, h_E, uhbt, uh_tot_0, duhdu_tot_0, &
       case default ; tol_eta = CS%tol_eta
     end select
 
-    !$omp loop collapse(2)
-    do jj=1,jje ; do II=1,IIe
+    do concurrent (jj=1:jje, II=1:IIe)
       if (uh_err(II,jj) > 0.0) then ; du_max(II,jj) = du(II,jj)
       elseif (uh_err(II,jj) < 0.0) then ; du_min(II,jj) = du(II,jj)
       else ; do_ij(II,jj) = .false. ; endif
-    enddo ; enddo
+    enddo
 
-    ! GPU iterations use per-face masks, not an unreduced shared early-exit flag.
-#ifndef __NVCOMPILER_OPENMP_GPU
     domore = .false.
-#endif
-    !$omp loop collapse(2) private(I,j,ddu,du_prev)
-    do jj=1,jje ; do II=1,IIe
+
+    do concurrent (jj=1:jje, II=1:IIe) DO_LOCALITY(reduce(.or.:domore))
       I = IsbB + II - 1
       j = jsb + jj - 1
 
@@ -1549,24 +1543,20 @@ subroutine zonal_flux_adjust(u, h_in, h_W, h_E, uhbt, uh_tot_0, duhdu_tot_0, &
               if (du_prev - du_min(II,jj) < 1.0e-15*abs(du(II,jj))) do_ij(II,jj) = .false.
             endif
           endif
-#ifndef __NVCOMPILER_OPENMP_GPU
           if (do_ij(II,jj)) domore = .true.
-#endif
         else
           do_ij(II,jj) = .false.
         endif
       endif
-    enddo ; enddo
+    enddo
 
-#ifndef __NVCOMPILER_OPENMP_GPU
     if (.not.domore) exit
-#endif
 
-    !$omp loop collapse(2)
-    do jj=1,jje ; do II=1,IIe
+    do concurrent (jj=1:jje, II=1:IIe)
       uh_err(II,jj) = -uhbt(II,jj) ; duhdu_tot(II,jj) = 0.0
-    enddo ; enddo
+    enddo
 
+    !$omp target
     do k=1,nz
       !$omp loop collapse(2) private(I,j,uh,duhdu,u_new)
       do jj=1,jje ; do II=1,IIe ; if (do_ij(II,jj)) then
@@ -1592,17 +1582,16 @@ subroutine zonal_flux_adjust(u, h_in, h_W, h_E, uhbt, uh_tot_0, duhdu_tot_0, &
         duhdu_tot(II,jj) = duhdu_tot(II,jj) + duhdu
       endif ; enddo ; enddo
     enddo
+    !$omp end target
 
-    !$omp loop collapse(2)
-    do jj=1,jje ; do II=1,IIe
+    do concurrent (jj=1:jje, II=1:IIe)
       uh_err_best(II,jj) = min(uh_err_best(II,jj), abs(uh_err(II,jj)))
-    enddo ; enddo
+    enddo
   enddo ! itt-loop
   ! If there are any faces which have not converged to within the tolerance,
   ! so-be-it, or else use a final upwind correction?
   ! This never seems to happen with 20 iterations as max_itt.
 
-  !$omp end target
   !$omp target exit data &
   !$omp   map(release:uh_err,uh_err_best,duhdu_tot,du_min,du_max,do_ij)
 end subroutine zonal_flux_adjust
@@ -2614,14 +2603,12 @@ subroutine meridional_flux_adjust(v, h_in, h_S, h_N, vhbt, vh_tot_0, dvhdv_tot_0
   JJe = JebB - JsbB + 1
   tol_vel = CS%tol_vel
 
-  !$omp target
-  !$omp loop collapse(2)
-  do JJ=1,JJe ; do ii=1,iie
+  do concurrent (JJ=1:JJe, ii=1:iie)
     dv(ii,JJ) = 0.0 ; do_ij(ii,JJ) = do_ij_in(ii,JJ)
     dv_max(ii,JJ) = dv_max_CFL(ii,JJ) ; dv_min(ii,JJ) = dv_min_CFL(ii,JJ)
     vh_err(ii,JJ) = vh_tot_0(ii,JJ) - vhbt(ii,JJ) ; dvhdv_tot(ii,JJ) = dvhdv_tot_0(ii,JJ)
     vh_err_best(ii,JJ) = abs(vh_err(ii,JJ))
-  enddo ; enddo
+  enddo
 
   do itt=1,max_itts
     select case (itt)
@@ -2631,19 +2618,15 @@ subroutine meridional_flux_adjust(v, h_in, h_S, h_N, vhbt, vh_tot_0, dvhdv_tot_0
       case default ; tol_eta = CS%tol_eta
     end select
 
-    !$omp loop collapse(2)
-    do JJ=1,JJe ; do ii=1,iie
+    do concurrent (JJ=1:JJe, ii=1:iie)
       if (vh_err(ii,JJ) > 0.0) then ; dv_max(ii,JJ) = dv(ii,JJ)
       elseif (vh_err(ii,JJ) < 0.0) then ; dv_min(ii,JJ) = dv(ii,JJ)
       else ; do_ij(ii,JJ) = .false. ; endif
-    enddo ; enddo
+    enddo
 
-    ! GPU iterations use per-face masks, not an unreduced shared early-exit flag.
-#ifndef __NVCOMPILER_OPENMP_GPU
     domore = .false.
-#endif
-    !$omp loop collapse(2) private(i,J,ddv,dv_prev)
-    do JJ=1,JJe ; do ii=1,iie
+
+    do concurrent (JJ=1:JJe, ii=1:iie) DO_LOCALITY(reduce(.or.:domore))
       i = isb + ii - 1
       J = JsbB + JJ - 1
 
@@ -2669,23 +2652,20 @@ subroutine meridional_flux_adjust(v, h_in, h_S, h_N, vhbt, vh_tot_0, dvhdv_tot_0
               if (dv_prev - dv_min(ii,JJ) < 1.0e-15*abs(dv(ii,JJ))) do_ij(ii,JJ) = .false.
             endif
           endif
-#ifndef __NVCOMPILER_OPENMP_GPU
           if (do_ij(ii,JJ)) domore = .true.
-#endif
         else
           do_ij(ii,JJ) = .false.
         endif
       endif
-    enddo ; enddo
+    enddo
 
-#ifndef __NVCOMPILER_OPENMP_GPU
     if (.not.domore) exit
-#endif
 
-    !$omp loop collapse(2)
-    do JJ=1,JJe ; do ii=1,iie
+    do concurrent (JJ=1:JJe, ii=1:iie)
       vh_err(ii,JJ) = -vhbt(ii,JJ) ; dvhdv_tot(ii,JJ) = 0.0
-    enddo ; enddo
+    enddo
+
+    !$omp target
     do k=1,nz
       !$omp loop collapse(2) private(i,J,vh,dvhdv,v_new)
       do JJ=1,JJe ; do ii=1,iie ; if (do_ij(ii,JJ)) then
@@ -2710,17 +2690,16 @@ subroutine meridional_flux_adjust(v, h_in, h_S, h_N, vhbt, vh_tot_0, dvhdv_tot_0
         dvhdv_tot(ii,JJ) = dvhdv_tot(ii,JJ) + dvhdv
       endif ; enddo ; enddo
     enddo
+    !$omp end target
 
-    !$omp loop collapse(2)
-    do JJ=1,JJe ; do ii=1,iie
+    do concurrent (JJ=1:JJe, ii=1:iie)
       vh_err_best(ii,JJ) = min(vh_err_best(ii,JJ), abs(vh_err(ii,JJ)))
-    enddo ; enddo
+    enddo
   enddo ! itt-loop
   ! If there are any faces which have not converged to within the tolerance,
   ! so-be-it, or else use a final upwind correction?
   ! This never seems to happen with 20 iterations as max_itt.
 
-  !$omp end target
   !$omp target exit data &
   !$omp   map(release:vh_err,vh_err_best,dvhdv_tot,dv_min,dv_max,do_ij)
 end subroutine meridional_flux_adjust
