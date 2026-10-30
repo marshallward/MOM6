@@ -26,6 +26,8 @@ contains
 !!
 !! Compute log(x) with bitwise reproducibility across platforms.
 module procedure log_repro
+  !$omp declare target
+
   integer(kind=int_rsize), parameter :: near_lo_bits = transfer(near_one_lo, int_mold)
     !< Lower endpoint bit pattern
   integer(kind=int_rsize), parameter :: near_hi_bits = transfer(near_one_hi, int_mold)
