@@ -31,6 +31,8 @@ contains
 !!
 !! Compute exp(x) with bitwise reproducibility across platforms.
 module procedure exp_repro
+  !$omp declare target
+
   real, parameter :: I_ln2 = 1.44269504088896340735992468100189214
     !< 1 / ln2: 1.4426950408889634073599... [nondim]
 

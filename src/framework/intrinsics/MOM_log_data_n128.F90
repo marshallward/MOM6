@@ -165,4 +165,6 @@ real, parameter :: c_lo(0:ndiv-1) = [ &
      4.90709454319605820e-17, -1.08231257415812228e-16,  4.41829275402951142e-17, -6.02003132399980990e-17 &
 ]
 
+!$omp declare target(inv_c, log_c, c_hi, c_lo)
+
 end module MOM_log_data_n128
