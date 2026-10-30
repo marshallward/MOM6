@@ -18,20 +18,15 @@ Options:
 from __future__ import annotations
 
 import argparse
-import difflib
+from functools import partial
 from pathlib import Path
-from typing import NamedTuple
-
-import flint
+from flint.formatting.runner import Change, run_spacing
 from flint.formatting.spacing import format_spacing, spacing_edits
 
 
-class Change(NamedTuple):
-    """A line diagnostic with its source path attached for reporting."""
-
-    path: Path
-    line_number: int
-    original: str
+def prepare_check(source, do_controls=False, strict=False):
+    """Prepare this rule for a shared Flint spacing run."""
+    return partial(collect_spacing_edits, do_controls=do_controls, strict=strict)
 
 
 def collect_spacing_edits(statement, do_controls=False, strict=False):
@@ -82,59 +77,10 @@ def report_assignment_spacing(
     strict=False,
 ) -> int:
     """Report or fix assignment spacing in parsed flint sources."""
-    changed: list[Path] = []
-    all_changes: list[Change] = []
-    project = flint.parse(*(str(path) for path in paths), excludes=excludes)
-
-    for source in project.sources:
-        path = Path(source.path)
-        old = path.read_text(encoding='utf-8', errors='ignore')
-        source_lines = old.splitlines() if report else None
-
-        new, file_changes = format_statements(
-            path,
-            source.statements,
-            source_lines,
-            do_controls=do_controls,
-            strict=strict,
-        )
-
-        if new != old:
-            changed.append(path)
-            all_changes.extend(file_changes)
-
-            if diff:
-                print(
-                    ''.join(
-                        difflib.unified_diff(
-                            old.splitlines(True),
-                            new.splitlines(True),
-                            fromfile=str(path),
-                            tofile=str(path),
-                        )
-                    ),
-                    end='',
-                )
-
-            if write:
-                path.write_text(new, encoding='utf-8')
-
-    if report:
-        seen = set()
-        for change in all_changes:
-            key = (change.path, change.line_number)
-
-            if key in seen:
-                continue
-
-            seen.add(key)
-            print(f'{change.path}:{change.line_number}: {change.original}')
-
-    elif not diff:
-        for path in changed:
-            print(path)
-
-    return 1 if changed and not write else 0
+    return run_spacing(
+        paths, checks=(partial(prepare_check, do_controls=do_controls, strict=strict),),
+        excludes=excludes, write=write, report=report, diff=diff,
+    )
 
 
 def main() -> int:
