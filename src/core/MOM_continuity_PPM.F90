@@ -1556,33 +1556,32 @@ subroutine zonal_flux_adjust(u, h_in, h_W, h_E, uhbt, uh_tot_0, duhdu_tot_0, &
       uh_err(II,jj) = -uhbt(II,jj) ; duhdu_tot(II,jj) = 0.0
     enddo
 
-    !$omp target
-    do k=1,nz
-      !$omp loop collapse(2) private(I,j,uh,duhdu,u_new)
-      do jj=1,jje ; do II=1,IIe ; if (do_ij(II,jj)) then
-        I = IsbB + II - 1
-        j = jsb + jj - 1
+    do concurrent (jj=1:jje)
+      do k=1,nz
+        do concurrent (II=1:IIe, do_ij(II,jj))
+          I = IsbB + II - 1
+          j = jsb + jj - 1
 
-        u_new = u(I,j,k) + du(II,jj) * visc_rem(II,jj,k)
+          u_new = u(I,j,k) + du(II,jj) * visc_rem(II,jj,k)
 
-        call flux_elem(u_new, h_in(i,j,k), h_in(i+1,j,k), &
-            h_W(i,j,k), h_W(i+1,j,k), h_E(i,j,k), h_E(i+1,j,k), &
-            uh, duhdu, visc_rem(II,jj,k), G%dy_Cu(I,j), &
-            G%IareaT(i,j), G%IareaT(i+1,j), G%IdxT(i,j), G%IdxT(i+1,j), &
-            dt, CS%vol_CFL, por_face_areaU(I,j,k), CS%h_marg_min)
+          call flux_elem(u_new, h_in(i,j,k), h_in(i+1,j,k), &
+              h_W(i,j,k), h_W(i+1,j,k), h_E(i,j,k), h_E(i+1,j,k), &
+              uh, duhdu, visc_rem(II,jj,k), G%dy_Cu(I,j), &
+              G%IareaT(i,j), G%IareaT(i+1,j), G%IdxT(i,j), G%IdxT(i+1,j), &
+              dt, CS%vol_CFL, por_face_areaU(I,j,k), CS%h_marg_min)
 
-        if (local_open_BC) &
-          call flux_elem_OBC(u_new, h_in(i,j,k), h_in(i+1,j,k), &
-              uh, duhdu, visc_rem(II,jj,k), &
-              por_face_areaU(I,j,k), G%dy_Cu(I,j), OBC, OBC%segnum_u(I,j), &
-              CS%h_marg_min)
+          if (local_open_BC) &
+            call flux_elem_OBC(u_new, h_in(i,j,k), h_in(i+1,j,k), &
+                uh, duhdu, visc_rem(II,jj,k), &
+                por_face_areaU(I,j,k), G%dy_Cu(I,j), OBC, OBC%segnum_u(I,j), &
+                CS%h_marg_min)
 
-        if (present(uh_3d)) uh_3d(II,jj,k) = uh
-        uh_err(II,jj) = uh_err(II,jj) + uh
-        duhdu_tot(II,jj) = duhdu_tot(II,jj) + duhdu
-      endif ; enddo ; enddo
+          if (present(uh_3d)) uh_3d(II,jj,k) = uh
+          uh_err(II,jj) = uh_err(II,jj) + uh
+          duhdu_tot(II,jj) = duhdu_tot(II,jj) + duhdu
+        enddo
+      enddo
     enddo
-    !$omp end target
 
     do concurrent (jj=1:jje, II=1:IIe)
       uh_err_best(II,jj) = min(uh_err_best(II,jj), abs(uh_err(II,jj)))
@@ -2665,32 +2664,31 @@ subroutine meridional_flux_adjust(v, h_in, h_S, h_N, vhbt, vh_tot_0, dvhdv_tot_0
       vh_err(ii,JJ) = -vhbt(ii,JJ) ; dvhdv_tot(ii,JJ) = 0.0
     enddo
 
-    !$omp target
-    do k=1,nz
-      !$omp loop collapse(2) private(i,J,vh,dvhdv,v_new)
-      do JJ=1,JJe ; do ii=1,iie ; if (do_ij(ii,JJ)) then
-        i = isb + ii - 1
-        J = JsbB + JJ - 1
+    do concurrent (JJ=1:JJe)
+      do k=1,nz
+        do concurrent (ii=1:iie, do_ij(ii,JJ))
+          i = isb + ii - 1
+          J = JsbB + JJ - 1
 
-        v_new = v(i,J,k) + dv(ii,JJ) * visc_rem(ii,JJ,k)
-        call flux_elem(v_new, h_in(i,J,k), h_in(i,J+1,k), &
-            h_S(i,J,k), h_S(i,J+1,k), h_N(i,J,k), h_N(i,J+1,k), &
-            vh, dvhdv, visc_rem(ii,JJ,k), G%dx_Cv(i,J), &
-            G%IareaT(i,J), G%IareaT(i,J+1), G%IdyT(i,J), G%IdyT(i,J+1), dt, &
-            CS%vol_CFL, por_face_areaV(i,J,k), CS%h_marg_min)
+          v_new = v(i,J,k) + dv(ii,JJ) * visc_rem(ii,JJ,k)
+          call flux_elem(v_new, h_in(i,J,k), h_in(i,J+1,k), &
+              h_S(i,J,k), h_S(i,J+1,k), h_N(i,J,k), h_N(i,J+1,k), &
+              vh, dvhdv, visc_rem(ii,JJ,k), G%dx_Cv(i,J), &
+              G%IareaT(i,J), G%IareaT(i,J+1), G%IdyT(i,J), G%IdyT(i,J+1), dt, &
+              CS%vol_CFL, por_face_areaV(i,J,k), CS%h_marg_min)
 
-        if (local_open_BC) &
-          call flux_elem_OBC(v_new, h_in(i,J,k), h_in(i,J+1,k), &
-              vh, dvhdv, visc_rem(ii,JJ,k), &
-              por_face_areaV(i,J,k), G%dx_Cv(i,J), OBC, OBC%segnum_v(i,J), &
-              CS%h_marg_min)
+          if (local_open_BC) &
+            call flux_elem_OBC(v_new, h_in(i,J,k), h_in(i,J+1,k), &
+                vh, dvhdv, visc_rem(ii,JJ,k), &
+                por_face_areaV(i,J,k), G%dx_Cv(i,J), OBC, OBC%segnum_v(i,J), &
+                CS%h_marg_min)
 
-        if (present(vh_3d)) vh_3d(ii,JJ,k) = vh
-        vh_err(ii,JJ) = vh_err(ii,JJ) + vh
-        dvhdv_tot(ii,JJ) = dvhdv_tot(ii,JJ) + dvhdv
-      endif ; enddo ; enddo
+          if (present(vh_3d)) vh_3d(ii,JJ,k) = vh
+          vh_err(ii,JJ) = vh_err(ii,JJ) + vh
+          dvhdv_tot(ii,JJ) = dvhdv_tot(ii,JJ) + dvhdv
+        enddo
+      enddo
     enddo
-    !$omp end target
 
     do concurrent (JJ=1:JJe, ii=1:iie)
       vh_err_best(ii,JJ) = min(vh_err_best(ii,JJ), abs(vh_err(ii,JJ)))
