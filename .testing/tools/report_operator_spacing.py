@@ -18,75 +18,12 @@ Options:
 from __future__ import annotations
 
 import argparse
-from functools import partial
 from pathlib import Path
-from flint.formatting.runner import Change, run_spacing
-from flint.formatting.spacing import format_spacing, spacing_edits
-
-
-def prepare_check(source, strict=False):
-    """Prepare this rule for a shared Flint spacing run."""
-    return partial(collect_spacing_edits, strict=strict)
-
-
-SKIPPED_OPERATOR_ROLES = {
-    'callable_or_subscript_operator',
-    'concatenation',
-    'declaration_specifier',
-    'do_control_operator',
-    'exponentiation',
-    'format_specifier',
-    'generic_operator_specifier',
-}
-
-
-def collect_spacing_edits(statement, strict=False):
-    """Return operator spacing proposals without changing parsed tokens."""
-    edits = []
-    for token in statement.tokens:
-        role = getattr(token, 'operator_role', None)
-        if role is None or role in SKIPPED_OPERATOR_ROLES:
-            continue
-
-        if role == 'unary_operator' and token == '.not.':
-            edits.extend(spacing_edits(token, after=' ', minimum=not strict))
-        elif role == 'unary_operator':
-            edits.extend(spacing_edits(token, after=''))
-        elif role == 'binary_operator':
-            edits.extend(spacing_edits(token, ' ', ' ', minimum=not strict))
-    return edits
-
-
-def format_statements(
-    path: Path,
-    statements,
-    source_lines=None,
-    strict=False,
-) -> tuple[str, list[Change]]:
-    """Format parsed statements and return rendered source plus changes."""
-    formatted, changes = format_spacing(
-        statements,
-        lambda statement: collect_spacing_edits(statement, strict=strict),
-        source_lines,
-    )
-    return formatted, [
-        Change(path, change.line_number, change.original) for change in changes
-    ]
-
-
-def report_operator_spacing(
-    paths,
-    write=False,
-    report=False,
-    diff=False,
-    excludes=(),
-    strict=False,
-) -> int:
-    """Report or fix operator spacing in parsed flint sources."""
-    return run_spacing(
-        paths, checks=(partial(prepare_check, strict=strict),),
-        excludes=excludes, write=write, report=report, diff=diff,
-    )
+from flint.formatting.runner import Change
+from flint.formatting.operators import (
+    SKIPPED_OPERATOR_ROLES, collect_spacing_edits, format_statements, prepare_check,
+    run as report_operator_spacing,
+)
 
 
 def main() -> int:

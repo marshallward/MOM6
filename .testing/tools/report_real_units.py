@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import NamedTuple
 
 import flint
+from flint.locations import statement_locations
 
 
 UNIT_RE = re.compile(r'\[[^\]\n]+\]')
@@ -45,12 +46,11 @@ def is_real_declaration(statement) -> bool:
 
 def token_line_number(statement, token) -> int:
     """Return the physical source line for a token in a statement."""
-    pattern = re.compile(rf'\b{re.escape(str(token))}\b', re.IGNORECASE)
-    for offset, line in enumerate(statement.source_line().splitlines()):
-        code = line.split('!', 1)[0]
-        if pattern.search(code):
-            return statement.line_number + offset
-    return statement.line_number + ''.join(token.head).count('\n')
+    for location in statement_locations(statement):
+        if location.token is token:
+            return location.line
+    # Expanded tokens without displayed text have no distinct physical span.
+    return statement.line_number
 
 
 def comments_in_liminals(liminals: list[str]) -> list[str]:

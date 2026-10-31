@@ -18,69 +18,12 @@ Options:
 from __future__ import annotations
 
 import argparse
-from functools import partial
 from pathlib import Path
-from flint.formatting.runner import Change, run_spacing
-from flint.formatting.spacing import format_spacing, spacing_edits
-
-
-def prepare_check(source, do_controls=False, strict=False):
-    """Prepare this rule for a shared Flint spacing run."""
-    return partial(collect_spacing_edits, do_controls=do_controls, strict=strict)
-
-
-def collect_spacing_edits(statement, do_controls=False, strict=False):
-    """Return assignment spacing proposals without changing parsed tokens."""
-    edits = []
-    for token in statement.tokens:
-        if token.syntax_role == 'assignment':
-            edits.extend(spacing_edits(token, ' ', ' ', minimum=not strict))
-        elif token.syntax_role == 'name_value':
-            edits.extend(spacing_edits(token, '', ''))
-        elif token.syntax_role == 'do_control' and do_controls:
-            edits.extend(spacing_edits(token, '', ''))
-
-    if do_controls and statement.is_do_statement():
-        for token in statement:
-            if str(token) == ',':
-                edits.extend(spacing_edits(token, after=''))
-    return edits
-
-
-def format_statements(
-    path: Path,
-    statements,
-    source_lines=None,
-    do_controls=False,
-    strict=False,
-) -> tuple[str, list[Change]]:
-    """Format parsed statements and return rendered source plus changes."""
-    formatted, changes = format_spacing(
-        statements,
-        lambda statement: collect_spacing_edits(
-            statement, do_controls=do_controls, strict=strict,
-        ),
-        source_lines,
-    )
-    return formatted, [
-        Change(path, change.line_number, change.original) for change in changes
-    ]
-
-
-def report_assignment_spacing(
-    paths,
-    write=False,
-    report=False,
-    diff=False,
-    excludes=(),
-    do_controls=False,
-    strict=False,
-) -> int:
-    """Report or fix assignment spacing in parsed flint sources."""
-    return run_spacing(
-        paths, checks=(partial(prepare_check, do_controls=do_controls, strict=strict),),
-        excludes=excludes, write=write, report=report, diff=diff,
-    )
+from flint.formatting.runner import Change
+from flint.formatting.assignment import (
+    collect_spacing_edits, format_statements, prepare_check,
+    run as report_assignment_spacing,
+)
 
 
 def main() -> int:

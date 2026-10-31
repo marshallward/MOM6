@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import NamedTuple
 
 import flint
+from flint.locations import statement_locations
 
 
 class Issue(NamedTuple):
@@ -49,16 +50,10 @@ def code_line_indices(statement):
     Count their newlines for locations, but only tokens introduce code lines.
     A token itself can span lines, for example a continued character literal.
     """
-    line_number = statement.line_number
     lines = {}
-    for index, token in enumerate(statement):
-        text = str(token)
-        if text:
-            lines.setdefault(line_number, index)
-            for _ in range(text.count('\n')):
-                line_number += 1
-                lines.setdefault(line_number, index)
-        line_number += ''.join(token.tail).count('\n')
+    for location in statement_locations(statement):
+        for line_number in range(location.line, location.end_line + 1):
+            lines.setdefault(line_number, location.index)
     return lines
 
 
