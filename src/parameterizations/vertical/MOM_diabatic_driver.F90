@@ -3280,11 +3280,12 @@ subroutine adiabatic(h, tv, fluxes, dt, G, GV, US, CS)
   type(diabatic_CS),       pointer       :: CS     !< module control structure
 
   real, dimension(SZI_(G),SZJ_(G),SZK_(GV)) :: zeros  ! An array of zeros with units of [H ~> m or kg m-2]
+  !$omp target enter data map(alloc: zeros)
 
   zeros(:,:,:) = 0.0
 
-  !$omp target update to(h)
-  !$omp target enter data map(to: zeros)
+  ! h is current only on the device here.  Tracer packages that read h_new on the host
+  ! need an update from(h) first.
   call call_tracer_column_fns(h, h, zeros, zeros, fluxes, zeros(:,:,1), dt, G, GV, US, tv, &
                               CS%optics, CS%tracer_flow_CSp, CS%debug)
   !$omp target exit data map(delete: zeros)
