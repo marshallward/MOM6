@@ -28,10 +28,8 @@ class Issue(NamedTuple):
 
 
 def collect_units(unit):
-    """Visit module/procedure variables, derived-type fields, and nested units."""
-    yield unit
-    for child in (*unit.derived_types, *unit.subprograms):
-        yield from collect_units(child)
+    """Visit implementation scopes and explicit interface bodies."""
+    yield from unit.walk()
 
 
 def real_unit_issues(source) -> list[Issue]:

@@ -64,6 +64,15 @@ class TestRealUnitLocations(unittest.TestCase):
         issues = self.issues_for('  double precision a, b')
         self.assertEqual([issue.name for issue in issues], ['a', 'b'])
 
+    def test_interface_arguments_are_checked(self):
+        issues = self.issues_for('''  interface
+    real function average(xa, xb)
+      real :: xa !< Start of interval
+      real :: xb !< End of interval
+    end function average
+  end interface''')
+        self.assertEqual([(issue.name, issue.line_number) for issue in issues], [('xa', 4), ('xb', 5)])
+
     def test_unrelated_following_documentation_is_not_units(self):
         issues = self.issues_for('  real :: a\n\n  ! Unrelated [m]')
         self.assertEqual([issue.name for issue in issues], ['a'])
