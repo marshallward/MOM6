@@ -32,9 +32,6 @@ jobs:
       run: |
         set +e
         flint format src config_src --only assignment-spacing \
-          --exclude src/equation_of_state/TEOS10 \
-          --exclude config_src/drivers/STALE_mct_cap \
-          --exclude config_src/drivers/nuopc_cap \
           2>&1 | tee assignment_spacing_errors
         status=${PIPESTATUS[0]}
         set -e
@@ -45,9 +42,6 @@ jobs:
             echo
             echo "To fix assignment spacing locally, run:"
             echo "  flint format src config_src --only assignment-spacing \\"
-            echo "    --exclude src/equation_of_state/TEOS10 \\"
-            echo "    --exclude config_src/drivers/STALE_mct_cap \\"
-            echo "    --exclude config_src/drivers/nuopc_cap \\"
             echo "    --write"
           } | tee -a assignment_spacing_errors
         fi
@@ -59,15 +53,6 @@ jobs:
       run: |
         set +e
         flint format src config_src --only callable-comma-spacing \
-          --exclude src/equation_of_state/TEOS10 \
-          --exclude config_src/drivers/STALE_mct_cap \
-          --exclude config_src/drivers/nuopc_cap \
-          --exclude-function min \
-          --exclude-function max \
-          --exclude-function sign \
-          --exclude-function mod \
-          --exclude-function modulo \
-          --exclude-function size \
           2>&1 | tee callable_comma_spacing_errors
         status=${PIPESTATUS[0]}
         set -e
@@ -78,15 +63,6 @@ jobs:
             echo
             echo "To fix callable comma spacing locally, run:"
             echo "  flint format src config_src --only callable-comma-spacing \\"
-            echo "    --exclude src/equation_of_state/TEOS10 \\"
-            echo "    --exclude config_src/drivers/STALE_mct_cap \\"
-            echo "    --exclude config_src/drivers/nuopc_cap \\"
-            echo "    --exclude-function min \\"
-            echo "    --exclude-function max \\"
-            echo "    --exclude-function sign \\"
-            echo "    --exclude-function mod \\"
-            echo "    --exclude-function modulo \\"
-            echo "    --exclude-function size \\"
             echo "    --write"
           } | tee -a callable_comma_spacing_errors
         fi
@@ -98,9 +74,6 @@ jobs:
       run: |
         set +e
         flint format src config_src --only operator-spacing \
-          --exclude src/equation_of_state/TEOS10 \
-          --exclude config_src/drivers/STALE_mct_cap \
-          --exclude config_src/drivers/nuopc_cap \
           2>&1 | tee operator_spacing_errors
         status=${PIPESTATUS[0]}
         set -e
@@ -111,9 +84,6 @@ jobs:
             echo
             echo "To fix operator spacing locally, run:"
             echo "  flint format src config_src --only operator-spacing \\"
-            echo "    --exclude src/equation_of_state/TEOS10 \\"
-            echo "    --exclude config_src/drivers/STALE_mct_cap \\"
-            echo "    --exclude config_src/drivers/nuopc_cap \\"
             echo "    --write"
           } | tee -a operator_spacing_errors
         fi
@@ -124,11 +94,8 @@ jobs:
       if: always()
       run: |
         set +e
-        ./.testing/tools/report_indentation.py src config_src \
-          --exclude src/equation_of_state/TEOS10 \
-          --exclude config_src/drivers/STALE_mct_cap \
-          --exclude config_src/drivers/nuopc_cap \
-          --report 2>&1 | tee indentation_errors
+        flint format src config_src --only indentation \
+          2>&1 | tee indentation_errors
         status=${PIPESTATUS[0]}
         set -e
         nerrors=$(grep -Ec '^[^[:space:]].*:[0-9]+: ' indentation_errors) || nerrors=0
@@ -137,11 +104,7 @@ jobs:
           {
             echo
             echo "To check indentation locally, run:"
-            echo "  ./.testing/tools/report_indentation.py src config_src \\"
-            echo "    --exclude src/equation_of_state/TEOS10 \\"
-            echo "    --exclude config_src/drivers/STALE_mct_cap \\"
-            echo "    --exclude config_src/drivers/nuopc_cap \\"
-            echo "    --report"
+            echo "  flint format src config_src --only indentation"
           } | tee -a indentation_errors
         fi
         exit ${status}

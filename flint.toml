@@ -1,0 +1,16 @@
+[format]
+rules = ["assignment-spacing", "operator-spacing", "callable-comma-spacing", "indentation"]
+exclude = [
+    "src/equation_of_state/TEOS10",
+    "config_src/drivers/STALE_mct_cap",
+    "config_src/drivers/nuopc_cap",
+]
+
+[format.callable-comma-spacing]
+excluded-functions = ["min", "max", "sign", "mod", "modulo", "size"]
+
+[format.indentation]
+width = 2
+module-contents = false
+continuation-width = 4
+declaration-continuation-width = 2
