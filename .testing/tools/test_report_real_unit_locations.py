@@ -29,6 +29,15 @@ class TestRealUnitLocations(unittest.TestCase):
                             '  real :: a\n  ! Length [m]'):
             self.assertEqual(self.issues_for(declaration), [])
 
+    def test_shared_units_on_continuation_line(self):
+        issues = self.issues_for(
+            '  real :: &\n'
+            '    dvdx, dudy, & ! Circulation contributions [L2 T-1 ~> m2 s-1]\n'
+            '    dvSdx, duSdy, & ! Stokes drift contributions [L2 T-1 ~> m2 s-1]\n'
+            '    undocumented ! No units'
+        )
+        self.assertEqual([issue.name for issue in issues], ['undocumented'])
+
     def test_double_precision_variables_are_real(self):
         issues = self.issues_for('  double precision a, b')
         self.assertEqual([issue.name for issue in issues], ['a', 'b'])
