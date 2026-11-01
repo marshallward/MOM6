@@ -29,6 +29,17 @@ class TestRealUnitLocations(unittest.TestCase):
                             '  real :: a\n  ! Length [m]'):
             self.assertEqual(self.issues_for(declaration), [])
 
+    def test_repeated_backward_markers_keep_units_in_same_block(self):
+        self.assertEqual(self.issues_for(
+            '  real, pointer :: p => NULL() !< Pressure of overlying ice\n'
+            '                              !< and atmosphere\n'
+            '                              !< on ocean surface [Pa]'
+        ), [])
+        self.assertEqual(self.issues_for(
+            '  real :: u_accel_bt !! Acceleration difference\n'
+            '                    !< [L T-2 ~> m s-2]'
+        ), [])
+
     def test_shared_units_on_continuation_line(self):
         issues = self.issues_for(
             '  real :: &\n'
@@ -37,6 +48,17 @@ class TestRealUnitLocations(unittest.TestCase):
             '    undocumented ! No units'
         )
         self.assertEqual([issue.name for issue in issues], ['undocumented'])
+
+    def test_macro_declarations_keep_variable_documentation(self):
+        issues = self.issues_for(
+            '#define ATTR , allocatable\n'
+            '#define EXTENT :\n'
+            '  real ATTR, dimension(EXTENT,EXTENT) :: &\n'
+            '    a, b, & !< Lengths [m]\n'
+            '    c !< No units'
+        )
+        self.assertEqual([(issue.name, issue.message) for issue in issues],
+                         [('c', 'missing bracketed units')])
 
     def test_double_precision_variables_are_real(self):
         issues = self.issues_for('  double precision a, b')
