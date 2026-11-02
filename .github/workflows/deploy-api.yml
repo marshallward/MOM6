@@ -1,0 +1,91 @@
+# This file is part of MOM6, the Modular Ocean Model version 6.
+# See the LICENSE file for licensing information.
+# SPDX-License-Identifier: Apache-2.0
+
+name: Flint API documentation
+
+on:
+  push:
+    paths:
+      - 'src/**'
+      - 'pkg/**'
+      - '.gitmodules'
+      - 'docs/**'
+      - '.github/workflows/deploy-api.yml'
+  pull_request:
+    paths:
+      - 'src/**'
+      - 'pkg/**'
+      - '.gitmodules'
+      - 'docs/**'
+      - '.github/workflows/deploy-api.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build and check API reference
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+      - name: Install documentation tools
+        run: python -m pip install -r docs/requirements-api.txt
+      - name: Test documentation builder
+        run: python -m unittest discover -s docs -p 'test_build_api_docs.py'
+      - name: Generate, render, and check links
+        run: python docs/build_api_docs.py
+      - name: Summarize reference build
+        run: |
+          {
+            echo '## Flint API reference'
+            echo '```json'
+            cat docs/_build/flint-api/reports/summary.json
+            echo '```'
+            echo 'Unresolved symbols are plain text; details are in the build artifact.'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Retain reST, HTML, and diagnostics
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: flint-api-reference
+          path: docs/_build/flint-api/
+          if-no-files-found: ignore
+          retention-days: 14
+      - name: Prepare Pages artifact
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: docs/_build/flint-api/html
+
+  deploy:
+    name: Deploy API reference
+    needs: build
+    # Publish from the default branch or the current development branch.
+    if: >-
+      github.repository == 'marshallward/MOM6' &&
+      github.event_name != 'pull_request' &&
+      (github.ref == format('refs/heads/{0}', github.event.repository.default_branch) ||
+       github.ref == 'refs/heads/check-assign-spacing')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    concurrency:
+      group: flint-api-pages
+      cancel-in-progress: false
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/configure-pages@v5
+      - name: Deploy GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
