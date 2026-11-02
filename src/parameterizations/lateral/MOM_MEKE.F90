@@ -27,6 +27,7 @@ use MOM_interface_heights, only : find_eta
 use MOM_interpolate,       only : init_external_field, time_interp_external
 use MOM_interpolate,       only : time_interp_external_init
 use MOM_interpolate,       only : external_field
+use MOM_intrinsic_functions, only : exp_repro, log_repro
 use MOM_io,                only : vardesc, var_desc, slasher
 use MOM_isopycnal_slopes,  only : calc_isoneutral_slopes
 use MOM_restart,           only : MOM_restart_CS, register_restart_field, query_initialized
@@ -423,14 +424,8 @@ subroutine step_forward_MEKE(MEKE, h, SN_u, SN_v, visc, dt, G, GV, US, CS, hu, h
       !$omp target update to(MEKE%MEKE)
     endif
 
-    ! TODO: THIS RUNS ON THE HOST, BE WARY! AAAAAA
-    ! MEKE_lengthScales_0d takes (1+x)**0.8 / (1+x)**0.25 and the intrinsic pow differs
-    ! CPU vs GPU in the last bit, so this stays on the host (with the depth_tot /
-    ! bottomFac2 / barotrFac2 / LmixScale syncs below) until a bit-reproducible pow
-    ! lands.  Only bottomFac2 (the **0.8) actually diverged on device.
-    !$omp target update from(depth_tot)
+    ! Calculates bottomFac2, barotrFac2 and LmixScale on the device
     call MEKE_lengthScales(CS, MEKE, G, GV, US, SN_u, SN_v, MEKE%MEKE, depth_tot, bottomFac2, barotrFac2, LmixScale)
-    !$omp target update to(bottomFac2, barotrFac2, LmixScale)
     if (CS%debug) then
       !$omp target update from(mass, drag_rate_visc, bottomFac2, barotrFac2, LmixScale)
       if (CS%visc_drag) then
@@ -559,12 +554,8 @@ subroutine step_forward_MEKE(MEKE, h, SN_u, SN_v, visc, dt, G, GV, US, CS, hu, h
     endif
 
     if (CS%MEKE_equilibrium_restoring) then
-      ! MEKE_equilibrium_restoring runs on the host: sync its device-computed input down
-      ! and its result up before the device loop consumes it.
-      !$omp target update from(depth_tot)
       call MEKE_equilibrium_restoring(CS, G, GV, US, SN_u, SN_v, depth_tot, &
                                       equilibrium_value)
-      !$omp target update to(equilibrium_value)
       do concurrent (j=js:je, i=is:ie)
         src(i,j) = src(i,j) - CS%MEKE_restoring_rate*(MEKE%MEKE(i,j) - equilibrium_value(i,j))
       enddo
@@ -885,11 +876,9 @@ subroutine step_forward_MEKE(MEKE, h, SN_u, SN_v, visc, dt, G, GV, US, CS, hu, h
     enddo ; enddo
     !$omp target update to(MEKE%MEKE)
     call MEKE_lengthScales(CS, MEKE, G, GV, US, SN_u, SN_v, MEKE%MEKE, depth_tot, bottomFac2, barotrFac2, LmixScale)
-    !$omp target update to(bottomFac2, barotrFac2, LmixScale)
   case(EKE_DBCLIENT)
     call pass_vector(u, v, G%Domain)
     call MEKE_lengthScales(CS, MEKE, G, GV, US, SN_u, SN_v, MEKE%MEKE, depth_tot, bottomFac2, barotrFac2, LmixScale)
-    !$omp target update to(bottomFac2, barotrFac2, LmixScale)
     call ML_MEKE_calculate_features(G, GV, US, CS, MEKE%Rd_dx_h, u, v, tv, h, dt, features_array)
     call predict_MEKE(G, US, CS, SIZE(h), Time, features_array, MEKE%MEKE)
     !$omp target update to(MEKE%MEKE)
@@ -1254,17 +1243,21 @@ subroutine MEKE_equilibrium_restoring(CS, G, GV, US, SN_u, SN_v, depth_tot, &
 
   is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec
   cd2 = CS%cdrag**2
-  equilibrium_value(:,:) = 0.0
+  do concurrent (j=js:je, i=is:ie)
+    equilibrium_value(i,j) = 0.0
+  enddo
 
-!$OMP do
-  do j=js,je ; do i=is,ie
+  do concurrent (j=js:je, i=is:ie) DO_LOCALITY(local(SN))
     ! SN = 0.25*max( (SN_u(I,j) + SN_u(I-1,j)) + (SN_v(i,J) + SN_v(i,J-1)), 0.)
     ! This avoids extremes values in equilibrium solution due to bad values in SN_u, SN_v
     SN = min(SN_u(I,j), SN_u(I-1,j), SN_v(i,J), SN_v(i,J-1))
     equilibrium_value(i,j) = (CS%MEKE_GEOMETRIC_alpha * SN * depth_tot(i,j))**2 / cd2
-  enddo ; enddo
+  enddo
 
-  if (CS%id_MEKE_equilibrium>0) call post_data(CS%id_MEKE_equilibrium, equilibrium_value, CS%diag)
+  if (CS%id_MEKE_equilibrium>0) then
+    !$omp target update from(equilibrium_value)
+    call post_data(CS%id_MEKE_equilibrium, equilibrium_value, CS%diag)
+  endif
 end subroutine MEKE_equilibrium_restoring
 
 !> Calculates the eddy mixing length scale and \f$\gamma_b\f$ and \f$\gamma_t\f$
@@ -1296,10 +1289,10 @@ subroutine MEKE_lengthScales(CS, MEKE, G, GV, US, SN_u, SN_v, EKE, depth_tot, &
   is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec
   h_neglect = GV%H_subroundoff
 
-  ! TODO: THIS RUNS ON THE HOST, BE WARY! AAAAAA (see the note at the call site in
-  ! step_forward_MEKE: the intrinsic pow in MEKE_lengthScales_0d is not bitwise CPU==GPU)
-!$OMP do
-  do j=js,je ; do i=is,ie
+  ! This runs on the device; the inputs and the three outputs are already resident.
+  !$omp target enter data map(alloc: LRhines, LEady)
+
+  do concurrent (j=js:je, i=is:ie) DO_LOCALITY(local(SN, FatH, beta_topo_x, beta_topo_y, beta))
     if (.not.CS%use_old_lscale) then
       if (CS%aEady > 0.) then
         SN = 0.25 * ( (SN_u(I,j) + SN_u(I-1,j)) + (SN_v(i,J) + SN_v(i,J-1)) )
@@ -1338,9 +1331,16 @@ subroutine MEKE_lengthScales(CS, MEKE, G, GV, US, SN_u, SN_v, EKE, depth_tot, &
                               MEKE%Rd_dx_h(i,j), SN, MEKE%MEKE(i,j), &
                               bottomFac2(i,j), barotrFac2(i,j), LmixScale(i,j), &
                               LRhines(i,j), LEady(i,j))
-  enddo ; enddo
-  if (CS%id_Lrhines>0) call post_data(CS%id_LRhines, LRhines, CS%diag)
-  if (CS%id_Leady>0) call post_data(CS%id_LEady, LEady, CS%diag)
+  enddo
+  if (CS%id_Lrhines>0) then
+    !$omp target update from(LRhines)
+    call post_data(CS%id_LRhines, LRhines, CS%diag)
+  endif
+  if (CS%id_Leady>0) then
+    !$omp target update from(LEady)
+    call post_data(CS%id_LEady, LEady, CS%diag)
+  endif
+  !$omp target exit data map(release: LRhines, LEady)
 
 end subroutine MEKE_lengthScales
 
@@ -1373,12 +1373,16 @@ pure subroutine MEKE_lengthScales_0d(CS, US, area, beta, depth_tot, Rd_dx, SN, E
   ! gamma_b^2 is the ratio of bottom eddy energy to mean column eddy energy
   ! used in calculating bottom drag
   bottomFac2 = CS%MEKE_CD_SCALE**2
-  if (Lfrict*CS%MEKE_Cb>0.) bottomFac2 = bottomFac2 + 1./( 1. + CS%MEKE_Cb*(Ldeform/Lfrict) )**0.8
+  ! The 0.8 power is computed as exp(0.8*log(x)) with the reproducible exp and log, since the
+  ! intrinsic power function differs between CPU and GPU in the last bit.
+  if (Lfrict*CS%MEKE_Cb>0.) &
+    bottomFac2 = bottomFac2 + 1./exp_repro(0.8*log_repro( 1. + CS%MEKE_Cb*(Ldeform/Lfrict) ))
   bottomFac2 = max(bottomFac2, CS%MEKE_min_gamma)
   ! gamma_t^2 is the ratio of barotropic eddy energy to mean column eddy energy
   ! used in the velocity scale for diffusivity
   barotrFac2 = 1.
-  if (Lfrict*CS%MEKE_Ct>0.) barotrFac2 = 1. / ( 1. + CS%MEKE_Ct*(Ldeform/Lfrict) )**0.25
+  ! The 0.25 power is two square roots, which are correctly rounded on all platforms.
+  if (Lfrict*CS%MEKE_Ct>0.) barotrFac2 = 1. / sqrt(sqrt( 1. + CS%MEKE_Ct*(Ldeform/Lfrict) ))
   barotrFac2 = max(barotrFac2, CS%MEKE_min_gamma)
   if (CS%use_old_lscale) then
     if (CS%Rd_as_max_scale) then
@@ -1877,6 +1881,10 @@ logical function MEKE_init(Time, G, GV, US, param_file, diag, dbcomms_CS, CS, ME
   if (allocated(MEKE%Le)) then
     !$omp target enter data map(to: MEKE%Le)
   endif
+
+  ! MEKE_lengthScales reads the planetary beta on the device.  These two grid arrays are not
+  ! mapped with the rest of the grid in MOM.F90.
+  !$omp target enter data map(to: G%dF_dx, G%dF_dy)
 
 end function MEKE_init
 
