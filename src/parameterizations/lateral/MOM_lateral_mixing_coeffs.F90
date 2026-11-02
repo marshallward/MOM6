@@ -356,11 +356,10 @@ subroutine calc_resoln_function(h, tv, G, GV, US, CS, MEKE, OBC, dt)
       CS%Rd_dx_h(i,j) = CS%cg1(i,j) / &
             (sqrt(CS%f2_dx2_h(i,j) + CS%cg1(i,j)*CS%beta_dx2_h(i,j)))
     enddo
+    ! The host copy of Rd_dx_h is copied to MEKE%Rd_dx_h in thickness_diffuse and then read by MEKE.
+    !$omp target update from(CS%Rd_dx_h)
     if (query_averaging_enabled(CS%diag)) then
-      if (CS%id_Rd_dx > 0) then
-        !$omp target update from(CS%Rd_dx_h)
-        call post_data(CS%id_Rd_dx, CS%Rd_dx_h, CS%diag)
-      endif
+      if (CS%id_Rd_dx > 0) call post_data(CS%id_Rd_dx, CS%Rd_dx_h, CS%diag)
     endif
   endif
 
@@ -851,6 +850,8 @@ subroutine calc_slope_functions(h, tv, dt, G, GV, US, CS, OBC)
     else
       call calc_slope_functions_using_just_e(h, G, GV, US, CS, e)
     endif
+    ! MEKE runs on the host and reads the host copies of SN_u and SN_v.
+    !$omp target update from(CS%SN_u, CS%SN_v)
   endif
 
   if (query_averaging_enabled(CS%diag)) then

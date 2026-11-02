@@ -2,6 +2,8 @@
 ! See the LICENSE file for licensing information.
 ! SPDX-License-Identifier: Apache-2.0
 
+#include "do_concurrent_compat.h"
+
 !> Finite volume pressure gradient (integrated by quadrature or analytically)
 module MOM_PressureForce_FV
 
@@ -996,8 +998,6 @@ subroutine PressureForce_FV_Bouss(h, tv, PFu, PFv, G, GV, US, CS, ALE_CSp, ADp, 
   real, dimension(SZI_(G)) :: &
     Rho_cv_BL   ! The coordinate potential density in the deepest variable
                 ! density near-surface layer [R ~> kg m-3].
-  real, dimension(SZI_(G),SZJ_(G)) :: &
-    dz_geo      ! The change in geopotential thickness through a layer [L2 T-2 ~> m2 s-2].
   real, dimension(SZI_(G),SZJ_(G),SZK_(GV)+1) :: &
     pa          ! The pressure anomaly (i.e. pressure + g*RHO_0*e) at the
                 ! the interface atop a layer [R L2 T-2 ~> Pa].
@@ -1374,21 +1374,7 @@ subroutine PressureForce_FV_Bouss(h, tv, PFu, PFv, G, GV, US, CS, ALE_CSp, ADp, 
     enddo
     !$omp target exit data map(release: tv)
   else
-    !$omp target data map(alloc: dz_geo)
-    do k=1,nz
-      do concurrent (j=Jsq:Jeq+1, i=Isq:Ieq+1)
-        dz_geo(i,j) = GV%g_Earth * GV%H_to_Z*h(i,j,k)
-        dpa(i,j,k) = (GV%Rlay(k) - rho_ref) * dz_geo(i,j)
-        intz_dpa(i,j,k) = 0.5*(GV%Rlay(k) - rho_ref) * dz_geo(i,j)*h(i,j,k)
-      enddo
-      do concurrent (j=js:je, I=Isq:Ieq)
-        intx_dpa(I,j,k) = 0.5*(GV%Rlay(k) - rho_ref) * (dz_geo(i,j) + dz_geo(i+1,j))
-      enddo
-      do concurrent (J=Jsq:Jeq, i=is:ie)
-        inty_dpa(i,J,k) = 0.5*(GV%Rlay(k) - rho_ref) * (dz_geo(i,j) + dz_geo(i,j+1))
-      enddo
-    enddo
-    !$omp end target data
+    call int_Rlay_dz(h, rho_ref, dpa, intz_dpa, intx_dpa, inty_dpa, G, GV, nkblock)
   endif
 
   ! Set the pressure anomalies at the interfaces.
@@ -2117,6 +2103,66 @@ subroutine PressureForce_FV_Bouss(h, tv, PFu, PFv, G, GV, US, CS, ALE_CSp, ADp, 
     if (CS%id_tides_v>0) call post_data(CS%id_tides_v, ADp%tides_v, CS%diag)
   endif
 end subroutine PressureForce_FV_Bouss
+
+!> Calculates the layer integrals of the pressure anomaly for layers of uniform density Rlay, using
+!! an explicit k-block size nkk to size the work array for the geopotential thickness.
+subroutine int_Rlay_dz(h, rho_ref, dpa, intz_dpa, intx_dpa, inty_dpa, G, GV, nkk)
+  type(ocean_grid_type),    intent(in)  :: G        !< Ocean grid structure
+  type(verticalGrid_type),  intent(in)  :: GV       !< Vertical grid structure
+  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)), &
+                            intent(in)  :: h        !< Layer thickness [H ~> m or kg m-2]
+  real,                     intent(in)  :: rho_ref  !< A reference density that is subtracted from
+                                                    !! the layer densities [R ~> kg m-3]
+  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)), &
+                            intent(inout) :: dpa    !< The change in the pressure anomaly across the
+                                                    !! layer [R L2 T-2 ~> Pa]
+  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)), &
+                            intent(inout) :: intz_dpa !< The vertical integral in depth of the pressure
+                                                    !! anomaly less the pressure anomaly at the top of
+                                                    !! the layer [H R L2 T-2 ~> m Pa or kg m-2 Pa]
+  real, dimension(SZIB_(G),SZJ_(G),SZK_(GV)), &
+                            intent(inout) :: intx_dpa !< The integral in x of the difference between the
+                                                    !! pressure anomaly at the top and bottom of the
+                                                    !! layer divided by the x grid spacing [R L2 T-2 ~> Pa]
+  real, dimension(SZI_(G),SZJB_(G),SZK_(GV)), &
+                            intent(inout) :: inty_dpa !< The integral in y of the difference between the
+                                                    !! pressure anomaly at the top and bottom of the
+                                                    !! layer divided by the y grid spacing [R L2 T-2 ~> Pa]
+  integer,                  intent(in)  :: nkk      !< The k-block size [nondim]
+
+  ! Local variables
+  real, dimension(SZI_(G),SZJ_(G),nkk) :: &
+    dz_geo      ! The change in geopotential thickness through a layer [L2 T-2 ~> m2 s-2].
+  integer :: is, ie, js, je, Isq, Ieq, Jsq, Jeq, nz
+  integer :: i, j, k, kk
+  integer :: ksb, keb  ! Start and end domain index bounds of current block
+  integer :: kke       ! Block end index of current block
+
+  is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec ; nz = GV%ke
+  Isq = G%IscB ; Ieq = G%IecB ; Jsq = G%JscB ; Jeq = G%JecB
+
+  !$omp target data map(alloc: dz_geo)
+  do ksb=1,nz,nkk
+    keb = min(ksb + nkk - 1, nz)
+    kke = keb - ksb + 1
+
+    do concurrent (kk=1:kke, j=Jsq:Jeq+1, i=Isq:Ieq+1) DO_LOCALITY(local(k))
+      k = ksb + kk - 1
+      dz_geo(i,j,kk) = GV%g_Earth * GV%H_to_Z*h(i,j,k)
+      dpa(i,j,k) = (GV%Rlay(k) - rho_ref) * dz_geo(i,j,kk)
+      intz_dpa(i,j,k) = 0.5*(GV%Rlay(k) - rho_ref) * dz_geo(i,j,kk)*h(i,j,k)
+    enddo
+    do concurrent (kk=1:kke, j=js:je, I=Isq:Ieq) DO_LOCALITY(local(k))
+      k = ksb + kk - 1
+      intx_dpa(I,j,k) = 0.5*(GV%Rlay(k) - rho_ref) * (dz_geo(i,j,kk) + dz_geo(i+1,j,kk))
+    enddo
+    do concurrent (kk=1:kke, J=Jsq:Jeq, i=is:ie) DO_LOCALITY(local(k))
+      k = ksb + kk - 1
+      inty_dpa(i,J,k) = 0.5*(GV%Rlay(k) - rho_ref) * (dz_geo(i,j,kk) + dz_geo(i,j+1,kk))
+    enddo
+  enddo ! ksb-loop over k-blocks
+  !$omp end target data
+end subroutine int_Rlay_dz
 
 !> Initializes the finite volume pressure gradient control structure
 subroutine PressureForce_FV_init(Time, G, GV, US, param_file, diag, CS, ADp, SAL_CSp, tides_CSp)

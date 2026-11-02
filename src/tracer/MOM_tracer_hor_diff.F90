@@ -79,6 +79,8 @@ type, public :: tracer_hor_diff_CS ; private
                                    !! from the original form of this code, while higher values use
                                    !! mathematically equivalent expressions that recover rotational symmetry
                                    !! when DIFFUSE_ML_TO_INTERIOR is true.
+  integer :: nkblock               !< The k-direction block size used in the along-layer tracer diffusion,
+                                   !! or 0 to use the full vertical column [nondim].
   type(neutral_diffusion_CS), pointer :: neutral_diffusion_CSp => NULL() !< Control structure for neutral diffusion.
   type(hbd_CS), pointer    :: hor_bnd_diffusion_CSp => NULL() !< Control structure for
                                                               !! horizontal boundary diffusion.
@@ -151,10 +153,7 @@ subroutine tracer_hordiff(h, dt, MEKE, VarMix, visc, G, GV, US, CS, Reg, tv, do_
 
 
   real, dimension(SZI_(G),SZJ_(G)) :: &
-    Ihdxdy, &     ! The inverse of the volume or mass of fluid in a layer in a
-                  ! grid cell [H-1 L-2 ~> m-3 or kg-1].
-    CFL, &        ! A diffusive CFL number for each cell [nondim].
-    dTr           ! The change in a tracer's concentration, in units of concentration [Conc].
+    CFL           ! A diffusive CFL number for each cell [nondim].
 
   real, dimension(SZI_(G),SZJ_(G),SZK_(GV)+1)  :: Kh_h
                   ! The tracer diffusivity averaged to tracer points [L2 T-1 ~> m2 s-1].
@@ -179,9 +178,13 @@ subroutine tracer_hordiff(h, dt, MEKE, VarMix, visc, G, GV, US, CS, Reg, tv, do_
   real :: max_CFL  ! The global maximum of the diffusive CFL number [nondim]
   logical :: use_VarMix, Resoln_scaled, do_online, use_Eady
   integer :: i, j, k, m, is, ie, js, je, nz, ntr, itt, num_itts
+  integer :: nkk        ! The number of layers in each k block [nondim].
+  integer :: ksb, keb        ! The first and last layers of the current k block [nondim].
   real :: I_numitts  ! The inverse of the number of iterations, num_itts [nondim]
-  real :: scale      ! The fraction of khdt_x or khdt_y that is applied in this
-                     ! layer for this iteration [nondim].
+  real :: scale_ml   ! The fraction of khdt_x or khdt_y that is applied in the mixed layers for each
+                     ! iteration [nondim].
+  integer :: k_ml    ! The number of mixed layers at the top that are diffused along layers [nondim].
+  integer :: k_int   ! The first layer below the buffer layers that is diffused along layers [nondim].
   real :: Idt        ! The inverse of the time step [T-1 ~> s-1].
   real :: h_neglect  ! A thickness that is so small it is usually lost
                      ! in roundoff and can be neglected [H ~> m or kg m-2].
@@ -218,6 +221,8 @@ subroutine tracer_hordiff(h, dt, MEKE, VarMix, visc, G, GV, US, CS, Reg, tv, do_
   ntr = Reg%ntr
   Idt = 1.0 / dt
   h_neglect = GV%H_subroundoff
+  nkk = CS%nkblock
+  if (nkk == 0) nkk = nz
 
   if (CS%Diffuse_ML_interior .and. CS%first_call) then ; if (is_root_pe()) then
     do m=1,ntr ; if (associated(Reg%Tr(m)%df_x) .or. associated(Reg%Tr(m)%df_y)) &
@@ -592,68 +597,26 @@ subroutine tracer_hordiff(h, dt, MEKE, VarMix, visc, G, GV, US, CS, Reg, tv, do_
   else    ! following if not using neutral diffusion, but instead along-surface diffusion
 
     if (CS%show_call_tree) call callTree_waypoint("Calculating horizontal diffusion (tracer_hordiff)")
-    !$omp target enter data map(alloc: dTr, Ihdxdy)
-    !$omp target enter data map(to: Coef_x, Coef_y) if(CS%use_hor_bnd_diffusion) ! copy from non-ported loops above
-    !$omp target enter data map(alloc: Coef_x, Coef_y) if(.not.CS%use_hor_bnd_diffusion)
+    ! When DIFFUSE_ML_TO_INTERIOR is true, the buffer layers are not diffused along layers, and neither are the
+    ! mixed layers unless ML_KHTR_SCALE is positive, in which case they use a reduced diffusivity.
+    k_ml = 0 ; k_int = 1
+    if (CS%Diffuse_ML_interior) then
+      if (CS%ML_KhTr_scale > 0.0) k_ml = GV%nkml
+      k_int = max(GV%nkml, GV%nk_rho_varies) + 1
+    endif
+    scale_ml = I_numitts * CS%ML_KhTr_scale
     do itt=1,num_itts
       call do_group_pass(CS%pass_t, G%Domain, clock=id_clock_pass, omp_offload=.true.)
-      ! loop should probably be reordered
-      do k=1,nz
-        scale = I_numitts
-        if (CS%Diffuse_ML_interior) then
-          if (k<=GV%nkml) then
-            if (CS%ML_KhTr_scale <= 0.0) cycle
-            scale = I_numitts * CS%ML_KhTr_scale
-          endif
-          if ((k>GV%nkml) .and. (k<=GV%nk_rho_varies)) cycle
-        endif
-
-        do concurrent (J=js-1:je, i=is:ie)
-          Coef_y(i,J,1) = ((scale * khdt_y(i,J))*2.0*(h(i,j,k)*h(i,j+1,k))) / &
-                                                   (h(i,j,k)+h(i,j+1,k)+h_neglect)
-        enddo
-
-        do concurrent (j=js:je)
-          do concurrent (I=is-1:ie)
-            Coef_x(I,j,1) = ((scale * khdt_x(I,j))*2.0*(h(i,j,k)*h(i+1,j,k))) / &
-                                                     (h(i,j,k)+h(i+1,j,k)+h_neglect)
-          enddo
-
-          do concurrent (i=is:ie)
-            Ihdxdy(i,j) = G%IareaT(i,j) / (h(i,j,k)+h_neglect)
-          enddo
-        enddo
-
-        do m=1,ntr
-          do concurrent (j=js:je, i=is:ie)
-            dTr(i,j) = Ihdxdy(i,j) * &
-              ( ((Coef_x(I-1,j,1) * (Reg%Tr(m)%t(i-1,j,k) - Reg%Tr(m)%t(i,j,k))) - &
-                 (Coef_x(I,j,1) * (Reg%Tr(m)%t(i,j,k) - Reg%Tr(m)%t(i+1,j,k)))) + &
-                ((Coef_y(i,J-1,1) * (Reg%Tr(m)%t(i,j-1,k) - Reg%Tr(m)%t(i,j,k))) - &
-                 (Coef_y(i,J,1) * (Reg%Tr(m)%t(i,j,k) - Reg%Tr(m)%t(i,j+1,k)))) )
-          enddo
-          if (associated(Reg%Tr(m)%df_x)) then ; do j=js,je ; do I=G%IscB,G%IecB
-            Reg%Tr(m)%df_x(I,j,k) = Reg%Tr(m)%df_x(I,j,k) + Coef_x(I,j,1) &
-                * (Reg%Tr(m)%t(i,j,k) - Reg%Tr(m)%t(i+1,j,k)) * Idt
-          enddo ; enddo ; endif
-          if (associated(Reg%Tr(m)%df_y)) then ; do J=G%JscB,G%JecB ; do i=is,ie
-            Reg%Tr(m)%df_y(i,J,k) = Reg%Tr(m)%df_y(i,J,k) + Coef_y(i,J,1) &
-                * (Reg%Tr(m)%t(i,j,k) - Reg%Tr(m)%t(i,j+1,k)) * Idt
-          enddo ; enddo ; endif
-          if (associated(Reg%Tr(m)%df2d_x)) then ; do j=js,je ; do I=G%IscB,G%IecB
-            Reg%Tr(m)%df2d_x(I,j) = Reg%Tr(m)%df2d_x(I,j) + Coef_x(I,j,1) &
-                * (Reg%Tr(m)%t(i,j,k) - Reg%Tr(m)%t(i+1,j,k)) * Idt
-          enddo ; enddo ; endif
-          if (associated(Reg%Tr(m)%df2d_y)) then ; do J=G%JscB,G%JecB ; do i=is,ie
-            Reg%Tr(m)%df2d_y(i,J) = Reg%Tr(m)%df2d_y(i,J) + Coef_y(i,J,1) &
-                * (Reg%Tr(m)%t(i,j,k) - Reg%Tr(m)%t(i,j+1,k)) * Idt
-          enddo ; enddo ; endif
-          do concurrent (j=js:je, i=is:ie)
-            Reg%Tr(m)%t(i,j,k) = Reg%Tr(m)%t(i,j,k) + dTr(i,j)
-          enddo
-        enddo
-
-      enddo ! End of k loop.
+      do ksb=1,k_ml,nkk
+        keb = min(ksb + nkk - 1, k_ml)
+        call tracer_along_coord_diff(h, khdt_x, khdt_y, scale_ml, h_neglect, Idt, Reg%Tr, ntr, &
+                                     ksb, keb, nkk, G, GV)
+      enddo ! End of the loop over blocks of the mixed layers.
+      do ksb=k_int,nz,nkk
+        keb = min(ksb + nkk - 1, nz)
+        call tracer_along_coord_diff(h, khdt_x, khdt_y, I_numitts, h_neglect, Idt, Reg%Tr, ntr, &
+                                     ksb, keb, nkk, G, GV)
+      enddo ! End of the loop over blocks of the layers below the buffer layers.
 
       ! Do user controlled underflow of the tracer concentrations.
       do m=1,ntr ; if (Reg%Tr(m)%conc_underflow > 0.0) then
@@ -663,7 +626,6 @@ subroutine tracer_hordiff(h, dt, MEKE, VarMix, visc, G, GV, US, CS, Reg, tv, do_
       endif ; enddo
 
     enddo ! End of "while" loop.
-    !$omp target exit data map(release: dTr, Ihdxdy, Coef_x, Coef_y)
   endif   ! endif for CS%use_neutral_diffusion
   call cpu_clock_end(id_clock_diffuse)
 
@@ -791,6 +753,120 @@ subroutine tracer_hordiff(h, dt, MEKE, VarMix, visc, G, GV, US, CS, Reg, tv, do_
   if (CS%show_call_tree) call callTree_leave("tracer_hordiff()")
 
 end subroutine tracer_hordiff
+
+!> This subroutine diffuses all of the tracers along layers ksb to keb for one iteration of the
+!! along-layer tracer diffusion.
+subroutine tracer_along_coord_diff(h, khdt_x, khdt_y, scale, h_neglect, Idt, Tr, ntr, &
+                                   ksb, keb, nkk, G, GV)
+  type(ocean_grid_type),   intent(in)    :: G       !< Grid type
+  type(verticalGrid_type), intent(in)    :: GV      !< ocean vertical grid structure
+  real, dimension(SZI_(G),SZJ_(G),SZK_(GV)), &
+                           intent(in)    :: h       !< Layer thickness [H ~> m or kg m-2]
+  real, dimension(SZIB_(G),SZJ_(G)), &
+                           intent(in)    :: khdt_x  !< The value of Khtr*dt times the open face width divided by
+                                                    !! the distance between adjacent tracer points [L2 ~> m2]
+  real, dimension(SZI_(G),SZJB_(G)), &
+                           intent(in)    :: khdt_y  !< The value of Khtr*dt times the open face width divided by
+                                                    !! the distance between adjacent tracer points [L2 ~> m2]
+  real,                    intent(in)    :: scale   !< The fraction of khdt_x and khdt_y that is applied in these
+                                                    !! layers for this iteration [nondim]
+  real,                    intent(in)    :: h_neglect !< A thickness that is so small it is usually lost
+                                                    !! in roundoff and can be neglected [H ~> m or kg m-2]
+  real,                    intent(in)    :: Idt     !< The inverse of the time step [T-1 ~> s-1]
+  integer,                 intent(in)    :: ntr     !< The number of tracers
+  type(tracer_type), dimension(ntr), &
+                           intent(inout) :: Tr      !< The tracers to diffuse
+  integer,                 intent(in)    :: ksb     !< The first layer of the k block to diffuse along
+  integer,                 intent(in)    :: keb     !< The last layer of the k block to diffuse along
+  integer,                 intent(in)    :: nkk     !< The maximum number of layers in a k block, which sets the
+                                                    !! size of the work arrays [nondim]
+
+  real, dimension(SZIB_(G),SZJ_(G),nkk) :: &
+    Coef_x        ! The coefficients relating zonal tracer differences to time-integrated
+                  ! fluxes [H L2 ~> m3 or kg].
+  real, dimension(SZI_(G),SZJB_(G),nkk) :: &
+    Coef_y        ! The coefficients relating meridional tracer differences to time-integrated
+                  ! fluxes [H L2 ~> m3 or kg].
+  real, dimension(SZI_(G),SZJ_(G),nkk) :: &
+    Ihdxdy, &     ! The inverse of the volume or mass of fluid in a layer in a
+                  ! grid cell [H-1 L-2 ~> m-3 or kg-1].
+    dTr           ! The change in a tracer's concentration, in units of concentration [Conc].
+  integer :: i, j, k, kk, kke, m, is, ie, js, je, Isq, Ieq, Jsq, Jeq
+
+  is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec
+  Isq = G%IscB ; Ieq = G%IecB ; Jsq = G%JscB ; Jeq = G%JecB
+  kke = keb - ksb + 1
+
+  !$omp target enter data map(alloc: dTr, Ihdxdy, Coef_x, Coef_y)
+
+  do concurrent (kk=1:kke, J=js-1:je, i=is:ie) DO_LOCALITY(local(k))
+    k = ksb + kk - 1
+    Coef_y(i,J,kk) = ((scale * khdt_y(i,J))*2.0*(h(i,j,k)*h(i,j+1,k))) / &
+                                             (h(i,j,k)+h(i,j+1,k)+h_neglect)
+  enddo
+
+  do concurrent (kk=1:kke, j=js:je, I=is-1:ie) DO_LOCALITY(local(k))
+    k = ksb + kk - 1
+    Coef_x(I,j,kk) = ((scale * khdt_x(I,j))*2.0*(h(i,j,k)*h(i+1,j,k))) / &
+                                             (h(i,j,k)+h(i+1,j,k)+h_neglect)
+  enddo
+
+  do concurrent (kk=1:kke, j=js:je, i=is:ie) DO_LOCALITY(local(k))
+    k = ksb + kk - 1
+    Ihdxdy(i,j,kk) = G%IareaT(i,j) / (h(i,j,k)+h_neglect)
+  enddo
+
+  do m=1,ntr
+    do concurrent (kk=1:kke, j=js:je, i=is:ie) DO_LOCALITY(local(k))
+      k = ksb + kk - 1
+      dTr(i,j,kk) = Ihdxdy(i,j,kk) * &
+        ( ((Coef_x(I-1,j,kk) * (Tr(m)%t(i-1,j,k) - Tr(m)%t(i,j,k))) - &
+           (Coef_x(I,j,kk) * (Tr(m)%t(i,j,k) - Tr(m)%t(i+1,j,k)))) + &
+          ((Coef_y(i,J-1,kk) * (Tr(m)%t(i,j-1,k) - Tr(m)%t(i,j,k))) - &
+           (Coef_y(i,J,kk) * (Tr(m)%t(i,j,k) - Tr(m)%t(i,j+1,k)))) )
+    enddo
+    if (associated(Tr(m)%df_x)) then
+      do concurrent (kk=1:kke, j=js:je, I=Isq:Ieq) DO_LOCALITY(local(k))
+        k = ksb + kk - 1
+        Tr(m)%df_x(I,j,k) = Tr(m)%df_x(I,j,k) + Coef_x(I,j,kk) &
+            * (Tr(m)%t(i,j,k) - Tr(m)%t(i+1,j,k)) * Idt
+      enddo
+    endif
+    if (associated(Tr(m)%df_y)) then
+      do concurrent (kk=1:kke, J=Jsq:Jeq, i=is:ie) DO_LOCALITY(local(k))
+        k = ksb + kk - 1
+        Tr(m)%df_y(i,J,k) = Tr(m)%df_y(i,J,k) + Coef_y(i,J,kk) &
+            * (Tr(m)%t(i,j,k) - Tr(m)%t(i,j+1,k)) * Idt
+      enddo
+    endif
+    if (associated(Tr(m)%df2d_x)) then
+      ! Each point adds the layers of the block in ascending order, so the sums over layers are the same
+      ! whatever the block size is.
+      do concurrent (j=js:je, I=Isq:Ieq) DO_LOCALITY(local(k, kk))
+        do kk=1,kke
+          k = ksb + kk - 1
+          Tr(m)%df2d_x(I,j) = Tr(m)%df2d_x(I,j) + Coef_x(I,j,kk) &
+              * (Tr(m)%t(i,j,k) - Tr(m)%t(i+1,j,k)) * Idt
+        enddo
+      enddo
+    endif
+    if (associated(Tr(m)%df2d_y)) then
+      do concurrent (J=Jsq:Jeq, i=is:ie) DO_LOCALITY(local(k, kk))
+        do kk=1,kke
+          k = ksb + kk - 1
+          Tr(m)%df2d_y(i,J) = Tr(m)%df2d_y(i,J) + Coef_y(i,J,kk) &
+              * (Tr(m)%t(i,j,k) - Tr(m)%t(i,j+1,k)) * Idt
+        enddo
+      enddo
+    endif
+    do concurrent (kk=1:kke, j=js:je, i=is:ie) DO_LOCALITY(local(k))
+      k = ksb + kk - 1
+      Tr(m)%t(i,j,k) = Tr(m)%t(i,j,k) + dTr(i,j,kk)
+    enddo
+  enddo
+
+  !$omp target exit data map(release: dTr, Ihdxdy, Coef_x, Coef_y)
+end subroutine tracer_along_coord_diff
 
 !> This subroutine does epipycnal diffusion of all tracers between the mixed
 !! and buffer layers and the interior, using the diffusivity in CS%KhTr.
@@ -949,9 +1025,13 @@ subroutine tracer_epipycnal_ML_diff(h, dt, Tr, ntr, khdt_epi_x, khdt_epi_y, G, &
     Rml_max(i,j) = rho_coord(i,j,1)
     num_srt(i,j) = 0 ; max_kRho(i,j) = 0
   enddo
-  do k=2,nkmb ; do concurrent (j=js-2:je+2, i=is-2:ie+2, Rml_max(i,j) < rho_coord(i,j,k))
-    Rml_max(i,j) = rho_coord(i,j,k)
-  enddo ; enddo
+  do concurrent (j=js-2:je+2)
+    do k=2,nkmb
+      do concurrent (i=is-2:ie+2, Rml_max(i,j) < rho_coord(i,j,k))
+        Rml_max(i,j) = rho_coord(i,j,k)
+      enddo
+    enddo
+  enddo
 
   !   Use bracketing and bisection to find the k-level that the densest of the
   ! mixed and buffer layer corresponds to, such that:
@@ -1749,6 +1829,11 @@ subroutine tracer_hor_diff_init(Time, G, GV, US, param_file, diag, EOS, diabatic
 # include "version_variable.h"
   character(len=40)  :: mdl = "MOM_tracer_hor_diff" ! This module's name.
   integer :: default_answer_date
+#ifdef __NVCOMPILER_OPENMP_GPU
+  integer, parameter :: default_nkblock = 0 ! The default k block size, where 0 is the full column [nondim].
+#else
+  integer, parameter :: default_nkblock = 1 ! The default k block size [nondim].
+#endif
 
   if (associated(CS)) then
     call MOM_error(WARNING, "tracer_hor_diff_init called with associated control structure.")
@@ -1847,6 +1932,12 @@ subroutine tracer_hor_diff_init(Time, G, GV, US, param_file, diag, EOS, diabatic
        "USE_HORIZONTAL_BOUNDARY_DIFFUSION and DIFFUSE_ML_TO_INTERIOR are mutually exclusive!")
 
   call get_param(param_file, mdl, "DEBUG", CS%debug, default=.false.)
+  call get_param(param_file, mdl, "TRACER_HOR_DIFF_NKBLOCK", CS%nkblock, &
+                 "The k-direction block size used in the along-layer tracer diffusion calculations. "//&
+                 "A value of 0 uses the full vertical column.", &
+                 default=default_nkblock, layoutParam=.true.)
+  if (CS%nkblock < 0) call MOM_error(FATAL, "MOM_tracer_hor_diff, tracer_hor_diff_init: "//&
+                 "TRACER_HOR_DIFF_NKBLOCK must be nonnegative; use 0 to select the full vertical column.")
 
   id_clock_diffuse = cpu_clock_id('(Ocean diffuse tracer)',          grain=CLOCK_MODULE)
   id_clock_epimix  = cpu_clock_id('(Ocean epipycnal diffuse tracer)',grain=CLOCK_MODULE)
