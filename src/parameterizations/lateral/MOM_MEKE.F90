@@ -285,11 +285,13 @@ subroutine step_forward_MEKE(MEKE, h, SN_u, SN_v, visc, dt, G, GV, US, CS, hu, h
   !$omp target enter data map(alloc: MEKE_uflux, MEKE_vflux, Kh_u, Kh_v, baroHu, baroHv)
   !$omp target enter data map(alloc: damp_rate, damping, MEKE_current, damp_rate_s1)
   !$omp target enter data map(alloc: del2MEKE, del4MEKE, MEKE_decay, equilibrium_value)
-  !$omp target enter data map(alloc: src_adv, src_GM, src_mom_K4, src_btm_drag, src_mom_lp, src_mom_bh)
+  !$omp target enter data map(alloc: src_adv, src_GM, src_mom_K4, src_btm_drag, src_mom_lp, src_mom_bh, tmp)
 
-  ! These MEKE members are written on the host by other modules (thickness_diffuse,
-  ! hor_visc frictional-work accumulation, VarMix), so refresh the device copies.
-  !$omp target update to(MEKE%GM_src) if(allocated(MEKE%GM_src))
+  ! These MEKE members are written on the host by other modules (hor_visc frictional-work
+  ! accumulation, thickness_diffuse and VarMix for Rd_dx_h and Kh_diff), so refresh the device copies.
+  ! MEKE%GM_src is deliberately not refreshed here: thickness_diffuse zeroes and accumulates it on the
+  ! device, and its exit data map(from:) does not copy it back to the host because the device copy is
+  ! still mapped by MEKE_init.  The host copy is therefore stale, and pushing it would erase the GM source.
   !$omp target update to(MEKE%mom_src) if(allocated(MEKE%mom_src))
   !$omp target update to(MEKE%mom_src_bh) if(allocated(MEKE%mom_src_bh))
   !$omp target update to(MEKE%GME_snk) if(allocated(MEKE%GME_snk))
@@ -305,8 +307,10 @@ subroutine step_forward_MEKE(MEKE, h, SN_u, SN_v, visc, dt, G, GV, US, CS, hu, h
         call hchksum(MEKE%mom_src_bh, 'MEKE mom_src_bh', G%HI, unscale=US%RZ3_T3_to_W_m2*US%L_to_Z**2)
       if (allocated(MEKE%GME_snk)) &
         call hchksum(MEKE%GME_snk, 'MEKE GME_snk', G%HI, unscale=US%RZ3_T3_to_W_m2*US%L_to_Z**2)
-      if (allocated(MEKE%GM_src)) &
+      if (allocated(MEKE%GM_src)) then
+        !$omp target update from(MEKE%GM_src)
         call hchksum(MEKE%GM_src, 'MEKE GM_src', G%HI, unscale=US%RZ3_T3_to_W_m2*US%L_to_Z**2)
+      endif
       if (allocated(MEKE%MEKE)) &
         call hchksum(MEKE%MEKE, 'MEKE MEKE', G%HI, unscale=US%L_T_to_m_s**2)
       call uvchksum("MEKE SN_[uv]", SN_u, SN_v, G%HI, unscale=US%s_to_T, &
@@ -405,7 +409,10 @@ subroutine step_forward_MEKE(MEKE, h, SN_u, SN_v, visc, dt, G, GV, US, CS, hu, h
 
     if (CS%initialize) then
       ! MEKE_equilibrium runs on the host, once: sync its device-computed inputs down and
-      ! its result (MEKE%MEKE) back up.
+      ! its result (MEKE%MEKE) back up.  It is deliberately not ported: each column runs a data-dependent
+      ! bracketing and bisection search with open-ended while loops and STOP statements, and the
+      ! debugIteration flag is carried from one column to the next, so the columns are not independent
+      ! iterations and could not be a do concurrent loop without changing the algorithm.
       !$omp target update from(drag_rate_visc, I_mass, depth_tot)
       call MEKE_equilibrium(CS, MEKE, G, GV, US, SN_u, SN_v, drag_rate_visc, I_mass, depth_tot)
       CS%initialize = .false.
@@ -856,6 +863,8 @@ subroutine step_forward_MEKE(MEKE, h, SN_u, SN_v, visc, dt, G, GV, US, CS, hu, h
     endif
 
   case(EKE_FILE)
+    ! This case is host-only: the EKE is read from a file with time_interp_external and then pushed to the
+    ! device.  It is not exercised by the benchmark configuration.
     call time_interp_external(CS%eke_handle, Time, data_eke, scale=US%m_s_to_L_T**2)
     do j=js,je ; do i=is,ie
       MEKE%MEKE(i,j) = data_eke(i,j) * G%mask2dT(i,j)
@@ -863,6 +872,10 @@ subroutine step_forward_MEKE(MEKE, h, SN_u, SN_v, visc, dt, G, GV, US, CS, hu, h
     !$omp target update to(MEKE%MEKE)
     call MEKE_lengthScales(CS, MEKE, G, GV, US, SN_u, SN_v, MEKE%MEKE, depth_tot, bottomFac2, barotrFac2, LmixScale)
   case(EKE_DBCLIENT)
+    ! This case is host-only because it is driven by an external database client (put_tensor, run_model and
+    ! unpack_tensor), and the feature calculation that feeds it packs its results into host arrays for that
+    ! client.  It is not exercised by the benchmark configuration, and its device data movement is unverified.
+    !$omp target update from(u, v)
     call pass_vector(u, v, G%Domain)
     call MEKE_lengthScales(CS, MEKE, G, GV, US, SN_u, SN_v, MEKE%MEKE, depth_tot, bottomFac2, barotrFac2, LmixScale)
     call ML_MEKE_calculate_features(G, GV, US, CS, MEKE%Rd_dx_h, u, v, tv, h, dt, features_array)
@@ -928,15 +941,13 @@ subroutine step_forward_MEKE(MEKE, h, SN_u, SN_v, visc, dt, G, GV, US, CS, hu, h
   endif
 
   ! Everything below runs on the host: sync the prognostic fields and any posted
-  ! scratch down from the device.  MEKE%MEKE and MEKE%Kh in particular are read on the
+  ! fields down from the device.  MEKE%MEKE and MEKE%Kh in particular are read on the
   ! host by thickness_diffuse and the restart machinery.
   !$omp target update from(MEKE%MEKE)
   !$omp target update from(MEKE%Kh) if(allocated(MEKE%Kh))
   !$omp target update from(MEKE%Ku) if(allocated(MEKE%Ku))
   !$omp target update from(MEKE%Au) if(allocated(MEKE%Au))
   !$omp target update from(MEKE%Le) if(allocated(MEKE%Le))
-  !$omp target update from(bottomFac2) if(CS%id_Ub>0 .or. CS%id_gamma_b>0)
-  !$omp target update from(barotrFac2) if(CS%id_Ut>0 .or. CS%id_gamma_t>0)
   !$omp target update from(LmixScale) if(CS%id_Le>0)
   !$omp target update from(Kh_u) if(CS%id_KhMEKE_u>0)
   !$omp target update from(Kh_v) if(CS%id_KhMEKE_v>0)
@@ -948,27 +959,35 @@ subroutine step_forward_MEKE(MEKE, h, SN_u, SN_v, visc, dt, G, GV, US, CS, hu, h
   !$omp target update from(src_mom_lp) if(CS%id_src_mom_lp>0)
   !$omp target update from(src_mom_bh) if(CS%id_src_mom_bh>0)
   !$omp target update from(MEKE_decay) if(CS%id_decay>0)
+  !$omp target update from(MEKE%GM_src) if(CS%id_GM_src>0)
 
-  ! Offer fields for averaging.
-  if (any([CS%id_Ue, CS%id_Ub, CS%id_Ut] > 0)) &
-    tmp(:,:) = 0.
+  ! Offer fields for averaging.  The diagnostic velocities are formed on the device from the
+  ! device-resident MEKE, bottomFac2 and barotrFac2, and only the result is copied back to the host.
+  if (any([CS%id_Ue, CS%id_Ub, CS%id_Ut] > 0)) then
+    do concurrent (j=G%jsd:G%jed, i=G%isd:G%ied)
+      tmp(i,j) = 0.
+    enddo
+  endif
   if (CS%id_MEKE>0) call post_data(CS%id_MEKE, MEKE%MEKE, CS%diag)
   if (CS%id_Ue>0) then
-    do j=js,je ; do i=is,ie
+    do concurrent (j=js:je, i=is:ie)
       tmp(i,j) = sqrt(max(0., 2. * MEKE%MEKE(i,j)))
-    enddo ; enddo
+    enddo
+    !$omp target update from(tmp)
     call post_data(CS%id_Ue, tmp, CS%diag)
   endif
   if (CS%id_Ub>0) then
-    do j=js,je ; do i=is,ie
+    do concurrent (j=js:je, i=is:ie)
       tmp(i,j) = sqrt(max(0., 2. * MEKE%MEKE(i,j) * bottomFac2(i,j)))
-    enddo ; enddo
+    enddo
+    !$omp target update from(tmp)
     call post_data(CS%id_Ub, tmp, CS%diag)
   endif
   if (CS%id_Ut>0) then
-    do j=js,je ; do i=is,ie
+    do concurrent (j=js:je, i=is:ie)
       tmp(i,j) = sqrt(max(0., 2. * MEKE%MEKE(i,j) * barotrFac2(i,j)))
-    enddo ; enddo
+    enddo
+    !$omp target update from(tmp)
     call post_data(CS%id_Ut, tmp, CS%diag)
   endif
   if (CS%id_Kh>0) call post_data(CS%id_Kh, MEKE%Kh, CS%diag)
@@ -990,15 +1009,17 @@ subroutine step_forward_MEKE(MEKE, h, SN_u, SN_v, visc, dt, G, GV, US, CS, hu, h
   if (CS%id_GME_snk>0) call post_data(CS%id_GME_snk, MEKE%GME_snk, CS%diag)
   if (CS%id_Le>0) call post_data(CS%id_Le, LmixScale, CS%diag)
   if (CS%id_gamma_b>0) then
-    do j=js,je ; do i=is,ie
+    do concurrent (j=js:je, i=is:ie)
       bottomFac2(i,j) = sqrt(bottomFac2(i,j))
-    enddo ; enddo
+    enddo
+    !$omp target update from(bottomFac2)
     call post_data(CS%id_gamma_b, bottomFac2, CS%diag)
   endif
   if (CS%id_gamma_t>0) then
-    do j=js,je ; do i=is,ie
+    do concurrent (j=js:je, i=is:ie)
       barotrFac2(i,j) = sqrt(barotrFac2(i,j))
-    enddo ; enddo
+    enddo
+    !$omp target update from(barotrFac2)
     call post_data(CS%id_gamma_t, barotrFac2, CS%diag)
   endif
 
@@ -1008,7 +1029,7 @@ subroutine step_forward_MEKE(MEKE, h, SN_u, SN_v, visc, dt, G, GV, US, CS, hu, h
   !$omp target exit data map(release: MEKE_uflux, MEKE_vflux, Kh_u, Kh_v, baroHu, baroHv)
   !$omp target exit data map(release: damp_rate, damping, MEKE_current, damp_rate_s1)
   !$omp target exit data map(release: del2MEKE, del4MEKE, MEKE_decay, equilibrium_value)
-  !$omp target exit data map(release: src_adv, src_GM, src_mom_K4, src_btm_drag, src_mom_lp, src_mom_bh)
+  !$omp target exit data map(release: src_adv, src_GM, src_mom_K4, src_btm_drag, src_mom_lp, src_mom_bh, tmp)
 
 end subroutine step_forward_MEKE
 
@@ -1771,6 +1792,8 @@ logical function MEKE_init(Time, G, GV, US, param_file, diag, dbcomms_CS, CS, ME
                        "MEKE_init: Initializing MEKE with a local equilibrium balance.")
   if (allocated(MEKE%Le)) then
     if (.not.query_initialized(MEKE%Le, "MEKE_Le", restart_CS)) then
+      ! This one-time initialization stays on the host.  The device copy of MEKE%Le is created by
+      ! the enter data map(to:) at the end of this function, which is after this loop, so it is coherent.
       !$OMP parallel do default(shared)
       do j=js,je ; do i=is,ie
         MEKE%Le(i,j) = sqrt(G%areaT(i,j))
