@@ -2,14 +2,24 @@ Experimental Flint API deployment
 =================================
 
 The ``Flint API documentation`` workflow builds the reference independently of
-the numerical and Doxygen checks. It scans the Fortran files under ``src`` using
-Flint's default preprocessor configuration. It does not combine the alternative
-drivers and infrastructure implementations in ``config_src``.
+the numerical and Doxygen checks. It scans ``src`` together with these selected
+configuration directories, using Flint's default preprocessor configuration:
+
+* ``config_src/drivers/solo_driver``
+* ``config_src/external`` (all subdirectories)
+* ``config_src/infra/FMS2``
+* ``config_src/memory/dynamic_symmetric`` (also supplies include headers)
+
+Alternative drivers are not combined: for example, the solo and ice-solo drivers
+both define ``atmos_ocean_fluxes_mod``. Duplicate module names fail the build
+rather than overwriting pages or creating ambiguous links. FMS1 and asymmetric
+memory are not included. External library implementations such as FMS itself
+remain outside this source selection.
 
 Build and deploy stages
 -----------------------
 
-Changes under ``src``, ``pkg``, or ``docs`` (or to ``.gitmodules``) trigger a build
+Changes under ``src``, ``config_src``, ``pkg``, or ``docs`` (or to ``.gitmodules``) trigger a build
 on pushes and pull requests. Checkout includes submodules, which supply the
 targets of source symlinks such as the TEOS10 files.
 The workflow can also be started manually from the Actions page. Each build:
@@ -60,6 +70,10 @@ From the MOM6 repository root, with Python 3.13::
 Open ``docs/_build/flint-api/html/index.html``. The output directory must be new
 so stale pages cannot hide broken links; use another ``--output`` path for a
 subsequent build, or remove the previous generated build directory yourself.
+
+Repeat ``--source DIRECTORY`` to supply a custom set of source roots instead of
+the defaults. For example, ``--source src`` restores a source-only reference.
+The generated index records the selected directories.
 
 Update the pinned Flint revision explicitly when adopting generator changes.
 Generation and rendering remain separate functions in ``build_api_docs.py``;

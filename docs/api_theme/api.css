@@ -79,8 +79,8 @@ dl.simple li p { margin: 0; }
 .contents .section a { font-weight: 600; color: #2d5268; padding-top: 11px; }
 .contents .definition a { font-family: var(--mono); font-size: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .module-index .page-layout { display: block; max-width: 1300px; }
-.module-index main > ul { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); padding: 0; list-style: none; gap: 0 28px; }
-.module-index main > ul li { border-bottom: 1px solid var(--rule); padding: 11px 0; font: 12px/1.65 var(--mono); overflow-wrap: anywhere; }
+.module-index #modules > ul { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); padding: 0; list-style: none; gap: 0 28px; }
+.module-index #modules > ul li { border-bottom: 1px solid var(--rule); padding: 11px 0; font: 12px/1.65 var(--mono); overflow-wrap: anywhere; }
 .page-footer { margin-top: 45px; padding-top: 18px; border-top: 1px solid var(--rule); color: var(--muted); font-size: 11px; }
 :target { scroll-margin-top: 24px; }
 @media (max-width: 1150px) {
@@ -97,7 +97,7 @@ dl.simple li p { margin: 0; }
   .page-header { padding: 12px 20px; }
   .header-note { display: none; }
   .page-layout { padding: 26px 20px 40px; }
-  .module-index main > ul { grid-template-columns: minmax(0, 1fr); }
+  .module-index #modules > ul { grid-template-columns: minmax(0, 1fr); }
   td, th { padding: 8px; }
   dl[id^="flint-"] > dd { padding-left: 13px; padding-right: 13px; }
 }

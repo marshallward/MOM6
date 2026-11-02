@@ -23,7 +23,9 @@ class ApiDocumentationTests(unittest.TestCase):
             root = Path(tmp)
             source = root / 'src'
             source.mkdir()
-            (source / 'library.F90').write_text(
+            infra = root / 'config_src' / 'infra' / 'FMS2'
+            infra.mkdir(parents=True)
+            (infra / 'library.F90').write_text(
                 'module library\ncontains\nsubroutine helper()\n'
                 'end subroutine helper\nend module library\n')
             (source / 'client.F90').write_text(
@@ -32,7 +34,7 @@ class ApiDocumentationTests(unittest.TestCase):
                 'end subroutine run\nend module client\n')
             output = root / 'site'
             with contextlib.redirect_stdout(io.StringIO()):
-                summary = build(source, output)
+                summary = build([source, infra], output)
             self.assertEqual(summary['source_files'], 2)
             self.assertEqual(summary['module_pages'], 2)
             self.assertEqual(summary['html_pages'], 3)
@@ -48,6 +50,16 @@ class ApiDocumentationTests(unittest.TestCase):
             self.assertIn('assets/api.css', page)
             self.assertTrue((output / 'html/assets/api.css').is_file())
             self.assertTrue((output / 'html/assets/api.js').is_file())
+
+    def test_alternative_modules_cannot_overwrite_pages(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            sources = [root / 'solo', root / 'ice_solo']
+            for source in sources:
+                source.mkdir()
+                (source / 'fluxes.F90').write_text('module fluxes\nend module fluxes\n')
+            with self.assertRaisesRegex(ValueError, 'Duplicate module fluxes'):
+                build(sources, root / 'site')
 
     def test_broken_page_and_fragment_links_fail(self):
         with tempfile.TemporaryDirectory() as tmp:

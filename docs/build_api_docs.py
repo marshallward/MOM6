@@ -15,6 +15,15 @@ from flint.docgen.rst import write_module
 from render_api_docs import render_reference
 
 
+DEFAULT_SOURCES = (
+    'src',
+    'config_src/drivers/solo_driver',
+    'config_src/external',
+    'config_src/infra/FMS2',
+    'config_src/memory/dynamic_symmetric',
+)
+
+
 class HtmlLinks(HTMLParser):
     def __init__(self):
         super().__init__()
@@ -56,16 +65,22 @@ def check_links(directory):
 
 def generate_reference(source, rst_dir, reports):
     """Parse one file at a time; retain only documentation snapshots for linking."""
-    missing = sorted(path for path in source.rglob('*') if path.is_symlink() and not path.exists())
+    sources = [source] if isinstance(source, Path) else list(source)
+    for root in sources:
+        if not root.is_dir():
+            raise FileNotFoundError(f'Source directory does not exist: {root}')
+    paths = sorted({path for root in sources for path in root.rglob('*')})
+    missing = [path for path in paths if path.is_symlink() and not path.exists()]
     if missing:
         raise FileNotFoundError(
             'Source symlinks have missing targets. Initialize the MOM6 submodules with '
             '`git submodule update --init --recursive`:\n' + '\n'.join(map(str, missing)))
-    files = sorted(path for path in source.rglob('*') if path.suffix in ('.F90', '.f90'))
+    files = [path for path in paths if path.suffix in ('.F90', '.f90')]
     if not files:
         raise ValueError(f'No Fortran files found in {source}')
-    includes = sorted({str(path.parent) for path in source.rglob('*') if path.is_file()})
+    includes = sorted({str(path.parent) for path in paths if path.is_file()})
     modules, externals = [], []
+    owners = {}
     external = None
     with (reports / 'parse.log').open('w', encoding='utf-8') as log:
         for path in files:
@@ -78,6 +93,10 @@ def generate_reference(source, rst_dir, reports):
                         external = module
                         externals.extend(module.procedures)
                     else:
+                        name = module.name.lower()
+                        if name in owners:
+                            raise ValueError(f'Duplicate module {module.name}: {owners[name]} and {path}')
+                        owners[name] = path
                         modules.append(module)
                 del project
     if externals:
@@ -91,8 +110,11 @@ def generate_reference(source, rst_dir, reports):
             write_module(stream, module, references=index, destinations=destinations)
     with (rst_dir / 'index.rst').open('w', encoding='utf-8') as stream:
         stream.write('MOM6 API reference\n==================\n\n')
-        stream.write('Experimental reference generated from the MOM6 ``src`` tree.\n'
-                     'Unresolved procedure references are displayed as plain text.\n\n')
+        stream.write('Experimental reference generated from these source directories:\n\n')
+        for root in sources:
+            stream.write(f'* ``{root}``\n')
+        stream.write('\nUnresolved procedure references are displayed as plain text.\n\n'
+                     'Modules\n-------\n\n')
         for module in sorted(modules, key=lambda entry: entry.name.lower()):
             stream.write(f'* `{module.name} <{module.name}.html>`__\n')
     return {'source_files': len(files), 'module_pages': len(modules),
@@ -120,10 +142,11 @@ def build(source, output):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--source', type=Path, default=Path('src'))
+    parser.add_argument('--source', type=Path, action='append',
+                        help='Source directory; repeat to combine roots (replaces the MOM6 defaults)')
     parser.add_argument('--output', type=Path, default=Path('docs/_build/flint-api'))
     args = parser.parse_args()
-    build(args.source.resolve(), args.output)
+    build(args.source or [Path(root) for root in DEFAULT_SOURCES], args.output)
 
 
 if __name__ == '__main__':
