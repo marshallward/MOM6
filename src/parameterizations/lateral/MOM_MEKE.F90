@@ -863,8 +863,10 @@ subroutine step_forward_MEKE(MEKE, h, SN_u, SN_v, visc, dt, G, GV, US, CS, hu, h
     endif
 
   case(EKE_FILE)
-    ! This case is host-only: the EKE is read from a file with time_interp_external and then pushed to the
-    ! device.  It is not exercised by the benchmark configuration.
+    ! The EKE is read from a file with time_interp_external on the host and then pushed to the device;
+    ! the length scales, positivity clamp and diffusivities below still run on the device.  This case is
+    ! not exercised by the benchmark configuration.
+    ! ### depth_tot is only set in the EKE_PROG case, but MEKE_lengthScales reads it here (known issue).
     call time_interp_external(CS%eke_handle, Time, data_eke, scale=US%m_s_to_L_T**2)
     do j=js,je ; do i=is,ie
       MEKE%MEKE(i,j) = data_eke(i,j) * G%mask2dT(i,j)
@@ -872,10 +874,12 @@ subroutine step_forward_MEKE(MEKE, h, SN_u, SN_v, visc, dt, G, GV, US, CS, hu, h
     !$omp target update to(MEKE%MEKE)
     call MEKE_lengthScales(CS, MEKE, G, GV, US, SN_u, SN_v, MEKE%MEKE, depth_tot, bottomFac2, barotrFac2, LmixScale)
   case(EKE_DBCLIENT)
-    ! This case is host-only because it is driven by an external database client (put_tensor, run_model and
-    ! unpack_tensor), and the feature calculation that feeds it packs its results into host arrays for that
-    ! client.  It is not exercised by the benchmark configuration, and its device data movement is unverified.
-    !$omp target update from(u, v)
+    ! The ML prediction is driven by an external database client (put_tensor, run_model and unpack_tensor),
+    ! and the feature calculation that feeds it packs its results into host arrays for that client; the length
+    ! scales and diffusivities still run on the device.  The caller has already pulled u and v to the host and
+    ! pushes them back afterwards.  This case is not exercised by the benchmark configuration, and its device
+    ! data movement is unverified.
+    ! ### depth_tot is only set in the EKE_PROG case, but MEKE_lengthScales reads it here (known issue).
     call pass_vector(u, v, G%Domain)
     call MEKE_lengthScales(CS, MEKE, G, GV, US, SN_u, SN_v, MEKE%MEKE, depth_tot, bottomFac2, barotrFac2, LmixScale)
     call ML_MEKE_calculate_features(G, GV, US, CS, MEKE%Rd_dx_h, u, v, tv, h, dt, features_array)

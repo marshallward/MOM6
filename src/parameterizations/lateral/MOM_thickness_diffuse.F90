@@ -225,7 +225,10 @@ subroutine thickness_diffuse(h, uhtr, vhtr, tv, dt, G, GV, US, MEKE, VarMix, CDp
   if (njblock == 0) njblock = je-js+2
 
   !$omp target enter data map(alloc: MEKE%GM_src) if(allocated(MEKE%GM_src))
-  ! MEKE%Kh is set on the host by MEKE, so copy it to the device; an alloc would be copied back over it below.
+  ! MEKE%Kh and MEKE%GM_src stay mapped on the device from MEKE_init, so the map clauses here and in the exit
+  ! data directives below only change reference counts: the host copies are synchronized by MEKE's own
+  ! update from, and a host-side update to of GM_src would overwrite its device values with stale ones.
+  ! MEKE%Kh is set on the device by MEKE; the map(to:) below only matters if no outer mapping exists.
   !$omp target enter data map(to: MEKE%Kh) if(allocated(MEKE%Kh))
 
   if (allocated(MEKE%GM_src)) then
