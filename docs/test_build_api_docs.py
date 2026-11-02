@@ -42,6 +42,12 @@ class ApiDocumentationTests(unittest.TestCase):
             self.assertIn('unavailable', (output / 'reports/unresolved.txt').read_text())
             self.assertEqual((output / 'reports/render.log').read_text(), '')
             self.assertTrue((output / 'rst/index.rst').exists())
+            page = (output / 'html/client.html').read_text()
+            self.assertIn('aria-label="Reference navigation"', page)
+            self.assertIn('aria-current="page">client</a>', page)
+            self.assertIn('assets/api.css', page)
+            self.assertTrue((output / 'html/assets/api.css').is_file())
+            self.assertTrue((output / 'html/assets/api.js').is_file())
 
     def test_broken_page_and_fragment_links_fail(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -8,11 +8,11 @@ import json
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
-from docutils.core import publish_file
 import flint
 from flint.docgen.model import iter_module_documentation
 from flint.docgen.references import HtmlDestinations, ReferenceIndex
 from flint.docgen.rst import write_module
+from render_api_docs import render_reference
 
 
 class HtmlLinks(HTMLParser):
@@ -108,13 +108,7 @@ def build(source, output):
         directory.mkdir()
     summary = generate_reference(source, rst_dir, reports)
     with (reports / 'render.log').open('w', encoding='utf-8') as warnings:
-        for rst in sorted(rst_dir.glob('*.rst')):
-            publish_file(source_path=str(rst),
-                         destination_path=str(html_dir / (rst.stem + '.html')),
-                         writer='html5', settings_overrides={
-                             'warning_stream': warnings, 'halt_level': 2,
-                             'input_encoding': 'utf-8', 'output_encoding': 'utf-8',
-                         })
+        render_reference(rst_dir, html_dir, warnings)
     links, cross_file = check_links(html_dir)
     summary.update(html_pages=len(list(html_dir.glob('*.html'))),
                    checked_links=links, cross_file_links=cross_file)

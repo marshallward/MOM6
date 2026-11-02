@@ -68,3 +68,23 @@ these particular files assume sibling ``.html`` pages.
 
 This deployment changes documentation only; model numerical answers are
 unchanged.
+
+HTML presentation
+-----------------
+
+``render_api_docs.py`` renders the generated reST using Docutils and the local
+HTML template, stylesheet, and optional navigation script in ``api_theme``.
+The theme provides a filterable module sidebar, breadcrumbs, in-page navigation,
+procedure signature panels, responsive layouts, and print styling. Assets are
+bundled with the site; there are no external fonts or JavaScript dependencies.
+Links and navigation work without JavaScript; the script adds module filtering
+and initially collapses the module browser on small screens.
+
+To preview theme changes without parsing Fortran again::
+
+    .venv-api/bin/python docs/render_api_docs.py \
+      docs/_build/flint-api/rst /tmp/mom6-api-preview
+
+This changes presentation only. The generated reST is untouched and remains
+usable with other renderers. The full build validates the theme's navigation
+links as well as the API-reference links.
