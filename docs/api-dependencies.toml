@@ -1,0 +1,5 @@
+# These are dependency implementations, even when reached through src symlinks.
+# Paths are relative to the MOM6 repository root.
+[source_libraries]
+GSW = "pkg/GSW-Fortran"
+CVMix = "pkg/CVMix-src"
