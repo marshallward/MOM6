@@ -13,6 +13,7 @@ import re
 from typing import NamedTuple
 
 import flint
+from flint.documentation import documentation_pass
 
 
 UNIT_RE = re.compile(r'\[[^\]\n]+\]')
@@ -32,6 +33,7 @@ def collect_units(unit):
     yield from unit.walk()
 
 
+@documentation_pass()
 def real_unit_issues(source) -> list[Issue]:
     """Apply MOM6's units-documentation policy to Flint variables."""
     path = Path(source.path)
@@ -41,9 +43,6 @@ def real_unit_issues(source) -> list[Issue]:
         for unit in collect_units(root):
             for variable in unit.variables:
                 if variable.type != 'real' or not getattr(variable.stmt, 'source_visible', True):
-                    continue
-                location = variable.location
-                if location is None:
                     continue
                 documentation = variable.documentation
                 if documentation is None:
@@ -59,6 +58,9 @@ def real_unit_issues(source) -> list[Issue]:
                     if not competing and any(UNIT_RE.search(' '.join(block.comments)) for block in selected):
                         continue
                     message = 'competing Doxygen comments' if competing else 'missing bracketed units'
+                location = variable.location
+                if location is None:
+                    continue
                 issues.append(Issue(
                     path, location.line, str(variable.name), lines[location.line - 1],
                     selected[0].comments if selected else (), message,
