@@ -16,12 +16,18 @@ rather than overwriting pages or creating ambiguous links. FMS1 and asymmetric
 memory are not included. External library implementations such as FMS itself
 remain outside this source selection.
 
+GSW and CVMix are external libraries, not MOM6 API pages. Files whose resolved
+paths lie in ``pkg/GSW-Fortran`` or ``pkg/CVMix-src`` are excluded before parsing,
+including TEOS10 symlinks under ``src``. MOM6's own EOS and CVMix wrappers remain
+documented. ``reports/excluded-dependencies.txt`` records the excluded sources.
+
 Build and deploy stages
 -----------------------
 
 Changes under ``src``, ``config_src``, ``pkg``, or ``docs`` (or to ``.gitmodules``) trigger a build
-on pushes and pull requests. Checkout includes submodules, which supply the
-targets of source symlinks such as the TEOS10 files.
+on pushes and pull requests. The documentation checkout does not fetch
+submodules. Symlinks into the excluded dependency trees are ignored even when
+their targets are absent. Other broken source symlinks still fail the build.
 The workflow can also be started manually from the Actions page. Each build:
 
 * Installs the Flint revision and Docutils version in ``requirements-api.txt``.
@@ -62,7 +68,6 @@ Local build
 
 From the MOM6 repository root, with Python 3.13::
 
-    git submodule update --init --recursive
     python3 -m venv .venv-api
     .venv-api/bin/python -m pip install -r docs/requirements-api.txt
     .venv-api/bin/python -m unittest discover -s docs -p 'test_build_api_docs.py'
@@ -108,6 +113,8 @@ Dependency classification
 -------------------------
 
 ``api-dependencies.toml`` records the ownership of known dependency modules.
+Its ``source_libraries`` table also specifies dependency implementation trees
+to exclude from publication, relative to the MOM6 repository root.
 An explicit ``USE`` import from one of these modules identifies an external
 reference, preserving renames and re-exports through documented modules. This
 is import-based provenance, not verification of the dependency's interface.

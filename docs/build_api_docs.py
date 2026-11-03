@@ -23,6 +23,7 @@ DEFAULT_SOURCES = (
     'config_src/infra/FMS2',
     'config_src/memory/dynamic_symmetric',
 )
+REPOSITORY = Path(__file__).resolve().parents[1]
 
 
 class HtmlLinks(HTMLParser):
@@ -66,11 +67,29 @@ def check_links(directory):
 
 def generate_reference(source, rst_dir, reports):
     """Parse one file at a time; retain only documentation snapshots for linking."""
+    dependency_file = Path(__file__).with_name('api-dependencies.toml')
+    with dependency_file.open('rb') as stream:
+        dependencies = tomllib.load(stream)
+    library_roots = {library: (REPOSITORY / path).resolve()
+                     for library, path in dependencies['source_libraries'].items()}
     sources = [source] if isinstance(source, Path) else list(source)
     for root in sources:
         if not root.is_dir():
             raise FileNotFoundError(f'Source directory does not exist: {root}')
     paths = sorted({path for root in sources for path in root.rglob('*')})
+    project_paths = []
+    excluded_counts = {}
+    with (reports / 'excluded-dependencies.txt').open('w', encoding='utf-8') as stream:
+        for path in paths:
+            target = path.resolve()
+            library = next((name for name, root in library_roots.items()
+                            if target.is_relative_to(root)), None)
+            if library is None:
+                project_paths.append(path)
+            elif path.suffix in ('.F90', '.f90'):
+                excluded_counts[library] = excluded_counts.get(library, 0) + 1
+                stream.write(f'{library}: {path} -> {target}\n')
+    paths = project_paths
     missing = [path for path in paths if path.is_symlink() and not path.exists()]
     if missing:
         raise FileNotFoundError(
@@ -102,10 +121,8 @@ def generate_reference(source, rst_dir, reports):
                 del project
     if externals:
         modules.append(replace(external, procedures=tuple(externals)))
-    dependency_file = Path(__file__).with_name('api-dependencies.toml')
-    with dependency_file.open('rb') as stream:
-        dependencies = tomllib.load(stream)['libraries']
-    external_modules = {name: library for library, names in dependencies.items() for name in names}
+    external_modules = {name: library for library, names in dependencies['libraries'].items()
+                        for name in names}
     index = ReferenceIndex(modules, external_modules=external_modules)
     (reports / 'unresolved.txt').write_text(
         ''.join(message + '\n' for message in index.diagnostics), encoding='utf-8')
@@ -128,10 +145,12 @@ def generate_reference(source, rst_dir, reports):
             stream.write(f'* ``{root}``\n')
         stream.write('\nExternal calls are grouped by dependency. Unknown references are retained '
                      'in build diagnostics, not published as calls.\n\n'
+                     'GSW and CVMix implementation sources are excluded, including symlinked files.\n\n'
                      'Modules\n-------\n\n')
         for module in sorted(modules, key=lambda entry: entry.name.lower()):
             stream.write(f'* `{module.name} <{module.name}.html>`__\n')
     return {'source_files': len(files), 'module_pages': len(modules),
+            'excluded_dependency_files': excluded_counts,
             'call_references': sum(len(calls) for calls in index.calls.values()),
             'external_references': sum(external_counts.values()),
             'external_libraries': external_counts,

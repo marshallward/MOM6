@@ -4,11 +4,46 @@ import io
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from build_api_docs import build, check_links
 
 
 class ApiDocumentationTests(unittest.TestCase):
+    def test_dependency_sources_are_excluded_by_resolved_ownership(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / 'src'
+            source.mkdir()
+            gsw = root / 'pkg/GSW-Fortran'
+            cvmix = root / 'pkg/CVMix-src'
+            gsw.mkdir(parents=True)
+            cvmix.mkdir()
+            # Deliberately invalid: these implementation files must not be parsed.
+            (gsw / 'library.F90').write_text('not Fortran\n')
+            (cvmix / 'library.F90').write_text('not Fortran\n')
+            (source / 'unrelated_name.F90').symlink_to(gsw / 'library.F90')
+            (source / 'client.F90').write_text(
+                'module client\nuse gsw_mod_toolbox, only: gsw_rho\n'
+                'use cvmix_kpp, only: cvmix_init_kpp\ncontains\n'
+                'subroutine run()\ncall gsw_rho()\ncall cvmix_init_kpp()\n'
+                'end subroutine run\nend module client\n')
+            output = root / 'site'
+            with patch('build_api_docs.REPOSITORY', root), contextlib.redirect_stdout(io.StringIO()):
+                summary = build([source, cvmix], output)
+            self.assertEqual(summary['source_files'], 1)
+            self.assertEqual(summary['module_pages'], 1)
+            self.assertEqual(summary['unresolved_references'], 0)
+            self.assertEqual(summary['external_libraries'], {'CVMix': 1, 'GSW': 1})
+            self.assertEqual(summary['excluded_dependency_files'], {'GSW': 1, 'CVMix': 1})
+            self.assertEqual({path.name for path in (output / 'rst').glob('*.rst')},
+                             {'client.rst', 'index.rst'})
+            self.assertIn('unrelated_name.F90', (output / 'reports/excluded-dependencies.txt').read_text())
+            (gsw / 'library.F90').unlink()
+            with patch('build_api_docs.REPOSITORY', root), contextlib.redirect_stdout(io.StringIO()):
+                missing_summary = build([source, cvmix], root / 'without-submodule')
+            self.assertEqual(missing_summary, summary)
+
     def test_missing_submodule_target_has_actionable_error(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
