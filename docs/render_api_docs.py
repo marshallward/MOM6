@@ -58,6 +58,15 @@ def render_reference(rst_dir, html_dir, warning_stream):
     template = Template((THEME / 'page.html').read_text(encoding='utf-8'))
     files = sorted(rst_dir.glob('*.rst'), key=lambda path: path.stem.lower())
     modules = [path.stem for path in files if path.stem != 'index']
+    labels = {}
+    for path in files:
+        # Flint emits an overlined document title. Read only that header rather
+        # than retaining all rendered pages just to build the sidebar.
+        with path.open(encoding='utf-8') as stream:
+            next(stream, '')
+            title = next(stream, '').strip()
+        suffix = ' module reference'
+        labels[path.stem] = title[:-len(suffix)] if title.endswith(suffix) else path.stem
     for path in files:
         parts = publish_parts(source=path.read_text(encoding='utf-8'), source_path=str(path),
                               writer='html5', settings_overrides={
@@ -69,16 +78,16 @@ def render_reference(rst_dir, html_dir, warning_stream):
         navigation = []
         for name in modules:
             current = ' aria-current="page"' if name == path.stem else ''
-            navigation.append(f'<li><a href="{escape(name)}.html"{current}>{escape(name)}</a></li>')
+            navigation.append(f'<li><a href="{escape(name)}.html"{current}>{escape(labels[name])}</a></li>')
         contents = ''.join(
             f'<li class="{kind}"><a href="#{escape(target)}" title="{escape(label)}">'
             f'{escape(label)}</a></li>' for target, kind, label in outline.items)
         landing = path.stem == 'index'
-        title = 'MOM6 API reference' if landing else path.stem
+        title = 'MOM6 API reference' if landing else labels[path.stem]
         page = template.substitute(
             title=escape(title), body=parts['html_body'], modules='\n'.join(navigation),
             contents=contents, page_class='module-index' if landing else 'module-page',
-            breadcrumb='Module index' if landing else escape(path.stem),
+            breadcrumb='Module index' if landing else escape(labels[path.stem]),
             module_count=str(len(modules)),
             contents_hidden=' hidden' if not contents else '',
         )

@@ -100,6 +100,14 @@ bundled with the site; there are no external fonts or JavaScript dependencies.
 Links and navigation work without JavaScript; the script adds module filtering
 and initially collapses the module browser on small screens.
 
+Procedure entries are grouped by standard reST containers. JavaScript turns
+them into initially collapsed, keyboard-accessible disclosure panels. Following
+a procedure link opens its panel (including enclosing panels for nested
+procedures); printing opens all procedure panels temporarily. Without JavaScript,
+the complete reference remains visible. Names retain definition spelling in
+titles, navigation, signatures, and resolved links, while page filenames and
+anchors keep their stable identities.
+
 To preview theme changes without parsing Fortran again::
 
     .venv-api/bin/python docs/render_api_docs.py \
@@ -121,6 +129,8 @@ in those diagnostics, with their original module and symbol names. The build
 prints a warning and counts them as ``potential_external_references`` (a subset
 of ``unresolved_references``). An unindexed module may also be an omitted project
 source, so it is not automatically classified as a confirmed dependency.
+With older Flint revisions that lack import-provenance metadata, this count is
+``null`` and the builder issues a general warning when unresolved calls exist.
 The ``libraries`` and ``source_libraries`` tables are independently optional.
 Its ``source_libraries`` table also specifies dependency implementation trees
 to exclude from publication, relative to the MOM6 repository root.

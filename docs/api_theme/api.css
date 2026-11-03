@@ -86,6 +86,13 @@ dl.simple li p { margin: 0; }
 .external-calls { margin: 12px 0 24px; padding: 12px 18px; border-left: 3px solid var(--rule); color: var(--muted); font-size: 12px; }
 .external-calls summary { cursor: pointer; font-weight: 600; }
 .external-calls dl { margin-bottom: 0; }
+.procedure { margin: 14px 0; border: 1px solid var(--rule); border-radius: 6px; }
+.procedure > summary { padding: 13px 17px; border-left: 3px solid #168b96; border-radius: 5px; background: #edf5f8; color: #174b61; cursor: pointer; font: 600 13px/1.75 var(--mono); overflow-wrap: anywhere; }
+.procedure[open] > summary { border-radius: 5px 5px 0 0; border-bottom: 1px solid var(--rule); }
+.procedure > summary::marker { color: #168b96; }
+.procedure-body > dl[id^="flint-"] { margin: 0; border: 0; }
+.procedure-body > .external-calls { margin: 12px 20px 20px; }
+.procedure-body > .procedure { margin: 14px 20px; }
 @media (max-width: 1150px) {
   .page-layout { grid-template-columns: minmax(0, 1fr); }
   .contents { display: none; }

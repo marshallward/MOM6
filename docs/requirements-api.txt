@@ -1,2 +1,2 @@
-flint @ git+https://github.com/marshallward/flint.git@5912ad80b70ef1abb56cf585d10ece2dff08a531
+flint @ git+https://github.com/marshallward/flint.git@49ca238c50069f9a65c2b9455422608bcd642729
 docutils==0.22.2

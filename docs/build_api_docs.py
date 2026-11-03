@@ -11,7 +11,7 @@ from urllib.parse import unquote, urlsplit
 
 import flint
 from flint.docgen.model import iter_module_documentation
-from flint.docgen.references import HtmlDestinations, ReferenceIndex
+from flint.docgen.references import HtmlDestinations, Reference, ReferenceIndex
 from flint.docgen.rst import write_module
 from render_api_docs import render_reference
 
@@ -132,10 +132,15 @@ def generate_reference(source, rst_dir, reports):
     (reports / 'unresolved.txt').write_text(
         ''.join(message + '\n' for message in index.diagnostics), encoding='utf-8')
     external_counts = {}
-    potential_external = sum(bool(ref.unindexed_module) for calls in index.calls.values() for ref in calls)
+    potential_external = (sum(bool(ref.unindexed_module) for calls in index.calls.values() for ref in calls)
+                          if hasattr(Reference, 'unindexed_module') else None)
     if potential_external:
         print(f'Warning: {potential_external} call references import symbols from unindexed modules; '
               f'they may be external dependencies or omitted project sources. See {reports / "unresolved.txt"}.')
+    elif potential_external is None and index.diagnostics:
+        print(f'Warning: {len(index.diagnostics)} unresolved call references; some may be external '
+              'dependencies. This Flint revision does not report unindexed-module provenance. '
+              f'See {reports / "unresolved.txt"}.')
     with (reports / 'external.txt').open('w', encoding='utf-8') as stream:
         for scope, calls in index.calls.items():
             for ref in calls:
@@ -159,7 +164,7 @@ def generate_reference(source, rst_dir, reports):
                          + ', '.join(library_roots) + '.\n\n')
         stream.write('Modules\n-------\n\n')
         for module in sorted(modules, key=lambda entry: entry.name.lower()):
-            stream.write(f'* `{module.name} <{module.name}.html>`__\n')
+            stream.write(f'* `{module.display_name or module.name} <{module.name}.html>`__\n')
     return {'source_files': len(files), 'module_pages': len(modules),
             'excluded_dependency_files': excluded_counts,
             'call_references': sum(len(calls) for calls in index.calls.values()),
