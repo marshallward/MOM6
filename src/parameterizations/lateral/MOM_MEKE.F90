@@ -289,24 +289,12 @@ subroutine step_forward_MEKE(MEKE, h, SN_u, SN_v, visc, dt, G, GV, US, CS, hu, h
 
   ! These MEKE members are written on the host by other modules (thickness_diffuse,
   ! hor_visc frictional-work accumulation, VarMix), so refresh the device copies.
-  if (allocated(MEKE%GM_src)) then
-    !$omp target update to(MEKE%GM_src)
-  endif
-  if (allocated(MEKE%mom_src)) then
-    !$omp target update to(MEKE%mom_src)
-  endif
-  if (allocated(MEKE%mom_src_bh)) then
-    !$omp target update to(MEKE%mom_src_bh)
-  endif
-  if (allocated(MEKE%GME_snk)) then
-    !$omp target update to(MEKE%GME_snk)
-  endif
-  if (allocated(MEKE%Rd_dx_h)) then
-    !$omp target update to(MEKE%Rd_dx_h)
-  endif
-  if (allocated(MEKE%Kh_diff)) then
-    !$omp target update to(MEKE%Kh_diff)
-  endif
+  !$omp target update to(MEKE%GM_src) if(allocated(MEKE%GM_src))
+  !$omp target update to(MEKE%mom_src) if(allocated(MEKE%mom_src))
+  !$omp target update to(MEKE%mom_src_bh) if(allocated(MEKE%mom_src_bh))
+  !$omp target update to(MEKE%GME_snk) if(allocated(MEKE%GME_snk))
+  !$omp target update to(MEKE%Rd_dx_h) if(allocated(MEKE%Rd_dx_h))
+  !$omp target update to(MEKE%Kh_diff) if(allocated(MEKE%Kh_diff))
 
   select case(CS%eke_src)
   case(EKE_PROG)
@@ -428,9 +416,7 @@ subroutine step_forward_MEKE(MEKE, h, SN_u, SN_v, visc, dt, G, GV, US, CS, hu, h
     call MEKE_lengthScales(CS, MEKE, G, GV, US, SN_u, SN_v, MEKE%MEKE, depth_tot, bottomFac2, barotrFac2, LmixScale)
     if (CS%debug) then
       !$omp target update from(mass, drag_rate_visc, bottomFac2, barotrFac2, LmixScale)
-      if (CS%visc_drag) then
-        !$omp target update from(drag_vel_u, drag_vel_v)
-      endif
+      !$omp target update from(drag_vel_u, drag_vel_v) if(CS%visc_drag)
       if (CS%visc_drag) &
         call uvchksum("MEKE drag_vel_[uv]", drag_vel_u, drag_vel_v, G%HI, &
                       unscale=GV%H_to_mks*US%s_to_T, scalar_pair=.true.)
@@ -945,57 +931,23 @@ subroutine step_forward_MEKE(MEKE, h, SN_u, SN_v, visc, dt, G, GV, US, CS, hu, h
   ! scratch down from the device.  MEKE%MEKE and MEKE%Kh in particular are read on the
   ! host by thickness_diffuse and the restart machinery.
   !$omp target update from(MEKE%MEKE)
-  if (allocated(MEKE%Kh)) then
-    !$omp target update from(MEKE%Kh)
-  endif
-  if (allocated(MEKE%Ku)) then
-    !$omp target update from(MEKE%Ku)
-  endif
-  if (allocated(MEKE%Au)) then
-    !$omp target update from(MEKE%Au)
-  endif
-  if (allocated(MEKE%Le)) then
-    !$omp target update from(MEKE%Le)
-  endif
-  if (CS%id_Ub>0 .or. CS%id_gamma_b>0) then
-    !$omp target update from(bottomFac2)
-  endif
-  if (CS%id_Ut>0 .or. CS%id_gamma_t>0) then
-    !$omp target update from(barotrFac2)
-  endif
-  if (CS%id_Le>0) then
-    !$omp target update from(LmixScale)
-  endif
-  if (CS%id_KhMEKE_u>0) then
-    !$omp target update from(Kh_u)
-  endif
-  if (CS%id_KhMEKE_v>0) then
-    !$omp target update from(Kh_v)
-  endif
-  if (CS%id_src>0) then
-    !$omp target update from(src)
-  endif
-  if (CS%id_src_adv>0) then
-    !$omp target update from(src_adv)
-  endif
-  if (CS%id_src_mom_K4>0) then
-    !$omp target update from(src_mom_K4)
-  endif
-  if (CS%id_src_btm_drag>0) then
-    !$omp target update from(src_btm_drag)
-  endif
-  if (CS%id_src_GM>0) then
-    !$omp target update from(src_GM)
-  endif
-  if (CS%id_src_mom_lp>0) then
-    !$omp target update from(src_mom_lp)
-  endif
-  if (CS%id_src_mom_bh>0) then
-    !$omp target update from(src_mom_bh)
-  endif
-  if (CS%id_decay>0) then
-    !$omp target update from(MEKE_decay)
-  endif
+  !$omp target update from(MEKE%Kh) if(allocated(MEKE%Kh))
+  !$omp target update from(MEKE%Ku) if(allocated(MEKE%Ku))
+  !$omp target update from(MEKE%Au) if(allocated(MEKE%Au))
+  !$omp target update from(MEKE%Le) if(allocated(MEKE%Le))
+  !$omp target update from(bottomFac2) if(CS%id_Ub>0 .or. CS%id_gamma_b>0)
+  !$omp target update from(barotrFac2) if(CS%id_Ut>0 .or. CS%id_gamma_t>0)
+  !$omp target update from(LmixScale) if(CS%id_Le>0)
+  !$omp target update from(Kh_u) if(CS%id_KhMEKE_u>0)
+  !$omp target update from(Kh_v) if(CS%id_KhMEKE_v>0)
+  !$omp target update from(src) if(CS%id_src>0)
+  !$omp target update from(src_adv) if(CS%id_src_adv>0)
+  !$omp target update from(src_mom_K4) if(CS%id_src_mom_K4>0)
+  !$omp target update from(src_btm_drag) if(CS%id_src_btm_drag>0)
+  !$omp target update from(src_GM) if(CS%id_src_GM>0)
+  !$omp target update from(src_mom_lp) if(CS%id_src_mom_lp>0)
+  !$omp target update from(src_mom_bh) if(CS%id_src_mom_bh>0)
+  !$omp target update from(MEKE_decay) if(CS%id_decay>0)
 
   ! Offer fields for averaging.
   if (any([CS%id_Ue, CS%id_Ub, CS%id_Ut] > 0)) &
@@ -1848,39 +1800,17 @@ logical function MEKE_init(Time, G, GV, US, param_file, diag, dbcomms_CS, CS, ME
   ! parameters are final, and BEFORE the component maps below, whose attach then fixes the
   ! MEKE arrays' descriptors in the device copy.
   !$omp target update to(CS)
-  if (allocated(MEKE%MEKE)) then
-    !$omp target enter data map(to: MEKE%MEKE)
-  endif
-  if (allocated(MEKE%GM_src)) then
-    !$omp target enter data map(to: MEKE%GM_src)
-  endif
-  if (allocated(MEKE%mom_src)) then
-    !$omp target enter data map(to: MEKE%mom_src)
-  endif
-  if (allocated(MEKE%mom_src_bh)) then
-    !$omp target enter data map(to: MEKE%mom_src_bh)
-  endif
-  if (allocated(MEKE%GME_snk)) then
-    !$omp target enter data map(to: MEKE%GME_snk)
-  endif
-  if (allocated(MEKE%Kh)) then
-    !$omp target enter data map(to: MEKE%Kh)
-  endif
-  if (allocated(MEKE%Kh_diff)) then
-    !$omp target enter data map(to: MEKE%Kh_diff)
-  endif
-  if (allocated(MEKE%Rd_dx_h)) then
-    !$omp target enter data map(to: MEKE%Rd_dx_h)
-  endif
-  if (allocated(MEKE%Ku)) then
-    !$omp target enter data map(to: MEKE%Ku)
-  endif
-  if (allocated(MEKE%Au)) then
-    !$omp target enter data map(to: MEKE%Au)
-  endif
-  if (allocated(MEKE%Le)) then
-    !$omp target enter data map(to: MEKE%Le)
-  endif
+  !$omp target enter data map(to: MEKE%MEKE) if(allocated(MEKE%MEKE))
+  !$omp target enter data map(to: MEKE%GM_src) if(allocated(MEKE%GM_src))
+  !$omp target enter data map(to: MEKE%mom_src) if(allocated(MEKE%mom_src))
+  !$omp target enter data map(to: MEKE%mom_src_bh) if(allocated(MEKE%mom_src_bh))
+  !$omp target enter data map(to: MEKE%GME_snk) if(allocated(MEKE%GME_snk))
+  !$omp target enter data map(to: MEKE%Kh) if(allocated(MEKE%Kh))
+  !$omp target enter data map(to: MEKE%Kh_diff) if(allocated(MEKE%Kh_diff))
+  !$omp target enter data map(to: MEKE%Rd_dx_h) if(allocated(MEKE%Rd_dx_h))
+  !$omp target enter data map(to: MEKE%Ku) if(allocated(MEKE%Ku))
+  !$omp target enter data map(to: MEKE%Au) if(allocated(MEKE%Au))
+  !$omp target enter data map(to: MEKE%Le) if(allocated(MEKE%Le))
 
   ! MEKE_lengthScales reads the planetary beta on the device.  These two grid arrays are not
   ! mapped with the rest of the grid in MOM.F90.
@@ -2327,39 +2257,17 @@ subroutine MEKE_end(MEKE)
   !  are always allocated (when MEKE is enabled)
 
   ! Unmap before deallocating, mirroring the maps at the end of MEKE_init.
-  if (allocated(MEKE%MEKE)) then
-    !$omp target exit data map(delete: MEKE%MEKE)
-  endif
-  if (allocated(MEKE%GM_src)) then
-    !$omp target exit data map(delete: MEKE%GM_src)
-  endif
-  if (allocated(MEKE%mom_src)) then
-    !$omp target exit data map(delete: MEKE%mom_src)
-  endif
-  if (allocated(MEKE%mom_src_bh)) then
-    !$omp target exit data map(delete: MEKE%mom_src_bh)
-  endif
-  if (allocated(MEKE%GME_snk)) then
-    !$omp target exit data map(delete: MEKE%GME_snk)
-  endif
-  if (allocated(MEKE%Kh)) then
-    !$omp target exit data map(delete: MEKE%Kh)
-  endif
-  if (allocated(MEKE%Kh_diff)) then
-    !$omp target exit data map(delete: MEKE%Kh_diff)
-  endif
-  if (allocated(MEKE%Rd_dx_h)) then
-    !$omp target exit data map(delete: MEKE%Rd_dx_h)
-  endif
-  if (allocated(MEKE%Ku)) then
-    !$omp target exit data map(delete: MEKE%Ku)
-  endif
-  if (allocated(MEKE%Au)) then
-    !$omp target exit data map(delete: MEKE%Au)
-  endif
-  if (allocated(MEKE%Le)) then
-    !$omp target exit data map(delete: MEKE%Le)
-  endif
+  !$omp target exit data map(delete: MEKE%MEKE) if(allocated(MEKE%MEKE))
+  !$omp target exit data map(delete: MEKE%GM_src) if(allocated(MEKE%GM_src))
+  !$omp target exit data map(delete: MEKE%mom_src) if(allocated(MEKE%mom_src))
+  !$omp target exit data map(delete: MEKE%mom_src_bh) if(allocated(MEKE%mom_src_bh))
+  !$omp target exit data map(delete: MEKE%GME_snk) if(allocated(MEKE%GME_snk))
+  !$omp target exit data map(delete: MEKE%Kh) if(allocated(MEKE%Kh))
+  !$omp target exit data map(delete: MEKE%Kh_diff) if(allocated(MEKE%Kh_diff))
+  !$omp target exit data map(delete: MEKE%Rd_dx_h) if(allocated(MEKE%Rd_dx_h))
+  !$omp target exit data map(delete: MEKE%Ku) if(allocated(MEKE%Ku))
+  !$omp target exit data map(delete: MEKE%Au) if(allocated(MEKE%Au))
+  !$omp target exit data map(delete: MEKE%Le) if(allocated(MEKE%Le))
 
   if (allocated(MEKE%Au)) deallocate(MEKE%Au)
   if (allocated(MEKE%Kh_diff)) deallocate(MEKE%Kh_diff)
