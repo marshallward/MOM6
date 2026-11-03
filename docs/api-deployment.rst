@@ -113,6 +113,15 @@ Dependency classification
 -------------------------
 
 ``api-dependencies.toml`` records the ownership of known dependency modules.
+The file is optional. Without it, the builder still excludes the GSW and CVMix
+implementation trees by default, but imports from unindexed modules remain
+in unresolved diagnostics rather than receiving guessed library labels.
+Explicit imports from unindexed modules are identified as potentially external
+in those diagnostics, with their original module and symbol names. The build
+prints a warning and counts them as ``potential_external_references`` (a subset
+of ``unresolved_references``). An unindexed module may also be an omitted project
+source, so it is not automatically classified as a confirmed dependency.
+The ``libraries`` and ``source_libraries`` tables are independently optional.
 Its ``source_libraries`` table also specifies dependency implementation trees
 to exclude from publication, relative to the MOM6 repository root.
 An explicit ``USE`` import from one of these modules identifies an external

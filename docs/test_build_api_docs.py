@@ -43,6 +43,19 @@ class ApiDocumentationTests(unittest.TestCase):
             with patch('build_api_docs.REPOSITORY', root), contextlib.redirect_stdout(io.StringIO()):
                 missing_summary = build([source, cvmix], root / 'without-submodule')
             self.assertEqual(missing_summary, summary)
+            warnings = io.StringIO()
+            with (patch('build_api_docs.REPOSITORY', root),
+                  patch('build_api_docs.DEPENDENCY_CONFIG', root / 'absent.toml'),
+                  contextlib.redirect_stdout(warnings)):
+                no_config = build([source, cvmix], root / 'without-config')
+            self.assertEqual(no_config['source_files'], 1)
+            self.assertEqual(no_config['excluded_dependency_files'], {'GSW': 1, 'CVMix': 1})
+            self.assertEqual(no_config['external_references'], 0)
+            self.assertEqual(no_config['unresolved_references'], 2)
+            self.assertEqual(no_config['potential_external_references'], 2)
+            self.assertIn('Warning: 2 call references', warnings.getvalue())
+            self.assertIn('gsw_mod_toolbox::gsw_rho',
+                          (root / 'without-config/reports/unresolved.txt').read_text())
 
     def test_missing_submodule_target_has_actionable_error(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -24,6 +24,8 @@ DEFAULT_SOURCES = (
     'config_src/memory/dynamic_symmetric',
 )
 REPOSITORY = Path(__file__).resolve().parents[1]
+DEPENDENCY_CONFIG = Path(__file__).with_name('api-dependencies.toml')
+DEPENDENCY_SOURCES = {'GSW': 'pkg/GSW-Fortran', 'CVMix': 'pkg/CVMix-src'}
 
 
 class HtmlLinks(HTMLParser):
@@ -67,11 +69,14 @@ def check_links(directory):
 
 def generate_reference(source, rst_dir, reports):
     """Parse one file at a time; retain only documentation snapshots for linking."""
-    dependency_file = Path(__file__).with_name('api-dependencies.toml')
-    with dependency_file.open('rb') as stream:
-        dependencies = tomllib.load(stream)
+    dependency_file = DEPENDENCY_CONFIG
+    if dependency_file.exists():
+        with dependency_file.open('rb') as stream:
+            dependencies = tomllib.load(stream)
+    else:
+        dependencies = {}
     library_roots = {library: (REPOSITORY / path).resolve()
-                     for library, path in dependencies['source_libraries'].items()}
+                     for library, path in dependencies.get('source_libraries', DEPENDENCY_SOURCES).items()}
     sources = [source] if isinstance(source, Path) else list(source)
     for root in sources:
         if not root.is_dir():
@@ -121,12 +126,16 @@ def generate_reference(source, rst_dir, reports):
                 del project
     if externals:
         modules.append(replace(external, procedures=tuple(externals)))
-    external_modules = {name: library for library, names in dependencies['libraries'].items()
+    external_modules = {name: library for library, names in dependencies.get('libraries', {}).items()
                         for name in names}
     index = ReferenceIndex(modules, external_modules=external_modules)
     (reports / 'unresolved.txt').write_text(
         ''.join(message + '\n' for message in index.diagnostics), encoding='utf-8')
     external_counts = {}
+    potential_external = sum(bool(ref.unindexed_module) for calls in index.calls.values() for ref in calls)
+    if potential_external:
+        print(f'Warning: {potential_external} call references import symbols from unindexed modules; '
+              f'they may be external dependencies or omitted project sources. See {reports / "unresolved.txt"}.')
     with (reports / 'external.txt').open('w', encoding='utf-8') as stream:
         for scope, calls in index.calls.items():
             for ref in calls:
@@ -144,9 +153,11 @@ def generate_reference(source, rst_dir, reports):
         for root in sources:
             stream.write(f'* ``{root}``\n')
         stream.write('\nExternal calls are grouped by dependency. Unknown references are retained '
-                     'in build diagnostics, not published as calls.\n\n'
-                     'GSW and CVMix implementation sources are excluded, including symlinked files.\n\n'
-                     'Modules\n-------\n\n')
+                     'in build diagnostics, not published as calls.\n\n')
+        if library_roots:
+            stream.write('Dependency implementation sources excluded (including symlinked files): '
+                         + ', '.join(library_roots) + '.\n\n')
+        stream.write('Modules\n-------\n\n')
         for module in sorted(modules, key=lambda entry: entry.name.lower()):
             stream.write(f'* `{module.name} <{module.name}.html>`__\n')
     return {'source_files': len(files), 'module_pages': len(modules),
@@ -154,6 +165,7 @@ def generate_reference(source, rst_dir, reports):
             'call_references': sum(len(calls) for calls in index.calls.values()),
             'external_references': sum(external_counts.values()),
             'external_libraries': external_counts,
+            'potential_external_references': potential_external,
             'unresolved_references': len(index.diagnostics)}
 
 

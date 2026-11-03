@@ -1,0 +1,22 @@
+# Known dependency module ownership. An explicit USE association is required;
+# this is not an inventory of routines and does not resolve wildcard imports.
+[libraries]
+FMS = [
+  "astronomy_mod", "constants_mod", "coupler_types_mod", "data_override_mod",
+  "diag_axis_mod", "diag_data_mod", "diag_manager_mod", "ensemble_manager_mod",
+  "fms2_io_mod", "fms_affinity_mod", "fms_io_utils_mod", "fms_mod",
+  "horiz_interp_mod", "memutils_mod", "mpp_domains_mod", "mpp_mod",
+  "netcdf_io_mod", "random_numbers_mod", "time_interp_external2_mod", "time_manager_mod",
+]
+NetCDF = ["netcdf"]
+GSW = ["gsw_mod_toolbox", "gsw_mod_kinds", "gsw_mod_error_functions"]
+CVMix = [
+  "cvmix_background", "cvmix_convection", "cvmix_ddiff", "cvmix_kinds_and_types",
+  "cvmix_kpp", "cvmix_put_get", "cvmix_shear", "cvmix_tidal",
+]
+
+# These are dependency implementations, even when reached through src symlinks.
+# Paths are relative to the MOM6 repository root.
+[source_libraries]
+GSW = "pkg/GSW-Fortran"
+CVMix = "pkg/CVMix-src"
