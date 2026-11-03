@@ -7,8 +7,8 @@
   --rule: #dce5eb;
   --nav: #172f40;
   --mono: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
-  --text-scale: 1.5;
-  --sidebar-width: 340px;
+  --text-scale: 1;
+  --sidebar-width: 278px;
 }
 * { box-sizing: border-box; }
 html { scroll-padding-top: 2rem; }
