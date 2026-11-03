@@ -83,6 +83,9 @@ dl.simple li p { margin: 0; }
 .module-index #modules > ul li { border-bottom: 1px solid var(--rule); padding: 11px 0; font: 12px/1.65 var(--mono); overflow-wrap: anywhere; }
 .page-footer { margin-top: 45px; padding-top: 18px; border-top: 1px solid var(--rule); color: var(--muted); font-size: 11px; }
 :target { scroll-margin-top: 24px; }
+.external-calls { margin: 12px 0 24px; padding: 12px 18px; border-left: 3px solid var(--rule); color: var(--muted); font-size: 12px; }
+.external-calls summary { cursor: pointer; font-weight: 600; }
+.external-calls dl { margin-bottom: 0; }
 @media (max-width: 1150px) {
   .page-layout { grid-template-columns: minmax(0, 1fr); }
   .contents { display: none; }

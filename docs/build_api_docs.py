@@ -5,6 +5,7 @@ import contextlib
 from dataclasses import replace
 from html.parser import HTMLParser
 import json
+import tomllib
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
@@ -101,9 +102,21 @@ def generate_reference(source, rst_dir, reports):
                 del project
     if externals:
         modules.append(replace(external, procedures=tuple(externals)))
-    index = ReferenceIndex(modules)
+    dependency_file = Path(__file__).with_name('api-dependencies.toml')
+    with dependency_file.open('rb') as stream:
+        dependencies = tomllib.load(stream)['libraries']
+    external_modules = {name: library for library, names in dependencies.items() for name in names}
+    index = ReferenceIndex(modules, external_modules=external_modules)
     (reports / 'unresolved.txt').write_text(
         ''.join(message + '\n' for message in index.diagnostics), encoding='utf-8')
+    external_counts = {}
+    with (reports / 'external.txt').open('w', encoding='utf-8') as stream:
+        for scope, calls in index.calls.items():
+            for ref in calls:
+                if ref.external is not None:
+                    symbol = ref.external
+                    external_counts[symbol.library] = external_counts.get(symbol.library, 0) + 1
+                    stream.write(f'{scope}: {ref.label}: {symbol.library}: {symbol.module}::{symbol.name}\n')
     destinations = HtmlDestinations(index)
     for module in modules:
         with (rst_dir / (module.name + '.rst')).open('w', encoding='utf-8') as stream:
@@ -113,12 +126,15 @@ def generate_reference(source, rst_dir, reports):
         stream.write('Experimental reference generated from these source directories:\n\n')
         for root in sources:
             stream.write(f'* ``{root}``\n')
-        stream.write('\nUnresolved procedure references are displayed as plain text.\n\n'
+        stream.write('\nExternal calls are grouped by dependency. Unknown references are retained '
+                     'in build diagnostics, not published as calls.\n\n'
                      'Modules\n-------\n\n')
         for module in sorted(modules, key=lambda entry: entry.name.lower()):
             stream.write(f'* `{module.name} <{module.name}.html>`__\n')
     return {'source_files': len(files), 'module_pages': len(modules),
             'call_references': sum(len(calls) for calls in index.calls.values()),
+            'external_references': sum(external_counts.values()),
+            'external_libraries': external_counts,
             'unresolved_references': len(index.diagnostics)}
 
 

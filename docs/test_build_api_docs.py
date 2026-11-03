@@ -29,8 +29,9 @@ class ApiDocumentationTests(unittest.TestCase):
                 'module library\ncontains\nsubroutine helper()\n'
                 'end subroutine helper\nend module library\n')
             (source / 'client.F90').write_text(
-                'module client\nuse library, only: work => helper\ncontains\n'
-                'subroutine run()\ncall work()\ncall unavailable()\n'
+                'module client\nuse library, only: work => helper\n'
+                'use netcdf, only: nf90_close\ncontains\n'
+                'subroutine run()\ncall work()\ncall nf90_close()\ncall unavailable()\n'
                 'end subroutine run\nend module client\n')
             output = root / 'site'
             with contextlib.redirect_stdout(io.StringIO()):
@@ -39,12 +40,18 @@ class ApiDocumentationTests(unittest.TestCase):
             self.assertEqual(summary['module_pages'], 2)
             self.assertEqual(summary['html_pages'], 3)
             self.assertEqual(summary['unresolved_references'], 1)
+            self.assertEqual(summary['external_references'], 1)
+            self.assertEqual(summary['external_libraries'], {'NetCDF': 1})
             self.assertGreater(summary['cross_file_links'], 0)
             self.assertIn('library.html#', (output / 'html/client.html').read_text())
             self.assertIn('unavailable', (output / 'reports/unresolved.txt').read_text())
             self.assertEqual((output / 'reports/render.log').read_text(), '')
             self.assertTrue((output / 'rst/index.rst').exists())
             page = (output / 'html/client.html').read_text()
+            self.assertIn('External calls', page)
+            self.assertIn('NetCDF', page)
+            self.assertNotIn('unavailable', page)
+            self.assertIn('netcdf::nf90_close', (output / 'reports/external.txt').read_text())
             self.assertIn('aria-label="Reference navigation"', page)
             self.assertIn('aria-current="page">client</a>', page)
             self.assertIn('assets/api.css', page)

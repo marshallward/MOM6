@@ -28,7 +28,8 @@ The workflow can also be started manually from the Actions page. Each build:
 * Parses one file at a time, retaining documentation snapshots for linking.
 * Generates one standard reST document per module and an index.
 * Renders HTML with Docutils and fails on renderer warnings or broken page/anchor
-  links. Unresolved symbols remain plain text and are recorded in diagnostics.
+   links. External calls are grouped by dependency; unresolved symbols appear
+   only in build diagnostics, not in published call lists.
 * Uploads ``flint-api-reference`` containing ``rst``, ``html``, and ``reports``
   directories. PR builds can be downloaded for local preview.
 
@@ -102,3 +103,21 @@ To preview theme changes without parsing Fortran again::
 This changes presentation only. The generated reST is untouched and remains
 usable with other renderers. The full build validates the theme's navigation
 links as well as the API-reference links.
+
+Dependency classification
+-------------------------
+
+``api-dependencies.toml`` records the ownership of known dependency modules.
+An explicit ``USE`` import from one of these modules identifies an external
+reference, preserving renames and re-exports through documented modules. This
+is import-based provenance, not verification of the dependency's interface.
+Wildcard imports without a symbol inventory and ambiguous references remain
+unresolved; missing symbols are never classified by name prefix alone.
+
+The public call lists contain resolved public project targets. External calls
+appear in separate library groups, collapsed when JavaScript is available.
+They have no guessed documentation URLs. ``reports/external.txt`` records
+their module and original symbol names; ``reports/unresolved.txt`` retains
+the remaining unknowns for investigation. The build summary counts external
+and unresolved references separately. Zero unresolved references remains the
+goal; omitting unknown names from the site does not resolve them.

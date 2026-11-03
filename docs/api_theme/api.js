@@ -1,4 +1,14 @@
 /* Progressive enhancement: all navigation works without JavaScript. */
+for (const container of document.querySelectorAll('.external-calls')) {
+  const details = document.createElement('details');
+  details.className = 'external-calls';
+  const summary = document.createElement('summary');
+  summary.textContent = 'External calls';
+  details.append(summary);
+  container.querySelector('.rubric')?.remove();
+  details.append(...container.childNodes);
+  container.replaceWith(details);
+}
 const filter = document.getElementById('module-filter');
 const modules = [...document.querySelectorAll('.module-list li')];
 if (window.matchMedia('(max-width: 760px)').matches) {

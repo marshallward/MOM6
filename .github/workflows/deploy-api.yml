@@ -51,7 +51,7 @@ jobs:
             echo '```json'
             cat docs/_build/flint-api/reports/summary.json
             echo '```'
-            echo 'Unresolved symbols are plain text; details are in the build artifact.'
+            echo 'External calls are grouped by dependency. Unresolved names remain in the diagnostics artifact, not the published call lists.'
           } >> "$GITHUB_STEP_SUMMARY"
       - name: Retain reST, HTML, and diagnostics
         if: always()
