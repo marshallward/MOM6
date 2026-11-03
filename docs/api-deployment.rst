@@ -108,6 +108,11 @@ the complete reference remains visible. Names retain definition spelling in
 titles, navigation, signatures, and resolved links, while page filenames and
 anchors keep their stable identities.
 
+Top-level module sections are independently foldable through their headings.
+They start open; individual procedure panels start closed. Following a link
+opens every enclosing section and procedure panel. Printing temporarily opens
+all content panels, then restores their previous state.
+
 To preview theme changes without parsing Fortran again::
 
     .venv-api/bin/python docs/render_api_docs.py \

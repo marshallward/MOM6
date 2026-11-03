@@ -17,6 +17,22 @@ for (const container of [...document.querySelectorAll('.api-procedure')].reverse
   container.replaceWith(details);
 }
 
+for (const section of document.querySelectorAll('.module-page main > section')) {
+  const heading = section.querySelector(':scope > h2');
+  if (!heading) continue;
+  const details = document.createElement('details');
+  details.className = 'doc-section';
+  details.id = section.id;
+  details.open = true;
+  const summary = document.createElement('summary');
+  summary.append(heading);
+  const body = document.createElement('div');
+  body.className = 'section-body';
+  body.append(...section.childNodes);
+  details.append(summary, body);
+  section.replaceWith(details);
+}
+
 function revealTarget(hash = window.location.hash) {
   if (!hash) return;
   let id;
@@ -52,7 +68,7 @@ revealTarget();
 
 let printClosed = [];
 window.addEventListener('beforeprint', () => {
-  printClosed = [...document.querySelectorAll('details.procedure:not([open])')];
+  printClosed = [...document.querySelectorAll('main details:not([open])')];
   for (const details of printClosed) details.open = true;
 });
 window.addEventListener('afterprint', () => {
