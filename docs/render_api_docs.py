@@ -1,5 +1,6 @@
 """MOM6's HTML presentation layer for independently generated reST pages."""
 import argparse
+import contextlib
 from html import escape
 from html.parser import HTMLParser
 from pathlib import Path
@@ -68,11 +69,17 @@ def render_reference(rst_dir, html_dir, warning_stream):
         suffix = ' module reference'
         labels[path.stem] = title[:-len(suffix)] if title.endswith(suffix) else path.stem
     for path in files:
-        parts = publish_parts(source=path.read_text(encoding='utf-8'), source_path=str(path),
-                              writer='html5', settings_overrides={
-                                  'warning_stream': warning_stream, 'halt_level': 2,
-                                  'stylesheet_path': [], 'embed_stylesheet': False,
-                              })
+        # publish_parts resolves embedded image paths against CWD. Inline SVG
+        # preserves clickable graph nodes without separate deployed assets.
+        source = path.read_text(encoding='utf-8')
+        source_path = str(path.resolve())
+        with contextlib.chdir(path.parent):
+            parts = publish_parts(source=source, source_path=source_path,
+                                  writer='html5', settings_overrides={
+                                      'warning_stream': warning_stream, 'halt_level': 2,
+                                      'stylesheet_path': [], 'embed_stylesheet': False,
+                                      'image_loading': 'embed',
+                                  })
         outline = Outline()
         outline.feed(parts['html_body'])
         navigation = []

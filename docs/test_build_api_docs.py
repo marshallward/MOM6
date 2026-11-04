@@ -1,6 +1,7 @@
 """Deployment checks use rendered files rather than trusting generated URLs."""
 import contextlib
 import io
+import re
 from pathlib import Path
 import tempfile
 import unittest
@@ -103,8 +104,9 @@ class ApiDocumentationTests(unittest.TestCase):
             infra = root / 'config_src' / 'infra' / 'FMS2'
             infra.mkdir(parents=True)
             (infra / 'library.F90').write_text(
-                'module library\ncontains\nsubroutine helper()\n'
-                'end subroutine helper\nend module library\n')
+                'module library\nprivate :: secret\ncontains\nsubroutine helper()\n'
+                'call secret()\nend subroutine helper\n'
+                'subroutine secret()\nend subroutine secret\nend module library\n')
             (source / 'client.F90').write_text(
                 'module client\nuse library, only: work => helper\n'
                 'use netcdf, only: nf90_close\ncontains\n'
@@ -116,6 +118,7 @@ class ApiDocumentationTests(unittest.TestCase):
             self.assertEqual(summary['source_files'], 2)
             self.assertEqual(summary['module_pages'], 2)
             self.assertEqual(summary['html_pages'], 3)
+            self.assertEqual(summary['call_graphs'], 4)
             self.assertEqual(summary['unresolved_references'], 1)
             self.assertEqual(summary['external_references'], 1)
             self.assertEqual(summary['external_libraries'], {'NetCDF': 1})
@@ -134,6 +137,15 @@ class ApiDocumentationTests(unittest.TestCase):
             self.assertIn('assets/api.css', page)
             self.assertTrue((output / 'html/assets/api.css').is_file())
             self.assertTrue((output / 'html/assets/api.js').is_file())
+            self.assertIn('<svg', page)
+            self.assertIn('Callees', page)
+            library = (output / 'html/library.html').read_text()
+            self.assertIn('Callers', library)
+            self.assertIn('[private/internal]', library)
+            ids = re.findall(r'\bid="([^"]+)"', library)
+            self.assertEqual(len(ids), len(set(ids)))
+            self.assertEqual(len(list((output / 'rst').glob('*.dot'))), 4)
+            self.assertEqual(len(list((output / 'rst').glob('*.svg'))), 4)
 
     def test_alternative_modules_cannot_overwrite_pages(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -153,6 +165,10 @@ class ApiDocumentationTests(unittest.TestCase):
                 check_links(root)
             (root / 'missing.html').write_text('<p id="present">Text</p>')
             (root / 'index.html').write_text('<a href="missing.html#absent">Missing anchor</a>')
+            with self.assertRaisesRegex(ValueError, 'missing.html#absent'):
+                check_links(root)
+            (root / 'index.html').write_text(
+                '<svg><a xlink:href="missing.html#absent">Graph node</a></svg>')
             with self.assertRaisesRegex(ValueError, 'missing.html#absent'):
                 check_links(root)
 

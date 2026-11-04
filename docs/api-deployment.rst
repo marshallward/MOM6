@@ -31,6 +31,8 @@ their targets are absent. Other broken source symlinks still fail the build.
 The workflow can also be started manually from the Actions page. Each build:
 
 * Installs the Flint revision and Docutils version in ``requirements-api.txt``.
+* Installs Graphviz and generates separate caller/callee diagrams, grouped by
+  module, for connected procedures and interfaces.
 * Parses one file at a time, retaining documentation snapshots for linking.
 * Generates one standard reST document per module and an index.
 * Renders HTML with Docutils and fails on renderer warnings or broken page/anchor
@@ -66,7 +68,9 @@ configure Pages there.
 Local build
 -----------
 
-From the MOM6 repository root, with Python 3.13::
+Install Graphviz so that ``dot`` is on your PATH (for example,
+``sudo apt-get install graphviz`` on Ubuntu). From the MOM6 repository root,
+with Python 3.13::
 
     python3 -m venv .venv-api
     .venv-api/bin/python -m pip install -r docs/requirements-api.txt
@@ -80,6 +84,14 @@ subsequent build, or remove the previous generated build directory yourself.
 Repeat ``--source DIRECTORY`` to supply a custom set of source roots instead of
 the defaults. For example, ``--source src`` restores a source-only reference.
 The generated index records the selected directories.
+
+Call graphs follow one hop by default; ``--graph-depth 2`` expands each
+direction to two hops. Private and internal procedures are included so that
+implementation paths remain visible. External and unresolved calls are omitted
+from diagrams. These are possible-call relationships, not execution order.
+DOT and SVG files are retained beside the reST pages. HTML embeds SVG inline
+to preserve clickable node links, which are validated with the other site
+links. ``reports/summary.json`` includes the number of generated diagrams.
 
 Update the pinned Flint revision explicitly when adopting generator changes.
 Generation and rendering remain separate functions in ``build_api_docs.py``;

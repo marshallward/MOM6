@@ -5,13 +5,17 @@ import contextlib
 from dataclasses import replace
 from html.parser import HTMLParser
 import json
+import shutil
+import subprocess
 import tomllib
+import xml.etree.ElementTree as ET
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
 import flint
 from flint.docgen.model import iter_module_documentation
-from flint.docgen.references import HtmlDestinations, Reference, ReferenceIndex
+from flint.docgen.references import HtmlDestinations, Reference, ReferenceIndex, anchor
+from flint.docgen.graphs import call_graph, write_dot
 from flint.docgen.rst import write_module
 from render_api_docs import render_reference
 
@@ -38,8 +42,10 @@ class HtmlLinks(HTMLParser):
         attrs = dict(attrs)
         if 'id' in attrs:
             self.ids.add(attrs['id'])
-        if tag == 'a' and 'href' in attrs:
-            self.links.append(attrs['href'])
+        if tag == 'a':
+            href = attrs.get('href', attrs.get('xlink:href'))
+            if href is not None:
+                self.links.append(href)
 
 
 def check_links(directory):
@@ -67,7 +73,42 @@ def check_links(directory):
     return count, cross_file
 
 
-def generate_reference(source, rst_dir, reports):
+def generate_graphs(index, directory, depth=1):
+    """Render directional graphs, including private implementation procedures."""
+    dot = shutil.which('dot')
+    if dot is None:
+        raise RuntimeError('Call graphs require Graphviz; install the dot executable.')
+    images = {}
+    ET.register_namespace('', 'http://www.w3.org/2000/svg')
+    ET.register_namespace('xlink', 'http://www.w3.org/1999/xlink')
+    for key, unit in sorted(index.units.items()):
+        if unit.kind not in ('function', 'subroutine', 'interface'):
+            continue
+        for direction in ('callees', 'callers'):
+            graph = call_graph(index, key, depth=depth, direction=direction)
+            if not graph.edges:
+                continue
+            path = directory / (direction + '-' + anchor(key) + '.dot')
+            with path.open('w', encoding='utf-8') as stream:
+                write_dot(stream, graph, index, html_links=True)
+            image = path.with_suffix('.svg')
+            subprocess.run([dot, '-Tsvg', str(path), '-o', str(image)], check=True)
+            # Graphviz repeats graph0/node1/etc. across files. Inline SVGs share
+            # the HTML document, so give their internal IDs unique prefixes.
+            tree = ET.parse(image)
+            for node in tree.iter():
+                if 'id' in node.attrib:
+                    node.set('id', path.stem + '-' + node.get('id'))
+                for attr in ('href', '{http://www.w3.org/1999/xlink}href'):
+                    value = node.get(attr, '')
+                    if value.startswith('#'):
+                        node.set(attr, '#' + path.stem + '-' + value[1:])
+            tree.write(image, encoding='utf-8', xml_declaration=True)
+            images.setdefault(key, []).append((direction.title(), image.name))
+    return images
+
+
+def generate_reference(source, rst_dir, reports, *, graph_depth=1):
     """Parse one file at a time; retain only documentation snapshots for linking."""
     dependency_file = DEPENDENCY_CONFIG
     if dependency_file.exists():
@@ -149,9 +190,11 @@ def generate_reference(source, rst_dir, reports):
                     external_counts[symbol.library] = external_counts.get(symbol.library, 0) + 1
                     stream.write(f'{scope}: {ref.label}: {symbol.library}: {symbol.module}::{symbol.name}\n')
     destinations = HtmlDestinations(index)
+    graph_images = generate_graphs(index, rst_dir, depth=graph_depth)
     for module in modules:
         with (rst_dir / (module.name + '.rst')).open('w', encoding='utf-8') as stream:
-            write_module(stream, module, references=index, destinations=destinations)
+            write_module(stream, module, references=index, destinations=destinations,
+                         graph_images=graph_images)
     with (rst_dir / 'index.rst').open('w', encoding='utf-8') as stream:
         stream.write('MOM6 API reference\n==================\n\n')
         stream.write('Experimental reference generated from these source directories:\n\n')
@@ -166,6 +209,7 @@ def generate_reference(source, rst_dir, reports):
         for module in sorted(modules, key=lambda entry: entry.name.lower()):
             stream.write(f'* `{module.display_name or module.name} <{module.name}.html>`__\n')
     return {'source_files': len(files), 'module_pages': len(modules),
+            'call_graphs': sum(len(images) for images in graph_images.values()),
             'excluded_dependency_files': excluded_counts,
             'call_references': sum(len(calls) for calls in index.calls.values()),
             'external_references': sum(external_counts.values()),
@@ -174,13 +218,15 @@ def generate_reference(source, rst_dir, reports):
             'unresolved_references': len(index.diagnostics)}
 
 
-def build(source, output):
+def build(source, output, *, graph_depth=1):
+    if graph_depth < 0:
+        raise ValueError('Graph depth must be nonnegative')
     # A fresh directory prevents old module pages from masking broken links.
     output.mkdir(parents=True, exist_ok=False)
     rst_dir, html_dir, reports = (output / name for name in ('rst', 'html', 'reports'))
     for directory in (rst_dir, html_dir, reports):
         directory.mkdir()
-    summary = generate_reference(source, rst_dir, reports)
+    summary = generate_reference(source, rst_dir, reports, graph_depth=graph_depth)
     with (reports / 'render.log').open('w', encoding='utf-8') as warnings:
         render_reference(rst_dir, html_dir, warnings)
     links, cross_file = check_links(html_dir)
@@ -197,8 +243,11 @@ def main():
     parser.add_argument('--source', type=Path, action='append',
                         help='Source directory; repeat to combine roots (replaces the MOM6 defaults)')
     parser.add_argument('--output', type=Path, default=Path('docs/_build/flint-api'))
+    parser.add_argument('--graph-depth', type=int, default=1,
+                        help='Caller/callee graph depth (default: 1)')
     args = parser.parse_args()
-    build(args.source or [Path(root) for root in DEFAULT_SOURCES], args.output)
+    build(args.source or [Path(root) for root in DEFAULT_SOURCES], args.output,
+          graph_depth=args.graph_depth)
 
 
 if __name__ == '__main__':
