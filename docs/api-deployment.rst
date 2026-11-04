@@ -109,6 +109,11 @@ HTML template, stylesheet, and optional navigation script in ``api_theme``.
 The theme provides a filterable module sidebar, breadcrumbs, in-page navigation,
 procedure signature panels, responsive layouts, and print styling. Assets are
 bundled with the site; there are no external fonts or JavaScript dependencies.
+Body text, signatures, and graph labels use a 16px reading baseline; navigation
+and secondary text use 14px. Graphviz labels are generated at 12pt (16px).
+The ``--text-scale`` CSS variable scales both text and diagrams. Phone layouts
+retain these reading sizes and let wide graphs scroll horizontally rather than
+shrinking their labels. Graph scroll regions also accept keyboard focus.
 Links and navigation work without JavaScript; the script adds module filtering
 and initially collapses the module browser on small screens.
 

@@ -92,7 +92,9 @@ def generate_graphs(index, directory, depth=1):
             with path.open('w', encoding='utf-8') as stream:
                 write_dot(stream, graph, index, html_links=True)
             image = path.with_suffix('.svg')
-            subprocess.run([dot, '-Tsvg', str(path), '-o', str(image)], check=True)
+            # Graphviz uses points: 12pt matches the site's 16px reading size.
+            subprocess.run([dot, '-Tsvg', '-Nfontsize=12', '-Gfontsize=12',
+                            '-Efontsize=12', str(path), '-o', str(image)], check=True)
             # Graphviz repeats graph0/node1/etc. across files. Inline SVGs share
             # the HTML document, so give their internal IDs unique prefixes.
             tree = ET.parse(image)

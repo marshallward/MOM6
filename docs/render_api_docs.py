@@ -1,6 +1,7 @@
 """MOM6's HTML presentation layer for independently generated reST pages."""
 import argparse
 import contextlib
+import re
 from html import escape
 from html.parser import HTMLParser
 from pathlib import Path
@@ -80,6 +81,13 @@ def render_reference(rst_dir, html_dir, warning_stream):
                                       'stylesheet_path': [], 'embed_stylesheet': False,
                                       'image_loading': 'embed',
                                   })
+        # Preserve natural graph label sizes on narrow screens. The wrapper
+        # provides keyboard-accessible scrolling instead of shrinking the SVG.
+        parts['html_body'] = re.sub(
+            r'(<svg\b.*?</svg>)',
+            r'<div class="call-graph" tabindex="0" role="region" '
+            r'aria-label="Call graph (scroll to explore)">\1</div>',
+            parts['html_body'], flags=re.DOTALL)
         outline = Outline()
         outline.feed(parts['html_body'])
         navigation = []

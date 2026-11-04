@@ -138,6 +138,8 @@ class ApiDocumentationTests(unittest.TestCase):
             self.assertTrue((output / 'html/assets/api.css').is_file())
             self.assertTrue((output / 'html/assets/api.js').is_file())
             self.assertIn('<svg', page)
+            self.assertIn('class="call-graph" tabindex="0"', page)
+            self.assertIn('font-size="12.00"', page)
             self.assertIn('Callees', page)
             library = (output / 'html/library.html').read_text()
             self.assertIn('Callers', library)

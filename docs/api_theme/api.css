@@ -12,10 +12,10 @@
 }
 * { box-sizing: border-box; }
 html { scroll-padding-top: 2rem; }
-body { margin: 0; color: var(--ink); background: #fff; font: calc(15px * var(--text-scale))/1.65 system-ui, -apple-system, "Segoe UI", sans-serif; }
+body { margin: 0; color: var(--ink); background: #fff; font: calc(16px * var(--text-scale))/1.65 system-ui, -apple-system, "Segoe UI", sans-serif; }
 a { color: var(--link); text-decoration: none; }
 a:hover { text-decoration: underline; }
-a:focus-visible, input:focus-visible, summary:focus-visible { outline: 3px solid #df9d27; outline-offset: 3px; }
+a:focus-visible, input:focus-visible, summary:focus-visible, .call-graph:focus-visible { outline: 3px solid #df9d27; outline-offset: 3px; }
 [hidden] { display: none !important; }
 .visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .skip-link { position: fixed; left: 1rem; top: -5rem; padding: .7rem 1rem; background: white; z-index: 10; }
@@ -101,16 +101,20 @@ dl.simple li p { margin: 0; }
 .doc-section > summary > h2 { display: inline; margin: 0; padding: 0; border: 0; }
 .doc-section > .section-body { padding-top: 1px; }
 .doc-section:not([open]) { margin-bottom: 16px; }
-/* One scale controls reading size across content and navigation. */
-.site-label, .contents h2, .contents .definition a { font-size: calc(10px * var(--text-scale)); }
+/* One scale controls reading size across content, navigation, and graphs.
+   Small screens change layout, not the reading size. */
+.site-label, .contents h2, .contents .definition a,
 .brand small, .count, .sidebar-footer, .header-note, .contents a, .page-footer,
-dl[id^="flint-"] > dt:not(:first-of-type), dl[id^="flint-"] > dd > p > a { font-size: calc(11px * var(--text-scale)); }
-.module-list a { font-size: calc(11.5px * var(--text-scale)); }
+dl[id^="flint-"] > dt:not(:first-of-type), dl[id^="flint-"] > dd > p > a,
+.module-list a,
 #module-filter, .page-header, td:first-child, dl.simple > dt, dl.simple li strong,
-.module-index #modules > ul li, .external-calls { font-size: calc(12px * var(--text-scale)); }
-.module-browser summary, table, dl.simple li, .procedure > summary,
-dl[id^="flint-"] > dt:first-of-type, p[id^="flint-"] { font-size: calc(13px * var(--text-scale)); }
-h2 { font-size: calc(18px * var(--text-scale)); }
+.module-index #modules > ul li, .external-calls, .module-browser summary,
+table { font-size: calc(14px * var(--text-scale)); }
+dl.simple li, .procedure > summary,
+dl[id^="flint-"] > dt:first-of-type, p[id^="flint-"] { font-size: calc(16px * var(--text-scale)); }
+h2 { font-size: calc(22px * var(--text-scale)); }
+.call-graph { max-width: 100%; overflow-x: auto; margin: 1rem 0; }
+.call-graph > svg { display: block; max-width: none; zoom: var(--text-scale); }
 .brand-mark { font-size: calc(19px * var(--text-scale)); }
 .brand { font-size: calc(25px * var(--text-scale)); }
 h1 { font-size: clamp(calc(1.65rem * var(--text-scale)), calc(2.3vw * var(--text-scale)), calc(2.25rem * var(--text-scale))); }
@@ -133,6 +137,8 @@ h1 { font-size: clamp(calc(1.65rem * var(--text-scale)), calc(2.3vw * var(--text
   dl[id^="flint-"] > dd { padding-left: 13px; padding-right: 13px; }
 }
 @media print {
+  .call-graph { overflow: visible; }
+  .call-graph > svg { max-width: 100%; height: auto; }
   .sidebar, .page-header, .contents, .skip-link { display: none; }
   .workspace { margin: 0; }
   .page-layout { display: block; padding: 0; }
