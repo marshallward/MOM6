@@ -30,12 +30,15 @@ submodules. Symlinks into the excluded dependency trees are ignored even when
 their targets are absent. Other broken source symlinks still fail the build.
 The workflow can also be started manually from the Actions page. Each build:
 
-* Installs the Flint revision and Docutils version in ``requirements-api.txt``.
+* Installs the Flint, Docutils, Sphinx, and bibliography dependencies pinned in
+  ``requirements-api.txt``.
 * Installs Graphviz and generates separate caller/callee diagrams, grouped by
   module, for connected procedures and interfaces.
 * Parses one file at a time, retaining documentation snapshots for linking.
-* Generates one standard reST document per module and an index.
-* Renders HTML with Docutils and fails on renderer warnings or broken page/anchor
+* Generates one standard reST document per module and an API index, and copies
+  the maintained ``api-home.rst`` landing page and handwritten manual chapters.
+* Renders API pages with Docutils and manual chapters with a minimal Sphinx
+  build, using the same site theme. Fails on renderer warnings or broken page/anchor
    links. External calls are grouped by dependency; unresolved symbols appear
    only in build diagnostics, not in published call lists.
 * Uploads ``flint-api-reference`` containing ``rst``, ``html``, and ``reports``
@@ -81,6 +84,32 @@ Open ``docs/_build/flint-api/html/index.html``. The output directory must be new
 so stale pages cannot hide broken links; use another ``--output`` path for a
 subsequent build, or remove the previous generated build directory yourself.
 
+The home page introduces the documentation and links to the local science
+and user-guide chapter pages. The local module index is
+``api-index.html``; module page URLs and procedure anchors are unchanged.
+Edit ``docs/api-home.rst`` to update the landing page. It uses ordinary reST
+and is independent of the existing Sphinx ``docs/index.rst``.
+
+``GUIDE_PAGES`` in ``render_guide_docs.py`` lists the 16 handwritten manual
+chapters and their navigation titles, including the bibliography. They use
+the same ``docs/*.rst`` sources as the existing manual, and appear under
+"User and science guide" rather than in the API module list. Sphinx handles
+their toctrees, citations, bibliography, and reference resolution; its HTML
+fragments are placed in the existing MOM6 template. ``guide_sphinx/conf.py``
+is a small standalone configuration, not the legacy Doxygen configuration.
+
+Detailed science pages generated from ``.dox`` files are still hosted on Read
+the Docs. During the temporary Sphinx build, links to these pages are replaced
+with their published URLs and titles. References into their sections use
+Intersphinx. Both use ``guide-inventory.inv``, a snapshot downloaded from
+``https://mom6.readthedocs.io/en/main/objects.inv`` on 2026-11-03 (inventory
+project: MOM6, version: 0.2a3). This is link metadata, not a copy of those pages.
+Refresh that snapshot deliberately when adopting changed external destinations;
+normal builds require no network access for reference resolution. Unknown
+chapter destinations and unresolved references fail the build rather than
+silently producing guessed links. The original source files are not rewritten
+to external links, so the existing Sphinx/Doxygen manual still builds normally.
+
 Repeat ``--source DIRECTORY`` to supply a custom set of source roots instead of
 the defaults. For example, ``--source src`` restores a source-only reference.
 The generated index records the selected directories.
@@ -104,7 +133,7 @@ unchanged.
 HTML presentation
 -----------------
 
-``render_api_docs.py`` renders the generated reST using Docutils and the local
+``render_api_docs.py`` assembles the rendered API and manual pages with the local
 HTML template, stylesheet, and optional navigation script in ``api_theme``.
 The theme provides a filterable module sidebar, breadcrumbs, in-page navigation,
 procedure signature panels, responsive layouts, and print styling. Assets are

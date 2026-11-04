@@ -79,6 +79,7 @@ const filter = document.getElementById('module-filter');
 const modules = [...document.querySelectorAll('.module-list li')];
 if (window.matchMedia('(max-width: 760px)').matches) {
   document.querySelector('.module-browser').open = false;
+  document.querySelector('.guide-browser').open = false;
 }
 if (filter) {
   document.querySelector('.filter-controls').hidden = false;

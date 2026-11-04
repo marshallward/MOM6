@@ -1,2 +1,4 @@
 flint @ git+https://github.com/marshallward/flint.git@93eedf051b2a6a3f6daf1f80182f7d8e76e83c04
 docutils==0.22.2
+sphinx==9.2.0
+sphinxcontrib-bibtex==2.7.0

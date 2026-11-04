@@ -28,6 +28,16 @@ a:focus-visible, input:focus-visible, summary:focus-visible, .call-graph:focus-v
 .site-label { padding: 0 22px 23px; font-size: 10px; font-weight: 600; letter-spacing: 1.5px; color: #a9c7d6; }
 .site-label span { float: right; font-weight: 400; letter-spacing: 0; color: #c5d5df; }
 .module-browser { display: flex; flex-direction: column; min-height: 0; overflow: auto; border-top: 1px solid #304b5d; }
+.site-nav { padding: 0 22px 16px; }
+.site-nav a { display: block; padding: 5px 0; color: #dbe9f1; font-size: calc(14px * var(--text-scale)); }
+.site-nav a[aria-current] { color: #fff; font-weight: 650; }
+.site-nav { flex-shrink: 0; }
+.guide-browser { max-height: 35vh; overflow-y: auto; font-size: calc(14px * var(--text-scale)); }
+.guide-browser > summary { cursor: pointer; padding: 5px 0; font-weight: 600; }
+.guide-browser > a { padding-left: 12px; }
+.guide-page dl.citation { font-size: calc(14px * var(--text-scale)); }
+.guide-page dl.citation > dt { font-weight: 600; }
+.guide-page dl.citation > dd { margin-left: 0; margin-bottom: 16px; }
 .module-browser summary { padding: 15px 22px 10px; cursor: pointer; font-weight: 600; font-size: 13px; }
 .count { margin-left: 8px; color: #a9c7d6; font-size: 11px; font-weight: 400; }
 .filter-controls { padding: 0 16px 14px; }
@@ -81,6 +91,8 @@ dl.simple li p { margin: 0; }
 .contents .section a { font-weight: 600; color: #2d5268; padding-top: 11px; }
 .contents .definition a { font-family: var(--mono); font-size: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .module-index .page-layout { display: block; max-width: 1300px; }
+.home-page .page-layout { display: block; max-width: 1100px; }
+.home-page .contents { display: none; }
 .module-index #modules > ul { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); padding: 0; list-style: none; gap: 0 28px; }
 .module-index #modules > ul li { border-bottom: 1px solid var(--rule); padding: 11px 0; font: 12px/1.65 var(--mono); overflow-wrap: anywhere; }
 .page-footer { margin-top: 45px; padding-top: 18px; border-top: 1px solid var(--rule); color: var(--muted); font-size: 11px; }

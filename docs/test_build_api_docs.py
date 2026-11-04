@@ -10,6 +10,7 @@ from unittest.mock import patch
 from build_api_docs import build, check_links
 from flint.docgen.references import Reference
 from render_api_docs import render_reference
+from render_guide_docs import GUIDE_PAGES
 
 
 class ApiDocumentationTests(unittest.TestCase):
@@ -35,6 +36,7 @@ class ApiDocumentationTests(unittest.TestCase):
             self.assertIn('subroutine Advance(State, dt)', page)
             check_links_directory = root / 'html'
             (check_links_directory / 'index.html').write_text('<p>Index</p>')
+            (check_links_directory / 'api-index.html').write_text('<p>API reference</p>')
             check_links(check_links_directory)
 
     def test_dependency_sources_are_excluded_by_resolved_ownership(self):
@@ -64,7 +66,8 @@ class ApiDocumentationTests(unittest.TestCase):
             self.assertEqual(summary['external_libraries'], {'CVMix': 1, 'GSW': 1})
             self.assertEqual(summary['excluded_dependency_files'], {'GSW': 1, 'CVMix': 1})
             self.assertEqual({path.name for path in (output / 'rst').glob('*.rst')},
-                             {'client.rst', 'index.rst'})
+                             {'client.rst', 'index.rst', 'api-index.rst'}
+                             | {name + '.rst' for name in GUIDE_PAGES})
             self.assertIn('unrelated_name.F90', (output / 'reports/excluded-dependencies.txt').read_text())
             (gsw / 'library.F90').unlink()
             with patch('build_api_docs.REPOSITORY', root), contextlib.redirect_stdout(io.StringIO()):
@@ -117,7 +120,7 @@ class ApiDocumentationTests(unittest.TestCase):
                 summary = build([source, infra], output)
             self.assertEqual(summary['source_files'], 2)
             self.assertEqual(summary['module_pages'], 2)
-            self.assertEqual(summary['html_pages'], 3)
+            self.assertEqual(summary['html_pages'], 4 + len(GUIDE_PAGES))
             self.assertEqual(summary['call_graphs'], 4)
             self.assertEqual(summary['unresolved_references'], 1)
             self.assertEqual(summary['external_references'], 1)
@@ -127,6 +130,36 @@ class ApiDocumentationTests(unittest.TestCase):
             self.assertIn('unavailable', (output / 'reports/unresolved.txt').read_text())
             self.assertEqual((output / 'reports/render.log').read_text(), '')
             self.assertTrue((output / 'rst/index.rst').exists())
+            home = (output / 'html/index.html').read_text()
+            self.assertIn('MOM6 documentation', home)
+            self.assertIn('href="api-index.html"', home)
+            self.assertIn('href="code_organization.html"', home)
+            self.assertIn('href="about.html"', home)
+            about = (output / 'html/about.html').read_text()
+            self.assertIn('<title>About this documentation — MOM6</title>', about)
+            self.assertIn('href="about.html" aria-current="page"', about)
+            self.assertIn('Flint', about)
+            self.assertIn('<span class="count">2</span>', about)
+            chapter = (output / 'html/code_organization.html').read_text()
+            self.assertIn('<title>Organization of the code — MOM6</title>', chapter)
+            self.assertIn('href="code_organization.html" aria-current="page"', chapter)
+            self.assertIn('configuration directories</a>', chapter)
+            self.assertIn('FMS_cap', chapter)
+            self.assertNotIn(':ref:', chapter)
+            self.assertIn('<span class="count">2</span>', chapter)
+            self.assertIn('href="equations.html"', home)
+            equations = (output / 'html/equations.html').read_text()
+            self.assertIn('https://mom6.readthedocs.io/en/main/api/generated/pages/Notation.html', equations)
+            self.assertIn('href="zzbibliography.html#', equations)
+            working = (output / 'html/working_with_MOM6.html').read_text()
+            self.assertIn('href="code_organization.html"', working)
+            lateral = (output / 'html/parameterizations_lateral.html').read_text()
+            self.assertNotIn(':cite:', lateral)
+            self.assertNotIn(':ref:', lateral)
+            self.assertIn('namespacemom-hor-visc-1section-horizontal-viscosity', lateral)
+            module_index = (output / 'html/api-index.html').read_text()
+            self.assertIn('href="client.html"', module_index)
+            self.assertNotIn('aria-current="page">api-index</a>', module_index)
             page = (output / 'html/client.html').read_text()
             library = (output / 'html/library.html').read_text()
             self.assertIn('External calls', page)

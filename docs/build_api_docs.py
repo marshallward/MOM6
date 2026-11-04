@@ -17,7 +17,7 @@ from flint.docgen.model import iter_module_documentation
 from flint.docgen.references import HtmlDestinations, Reference, ReferenceIndex, anchor
 from flint.docgen.graphs import call_graph, write_dot
 from flint.docgen.rst import write_module
-from render_api_docs import render_reference
+from render_api_docs import GUIDE_PAGES, render_reference
 
 
 DEFAULT_SOURCES = (
@@ -197,7 +197,10 @@ def generate_reference(source, rst_dir, reports, *, graph_depth=1):
         with (rst_dir / (module.name + '.rst')).open('w', encoding='utf-8') as stream:
             write_module(stream, module, references=index, destinations=destinations,
                          graph_images=graph_images)
-    with (rst_dir / 'index.rst').open('w', encoding='utf-8') as stream:
+    shutil.copyfile(Path(__file__).with_name('api-home.rst'), rst_dir / 'index.rst')
+    for name in GUIDE_PAGES:
+        shutil.copyfile(Path(__file__).with_name(name + '.rst'), rst_dir / (name + '.rst'))
+    with (rst_dir / 'api-index.rst').open('w', encoding='utf-8') as stream:
         stream.write('MOM6 API reference\n==================\n\n')
         stream.write('Experimental reference generated from these source directories:\n\n')
         for root in sources:

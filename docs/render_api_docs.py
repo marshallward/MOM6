@@ -13,6 +13,7 @@ from docutils import nodes
 from docutils.core import publish_parts
 from docutils.readers.standalone import Reader
 from docutils.transforms import Transform
+from render_guide_docs import GUIDE_PAGES, render_guides
 
 
 THEME = Path(__file__).parent / 'api_theme'
@@ -139,9 +140,14 @@ def render_reference(rst_dir, html_dir, warning_stream):
         shutil.copyfile(THEME / name, assets / name)
     template = Template((THEME / 'page.html').read_text(encoding='utf-8'))
     files = sorted(rst_dir.glob('*.rst'), key=lambda path: path.stem.lower())
-    modules = [path.stem for path in files if path.stem != 'index']
+    guide_bodies = render_guides(rst_dir, warning_stream)
+    modules = [path.stem for path in files
+               if path.stem not in ('index', 'api-index') and path.stem not in GUIDE_PAGES]
     labels = {}
     for path in files:
+        if path.stem in GUIDE_PAGES:
+            labels[path.stem] = GUIDE_PAGES[path.stem]
+            continue
         # Flint emits an overlined document title. Read only that header rather
         # than retaining all rendered pages just to build the sidebar.
         with path.open(encoding='utf-8') as stream:
@@ -154,13 +160,16 @@ def render_reference(rst_dir, html_dir, warning_stream):
         # preserves clickable graph nodes without separate deployed assets.
         source = path.read_text(encoding='utf-8')
         source_path = str(path.resolve())
-        with contextlib.chdir(path.parent):
-            parts = publish_parts(source=source, source_path=source_path, reader=GraphReader(),
-                                  writer='html5', settings_overrides={
-                                      'warning_stream': warning_stream, 'halt_level': 2,
-                                      'stylesheet_path': [], 'embed_stylesheet': False,
-                                      'image_loading': 'embed',
-                                  })
+        if path.stem in guide_bodies:
+            parts = {'html_body': guide_bodies[path.stem]}
+        else:
+            with contextlib.chdir(path.parent):
+                parts = publish_parts(source=source, source_path=source_path, reader=GraphReader(),
+                                      writer='html5', settings_overrides={
+                                          'warning_stream': warning_stream, 'halt_level': 2,
+                                          'stylesheet_path': [], 'embed_stylesheet': False,
+                                          'image_loading': 'embed',
+                                      })
         outline = Outline()
         outline.feed(parts['html_body'])
         navigation = []
@@ -170,12 +179,23 @@ def render_reference(rst_dir, html_dir, warning_stream):
         contents = ''.join(
             f'<li class="{kind}"><a href="#{escape(target)}" title="{escape(label)}">'
             f'{escape(label)}</a></li>' for target, kind, label in outline.items)
-        landing = path.stem == 'index'
-        title = 'MOM6 API reference' if landing else labels[path.stem]
+        home = path.stem == 'index'
+        module_index = path.stem == 'api-index'
+        guide = path.stem in GUIDE_PAGES
+        guides = []
+        for name, label in GUIDE_PAGES.items():
+            if name in labels:
+                current = ' aria-current="page"' if name == path.stem else ''
+                guides.append(f'<a href="{name}.html"{current}>{escape(label)}</a>')
+        title = ('MOM6 documentation' if home else
+                 'MOM6 API reference' if module_index else labels[path.stem])
         page = template.substitute(
             title=escape(title), body=parts['html_body'], modules='\n'.join(navigation),
-            contents=contents, page_class='module-index' if landing else 'module-page',
-            breadcrumb='Module index' if landing else escape(labels[path.stem]),
+            guides='\n'.join(guides),
+            contents=contents,
+            page_class=('home-page' if home else 'module-index' if module_index else
+                        'guide-page' if guide else 'module-page'),
+            breadcrumb='Home' if home else 'API reference' if module_index else escape(labels[path.stem]),
             module_count=str(len(modules)),
             contents_hidden=' hidden' if not contents else '',
         )
