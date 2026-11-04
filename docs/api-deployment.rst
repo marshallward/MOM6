@@ -114,6 +114,8 @@ and secondary text use 14px. Graphviz labels are generated at 12pt (16px).
 The ``--text-scale`` CSS variable scales both text and diagrams. Phone layouts
 retain these reading sizes and let wide graphs scroll horizontally rather than
 shrinking their labels. Graph scroll regions also accept keyboard focus.
+Callee and caller diagrams each have their own initially collapsed disclosure
+box. These work without JavaScript, and retain the scroll region when expanded.
 Links and navigation work without JavaScript; the script adds module filtering
 and initially collapses the module browser on small screens.
 

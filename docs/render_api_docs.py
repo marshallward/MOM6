@@ -88,6 +88,14 @@ def render_reference(rst_dir, html_dir, warning_stream):
             r'<div class="call-graph" tabindex="0" role="region" '
             r'aria-label="Call graph (scroll to explore)">\1</div>',
             parts['html_body'], flags=re.DOTALL)
+        # Keep large diagrams optional to read, independently of the procedure
+        # panel. Native details remain usable without JavaScript.
+        parts['html_body'] = re.sub(
+            r'<p class="rubric">(Callees|Callers)</p>\s*'
+            r'(<div class="call-graph"[^>]*>.*?</div>)',
+            r'<details class="call-graph-panel"><summary>\1 call graph</summary>'
+            r'\2</details>',
+            parts['html_body'], flags=re.DOTALL)
         outline = Outline()
         outline.feed(parts['html_body'])
         navigation = []
