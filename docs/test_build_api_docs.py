@@ -10,10 +10,42 @@ from unittest.mock import patch
 from build_api_docs import build, check_links
 from flint.docgen.references import Reference
 from render_api_docs import render_reference
-from render_guide_docs import GUIDE_PAGES, SCIENCE_PAGES
+from render_guide_docs import GUIDE_PAGES, SCIENCE_PAGES, render_guides
 
 
 class ApiDocumentationTests(unittest.TestCase):
+    def test_manual_references_citations_and_code_are_resolved_without_sphinx(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / 'first.rst').write_text(
+                'First\n=====\n\n.. toctree::\n   :maxdepth: 2\n\n   second\n\n'
+                'See :ref:`the result <result>` and :cite:`Adcroft2019,reichl2018`.\n\n'
+                '.. code-block:: text\n\n   :cite:`not-a-citation`\n')
+            (root / 'second.rst').write_text(
+                'Second\n======\n\nIntroduction.\n\n.. _result:\n\n'
+                'Result\n------\n\nA result.\n')
+            (root / 'zzbibliography.rst').write_text(
+                'Bibliography\n============\n\n.. bibliography:: ocean.bib\n   :style: plain\n')
+            titles = {'first': 'First', 'second': 'Second', 'zzbibliography': 'Bibliography'}
+            with patch('render_guide_docs.GUIDE_PAGES', titles), patch('render_guide_docs.SCIENCE_PAGES', {}):
+                warnings = io.StringIO()
+                pages = render_guides(root, warnings)
+                self.assertEqual(warnings.getvalue(), '')
+                self.assertIn('href="second.html#result"', pages['first'])
+                self.assertIn('the result</a>', pages['first'])
+                self.assertIn(':cite:`not-a-citation`', pages['first'])
+                self.assertIn('href="zzbibliography.html#cite-adcroft2019"', pages['first'])
+                self.assertIn('id="cite-adcroft2019"', pages['zzbibliography'])
+                for name, body in pages.items():
+                    (root / (name + '.html')).write_text(body)
+                check_links(root)
+                (root / 'first.rst').write_text('First\n=====\n\n:ref:`missing-target`\n')
+                with self.assertRaisesRegex(ValueError, 'Unknown manual reference missing-target'):
+                    render_guides(root, io.StringIO())
+                (root / 'first.rst').write_text('First\n=====\n\n:cite:`missing-paper`\n')
+                with self.assertRaisesRegex(ValueError, 'Unknown citation keys'):
+                    render_guides(root, io.StringIO())
+
     def test_renderer_uses_title_case_without_changing_urls(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -152,7 +184,7 @@ class ApiDocumentationTests(unittest.TestCase):
             self.assertIn('href="Notation.html"', equations)
             governing = (output / 'html/Governing_Equations.html').read_text()
             self.assertIn('assets/mathjax-3.2.2.js', governing)
-            self.assertIn('class="math notranslate nohighlight"', governing)
+            self.assertIn('class="math"', governing)
             indexing = (output / 'html/Horizontal_Indexing.html').read_text()
             self.assertIn('_images/Arakawa_C_grid.png', indexing)
             self.assertIn('<ul', indexing)

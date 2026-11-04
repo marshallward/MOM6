@@ -194,7 +194,7 @@ def render_reference(rst_dir, html_dir, warning_stream):
             guides='\n'.join(guides),
             contents=contents,
             math_script=('<script defer src="assets/mathjax-3.2.2.js"></script>'
-                         if 'class="math ' in parts['html_body'] else ''),
+                         if 'class="math"' in parts['html_body'] else ''),
             page_class=('home-page' if home else 'module-index' if module_index else
                         'guide-page' if guide else 'module-page'),
             breadcrumb='Home' if home else 'API reference' if module_index else escape(labels[path.stem]),

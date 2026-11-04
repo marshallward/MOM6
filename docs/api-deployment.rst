@@ -30,15 +30,15 @@ submodules. Symlinks into the excluded dependency trees are ignored even when
 their targets are absent. Other broken source symlinks still fail the build.
 The workflow can also be started manually from the Actions page. Each build:
 
-* Installs the Flint, Docutils, Sphinx, and bibliography dependencies pinned in
+* Installs the Flint, Docutils, and Pybtex dependencies pinned in
   ``requirements-api.txt``.
 * Installs Graphviz and generates separate caller/callee diagrams, grouped by
   module, for connected procedures and interfaces.
 * Parses one file at a time, retaining documentation snapshots for linking.
 * Generates one standard reST document per module and an API index, and copies
   the maintained ``api-home.rst`` landing page and handwritten manual chapters.
-* Renders API pages with Docutils and manual chapters with a minimal Sphinx
-  build, using the same site theme. Fails on renderer warnings or broken page/anchor
+* Renders API pages and manual chapters with Docutils, using the same site
+  theme. Fails on renderer warnings or broken page/anchor
    links. External calls are grouped by dependency; unresolved symbols appear
    only in build diagnostics, not in published call lists.
 * Uploads ``flint-api-reference`` containing ``rst``, ``html``, and ``reports``
@@ -93,10 +93,9 @@ and is independent of the existing Sphinx ``docs/index.rst``.
 ``GUIDE_PAGES`` in ``render_guide_docs.py`` lists the 16 handwritten manual
 chapters and their navigation titles, including the bibliography. They use
 the same ``docs/*.rst`` sources as the existing manual, and appear under
-"User and science guide" rather than in the API module list. Sphinx handles
-their toctrees, citations, bibliography, and reference resolution; its HTML
-fragments are placed in the existing MOM6 template. ``guide_sphinx/conf.py``
-is a small standalone configuration, not the legacy Doxygen configuration.
+"User and science guide" rather than in the API module list. Docutils renders
+their HTML fragments for the existing MOM6 template. ``render_guide_docs.py``
+resolves chapter navigation, named references, and citations across the site.
 
 The 44 detailed science pages are maintained directly in ``src/**/*.rst``,
 beside the implementation sources in their original ``.dox`` directories.
@@ -117,10 +116,19 @@ from their source directories; both builds adjust these paths when staging.
 The site bundles MathJax 3.2.2 (``tex-svg-full.js`` and its Apache-2.0
 license in ``api_theme``), so equations render offline as well as online.
 
-Sphinx remains a temporary compatibility frontend for the manual. The target
-architecture is maintained reST rendered through Docutils and the shared theme;
-navigation, cross-page targets, and BibTeX support must be replaced before the
-Sphinx dependency can be removed. The math markup itself is standard Docutils.
+The new site requires neither Sphinx nor Doxygen. All reST is rendered with
+Docutils. The existing ``toctree``, ``:ref:``, and ``:cite:`` source syntax is
+supported by the standalone manual frontend so the legacy manual can share
+the same sources. Chapter lists become ordinary links, with section links up
+to the requested depth. Named references resolve against explicit Docutils
+targets before consulting the published reference inventory. Unknown references
+fail the build.
+
+Pybtex reads the existing BibTeX files and formats the cited entries in the
+``plain`` style. Citations link to stable, key-based bibliography anchors.
+Missing citation keys and duplicate anchors fail the build. Pandoc and its
+``citeproc`` filter are not required. The legacy manual remains a separate
+Sphinx/Doxygen pipeline with its own ``requirements.txt`` dependencies.
 
 For the legacy manual, ``science_compat.py`` copies these same maintained sources
 into ``api/generated/pages`` after autosummary runs, adjusting image paths and

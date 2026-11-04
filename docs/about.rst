@@ -22,12 +22,14 @@ User guide
   a high-level overview of the model, its scientific formulation, and its use.
 
   The user guide is written in reStructuredText (.rst files) that reside in ``docs/`` of the `MOM6 source code <https://github.com/mom-ocean/MOM6>`_.
-  Sphinx processes these files for Read the Docs. Migrated standalone chapters
-  are also rendered directly from the same sources in the experimental site.
+   Sphinx processes these files for Read the Docs. The experimental site renders
+   the same sources directly with Docutils, using Pybtex for citations and the
+   bibliography. It requires neither Sphinx nor Doxygen.
 
-  Much of the longer scientific documentation lives in ``.dox`` files alongside
-  the Fortran source. The existing manual converts these using Doxygen; those
-  chapters remain available on Read the Docs during the migration.
+   The longer scientific chapters are maintained as ``.rst`` files alongside
+   the Fortran source under ``src/``. These replace the former ``.dox`` files
+   and are shared by both documentation builds. MathJax renders their equations
+   in the browser; the experimental site bundles it for offline use.
 
 API reference
   The `experimental documentation site <https://marshallward.github.io/MOM6/>`_
