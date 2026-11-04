@@ -1,17 +1,97 @@
 """MOM6's HTML presentation layer for independently generated reST pages."""
 import argparse
 import contextlib
-import re
 from html import escape
 from html.parser import HTMLParser
 from pathlib import Path
 import shutil
 from string import Template
+import xml.etree.ElementTree as ET
+from urllib.parse import unquote
 
+from docutils import nodes
 from docutils.core import publish_parts
+from docutils.readers.standalone import Reader
+from docutils.transforms import Transform
 
 
 THEME = Path(__file__).parent / 'api_theme'
+
+
+def graph_text(image):
+    """Build linked text edges from the same SVG used by the visual graph."""
+    tree = ET.parse(unquote(image['uri']))
+    ns = {'svg': 'http://www.w3.org/2000/svg'}
+    labels = {}
+    edges = []
+    for group in tree.findall('.//svg:g', ns):
+        title = group.find('svg:title', ns)
+        if title is None:
+            continue
+        if group.get('class') == 'node':
+            link = group.find('.//svg:a', ns)
+            url = (link.get('{http://www.w3.org/1999/xlink}href', link.get('href'))
+                   if link is not None else None)
+            # Qualified identities disambiguate same-named procedures/modules.
+            labels[title.text] = url
+        elif group.get('class') == 'edge':
+            edges.append(title.text.split('->', 1))
+    listing = nodes.bullet_list(classes=['call-graph-links'])
+    for caller, callee in edges:
+        paragraph = nodes.paragraph()
+        for index, name in enumerate((caller, callee)):
+            if index:
+                paragraph += nodes.Text(' → ')
+            url = labels.get(name)
+            paragraph += (nodes.reference('', name, refuri=url) if url else nodes.Text(name))
+        listing += nodes.list_item('', paragraph)
+    return listing
+
+
+class GraphPresentation(Transform):
+    """Replace graph-backed call lists with a diagram and linked text view."""
+    default_priority = 850
+
+    def apply(self):
+        titles = {'Callees': 'Calls into', 'Callers': 'Called by'}
+        for container in list(self.document.findall(nodes.container)):
+            if 'api-procedure' not in container['classes']:
+                continue
+            # Only direct children belong to this procedure, not nested ones.
+            for rubric in list(container.children):
+                if not isinstance(rubric, nodes.rubric) or rubric.astext() not in titles:
+                    continue
+                position = container.index(rubric)
+                if position + 1 >= len(container):
+                    continue
+                image = container[position + 1]
+                if not isinstance(image, nodes.image) or not image['uri'].endswith('.svg'):
+                    continue
+                text = graph_text(image)
+                title = rubric.astext()
+                for listing in list(container.children):
+                    if not isinstance(listing, nodes.definition_list):
+                        continue
+                    for item in list(listing.children):
+                        term = next((child for child in item if isinstance(child, nodes.term)), None)
+                        if term is not None and term.astext() == titles[title]:
+                            listing.remove(item)
+                    if not listing.children:
+                        container.remove(listing)
+                position = container.index(rubric)
+                opening = nodes.raw('',
+                    '<details class="call-graph-panel"><summary>' + title + ' call graph</summary>'
+                    '<div class="call-graph" tabindex="0" role="region" '
+                    'aria-label="Call graph (scroll to explore)">', format='html')
+                text_open = nodes.raw('', '</div><details class="call-graph-text">'
+                                      '<summary>Text view</summary>', format='html')
+                closing = nodes.raw('', '</details></details>', format='html')
+                container[position:position + 2] = [opening, image, text_open, text, closing]
+
+
+class GraphReader(Reader):
+    def get_transforms(self):
+        return super().get_transforms() + [GraphPresentation]
 
 
 class Outline(HTMLParser):
@@ -75,27 +155,12 @@ def render_reference(rst_dir, html_dir, warning_stream):
         source = path.read_text(encoding='utf-8')
         source_path = str(path.resolve())
         with contextlib.chdir(path.parent):
-            parts = publish_parts(source=source, source_path=source_path,
+            parts = publish_parts(source=source, source_path=source_path, reader=GraphReader(),
                                   writer='html5', settings_overrides={
                                       'warning_stream': warning_stream, 'halt_level': 2,
                                       'stylesheet_path': [], 'embed_stylesheet': False,
                                       'image_loading': 'embed',
                                   })
-        # Preserve natural graph label sizes on narrow screens. The wrapper
-        # provides keyboard-accessible scrolling instead of shrinking the SVG.
-        parts['html_body'] = re.sub(
-            r'(<svg\b.*?</svg>)',
-            r'<div class="call-graph" tabindex="0" role="region" '
-            r'aria-label="Call graph (scroll to explore)">\1</div>',
-            parts['html_body'], flags=re.DOTALL)
-        # Keep large diagrams optional to read, independently of the procedure
-        # panel. Native details remain usable without JavaScript.
-        parts['html_body'] = re.sub(
-            r'<p class="rubric">(Callees|Callers)</p>\s*'
-            r'(<div class="call-graph"[^>]*>.*?</div>)',
-            r'<details class="call-graph-panel"><summary>\1 call graph</summary>'
-            r'\2</details>',
-            parts['html_body'], flags=re.DOTALL)
         outline = Outline()
         outline.feed(parts['html_body'])
         navigation = []

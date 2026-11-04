@@ -116,6 +116,10 @@ retain these reading sizes and let wide graphs scroll horizontally rather than
 shrinking their labels. Graph scroll regions also accept keyboard focus.
 Callee and caller diagrams each have their own initially collapsed disclosure
 box. These work without JavaScript, and retain the scroll region when expanded.
+Each graph box includes a collapsed ``Text view`` of the same caller-to-callee
+edges, with qualified, clickable procedure names. The corresponding standalone
+call lists are removed from HTML when a diagram is present; the original reST
+retains them for other renderers. External-library calls remain separate.
 Links and navigation work without JavaScript; the script adds module filtering
 and initially collapses the module browser on small screens.
 

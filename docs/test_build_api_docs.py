@@ -128,7 +128,16 @@ class ApiDocumentationTests(unittest.TestCase):
             self.assertEqual((output / 'reports/render.log').read_text(), '')
             self.assertTrue((output / 'rst/index.rst').exists())
             page = (output / 'html/client.html').read_text()
+            library = (output / 'html/library.html').read_text()
             self.assertIn('External calls', page)
+            self.assertNotIn('<dt>Calls into</dt>', page)
+            self.assertNotIn('<dt>Called by</dt>', library)
+            text_views = re.findall(
+                r'<details class="call-graph-text"><summary>Text view</summary>(.*?)</details>',
+                library, flags=re.DOTALL)
+            self.assertEqual(len(text_views), 3)
+            self.assertTrue(any('library::secret</a>' in view for view in text_views))
+            self.assertTrue(any('client::run</a>' in view for view in text_views))
             self.assertIn('NetCDF', page)
             self.assertNotIn('unavailable', page)
             self.assertIn('netcdf::nf90_close', (output / 'reports/external.txt').read_text())
@@ -142,7 +151,6 @@ class ApiDocumentationTests(unittest.TestCase):
             self.assertIn('<details class="call-graph-panel"><summary>Callees call graph</summary>', page)
             self.assertIn('font-size="12.00"', page)
             self.assertIn('Callees', page)
-            library = (output / 'html/library.html').read_text()
             self.assertIn('Callers', library)
             self.assertIn('<details class="call-graph-panel"><summary>Callers call graph</summary>', library)
             self.assertEqual(library.count('<details class="call-graph-panel">'), library.count('<svg'))
@@ -151,6 +159,10 @@ class ApiDocumentationTests(unittest.TestCase):
             self.assertEqual(len(ids), len(set(ids)))
             self.assertEqual(len(list((output / 'rst').glob('*.dot'))), 4)
             self.assertEqual(len(list((output / 'rst').glob('*.svg'))), 4)
+            with contextlib.redirect_stdout(io.StringIO()):
+                graphless = build([source, infra], root / 'without-graphs', graph_depth=0)
+            self.assertEqual(graphless['call_graphs'], 0)
+            self.assertIn('<dt>Calls into</dt>', (root / 'without-graphs/html/client.html').read_text())
 
     def test_alternative_modules_cannot_overwrite_pages(self):
         with tempfile.TemporaryDirectory() as tmp:
