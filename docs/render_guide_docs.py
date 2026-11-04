@@ -9,6 +9,7 @@ import sys
 import tempfile
 
 from sphinx.util.inventory import InventoryFile
+from science_sources import science_sources
 
 
 GUIDE_PAGES = {
@@ -31,12 +32,17 @@ GUIDE_PAGES = {
 }
 MANUAL_URL = 'https://mom6.readthedocs.io/en/main/'
 DOCS = Path(__file__).resolve().parent
+SCIENCE_SOURCES = science_sources(DOCS)
+SCIENCE_PAGES = {name: path.read_text(encoding='utf-8').splitlines()[2]
+                 for name, path in SCIENCE_SOURCES.items()}
 
 
 def external_chapters(source, inventory):
-    """Keep not-yet-migrated Doxygen chapters linked to the published manual."""
+    """Resolve legacy chapter paths to local pages or published destinations."""
     def replace(match):
         name = match[2].removesuffix('.rst')
+        if name.startswith('api/generated/pages/') and name.rsplit('/', 1)[-1] in SCIENCE_PAGES:
+            return match[1] + name.rsplit('/', 1)[-1]
         entry = inventory['std:doc'].get(name)
         if entry is None:
             raise ValueError(f'No published manual destination for {name}')
@@ -44,14 +50,15 @@ def external_chapters(source, inventory):
     return re.sub(r'^([ \t]+)(api/generated/\S+)[ \t]*$', replace, source, flags=re.MULTILINE)
 
 
-def render_guides(rst_dir, warning_stream):
+def render_guides(rst_dir, warning_stream, html_dir=None):
     """Return HTML fragments; Sphinx handles toctrees, citations and references.
 
     Build in a subprocess so Sphinx's Docutils registrations cannot leak into
     the standalone Flint renderer. The checked-in inventory makes reference
     resolution independent of network availability during builds.
     """
-    names = [name for name in GUIDE_PAGES if (rst_dir / (name + '.rst')).is_file()]
+    names = [name for name in {**GUIDE_PAGES, **SCIENCE_PAGES}
+             if (rst_dir / (name + '.rst')).is_file()]
     if not names:
         return {}
     inventory = InventoryFile.load(io.BytesIO((DOCS / 'guide-inventory.inv').read_bytes()),
@@ -62,6 +69,7 @@ def render_guides(rst_dir, warning_stream):
         source.mkdir()
         shutil.copyfile(DOCS / 'guide_sphinx/conf.py', source / 'conf.py')
         shutil.copyfile(DOCS / 'guide-inventory.inv', source / 'guide-inventory.inv')
+        shutil.copytree(DOCS / 'images', source / 'images')
         for name in names:
             text = (rst_dir / (name + '.rst')).read_text(encoding='utf-8')
             (source / (name + '.rst')).write_text(external_chapters(text, inventory), encoding='utf-8')
@@ -77,5 +85,7 @@ def render_guides(rst_dir, warning_stream):
         warning_stream.write(result.stdout + result.stderr)
         if result.returncode:
             raise RuntimeError('Manual rendering failed:\n' + result.stdout + result.stderr)
+        if html_dir is not None and (output / '_images').exists():
+            shutil.copytree(output / '_images', html_dir / '_images', dirs_exist_ok=True)
         return {name: json.loads((output / (name + '.fjson')).read_text(encoding='utf-8'))['body']
                 for name in names}

@@ -10,7 +10,7 @@ from unittest.mock import patch
 from build_api_docs import build, check_links
 from flint.docgen.references import Reference
 from render_api_docs import render_reference
-from render_guide_docs import GUIDE_PAGES
+from render_guide_docs import GUIDE_PAGES, SCIENCE_PAGES
 
 
 class ApiDocumentationTests(unittest.TestCase):
@@ -67,7 +67,7 @@ class ApiDocumentationTests(unittest.TestCase):
             self.assertEqual(summary['excluded_dependency_files'], {'GSW': 1, 'CVMix': 1})
             self.assertEqual({path.name for path in (output / 'rst').glob('*.rst')},
                              {'client.rst', 'index.rst', 'api-index.rst'}
-                             | {name + '.rst' for name in GUIDE_PAGES})
+                              | {name + '.rst' for name in {**GUIDE_PAGES, **SCIENCE_PAGES}})
             self.assertIn('unrelated_name.F90', (output / 'reports/excluded-dependencies.txt').read_text())
             (gsw / 'library.F90').unlink()
             with patch('build_api_docs.REPOSITORY', root), contextlib.redirect_stdout(io.StringIO()):
@@ -120,7 +120,7 @@ class ApiDocumentationTests(unittest.TestCase):
                 summary = build([source, infra], output)
             self.assertEqual(summary['source_files'], 2)
             self.assertEqual(summary['module_pages'], 2)
-            self.assertEqual(summary['html_pages'], 4 + len(GUIDE_PAGES))
+            self.assertEqual(summary['html_pages'], 4 + len(GUIDE_PAGES) + len(SCIENCE_PAGES))
             self.assertEqual(summary['call_graphs'], 4)
             self.assertEqual(summary['unresolved_references'], 1)
             self.assertEqual(summary['external_references'], 1)
@@ -149,7 +149,14 @@ class ApiDocumentationTests(unittest.TestCase):
             self.assertIn('<span class="count">2</span>', chapter)
             self.assertIn('href="equations.html"', home)
             equations = (output / 'html/equations.html').read_text()
-            self.assertIn('https://mom6.readthedocs.io/en/main/api/generated/pages/Notation.html', equations)
+            self.assertIn('href="Notation.html"', equations)
+            governing = (output / 'html/Governing_Equations.html').read_text()
+            self.assertIn('assets/mathjax-3.2.2.js', governing)
+            self.assertIn('class="math notranslate nohighlight"', governing)
+            indexing = (output / 'html/Horizontal_Indexing.html').read_text()
+            self.assertIn('_images/Arakawa_C_grid.png', indexing)
+            self.assertIn('<ul', indexing)
+            self.assertNotIn('HI%%', indexing)
             self.assertIn('href="zzbibliography.html#', equations)
             working = (output / 'html/working_with_MOM6.html').read_text()
             self.assertIn('href="code_organization.html"', working)

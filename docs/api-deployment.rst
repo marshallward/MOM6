@@ -98,17 +98,44 @@ their toctrees, citations, bibliography, and reference resolution; its HTML
 fragments are placed in the existing MOM6 template. ``guide_sphinx/conf.py``
 is a small standalone configuration, not the legacy Doxygen configuration.
 
-Detailed science pages generated from ``.dox`` files are still hosted on Read
-the Docs. During the temporary Sphinx build, links to these pages are replaced
-with their published URLs and titles. References into their sections use
-Intersphinx. Both use ``guide-inventory.inv``, a snapshot downloaded from
+The 44 detailed science pages are maintained directly in ``src/**/*.rst``,
+beside the implementation sources in their original ``.dox`` directories.
+Their former ``src/**/*.dox`` sources have been retired. Edit the reST files;
+neither Pandoc nor a Doxygen-to-reST converter is part of the build.
+``science-migration.json`` records the original paths, hashes, and conversion
+counts. Each new path is the original source directory plus the recorded page
+name and ``.rst`` extension. ``science_sources.py`` discovers these chapters
+for both builds. The migration preserved 493 inline formulae, 202 display equations,
+35 figure placements, ten tables, and the scientific prose and citations.
+
+Use standard ``:math:`` roles and ``.. math::`` directives for equations, with
+explicit reST targets for equation references. Multiline equations use
+``aligned``; keep their lines together without blank paragraphs. Reference links
+use descriptive names (or the cited paper's equation numbers), rather than
+unstable site-wide numbering. Figures use relative paths to ``docs/images/``
+from their source directories; both builds adjust these paths when staging.
+The site bundles MathJax 3.2.2 (``tex-svg-full.js`` and its Apache-2.0
+license in ``api_theme``), so equations render offline as well as online.
+
+Sphinx remains a temporary compatibility frontend for the manual. The target
+architecture is maintained reST rendered through Docutils and the shared theme;
+navigation, cross-page targets, and BibTeX support must be replaced before the
+Sphinx dependency can be removed. The math markup itself is standard Docutils.
+
+For the legacy manual, ``science_compat.py`` copies these same maintained sources
+into ``api/generated/pages`` after autosummary runs, adjusting image paths and
+adding legacy reference aliases. Before Doxygen runs, it writes a generated,
+link-only list of page names and anchors so Fortran comments can still refer to
+the science pages. Doxygen does not generate their scientific content.
+
+References to sections still embedded in Fortran documentation use the published
+manual via ``guide-inventory.inv``, a snapshot downloaded from
 ``https://mom6.readthedocs.io/en/main/objects.inv`` on 2026-11-03 (inventory
 project: MOM6, version: 0.2a3). This is link metadata, not a copy of those pages.
 Refresh that snapshot deliberately when adopting changed external destinations;
 normal builds require no network access for reference resolution. Unknown
 chapter destinations and unresolved references fail the build rather than
-silently producing guessed links. The original source files are not rewritten
-to external links, so the existing Sphinx/Doxygen manual still builds normally.
+silently producing guessed links.
 
 Repeat ``--source DIRECTORY`` to supply a custom set of source roots instead of
 the defaults. For example, ``--source src`` restores a source-only reference.

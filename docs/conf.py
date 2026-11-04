@@ -21,6 +21,7 @@ from subprocess import check_output
 # add these directories to sys.path here. If the directory is relative to the
 # documentation root, use os.path.abspath to make it absolute, like shown here.
 sys.path.insert(0, os.path.abspath('_ext'))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 # -- Custom configuration values and roles -----------------------------------
 from docutils import nodes
@@ -159,6 +160,8 @@ def _patch_sphinx_wrap_displaymath():
 _patch_sphinx_wrap_displaymath()
 
 def setup(app):
+    from science_compat import copy_science_pages
+    app.connect('builder-inited', copy_science_pages, priority=800)
     app.add_config_value('sphinx_build_mode', '', 'env')
     app.add_role('latex', latexPassthru)
 
@@ -254,9 +257,11 @@ if os.environ.get('DOXYGEN_CONF'):
 out = check_output([doxygen_bin,"-v"])
 doxygen_version = out.strip().decode('utf-8')
 print("Running Doxygen %s" % (doxygen_version))
-doxygenize = "%s %s" % (doxygen_bin, doxygen_conf)
-print("Running: %s" % (doxygenize))
-return_code = subprocess.call(doxygenize, shell=True)
+from pathlib import Path
+from science_compat import write_doxygen_targets
+science_targets = write_doxygen_targets(Path(__file__).resolve().parent)
+doxygen_input = f'@INCLUDE = "{doxygen_conf}"\nINPUT += "{science_targets}"\n'
+return_code = subprocess.run([doxygen_bin, '-'], input=doxygen_input, text=True).returncode
 if return_code != 0: sys.exit(return_code)
 
 # -- General configuration (sphinx) ---------------------------------------

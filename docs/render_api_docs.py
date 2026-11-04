@@ -13,7 +13,7 @@ from docutils import nodes
 from docutils.core import publish_parts
 from docutils.readers.standalone import Reader
 from docutils.transforms import Transform
-from render_guide_docs import GUIDE_PAGES, render_guides
+from render_guide_docs import GUIDE_PAGES, SCIENCE_PAGES, render_guides
 
 
 THEME = Path(__file__).parent / 'api_theme'
@@ -136,17 +136,17 @@ def render_reference(rst_dir, html_dir, warning_stream):
     html_dir.mkdir(parents=True, exist_ok=True)
     assets = html_dir / 'assets'
     assets.mkdir(exist_ok=True)
-    for name in ('api.css', 'api.js'):
+    for name in ('api.css', 'api.js', 'mathjax-3.2.2.js', 'mathjax-LICENSE'):
         shutil.copyfile(THEME / name, assets / name)
     template = Template((THEME / 'page.html').read_text(encoding='utf-8'))
     files = sorted(rst_dir.glob('*.rst'), key=lambda path: path.stem.lower())
-    guide_bodies = render_guides(rst_dir, warning_stream)
+    guide_bodies = render_guides(rst_dir, warning_stream, html_dir)
     modules = [path.stem for path in files
-               if path.stem not in ('index', 'api-index') and path.stem not in GUIDE_PAGES]
+               if path.stem not in ('index', 'api-index') and path.stem not in guide_bodies]
     labels = {}
     for path in files:
-        if path.stem in GUIDE_PAGES:
-            labels[path.stem] = GUIDE_PAGES[path.stem]
+        if path.stem in guide_bodies:
+            labels[path.stem] = {**GUIDE_PAGES, **SCIENCE_PAGES}[path.stem]
             continue
         # Flint emits an overlined document title. Read only that header rather
         # than retaining all rendered pages just to build the sidebar.
@@ -181,7 +181,7 @@ def render_reference(rst_dir, html_dir, warning_stream):
             f'{escape(label)}</a></li>' for target, kind, label in outline.items)
         home = path.stem == 'index'
         module_index = path.stem == 'api-index'
-        guide = path.stem in GUIDE_PAGES
+        guide = path.stem in guide_bodies
         guides = []
         for name, label in GUIDE_PAGES.items():
             if name in labels:
@@ -193,6 +193,8 @@ def render_reference(rst_dir, html_dir, warning_stream):
             title=escape(title), body=parts['html_body'], modules='\n'.join(navigation),
             guides='\n'.join(guides),
             contents=contents,
+            math_script=('<script defer src="assets/mathjax-3.2.2.js"></script>'
+                         if 'class="math ' in parts['html_body'] else ''),
             page_class=('home-page' if home else 'module-index' if module_index else
                         'guide-page' if guide else 'module-page'),
             breadcrumb='Home' if home else 'API reference' if module_index else escape(labels[path.stem]),

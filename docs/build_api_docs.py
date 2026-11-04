@@ -18,6 +18,8 @@ from flint.docgen.references import HtmlDestinations, Reference, ReferenceIndex,
 from flint.docgen.graphs import call_graph, write_dot
 from flint.docgen.rst import write_module
 from render_api_docs import GUIDE_PAGES, render_reference
+from render_guide_docs import SCIENCE_SOURCES
+from science_sources import science_text
 
 
 DEFAULT_SOURCES = (
@@ -46,6 +48,10 @@ class HtmlLinks(HTMLParser):
             href = attrs.get('href', attrs.get('xlink:href'))
             if href is not None:
                 self.links.append(href)
+        if tag in ('img', 'script') and attrs.get('src'):
+            self.links.append(attrs['src'])
+        if tag == 'link' and attrs.get('href'):
+            self.links.append(attrs['href'])
 
 
 def check_links(directory):
@@ -66,7 +72,8 @@ def check_links(directory):
             fragment = unquote(url.fragment)
             count += 1
             cross_file += target != filename
-            if target not in pages or (fragment and fragment not in pages[target].ids):
+            if (not (directory / target).is_file()
+                    or (fragment and (target not in pages or fragment not in pages[target].ids))):
                 errors.append(f'{filename}: {href}')
     if errors:
         raise ValueError('Broken HTML links:\n' + '\n'.join(errors))
@@ -200,6 +207,10 @@ def generate_reference(source, rst_dir, reports, *, graph_depth=1):
     shutil.copyfile(Path(__file__).with_name('api-home.rst'), rst_dir / 'index.rst')
     for name in GUIDE_PAGES:
         shutil.copyfile(Path(__file__).with_name(name + '.rst'), rst_dir / (name + '.rst'))
+    for name, path in SCIENCE_SOURCES.items():
+        text = science_text(path, Path(__file__).parent, 'images/')
+        (rst_dir / (name + '.rst')).write_text(text, encoding='utf-8')
+    shutil.copytree(Path(__file__).parent / 'images', rst_dir / 'images')
     with (rst_dir / 'api-index.rst').open('w', encoding='utf-8') as stream:
         stream.write('MOM6 API reference\n==================\n\n')
         stream.write('Experimental reference generated from these source directories:\n\n')

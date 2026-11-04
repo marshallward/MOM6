@@ -164,3 +164,7 @@ h1 { font-size: clamp(calc(1.65rem * var(--text-scale)), calc(2.3vw * var(--text
   a { color: inherit; }
   dl[id^="flint-"] { break-inside: avoid; }
 }
+.guide-page figure { margin: 1.5rem 0; }
+.guide-page figure img { max-width: 100%; height: auto; }
+.guide-page figcaption { color: var(--muted); font-size: 0.9em; }
+.guide-page div.math { overflow-x: auto; padding: 0.5rem 0; }
