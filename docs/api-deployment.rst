@@ -30,12 +30,15 @@ submodules. Symlinks into the excluded dependency trees are ignored even when
 their targets are absent. Other broken source symlinks still fail the build.
 The workflow can also be started manually from the Actions page. Each build:
 
-* Installs the Flint revision and Docutils version in ``requirements-api.txt``.
+* Installs the Flint, Docutils, and Pybtex dependencies pinned in
+  ``requirements-api.txt``.
 * Installs Graphviz and generates separate caller/callee diagrams, grouped by
   module, for connected procedures and interfaces.
 * Parses one file at a time, retaining documentation snapshots for linking.
-* Generates one standard reST document per module and an index.
-* Renders HTML with Docutils and fails on renderer warnings or broken page/anchor
+* Generates one standard reST document per module and an API index, and copies
+  the maintained ``api-home.rst`` landing page and handwritten manual chapters.
+* Renders API pages and manual chapters with Docutils, using the same site
+  theme. Fails on renderer warnings or broken page/anchor
    links. External calls are grouped by dependency; unresolved symbols appear
    only in build diagnostics, not in published call lists.
 * Uploads ``flint-api-reference`` containing ``rst``, ``html``, and ``reports``
@@ -81,6 +84,73 @@ Open ``docs/_build/flint-api/html/index.html``. The output directory must be new
 so stale pages cannot hide broken links; use another ``--output`` path for a
 subsequent build, or remove the previous generated build directory yourself.
 
+The home page introduces the documentation and links to the local science
+and user-guide chapter pages. The local module index is
+``api-index.html``; module page URLs and procedure anchors are unchanged.
+Edit ``docs/api-home.rst`` to update the landing page. It uses ordinary reST
+and is independent of the existing Sphinx ``docs/index.rst``.
+
+``GUIDE_PAGES`` in ``render_guide_docs.py`` lists the 16 handwritten manual
+chapters and their navigation titles, including the bibliography. They use
+the same ``docs/*.rst`` sources as the existing manual, and appear under
+"User and science guide" rather than in the API module list. Docutils renders
+their HTML fragments for the existing MOM6 template. ``render_guide_docs.py``
+resolves chapter navigation, named references, and citations across the site.
+
+The 44 detailed science pages are maintained directly in ``src/**/*.rst``,
+beside the implementation sources in their original ``.dox`` directories.
+Their former ``src/**/*.dox`` sources have been retired. Edit the reST files;
+neither Pandoc nor a Doxygen-to-reST converter is part of the build.
+``science-migration.json`` records the original paths, hashes, and conversion
+counts. Each new path is the original source directory plus the recorded page
+name and ``.rst`` extension. ``science_sources.py`` discovers these chapters
+for both builds. The migration preserved 493 inline formulae, 202 display equations,
+35 figure placements, ten tables, and the scientific prose and citations.
+
+Use standard ``:math:`` roles and ``.. math::`` directives for equations, with
+explicit reST targets for equation references. Multiline equations use
+``aligned``; keep their lines together without blank paragraphs. Reference links
+use descriptive names (or the cited paper's equation numbers), rather than
+unstable site-wide numbering. Figures use relative paths to ``docs/images/``
+from their source directories; both builds adjust these paths when staging.
+The renderer downloads MathJax 3.2.2 (``tex-svg-full.js`` and its Apache-2.0
+license) from version-pinned jsDelivr URLs and verifies their SHA-256 checksums.
+Verified assets are cached in ``docs/_build/assets`` and copied into the site's
+``assets`` directory. Local builds, GitHub Actions, and Read the Docs all use
+this setup. The first build requires network access; subsequent builds can use
+the verified cache offline. The generated site includes MathJax locally, so
+equations render offline as well as online. URLs and checksums are maintained
+in ``documentation_assets.py``; the third-party bundle is not stored in Git.
+
+The new site requires neither Sphinx nor Doxygen. All reST is rendered with
+Docutils. The existing ``toctree``, ``:ref:``, and ``:cite:`` source syntax is
+supported by the standalone manual frontend so the legacy manual can share
+the same sources. Chapter lists become ordinary links, with section links up
+to the requested depth. Named references resolve against explicit Docutils
+targets before consulting the published reference inventory. Unknown references
+fail the build.
+
+Pybtex reads the existing BibTeX files and formats the cited entries in the
+``plain`` style. Citations link to stable, key-based bibliography anchors.
+Missing citation keys and duplicate anchors fail the build. Pandoc and its
+``citeproc`` filter are not required. The legacy manual remains a separate
+Sphinx/Doxygen pipeline with its own ``requirements.txt`` dependencies.
+
+For the legacy manual, ``science_compat.py`` copies these same maintained sources
+into ``api/generated/pages`` after autosummary runs, adjusting image paths and
+adding legacy reference aliases. Before Doxygen runs, it writes a generated,
+link-only list of page names and anchors so Fortran comments can still refer to
+the science pages. Doxygen does not generate their scientific content.
+
+References to sections still embedded in Fortran documentation use the published
+manual via ``guide-inventory.inv``, a snapshot downloaded from
+``https://mom6.readthedocs.io/en/main/objects.inv`` on 2026-11-03 (inventory
+project: MOM6, version: 0.2a3). This is link metadata, not a copy of those pages.
+Refresh that snapshot deliberately when adopting changed external destinations;
+normal builds require no network access for reference resolution. Unknown
+chapter destinations and unresolved references fail the build rather than
+silently producing guessed links.
+
 Repeat ``--source DIRECTORY`` to supply a custom set of source roots instead of
 the defaults. For example, ``--source src`` restores a source-only reference.
 The generated index records the selected directories.
@@ -104,7 +174,7 @@ unchanged.
 HTML presentation
 -----------------
 
-``render_api_docs.py`` renders the generated reST using Docutils and the local
+``render_api_docs.py`` assembles the rendered API and manual pages with the local
 HTML template, stylesheet, and optional navigation script in ``api_theme``.
 The theme provides a filterable module sidebar, breadcrumbs, in-page navigation,
 procedure signature panels, responsive layouts, and print styling. Assets are

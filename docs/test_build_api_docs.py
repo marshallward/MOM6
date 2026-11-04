@@ -1,5 +1,6 @@
 """Deployment checks use rendered files rather than trusting generated URLs."""
 import contextlib
+import hashlib
 import io
 import re
 from pathlib import Path
@@ -8,11 +9,73 @@ import unittest
 from unittest.mock import patch
 
 from build_api_docs import build, check_links
+from documentation_assets import install_mathjax
 from flint.docgen.references import Reference
 from render_api_docs import render_reference
+from render_guide_docs import GUIDE_PAGES, SCIENCE_PAGES, render_guides
 
 
 class ApiDocumentationTests(unittest.TestCase):
+    def test_mathjax_download_cache_and_checksum(self):
+        data = b'verified test asset'
+        asset = ('mathjax.js', 'https://example.invalid/mathjax.js',
+                 hashlib.sha256(data).hexdigest())
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            cache = root / 'cache'
+            with (patch('documentation_assets.CACHE', cache),
+                  patch('documentation_assets.MATHJAX', (asset,)),
+                  patch('documentation_assets.urlopen', return_value=io.BytesIO(data)) as download):
+                install_mathjax(root / 'first')
+                self.assertEqual((root / 'first/mathjax.js').read_bytes(), data)
+                download.assert_called_once_with(asset[1], timeout=60)
+                download.reset_mock()
+                install_mathjax(root / 'second')
+                download.assert_not_called()
+                self.assertEqual((root / 'second/mathjax.js').read_bytes(), data)
+                (cache / 'mathjax.js').write_bytes(b'corrupt')
+                with self.assertRaisesRegex(ValueError, 'checksum mismatch'):
+                    install_mathjax(root / 'third')
+                self.assertFalse((root / 'third/mathjax.js').exists())
+                (cache / 'mathjax.js').unlink()
+                download.return_value = io.BytesIO(b'bad download')
+                with self.assertRaisesRegex(ValueError, 'checksum mismatch'):
+                    install_mathjax(root / 'fourth')
+                self.assertFalse((cache / 'mathjax.js').exists())
+                self.assertFalse((root / 'fourth/mathjax.js').exists())
+
+    def test_manual_references_citations_and_code_are_resolved_without_sphinx(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / 'first.rst').write_text(
+                'First\n=====\n\n.. toctree::\n   :maxdepth: 2\n\n   second\n\n'
+                'See :ref:`the result <result>` and :cite:`Adcroft2019,reichl2018`.\n\n'
+                '.. code-block:: text\n\n   :cite:`not-a-citation`\n')
+            (root / 'second.rst').write_text(
+                'Second\n======\n\nIntroduction.\n\n.. _result:\n\n'
+                'Result\n------\n\nA result.\n')
+            (root / 'zzbibliography.rst').write_text(
+                'Bibliography\n============\n\n.. bibliography:: ocean.bib\n   :style: plain\n')
+            titles = {'first': 'First', 'second': 'Second', 'zzbibliography': 'Bibliography'}
+            with patch('render_guide_docs.GUIDE_PAGES', titles), patch('render_guide_docs.SCIENCE_PAGES', {}):
+                warnings = io.StringIO()
+                pages = render_guides(root, warnings)
+                self.assertEqual(warnings.getvalue(), '')
+                self.assertIn('href="second.html#result"', pages['first'])
+                self.assertIn('the result</a>', pages['first'])
+                self.assertIn(':cite:`not-a-citation`', pages['first'])
+                self.assertIn('href="zzbibliography.html#cite-adcroft2019"', pages['first'])
+                self.assertIn('id="cite-adcroft2019"', pages['zzbibliography'])
+                for name, body in pages.items():
+                    (root / (name + '.html')).write_text(body)
+                check_links(root)
+                (root / 'first.rst').write_text('First\n=====\n\n:ref:`missing-target`\n')
+                with self.assertRaisesRegex(ValueError, 'Unknown manual reference missing-target'):
+                    render_guides(root, io.StringIO())
+                (root / 'first.rst').write_text('First\n=====\n\n:cite:`missing-paper`\n')
+                with self.assertRaisesRegex(ValueError, 'Unknown citation keys'):
+                    render_guides(root, io.StringIO())
+
     def test_renderer_uses_title_case_without_changing_urls(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -35,6 +98,7 @@ class ApiDocumentationTests(unittest.TestCase):
             self.assertIn('subroutine Advance(State, dt)', page)
             check_links_directory = root / 'html'
             (check_links_directory / 'index.html').write_text('<p>Index</p>')
+            (check_links_directory / 'api-index.html').write_text('<p>API reference</p>')
             check_links(check_links_directory)
 
     def test_dependency_sources_are_excluded_by_resolved_ownership(self):
@@ -64,7 +128,8 @@ class ApiDocumentationTests(unittest.TestCase):
             self.assertEqual(summary['external_libraries'], {})
             self.assertEqual(summary['excluded_dependency_files'], {'GSW': 1, 'CVMix': 1})
             self.assertEqual({path.name for path in (output / 'rst').glob('*.rst')},
-                             {'client.rst', 'index.rst'})
+                             {'client.rst', 'index.rst', 'api-index.rst'}
+                              | {name + '.rst' for name in {**GUIDE_PAGES, **SCIENCE_PAGES}})
             self.assertIn('unrelated_name.F90', (output / 'reports/excluded-dependencies.txt').read_text())
             (gsw / 'library.F90').unlink()
             with patch('build_api_docs.REPOSITORY', root), contextlib.redirect_stdout(io.StringIO()):
@@ -115,7 +180,7 @@ class ApiDocumentationTests(unittest.TestCase):
                 summary = build([source, infra], output)
             self.assertEqual(summary['source_files'], 2)
             self.assertEqual(summary['module_pages'], 2)
-            self.assertEqual(summary['html_pages'], 3)
+            self.assertEqual(summary['html_pages'], 4 + len(GUIDE_PAGES) + len(SCIENCE_PAGES))
             self.assertEqual(summary['call_graphs'], 4)
             self.assertEqual(summary['unresolved_references'], 1)
             self.assertEqual(summary['external_references'], 1)
@@ -125,6 +190,43 @@ class ApiDocumentationTests(unittest.TestCase):
             self.assertIn('unavailable', (output / 'reports/unresolved.txt').read_text())
             self.assertEqual((output / 'reports/render.log').read_text(), '')
             self.assertTrue((output / 'rst/index.rst').exists())
+            home = (output / 'html/index.html').read_text()
+            self.assertIn('MOM6 documentation', home)
+            self.assertIn('href="api-index.html"', home)
+            self.assertIn('href="code_organization.html"', home)
+            self.assertIn('href="about.html"', home)
+            about = (output / 'html/about.html').read_text()
+            self.assertIn('<title>About this documentation — MOM6</title>', about)
+            self.assertIn('href="about.html" aria-current="page"', about)
+            self.assertIn('Flint', about)
+            self.assertIn('<span class="count">2</span>', about)
+            chapter = (output / 'html/code_organization.html').read_text()
+            self.assertIn('<title>Organization of the code — MOM6</title>', chapter)
+            self.assertIn('href="code_organization.html" aria-current="page"', chapter)
+            self.assertIn('configuration directories</a>', chapter)
+            self.assertIn('FMS_cap', chapter)
+            self.assertNotIn(':ref:', chapter)
+            self.assertIn('<span class="count">2</span>', chapter)
+            self.assertIn('href="equations.html"', home)
+            equations = (output / 'html/equations.html').read_text()
+            self.assertIn('href="Notation.html"', equations)
+            governing = (output / 'html/Governing_Equations.html').read_text()
+            self.assertIn('assets/mathjax-3.2.2.js', governing)
+            self.assertIn('class="math"', governing)
+            indexing = (output / 'html/Horizontal_Indexing.html').read_text()
+            self.assertIn('_images/Arakawa_C_grid.png', indexing)
+            self.assertIn('<ul', indexing)
+            self.assertNotIn('HI%%', indexing)
+            self.assertIn('href="zzbibliography.html#', equations)
+            working = (output / 'html/working_with_MOM6.html').read_text()
+            self.assertIn('href="code_organization.html"', working)
+            lateral = (output / 'html/parameterizations_lateral.html').read_text()
+            self.assertNotIn(':cite:', lateral)
+            self.assertNotIn(':ref:', lateral)
+            self.assertIn('namespacemom-hor-visc-1section-horizontal-viscosity', lateral)
+            module_index = (output / 'html/api-index.html').read_text()
+            self.assertIn('href="client.html"', module_index)
+            self.assertNotIn('aria-current="page">api-index</a>', module_index)
             page = (output / 'html/client.html').read_text()
             library = (output / 'html/library.html').read_text()
             self.assertIn('External calls', page)

@@ -12,7 +12,7 @@ The highest level of directories are:
 
 `config_src/`
   Under `config_src` are various drivers and memory configuration sources that
-  can only be compiled in limited configurations. See :ref:`config_src`
+  can only be compiled in limited configurations. See `configuration directories <config_src_>`_.
 
 `pkg/`
   Packages (source code) from other sources/parties only some of which might
