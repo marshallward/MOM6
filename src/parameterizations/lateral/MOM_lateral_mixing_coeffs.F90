@@ -965,11 +965,14 @@ subroutine calc_Visbeck_coeffs_old(h, slope_x, slope_y, N2_u, N2_v, G, GV, US, C
 
   S2max = CS%Visbeck_S_max**2
 
-  CS%SN_u(:,:) = 0.0
-  CS%SN_v(:,:) = 0.0
-
-  ! These settings apply where there are not open boundary conditions.
-  OBC_dir_u(:,:) = 0 ; OBC_dir_v(:,:) = 0
+  ! These are set on the device, where SN_u, SN_v, OBC_dir_u and OBC_dir_v are used.  The settings of
+  ! OBC_dir_u and OBC_dir_v apply where there are not open boundary conditions.
+  do concurrent (j=G%jsd:G%jed, I=G%IsdB:G%IedB)
+    CS%SN_u(I,j) = 0.0 ; OBC_dir_u(I,j) = 0
+  enddo
+  do concurrent (J=G%JsdB:G%JedB, i=G%isd:G%ied)
+    CS%SN_v(i,J) = 0.0 ; OBC_dir_v(i,J) = 0
+  enddo
 
   if (associated(OBC) .and. CS%OBC_friendly) then
    ! Store the direction of any OBC faces.
@@ -2208,7 +2211,7 @@ subroutine VarMix_init(Time, G, GV, US, param_file, diag, CS)
   if (CS%use_stored_slopes .or. (CS%interpolated_sqg_struct .and. (CS%sqg_expo>0.0))) then
     allocate(CS%slope_x(IsdB:IedB,jsd:jed,GV%ke+1), source=0.0)
     allocate(CS%slope_y(isd:ied,JsdB:JedB,GV%ke+1), source=0.0)
-    !$omp target enter data map(alloc: CS%slope_x, CS%slope_y)
+    !$omp target enter data map(to: CS%slope_x, CS%slope_y)
   endif
 
   if (CS%calculate_Eady_growth_rate) then
