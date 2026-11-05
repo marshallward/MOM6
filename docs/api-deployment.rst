@@ -135,6 +135,10 @@ commands fail generation with the owning source file in the error.
 Generated API pages and manual chapters share the same citation and named-target
 index. References to sections present in API comments now resolve locally;
 the published inventory remains a fallback for destinations not yet generated.
+The legacy-destination audit in ``api-content-audit.rst`` records the content
+checks and local mappings: the full selected-source build no longer uses the
+old site for scientific/API destinations. Partial builds can still use the
+inventory for omitted modules.
 
 Pybtex reads the existing BibTeX files and formats the cited entries in the
 ``plain`` style. Citations link to stable, key-based bibliography anchors.
