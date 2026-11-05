@@ -3,17 +3,22 @@
 ! SPDX-License-Identifier: Apache-2.0
 
 !> Bitwise reproducible complementary error function.
-!! Rational approximations and coefficients are from W. J. Cody, "Rational
-!! Chebyshev approximations for the error function", Math. Comp. 23 (1969),
-!! 631-637, as tabulated in https://netlib.org/specfun/erf (CALERF, 1990).
-!! Evaluation uses compensated rational functions and exp_repro(), with a split
-!! square and delayed underflow.  This is a roundoff-accuracy approximation,
-!! not a correctly rounded implementation.  The accuracy target is binary64
-!! default real; exp_repro() range reduction is also tuned for that precision.
+!! Near zero, evaluate erf(x)/x as a compensated Taylor polynomial.  Elsewhere,
+!! approximate exp(x*x)*erfc(x) with piecewise Chebyshev polynomials, and retain
+!! hi/lo components through the exponential and final rounding.  Results near
+!! rounding midpoints use a three-component fallback with longer polynomials.
+!! The exponential
+!! shares exp_repro()'s range-reduction table, but retains extra precision.
+!! Coefficients are generated with MPFR; see .testing/tools/erfc/generate.c.
+!! The accuracy target is binary64 default real.  Correct rounding is tested
+!! against MPFR, but has not been proved for every binary64 input.
 !! See the interface for FP requirements.
 submodule (MOM_intrinsic_functions) MOM_erfc
 
 use, intrinsic :: iso_fortran_env, only : int32
+use MOM_erfc_data, only : erfcx_hi, erfcx_lo, erf_hi, erf_lo, exp_hi, exp_lo
+use MOM_erfc_data, only : erfcx_tail, erf_tail, exp_tail, ln2_parts
+use MOM_exp_data_n128, only : ndiv, idiv_scale_lookup, idiv_residual_lookup
 
 implicit none
 
@@ -23,63 +28,34 @@ integer(erfc_int_kind), parameter :: erfc_int_mold = 0
   !< Integer mold for bit transfers
 integer(erfc_int_kind), parameter :: infinity_bits = ishft(2_erfc_int_kind**expwidth - 1, expbit)
   !< Positive infinity bit pattern
+
 !> Compensated working value; all components have the same nondimensional units.
 type :: erfc_pair
   real :: hi !< Leading part [nondim]
   real :: lo !< Rounding residual [nondim]
 end type erfc_pair
 
+!> Three-component expansion used only when the fast result is near a midpoint.
+type :: erfc_wide
+  real :: v(3) !< Components in decreasing magnitude [nondim]
+end type erfc_wide
+
 contains
 
-!> Evaluate erfc without cancellation in the positive tail.
+!> Evaluate erfc without cancellation or premature rounding in the positive tail.
 module procedure erfc_repro
-  real, parameter :: inv_sqrt_pi = 0.564189583547756286948079451560772586
-    !< Reciprocal square root of pi [nondim]
   real, parameter :: ln2 = 0.693147180559945309417232121458176568
     !< Natural logarithm of two [nondim]
-  real, parameter :: ln2_hi = 0.69314718036912381649017333984375
-    !< Leading part of ln(2), as in exp_repro() [nondim]
-  real, parameter :: ln2_lo = 1.90821492927058770002e-10
-    !< Trailing part of ln(2) [nondim]
-  integer, parameter :: tail_scale = maxexponent(real_mold) / 2
-    !< Power-of-two bias keeping tail exponentials and residuals normal
   real, parameter :: zero_bound = sqrt(real(digits(real_mold) - minexponent(real_mold) + 2) * ln2)
     !< Conservative positive bound beyond which erfc rounds to zero [nondim]
   real, parameter :: two_bound = sqrt(real(digits(real_mold)) * ln2)
     !< Conservative magnitude beyond which negative inputs round to two [nondim]
-  real, parameter :: small_num(5) = [ &
-      3.16112374387056560, 1.13864154151050156e2, 3.77485237685302021e2, &
-      3.20937758913846947e3, 1.85777706184603153e-1 ]
-    !< Numerator coefficients for erf(x)/x near zero [nondim]
-  real, parameter :: small_den(4) = [ &
-      2.36012909523441209e1, 2.44024637934444173e2, &
-      1.28261652607737228e3, 2.84423683343917062e3 ]
-    !< Denominator coefficients for erf(x)/x near zero [nondim]
-  real, parameter :: mid_num(9) = [ &
-      5.64188496988670089e-1, 8.88314979438837594, 6.61191906371416295e1, &
-      2.98635138197400131e2, 8.81952221241769090e2, 1.71204761263407058e3, &
-      2.05107837782607147e3, 1.23033935479799725e3, 2.15311535474403846e-8 ]
-    !< Numerator coefficients for exp(x*x)*erfc(x), 0.46875 < x <= 4 [nondim]
-  real, parameter :: mid_den(8) = [ &
-      1.57449261107098347e1, 1.17693950891312499e2, 5.37181101862009858e2, &
-      1.62138957456669019e3, 3.29079923573345963e3, 4.36261909014324716e3, &
-      3.43936767414372164e3, 1.23033935480374942e3 ]
-    !< Denominator coefficients for the middle interval [nondim]
-  real, parameter :: tail_num(6) = [ &
-      3.05326634961232344e-1, 3.60344899949804439e-1, 1.25781726111229246e-1, &
-      1.60837851487422766e-2, 6.58749161529837803e-4, 1.63153871373020978e-2 ]
-    !< Numerator coefficients for the asymptotic correction, x > 4 [nondim]
-  real, parameter :: tail_den(5) = [ &
-      2.56852019228982242, 1.87295284992346047, 5.27905102951428412e-1, &
-      6.05183413124413191e-2, 2.33520497626869185e-3 ]
-    !< Denominator coefficients for the asymptotic correction [nondim]
-  real :: y, delta, exponential, correction
-    ! Absolute input, exponential argument residual, exponential and its correction [nondim]
-  type(erfc_pair) :: z, ratio, scaled_erfc, square, argument, factor, value
-    ! Compensated polynomial argument, rational value, scaled complement and reconstruction
+  real :: y, t, error, lower, upper ! Input, reduced argument, error budget, and rounded bounds [nondim]
+  type(erfc_pair) :: square, scaled_erfc, exponential, value
+    ! Compensated square, scaled complement, exponential mantissa, and result
   integer(erfc_int_kind) :: xb, magnitude
     ! Input bits and unsigned magnitude bits
-  integer :: rescale ! Binary exponent adjustment for the final result
+  integer :: rescale, bin ! Binary exponent adjustment and Chebyshev interval
 
   ! Classify by bits before comparisons or squaring, including signaling NaNs.
   xb = transfer(x, erfc_int_mold)
@@ -107,48 +83,46 @@ module procedure erfc_repro
     a = 1.
     return
   else if (y <= 0.46875) then
-    z = erfc_multiply(erfc_pair(y, 0.), erfc_pair(y, 0.))
-    ratio = erfc_rational(z, small_num, small_den)
-    value = erfc_multiply(erfc_pair(-x, 0.), ratio)
-    value = erfc_add(erfc_pair(1., 0.), value)
-    a = value%hi + value%lo
-    return
-  else if (y <= 4.) then
-    scaled_erfc = erfc_rational(erfc_pair(y, 0.), mid_num, mid_den)
-  else
     square = erfc_multiply(erfc_pair(y, 0.), erfc_pair(y, 0.))
-    z = erfc_divide(erfc_pair(1., 0.), square)
-    ratio = erfc_rational(z, tail_num, tail_den)
-    value = erfc_multiply(z, ratio)
-    value = erfc_add(erfc_pair(inv_sqrt_pi, 0.), erfc_pair(-value%hi, -value%lo))
-    scaled_erfc = erfc_divide(value, erfc_pair(y, 0.))
+    value = erfc_polynomial(square, erf_hi(0:20), erf_lo(0:20))
+    value = erfc_multiply(erfc_pair(-x, 0.), value)
+    a = erfc_round_sum(1., value)
+    ! A conservative working error budget for the compensated fast path.
+    ! Compare rounded interval endpoints before accepting a near-midpoint result.
+    error = scale(abs(value%hi), -90)
+    lower = erfc_round_sum(1., erfc_pair(value%hi, value%lo-error))
+    upper = erfc_round_sum(1., erfc_pair(value%hi, value%lo+error))
+    if (lower /= upper) a = erfc_accurate(x)
+    return
   endif
 
-  ! Keep the rounded square and its residual.  The low part of the exponential
-  ! argument must not be added back before calling exp_repro(): its loss would
-  ! amplify relative error by O(x*x).  In the far tail, bias the exponent by an
-  ! accurately split multiple of ln(2) so all compensated products stay normal.
+  ! Map each interval exactly onto [-1,1].  The interval boundaries, centers,
+  ! and radii are binary fractions, and the subtraction is exact by Sterbenz.
+  if (y < 1.) then
+    bin = 0
+    t = 2. * y - 1.
+  else
+    bin = exponent(y)
+    t = scale(y, 2-bin) - 3.
+  endif
+  scaled_erfc = erfc_chebyshev(t, bin)
   square = erfc_multiply(erfc_pair(y, 0.), erfc_pair(y, 0.))
-  argument = erfc_pair(-square%hi, -square%lo)
-  rescale = 0
-  if (square%hi > -0.5 * real(minexponent(real_mold)) * ln2) then
-    argument = erfc_add(argument, erfc_pair(real(tail_scale) * ln2_hi, real(tail_scale) * ln2_lo))
-    rescale = -tail_scale
+  call erfc_exp(erfc_pair(-square%hi, -square%lo), exponential, rescale)
+  value = erfc_multiply(scaled_erfc, exponential)
+  if (x < 0.) then
+    ! Preserve the low part until after reflection, avoiding double rounding.
+    value = erfc_pair(-scale(value%hi, rescale), -scale(value%lo, rescale))
+    a = erfc_round_sum(2., value)
+    error = scale(abs(value%hi), -90)
+    lower = erfc_round_sum(2., erfc_pair(value%hi, value%lo-error))
+    upper = erfc_round_sum(2., erfc_pair(value%hi, value%lo+error))
+  else
+    a = erfc_round(value, rescale)
+    error = scale(abs(value%hi), -90)
+    lower = erfc_round(erfc_pair(value%hi, value%lo-error), rescale)
+    upper = erfc_round(erfc_pair(value%hi, value%lo+error), rescale)
   endif
-
-  ! exp(argument%lo) is almost one.  Preserve expm1(argument%lo) as a low
-  ! component instead of rounding it away in a second exponential call.
-  ! |delta| < 2^-43 in binary64; the omitted cubic is below 2^-129.
-  delta = argument%lo
-  correction = 0.5 * (delta * delta)
-  factor = erfc_add(erfc_pair(1., 0.), erfc_pair(delta, correction))
-  value = erfc_multiply(scaled_erfc, factor)
-  exponential = exp_repro(argument%hi)
-  value = erfc_multiply(value, erfc_pair(exponential, 0.))
-  ! Scaling is exact for normal outputs.  Subnormals round only here, although
-  ! rounding hi+lo first can introduce double rounding at a subnormal midpoint.
-  a = scale(value%hi + value%lo, rescale)
-  if (x < 0.) a = 2. - a
+  if (lower /= upper) a = erfc_accurate(x)
 end procedure erfc_repro
 
 !> Add two compensated values, retaining the leading addition's roundoff.
@@ -187,35 +161,274 @@ pure function erfc_multiply(a, b) result(c)
   c%lo = (p - c%hi) + e
 end function erfc_multiply
 
-!> Correct a quotient using the compensated division residual.
-pure function erfc_divide(a, b) result(c)
-  type(erfc_pair), intent(in) :: a, b !< Numerator and nonzero denominator
-  type(erfc_pair) :: c, product, residual !< Quotient and intermediate values
-  real :: q, r ! Leading quotient and correction [nondim]
-
-  q = a%hi / b%hi
-  product = erfc_multiply(erfc_pair(q, 0.), b)
-  residual = erfc_add(a, erfc_pair(-product%hi, -product%lo))
-  r = (residual%hi + residual%lo) / b%hi
-  c = erfc_add(erfc_pair(q, 0.), erfc_pair(r, 0.))
-end function erfc_divide
-
-!> Evaluate a Cody rational function with compensated Horner steps and division.
-!! The last numerator coefficient is leading; the others follow in descending
-!! order.  The denominator is monic with its remaining coefficients descending.
-pure function erfc_rational(z, cn, cd) result(r)
+!> Evaluate a polynomial with compensated coefficients and Horner steps.
+pure function erfc_polynomial(z, ch, cl) result(r)
   type(erfc_pair), intent(in) :: z !< Polynomial argument
-  real, intent(in) :: cn(:), cd(:) !< Numerator and denominator coefficients [nondim]
-  type(erfc_pair) :: r, num, den !< Rational approximation and polynomial values
+  real, intent(in) :: ch(0:), cl(0:) !< Leading coefficients and residuals [nondim]
+  type(erfc_pair) :: r !< Polynomial value
   integer :: i ! Coefficient index
 
-  num = erfc_pair(cn(size(cn)), 0.)
-  den = erfc_pair(1., 0.)
-  do i=1,size(cd)
-    num = erfc_add(erfc_multiply(num, z), erfc_pair(cn(i), 0.))
-    den = erfc_add(erfc_multiply(den, z), erfc_pair(cd(i), 0.))
+  r = erfc_pair(ch(size(ch)-1), cl(size(cl)-1))
+  do i=size(ch)-2,0,-1
+    r = erfc_add(erfc_multiply(r, z), erfc_pair(ch(i), cl(i)))
   enddo
-  r = erfc_divide(num, den)
-end function erfc_rational
+end function erfc_polynomial
+
+!> Compensated Clenshaw evaluation of the scaled complementary error function.
+pure function erfc_chebyshev(t, bin) result(r)
+  real, intent(in) :: t !< Reduced input in [-1,1] [nondim]
+  integer, intent(in) :: bin !< Table interval
+  type(erfc_pair) :: r, b1, b2, next !< Polynomial value and Clenshaw recurrence
+  integer :: i ! Coefficient index
+
+  b1 = erfc_pair(0., 0.)
+  b2 = erfc_pair(0., 0.)
+  do i=48,1,-1
+    next = erfc_multiply(erfc_pair(2.*t, 0.), b1)
+    next = erfc_add(next, erfc_pair(-b2%hi, -b2%lo))
+    next = erfc_add(next, erfc_pair(erfcx_hi(i,bin), erfcx_lo(i,bin)))
+    b2 = b1
+    b1 = next
+  enddo
+  r = erfc_multiply(erfc_pair(t, 0.), b1)
+  r = erfc_add(r, erfc_pair(-b2%hi, -b2%lo))
+  r = erfc_add(r, erfc_pair(erfcx_hi(0,bin), erfcx_lo(0,bin)))
+end function erfc_chebyshev
+
+!> Compute exp(x) = (a%hi+a%lo)*2**k without prematurely rounding to one double.
+!! The input is the exact compensated negative square, bounded by the erfc cutoff.
+pure subroutine erfc_exp(x, a, k)
+  type(erfc_pair), intent(in) :: x !< Compensated negative square
+  type(erfc_pair), intent(out) :: a !< Exponential mantissa
+  integer, intent(out) :: k !< Binary exponent
+  real, parameter :: inv_ln2 = 1.44269504088896340735992468100189214
+    !< Reciprocal ln(2) [nondim]
+  real, parameter :: ln2_hi = 0.69314718036912381649017333984375
+    !< Leading part of ln(2), whose product with the reduction integer is exact [nondim]
+  real, parameter :: ln2_lo = 1.90821492927058770002e-10
+    !< Second part of ln(2) [nondim]
+  real, parameter :: ln2_tail = 1.1612227229362532e-26
+    !< Residual of the first two parts of ln(2) [nondim]
+  type(erfc_pair) :: r, correction, table !< Reduced argument, reduction residual, and table value
+  real :: z ! Reduction integer divided by the table size [nondim]
+  integer :: n, j ! Reduction integer and table index
+
+  n = nint(x%hi * (real(ndiv) * inv_ln2))
+  j = modulo(n, ndiv)
+  k = (n-j) / ndiv
+  z = real(n) / real(ndiv)
+  r = erfc_add(x, erfc_pair(-z * ln2_hi, 0.))
+  correction = erfc_multiply(erfc_pair(-z, 0.), erfc_pair(ln2_lo, ln2_tail))
+  r = erfc_add(r, correction)
+  a = erfc_polynomial(r, exp_hi(0:12), exp_lo(0:12))
+  table = erfc_multiply(erfc_pair(idiv_scale_lookup(j), 0.), &
+      erfc_pair(1., idiv_residual_lookup(j)))
+  a = erfc_multiply(a, table)
+end subroutine erfc_exp
+
+!> Round base + a hi/lo correction without losing a tiny midpoint displacement.
+!! Returning a normalized hi/lo sum first would discard the third component
+!! when base is much larger than the correction (especially for tiny inputs).
+pure function erfc_round_sum(base, correction, tail) result(a)
+  real, intent(in) :: base !< Exactly representable offset [nondim]
+  type(erfc_pair), intent(in) :: correction !< Signed correction
+  real, optional, intent(in) :: tail !< Third component of the correction [nondim]
+  real :: a !< Rounded sum [nondim]
+  real :: h, v, residual, direction, neighbor, half_gap, last ! Summation and rounding terms [nondim]
+  type(erfc_pair) :: low, distance !< Residual and distance past the rounding midpoint
+
+  h = base + correction%hi
+  v = h - base
+  residual = (base - (h - v)) + (correction%hi - v)
+  last = 0.
+  if (present(tail)) last = tail
+  low = erfc_add(erfc_pair(residual, 0.), erfc_pair(correction%lo, last))
+  a = h
+  if (low%hi == 0.) return
+  direction = sign(1., low%hi)
+  neighbor = nearest(h, direction)
+  half_gap = 0.5 * abs(neighbor - h)
+  distance = erfc_add(erfc_pair(direction * residual - half_gap, 0.), &
+      erfc_pair(direction * correction%lo, direction * last))
+  if (distance%hi > 0.) then
+    a = neighbor
+  else if (distance%hi == 0.) then
+    if (distance%lo > 0. .or. (distance%lo == 0. .and. btest(transfer(h, erfc_int_mold),0))) a = neighbor
+  endif
+end function erfc_round_sum
+
+!> Round a positive compensated value after binary scaling, including subnormals.
+pure function erfc_round(value, k) result(a)
+  type(erfc_pair), intent(in) :: value !< Positive mantissa
+  integer, intent(in) :: k !< Binary exponent
+  real :: a !< Rounded and scaled result [nondim]
+  integer, parameter :: quantum_exp = minexponent(real_mold) - digits(real_mold)
+    !< Exponent of the least positive subnormal
+  integer(erfc_int_kind) :: n ! Integer number of subnormal quanta
+  type(erfc_pair) :: units, fraction !< Result in subnormal quanta and fractional remainder
+
+  if (exponent(value%hi) + k > minexponent(real_mold)) then
+    a = scale(value%hi + value%lo, k)
+  else
+    ! Round to integer multiples of the subnormal quantum BEFORE scaling.
+    ! Rounding hi+lo first would sometimes double-round at subnormal midpoints.
+    units = erfc_pair(scale(value%hi, k-quantum_exp), scale(value%lo, k-quantum_exp))
+    n = int(units%hi, erfc_int_kind)
+    fraction = erfc_add(units, erfc_pair(-real(n), 0.))
+    if (fraction%hi > 0.5) then
+      n = n + 1
+    else if (fraction%hi == 0.5) then
+      if (fraction%lo > 0. .or. (fraction%lo == 0. .and. btest(n,0))) n = n + 1
+    endif
+    a = scale(real(n), quantum_exp)
+  endif
+end function erfc_round
+
+!> Error-free sum of two ordinary reals, with no multiply-add contraction.
+pure subroutine erfc_two_sum(a, b, s, e)
+  real, intent(in) :: a, b !< Addends [nondim]
+  real, intent(out) :: s, e !< Rounded sum and exact residual [nondim]
+  real :: v ! Recovered addend [nondim]
+
+  s = a + b
+  v = s - a
+  e = (a - (s - v)) + (b - v)
+end subroutine erfc_two_sum
+
+!> Accumulate terms into three components, keeping two levels of sum residuals.
+pure function erfc_accumulate(terms) result(r)
+  real, intent(in) :: terms(:) !< Terms to accumulate [nondim]
+  type(erfc_wide) :: r !< Three-component sum
+  real :: h, l, t, s, e, f, u, v ! Accumulators and error-free sum outputs [nondim]
+  integer :: i ! Term or normalization index
+
+  h = 0.
+  l = 0.
+  t = 0.
+  do i=1,size(terms)
+    call erfc_two_sum(h, terms(i), s, e)
+    h = s
+    call erfc_two_sum(l, e, s, f)
+    l = s
+    t = t + f
+  enddo
+  do i=1,2
+    call erfc_two_sum(l, t, s, e)
+    call erfc_two_sum(h, s, u, v)
+    h = u
+    l = v
+    t = e
+  enddo
+  r%v(:) = [h, l, t]
+end function erfc_accumulate
+
+!> Three-component addition for the rare accurate path.
+pure function erfc_wide_add(a, b) result(r)
+  type(erfc_wide), intent(in) :: a, b !< Operands
+  type(erfc_wide) :: r !< Sum
+
+  r = erfc_accumulate([a%v(1), b%v(1), a%v(2), b%v(2), a%v(3), b%v(3)])
+end function erfc_wide_add
+
+!> Three-component multiplication using exact two-component products.
+pure function erfc_wide_multiply(a, b) result(r)
+  type(erfc_wide), intent(in) :: a, b !< Operands
+  type(erfc_wide) :: r !< Product
+  type(erfc_pair) :: p ! Exact product of two ordinary components
+  real :: terms(18) ! Products and their residuals [nondim]
+  integer :: i, j, n ! Component and term indices
+
+  n = 0
+  do i=1,3
+    do j=1,3
+      p = erfc_multiply(erfc_pair(a%v(i), 0.), erfc_pair(b%v(j), 0.))
+      terms(n+1:n+2) = [p%hi, p%lo]
+      n = n + 2
+    enddo
+  enddo
+  r = erfc_accumulate(terms(:))
+end function erfc_wide_multiply
+
+!> Three-component Horner evaluation including coefficient residuals.
+pure function erfc_wide_polynomial(z, ch, cl, ct) result(r)
+  type(erfc_wide), intent(in) :: z !< Argument
+  real, intent(in) :: ch(0:), cl(0:), ct(0:) !< Three coefficient components [nondim]
+  type(erfc_wide) :: r !< Polynomial value
+  integer :: i ! Coefficient index
+
+  i = size(ch)-1
+  r = erfc_wide([ch(i), cl(i), ct(i)])
+  do i=size(ch)-2,0,-1
+    r = erfc_wide_add(erfc_wide_multiply(r, z), erfc_wide([ch(i), cl(i), ct(i)]))
+  enddo
+end function erfc_wide_polynomial
+
+!> Higher-precision fallback, using three-component arithmetic and longer polynomials.
+!! No hardware extended precision or platform transcendental functions are used.
+pure function erfc_accurate(x) result(a)
+  real, intent(in) :: x !< Finite input inside the saturation bounds [nondim]
+  real :: a !< Rounded complementary error function [nondim]
+  real :: y, t ! Absolute input and reduced Chebyshev argument [nondim]
+  type(erfc_wide) :: square, value, b1, b2, next, r, exponential, units
+    ! Compensated square, polynomial recurrence, exponential and rounding values
+  integer :: bin, i, k ! Interval, coefficient index, and binary exponent
+  integer(erfc_int_kind) :: n ! Integer count of subnormal quanta
+  integer, parameter :: quantum_exp = minexponent(real_mold) - digits(real_mold)
+    !< Exponent of the least positive subnormal
+  type(erfc_pair) :: fraction ! Fractional distance beyond a subnormal midpoint
+
+  y = abs(x)
+  square = erfc_wide_multiply(erfc_wide([y, 0., 0.]), erfc_wide([y, 0., 0.]))
+  if (y <= 0.46875) then
+    value = erfc_wide_polynomial(square, erf_hi, erf_lo, erf_tail)
+    value = erfc_wide_multiply(erfc_wide([-x, 0., 0.]), value)
+    a = erfc_round_sum(1., erfc_pair(value%v(1), value%v(2)), value%v(3))
+    return
+  endif
+
+  if (y < 1.) then
+    bin = 0
+    t = 2.*y - 1.
+  else
+    bin = exponent(y)
+    t = scale(y, 2-bin) - 3.
+  endif
+  b1 = erfc_wide([0., 0., 0.])
+  b2 = b1
+  do i=ubound(erfcx_hi,1),1,-1
+    next = erfc_wide_multiply(erfc_wide([2.*t, 0., 0.]), b1)
+    next = erfc_wide_add(next, erfc_wide([-b2%v(1), -b2%v(2), -b2%v(3)]))
+    next = erfc_wide_add(next, erfc_wide([erfcx_hi(i,bin), erfcx_lo(i,bin), erfcx_tail(i,bin)]))
+    b2 = b1
+    b1 = next
+  enddo
+  value = erfc_wide_multiply(erfc_wide([t, 0., 0.]), b1)
+  value = erfc_wide_add(value, erfc_wide([-b2%v(1), -b2%v(2), -b2%v(3)]))
+  value = erfc_wide_add(value, erfc_wide([erfcx_hi(0,bin), erfcx_lo(0,bin), erfcx_tail(0,bin)]))
+
+  ! Independent full-ln(2) reduction avoids the fast path's two-component table.
+  k = nint(-square%v(1) / ln2_parts(1))
+  r = erfc_wide([-square%v(1), -square%v(2), -square%v(3)])
+  next = erfc_wide_multiply(erfc_wide([-real(k), 0., 0.]), erfc_wide(ln2_parts(:)))
+  r = erfc_wide_add(r, next)
+  exponential = erfc_wide_polynomial(r, exp_hi, exp_lo, exp_tail)
+  value = erfc_wide_multiply(value, exponential)
+  if (x < 0.) then
+    a = erfc_round_sum(2., erfc_pair(-scale(value%v(1), k), -scale(value%v(2), k)), -scale(value%v(3), k))
+  else if (exponent(value%v(1)) + k > minexponent(real_mold)) then
+    a = scale(erfc_round_sum(value%v(1), erfc_pair(value%v(2), value%v(3))), k)
+  else
+    units = erfc_wide([scale(value%v(1), k-quantum_exp), &
+        scale(value%v(2), k-quantum_exp), scale(value%v(3), k-quantum_exp)])
+    n = int(units%v(1), erfc_int_kind)
+    fraction = erfc_add(erfc_pair((units%v(1)-real(n)) - 0.5, 0.), erfc_pair(units%v(2), units%v(3)))
+    if (fraction%hi > 0.) then
+      n = n + 1
+    else if (fraction%hi == 0.) then
+      if (fraction%lo > 0. .or. (fraction%lo == 0. .and. btest(n,0))) n = n + 1
+    endif
+    a = scale(real(n), quantum_exp)
+  endif
+end function erfc_accurate
 
 end submodule MOM_erfc

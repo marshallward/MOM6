@@ -6,6 +6,7 @@
 module MOM_intrinsic_functions_tests
 
 use, intrinsic :: ieee_arithmetic, only : ieee_value
+use, intrinsic :: iso_fortran_env, only : int64
 use, intrinsic :: ieee_arithmetic, only : ieee_quiet_nan, ieee_signaling_nan
 use, intrinsic :: ieee_arithmetic, only : ieee_positive_inf, ieee_negative_inf
 use, intrinsic :: ieee_arithmetic, only : ieee_is_nan
@@ -84,12 +85,12 @@ subroutine test_erfc_special
   call assert(ieee_is_nan(erfc_repro(-ieee_value(0., ieee_quiet_nan))), 'erfc_repro negative NaN')
 end subroutine test_erfc_special
 
-!> Compare erfc with an independent quad-precision intrinsic reference.
+!> Compare erfc with an unrounded quad-precision intrinsic reference.
 !! Cover both polynomial joins and their adjacent floats, negative saturation,
 !! the normal/subnormal transition, and eventual rounding to zero.
 subroutine test_erfc_accuracy
-  real, parameter :: joins(9) = [0., 0.46875, 4., 6., 26.5, 27.25, &
-      sqrt(-0.5 * real(minexponent(0.)) * ln2), &
+  real, parameter :: joins(11) = [0., 0.46875, 1., 2., 4., 8., 16., &
+      26.54325845425098, 27.226017111108365, &
       sqrt(real(digits(0.)) * ln2), sqrt(real(digits(0.) - minexponent(0.) + 2) * ln2)]
     !< Points at or near sensitive regions in binary64 [nondim]
   real :: x, a, ref, ulp, err, worst, previous
@@ -127,8 +128,39 @@ subroutine test_erfc_accuracy
     enddo ! Neighboring floats at each join
   enddo
   print '(2x,"erfc_repro maximum sampled ULP error: ",f8.2)', worst
-  call assert(worst <= 2., 'erfc_repro exceeds 2 ULP accuracy tolerance')
+  call assert(worst <= 0.5, 'erfc_repro exceeds 0.5 ULP accuracy tolerance')
 end subroutine test_erfc_accuracy
+
+!> Regression cases near rounding midpoints, independently rounded with MPFR.
+!! The quad intrinsic is not a sufficient oracle for some tiny-input cases:
+!! its own rounding can place the reference exactly on a binary64 midpoint.
+!! Inputs are selected from the glibc/CORE-MATH difficult cases; see
+!! .testing/tools/erfc/hard-inputs.txt for the full set and the MPFR checker.
+subroutine test_erfc_hard_rounding
+  integer(int64), parameter :: bits(2,10) = reshape([ &
+      int(z'40348DE452FB1A15',int64), int(z'1983C2A1264045AD',int64), &
+      int(z'BC9C5BF891B4EF6B',int64), int(z'3FF0000000000001',int64), &
+      int(z'BCCFE777A3EB8D58',int64), int(z'3FF0000000000005',int64), &
+      int(z'BDAB71F3A10691D9',int64), int(z'3FF000000000F7BF',int64), &
+      int(z'BFFF9A4A209CA0E4',int64), int(z'3FFFEAA166E384C9',int64), &
+      int(z'3C8C5BF891B4EF6B',int64), int(z'3FEFFFFFFFFFFFFF',int64), &
+      int(z'3CD29C5B1F9EBD1E',int64), int(z'3FEFFFFFFFFFFFF5',int64), &
+      int(z'3FBD4AF8ADB90116',int64), int(z'3FEBE2E345C31801',int64), &
+      int(z'3FFAF08AE30C9364',int64), int(z'3F91AC47852096CB',int64), &
+      int(z'403A8F7BFBD15495',int64), int(z'000667BD620FD95B',int64) ], [2,10])
+    !< Input and MPFR-rounded result bit patterns
+  real :: x(10), a(10) ! Inputs and elemental results [nondim]
+  integer :: i ! Case index
+
+  if (storage_size(0.) /= 64) return
+  do i=1,10
+    x(i) = transfer(bits(1,i), 0.)
+  enddo
+  a(:) = erfc_repro(x(:))
+  do i=1,10
+    call assert(transfer(a(i), 0_int64) == bits(2,i), 'erfc_repro hard case is not correctly rounded')
+  enddo
+end subroutine test_erfc_hard_rounding
 
 !> Check if IEEE exception flags are supported on this platform
 subroutine check_ieee_support
@@ -1075,6 +1107,7 @@ subroutine run_intrinsic_functions_tests
   suite = TestSuite()
 
   call suite%add(test_erfc_special, "test_erfc_special")
+  call suite%add(test_erfc_hard_rounding, "test_erfc_hard_rounding")
   if (realquad >= 0) call suite%add(test_erfc_accuracy, "test_erfc_accuracy")
 
   ! Basic value tests
