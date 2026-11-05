@@ -11,7 +11,7 @@ use iso_fortran_env, only : int64
 
 implicit none ; private
 
-public :: invcosh, cuberoot, exp_repro
+public :: invcosh, cuberoot, exp_repro, erfc_repro
 public :: intrinsic_functions_unit_tests
 
 interface
@@ -25,6 +25,16 @@ interface
     real :: a
       !< exp(x) [nondim]
   end function exp_repro
+
+  !> Reproducible complementary error function, implemented in submodule MOM_erfc.
+  !! Tuned for IEEE binary64 default real, like exp_repro().  Bit reproducibility
+  !! requires round-to-nearest arithmetic, preserved
+  !! parentheses, and disabled multiply-add contraction.  Gradual underflow is
+  !! required for reproducible subnormal results, as for exp_repro().
+  elemental module function erfc_repro(x) result(a)
+    real, intent(in) :: x !< Input value [nondim]
+    real :: a            !< erfc(x) [nondim]
+  end function erfc_repro
 end interface
 
 real, parameter :: real_mold = 0.

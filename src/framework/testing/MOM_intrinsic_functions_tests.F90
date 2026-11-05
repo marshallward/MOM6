@@ -18,7 +18,7 @@ use, intrinsic :: ieee_exceptions, only : ieee_divide_by_zero
 
 use MOM_error_handler, only : assert
 use MOM_unit_testing, only : TestSuite
-use MOM_intrinsic_functions, only : exp_repro
+use MOM_intrinsic_functions, only : exp_repro, erfc_repro
 
 implicit none ; private
 
@@ -71,6 +71,64 @@ logical :: ieee_flags_supported = .false.
   !< True if the platform supports IEEE exception flag queries
 
 contains
+
+!> Check erfc special values and its elemental interface.
+subroutine test_erfc_special
+  real :: x(8), a(8) ! Inputs and complementary error functions [nondim]
+
+  x(:) = [0., -0., huge(0.), -huge(0.), tiny(0.), -tiny(0.), &
+      ieee_value(0., ieee_positive_inf), ieee_value(0., ieee_negative_inf)]
+  a(:) = erfc_repro(x(:))
+  call assert(all(a(:) == [1., 1., 0., 2., 1., 1., 0., 2.]), 'erfc_repro special values')
+  call assert(ieee_is_nan(erfc_repro(ieee_value(0., ieee_quiet_nan))), 'erfc_repro NaN')
+  call assert(ieee_is_nan(erfc_repro(-ieee_value(0., ieee_quiet_nan))), 'erfc_repro negative NaN')
+end subroutine test_erfc_special
+
+!> Compare erfc with an independent quad-precision intrinsic reference.
+!! Cover both polynomial joins and their adjacent floats, negative saturation,
+!! the normal/subnormal transition, and eventual rounding to zero.
+subroutine test_erfc_accuracy
+  real, parameter :: joins(9) = [0., 0.46875, 4., 6., 26.5, 27.25, &
+      sqrt(-0.5 * real(minexponent(0.)) * ln2), &
+      sqrt(real(digits(0.)) * ln2), sqrt(real(digits(0.) - minexponent(0.) + 2) * ln2)]
+    !< Points at or near sensitive regions in binary64 [nondim]
+  real :: x, a, ref, ulp, err, worst, previous
+    ! Input, result, reference, spacing, errors, and previous result [nondim]
+  real(kind=realq) :: reference ! Unrounded quad-precision reference [nondim]
+  integer :: i, j, k
+
+  worst = 0.
+  previous = 2.
+  do i=0,34000
+    x = -6. + real(i) * 0.001
+    a = erfc_repro(x)
+    reference = erfc(real(x, realq))
+    ref = real(reference)
+    ulp = nearest(ref, 1.) - ref
+    err = real(abs(real(a, realq) - reference) / real(ulp, realq))
+    worst = max(worst, err)
+    call assert(a <= previous, 'erfc_repro must be monotone decreasing')
+    call assert(a >= 0. .and. a <= 2., 'erfc_repro must lie in [0,2]')
+    previous = a
+  enddo
+  do i=1,size(joins)
+    do j=-1,1
+      x = joins(i)
+      if (j /= 0) x = nearest(x, real(j))
+      do k=1,2
+        x = -x
+        a = erfc_repro(x)
+        reference = erfc(real(x, realq))
+        ref = real(reference)
+        ulp = nearest(ref, 1.) - ref
+        err = real(abs(real(a, realq) - reference) / real(ulp, realq))
+        worst = max(worst, err)
+      enddo
+    enddo ! Neighboring floats at each join
+  enddo
+  print '(2x,"erfc_repro maximum sampled ULP error: ",f8.2)', worst
+  call assert(worst <= 2., 'erfc_repro exceeds 2 ULP accuracy tolerance')
+end subroutine test_erfc_accuracy
 
 !> Check if IEEE exception flags are supported on this platform
 subroutine check_ieee_support
@@ -1015,6 +1073,9 @@ subroutine run_intrinsic_functions_tests
   call check_ieee_support
 
   suite = TestSuite()
+
+  call suite%add(test_erfc_special, "test_erfc_special")
+  if (realquad >= 0) call suite%add(test_erfc_accuracy, "test_erfc_accuracy")
 
   ! Basic value tests
   call suite%add(test_exp_zero, "test_exp_zero")
