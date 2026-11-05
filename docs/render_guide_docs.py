@@ -4,7 +4,6 @@ import contextlib
 from pathlib import Path
 import re
 import shutil
-import zlib
 from urllib.parse import urlsplit
 
 from docutils import nodes
@@ -35,7 +34,6 @@ GUIDE_PAGES = {
     'testing': 'Testing of MOM6',
     'zzbibliography': 'Bibliography',
 }
-MANUAL_URL = 'https://mom6.readthedocs.io/en/main/'
 DOCS = Path(__file__).resolve().parent
 SCIENCE_SOURCES = science_sources(DOCS)
 SCIENCE_PAGES = {name: path.read_text(encoding='utf-8').splitlines()[2]
@@ -56,22 +54,6 @@ LEGACY_SECTIONS = {
     'namespacemom__spherical__harmonics_1section_spherical_harmonics':
         ('mom_spherical_harmonics', 'section_spherical_harmonics'),
 }
-
-
-def read_inventory(path):
-    """Read the published v2 reference inventory without importing Sphinx."""
-    with path.open('rb') as stream:
-        header = [stream.readline() for _ in range(4)]
-        if header[0].strip() != b'# Sphinx inventory version 2' or b'zlib' not in header[3]:
-            raise ValueError(f'Unsupported reference inventory: {path}')
-        payload = zlib.decompress(stream.read()).decode('utf-8')
-    inventory = {}
-    for line in payload.splitlines():
-        name, domain, priority, uri, label = line.split(maxsplit=4)
-        if uri.endswith('$'):
-            uri = uri[:-1] + name
-        inventory.setdefault(domain, {})[name] = (MANUAL_URL + uri, name if label == '-' else label)
-    return inventory
 
 
 class GuideInliner(Inliner):
@@ -96,18 +78,16 @@ class GuideInliner(Inliner):
         return super().interpreted(rawsource, text, role, lineno)
 
 
-def chapter_destination(name, titles, inventory):
+def chapter_destination(name, titles):
     name = name.removeprefix('/').removesuffix('.rst')
     local = name.removeprefix('api/generated/pages/')
     local = local.removeprefix('api/generated/modules/')
     if local in titles:
         return local + '.html', titles[local]
-    if name in inventory.get('std:doc', {}):
-        return inventory['std:doc'][name]
     raise ValueError(f'Unknown manual chapter: {name}')
 
 
-def prepare_source(source, titles, inventory):
+def prepare_source(source, titles):
     """Express legacy navigation and bibliography directives as Docutils nodes."""
     def toctree(match):
         lines = [line.strip() for line in match[0].splitlines()[1:] if line.strip()]
@@ -118,7 +98,7 @@ def prepare_source(source, titles, inventory):
                 if not line.startswith(':maxdepth:'):
                     raise ValueError(f'Unsupported chapter navigation option: {line}')
                 continue
-            url, title = chapter_destination(line, titles, inventory)
+            url, title = chapter_destination(line, titles)
             result += f'   * `{title} <{url}>`__\n'
         return result + '\n'
     source = re.sub(r'(?m)^\.\. toctree::[^\n]*\n(?:(?:[ \t]+[^\n]*|)\n)*', toctree, source)
@@ -184,7 +164,6 @@ def render_guides(rst_dir, warning_stream, html_dir=None, *, api_reader=None):
                 titles[path.stem] = path.stem
     if not titles:
         return {}
-    inventory = read_inventory(DOCS / 'guide-inventory.inv')
     documents, targets, keys = {}, {}, set()
     settings = {'warning_stream': warning_stream, 'halt_level': 2,
                 'stylesheet_path': [], 'embed_stylesheet': False,
@@ -193,7 +172,7 @@ def render_guides(rst_dir, warning_stream, html_dir=None, *, api_reader=None):
                 'syntax_highlight': 'short'}
     for name in titles:
         path = rst_dir / (name + '.rst')
-        source = prepare_source(path.read_text(encoding='utf-8'), titles, inventory)
+        source = prepare_source(path.read_text(encoding='utf-8'), titles)
         source_path = str(path.resolve())
         with contextlib.chdir(rst_dir):
             document = publish_doctree(source, source_path=source_path,
@@ -241,10 +220,9 @@ def render_guides(rst_dir, warning_stream, html_dir=None, *, api_reader=None):
             explicit = re.fullmatch(r'(.+?)\s*<([^>]+)>', text)
             label, target = explicit.groups() if explicit else (None, text)
             if role == 'doc':
-                url, title = chapter_destination(target, titles, inventory)
+                url, title = chapter_destination(target, titles)
             else:
-                destination = (targets.get(nodes.fully_normalize_name(target))
-                               or inventory.get('std:label', {}).get(target.lower()))
+                destination = targets.get(nodes.fully_normalize_name(target))
                 if destination is None:
                     raise ValueError(f'{name}:{node.line}: Unknown manual reference {target}')
                 url, title = destination

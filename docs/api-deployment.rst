@@ -142,8 +142,7 @@ The new site requires neither Sphinx nor Doxygen. All reST is rendered with
 Docutils. The existing ``toctree``, ``:ref:``, and ``:cite:`` source syntax is
 supported by the standalone manual frontend. Chapter lists become ordinary links, with section links up
 to the requested depth. Named references resolve against explicit Docutils
-targets before consulting the published reference inventory. Unknown references
-fail the build.
+targets. Unknown references fail the build.
 
 Fortran comments remain in their existing Doxygen format. The builder explicitly
 selects Flint's ``doxygen`` comment frontend, which emits reST without running
@@ -154,12 +153,10 @@ migration is independent of replacing the build system. Unsupported Doxygen
 commands fail generation with the owning source file in the error.
 
 Generated API pages and manual chapters share the same citation and named-target
-index. References to sections present in API comments now resolve locally;
-the published inventory remains a fallback for destinations not yet generated.
+index. References to sections present in API comments resolve locally.
 The legacy-destination audit in ``api-content-audit.rst`` records the content
 checks and local mappings: the full selected-source build no longer uses the
-old site for scientific/API destinations. Partial builds can still use the
-inventory for omitted modules.
+old site for scientific/API destinations.
 
 Pybtex reads the existing BibTeX files and formats the cited entries in the
 ``plain`` style. Citations link to stable, key-based bibliography anchors.
@@ -167,14 +164,10 @@ Missing citation keys and duplicate anchors fail the build. Pandoc and its
 ``citeproc`` filter are not required. The former Sphinx/Doxygen configuration,
 extensions, build targets, and equation postprocessor have been retired.
 
-References without local targets use the published manual via
-``guide-inventory.inv``, a snapshot downloaded from
-``https://mom6.readthedocs.io/en/main/objects.inv`` on 2026-11-03 (inventory
-project: MOM6, version: 0.2a3). This is link metadata, not a copy of those pages.
-Refresh that snapshot deliberately when adopting changed external destinations;
-normal builds require no network access for reference resolution. Unknown
-chapter destinations and unresolved references fail the build rather than
-silently producing guessed links.
+The saved old-site inventory has been removed. Reference resolution needs no
+network access and has no automatic external fallback. Unknown chapter
+destinations and unresolved references fail the build. Partial source selections
+must include the modules referenced by the maintained manual.
 
 Repeat ``--source DIRECTORY`` to supply a custom set of source roots instead of
 the defaults. For example, ``--source src`` restores a source-only reference.

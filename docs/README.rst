@@ -62,9 +62,8 @@ Read the Docs runs the same builder through the custom jobs in
 ``.readthedocs.yml`` and publishes its HTML. Both hosts use the same pinned
 dependencies; neither needs the former Sphinx/Doxygen toolchain.
 
-The saved ``guide-inventory.inv`` is static link metadata for partial builds,
-not a Sphinx dependency. The complete selected-source build resolves all
-scientific/API destinations locally.
+Scientific/API references resolve locally. Missing targets fail the build;
+there is no saved old-site inventory or automatic external fallback.
 
 The previous documentation pipeline was developed with contributions from
 Angus Gibson, Rob Cermak, and Marshall Ward. Its implementation and build

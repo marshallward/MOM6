@@ -7,10 +7,34 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from build_api_docs import build, check_links
+from build_api_docs import build as build_site, check_links, generate_reference
 from flint.docgen.references import Reference
 from render_api_docs import render_reference
-from render_guide_docs import GUIDE_PAGES, SCIENCE_PAGES, render_guides
+from render_guide_docs import GUIDE_PAGES, SCIENCE_PAGES, LEGACY_SECTIONS, render_guides
+
+
+MANUAL_API_FIXTURES = {page: label for page, label in LEGACY_SECTIONS.values()}
+MANUAL_API_FIXTURES['mom_unit_scaling'] = None
+
+
+def build(*args, **kwargs):
+    """Supply the manual's API destinations for tiny synthetic Fortran projects.
+
+    These tests exercise the real manual as well as synthetic API pages. The
+    manual's referenced science sections must be local, even in test fixtures.
+    Full-project validation uses build_api_docs.build directly.
+    """
+    def generate_with_manual_fixtures(source, rst_dir, reports, **options):
+        summary = generate_reference(source, rst_dir, reports, **options)
+        for page, label in MANUAL_API_FIXTURES.items():
+            path = rst_dir / (page + '.rst')
+            assert not path.exists(), f'Fixture would overwrite generated page: {page}'
+            target = f'.. _{label}:\n\n' if label else ''
+            path.write_text(target + page + '\n' + '=' * len(page) + '\n\n'
+                            'Local API destination for the manual fixture.\n')
+        return summary
+    with patch('build_api_docs.generate_reference', generate_with_manual_fixtures):
+        return build_site(*args, **kwargs)
 
 
 class ApiDocumentationTests(unittest.TestCase):
@@ -32,8 +56,12 @@ class ApiDocumentationTests(unittest.TestCase):
                 # A section with the right label on the wrong page is not an alias.
                 (root / 'mom_meke.rst').rename(root / 'other.rst')
                 titles['other'] = titles.pop('mom_meke')
-                pages = render_guides(root, io.StringIO())
-                self.assertIn('https://mom6.readthedocs.io/', pages['first'])
+                with self.assertRaisesRegex(ValueError, 'Unknown manual reference'):
+                    render_guides(root, io.StringIO())
+                (root / 'first.rst').write_text(
+                    'First\n=====\n\n:doc:`/api/generated/modules/missing`\n')
+                with self.assertRaisesRegex(ValueError, 'Unknown manual chapter'):
+                    render_guides(root, io.StringIO())
 
     def test_api_comment_references_share_manual_targets_and_bibliography(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -139,7 +167,7 @@ class ApiDocumentationTests(unittest.TestCase):
             self.assertEqual(summary['excluded_dependency_files'], {'GSW': 1, 'CVMix': 1})
             self.assertEqual({path.name for path in (output / 'rst').glob('*.rst')},
                              {'client.rst', 'index.rst', 'api-index.rst'}
-                              | {name + '.rst' for name in {**GUIDE_PAGES, **SCIENCE_PAGES}})
+                              | {name + '.rst' for name in {**GUIDE_PAGES, **SCIENCE_PAGES, **MANUAL_API_FIXTURES}})
             self.assertIn('unrelated_name.F90', (output / 'reports/excluded-dependencies.txt').read_text())
             (gsw / 'library.F90').unlink()
             with patch('build_api_docs.REPOSITORY', root), contextlib.redirect_stdout(io.StringIO()):
@@ -192,7 +220,8 @@ class ApiDocumentationTests(unittest.TestCase):
                 summary = build([source, infra], output)
             self.assertEqual(summary['source_files'], 2)
             self.assertEqual(summary['module_pages'], 2)
-            self.assertEqual(summary['html_pages'], 4 + len(GUIDE_PAGES) + len(SCIENCE_PAGES))
+            self.assertEqual(summary['html_pages'],
+                             4 + len(GUIDE_PAGES) + len(SCIENCE_PAGES) + len(MANUAL_API_FIXTURES))
             self.assertEqual(summary['call_graphs'], 4)
             self.assertEqual(summary['unresolved_references'], 1)
             self.assertEqual(summary['external_references'], 1)
@@ -211,14 +240,14 @@ class ApiDocumentationTests(unittest.TestCase):
             self.assertIn('<title>About this documentation — MOM6</title>', about)
             self.assertIn('href="about.html" aria-current="page"', about)
             self.assertIn('Flint', about)
-            self.assertIn('<span class="count">2</span>', about)
+            self.assertIn(f'<span class="count">{2 + len(MANUAL_API_FIXTURES)}</span>', about)
             chapter = (output / 'html/code_organization.html').read_text()
             self.assertIn('<title>Organization of the code — MOM6</title>', chapter)
             self.assertIn('href="code_organization.html" aria-current="page"', chapter)
             self.assertIn('configuration directories</a>', chapter)
             self.assertIn('FMS_cap', chapter)
             self.assertNotIn(':ref:', chapter)
-            self.assertIn('<span class="count">2</span>', chapter)
+            self.assertIn(f'<span class="count">{2 + len(MANUAL_API_FIXTURES)}</span>', chapter)
             self.assertIn('href="equations.html"', home)
             equations = (output / 'html/equations.html').read_text()
             self.assertIn('href="Notation.html"', equations)
@@ -235,7 +264,8 @@ class ApiDocumentationTests(unittest.TestCase):
             lateral = (output / 'html/parameterizations_lateral.html').read_text()
             self.assertNotIn(':cite:', lateral)
             self.assertNotIn(':ref:', lateral)
-            self.assertIn('namespacemom-hor-visc-1section-horizontal-viscosity', lateral)
+            self.assertIn('mom_hor_visc.html#section-horizontal-viscosity', lateral)
+            self.assertNotIn('https://mom6.readthedocs.io/en/main/api/', lateral)
             module_index = (output / 'html/api-index.html').read_text()
             self.assertIn('href="client.html"', module_index)
             self.assertNotIn('aria-current="page">api-index</a>', module_index)
