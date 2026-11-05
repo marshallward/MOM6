@@ -393,8 +393,10 @@ subroutine energetic_PBL(h_3d, u_3d, v_3d, tv, fluxes, visc, dt, Kd_int, G, GV, 
                            intent(in)    :: buoy_flux !< The surface buoyancy flux [Z2 T-3 ~> m2 s-3].
   real, dimension(SZI_(G),SZJ_(G)), &
                            intent(in)    :: BBL_buoy_flux !< The bottom buoyancy flux [Z2 T-3 ~> m2 s-3].
-  type(wave_parameters_CS), pointer      :: Waves  !< Waves control structure for Langmuir turbulence
-  type(stochastic_CS),     pointer       :: stoch_CS  !< The control structure returned by a previous
+  ! Waves and stoch_CS are not pointers so that the device column loop can find their mapped copies.
+  ! A disassociated Waves pointer passed by the caller makes Waves absent.
+  type(wave_parameters_CS), optional, intent(in) :: Waves !< Waves control structure for Langmuir turbulence
+  type(stochastic_CS),     intent(in)    :: stoch_CS  !< The control structure returned by a previous
 
 !    This subroutine determines the diffusivities from the integrated energetics
 !  mixed layer model.  It assumes that heating, cooling and freshwater fluxes
@@ -482,6 +484,7 @@ subroutine energetic_PBL(h_3d, u_3d, v_3d, tv, fluxes, visc, dt, Kd_int, G, GV, 
   type(energetic_PBL_CS)  :: CS_tmp1, CS_tmp2 ! Copies of the energetic PBL control structure that
                                        ! can be modified to test for sensitivities
   logical :: BBL_mixing ! If true, there is bottom boundary layer mixing.
+  logical :: do_avg_its ! A local copy of report_avg_its, so the column loop does not read a module variable.
   real, dimension(WSZK_(SZK_(GV))) :: &
     h, &            ! The layer thickness [H ~> m or kg m-2].
     dz, &           ! The vertical distance across layers [Z ~> m].
@@ -549,7 +552,7 @@ subroutine energetic_PBL(h_3d, u_3d, v_3d, tv, fluxes, visc, dt, Kd_int, G, GV, 
       "energetic_PBL: No surface friction velocity (ustar or tau_mag) defined in fluxes type.")
   if ((.not.GV%Boussinesq) .and. (.not.associated(fluxes%tau_mag))) call MOM_error(FATAL, &
       "energetic_PBL: No surface wind stress magnitude defined in fluxes type in non-Boussinesq mode.")
-  if (CS%use_LT .and. .not.associated(Waves)) call MOM_error(FATAL, &
+  if (CS%use_LT .and. .not.present(Waves)) call MOM_error(FATAL, &
       "energetic_PBL: The Waves control structure must be associated if CS%use_LT "//&
       "(i.e., USE_LA_LI2016 or EPBL_LT) is True.")
 
@@ -558,6 +561,7 @@ subroutine energetic_PBL(h_3d, u_3d, v_3d, tv, fluxes, visc, dt, Kd_int, G, GV, 
   I_dt = 0.0 ; if (dt > 0.0) I_dt = 1.0 / dt
   I_rho0dt = 1.0 / (GV%Rho0 * dt)  ! This is not used when fully non-Boussinesq.
   BBL_mixing = ((CS%ePBL_BBL_effic > 0.0) .or. (CS%ePBL_tidal_effic > 0.0) .or. CS%ePBL_BBL_use_mstar)
+  do_avg_its = report_avg_its
 
   ! Zero out diagnostics before accumulation.
   if (CS%TKE_diagnostics) then
@@ -657,7 +661,7 @@ subroutine energetic_PBL(h_3d, u_3d, v_3d, tv, fluxes, visc, dt, Kd_int, G, GV, 
     iie = ieb-isb+1
     jje = jeb-jsb+1
 
-    do concurrent (jj=1:jje, ii=1:iie)
+    do concurrent (jj=1:jje, ii=1:iie) DO_LOCALITY(local(i, j, k))
       j = jsb+jj-1
       i = isb+ii-1
 
@@ -674,12 +678,12 @@ subroutine energetic_PBL(h_3d, u_3d, v_3d, tv, fluxes, visc, dt, Kd_int, G, GV, 
       enddo
     enddo
 
-    !$omp target teams distribute parallel do collapse(2) &
-    !$omp   private(i,j,k,h,dz,T0,S0,dSV_dT_1d,dSV_dS_1d,TKE_forcing,u,v,Kd,mixvel,mixlen, &
-    !$omp&    mixvel_BBL,mixlen_BBL,Kd_BBL,SpV_dt,SpV_dt_cf,Kd_1,Kd_2,SpV_dt_tmp, &
-    !$omp&    absf,u_star,u_star_mean,mech_TKE,u_star_BBL,u_star_BBL_z_t,BBL_TKE,B_flux, &
-    !$omp&    MLD_io,BBLD_io,MLD_in,BBLD_in,BLD_1,BLD_2,eCD,eCD_tmp)
-    do jj=1,jje ; do ii=1,iie
+    do concurrent (jj=1:jje, ii=1:iie) DO_LOCALITY(local(i, j, k)) &
+        DO_LOCALITY(local(h, dz, T0, S0, dSV_dT_1d, dSV_dS_1d, TKE_forcing, u, v)) &
+        DO_LOCALITY(local(Kd, mixvel, mixlen, mixvel_BBL, mixlen_BBL, Kd_BBL)) &
+        DO_LOCALITY(local(SpV_dt, SpV_dt_cf, Kd_1, Kd_2, SpV_dt_tmp)) &
+        DO_LOCALITY(local(absf, u_star, u_star_mean, mech_TKE, u_star_BBL, u_star_BBL_z_t, BBL_TKE)) &
+        DO_LOCALITY(local(B_flux, MLD_io, BBLD_io, MLD_in, BBLD_in, BLD_1, BLD_2, eCD, eCD_tmp))
       j = jsb+jj-1 ; i = isb+ii-1
       SpV_dt(:) = 0.0
       if ((dt > 0.0) .and. GV%Boussinesq .or. .not.allocated(tv%SpV_avg)) then
@@ -830,7 +834,7 @@ subroutine energetic_PBL(h_3d, u_3d, v_3d, tv, fluxes, visc, dt, Kd_int, G, GV, 
         if (CS%id_mstar_LT > 0) diag_mstar_lt(i,j) = eCD%mstar_LT
         if (CS%id_LA > 0) diag_LA(i,j) = eCD%LA
         if (CS%id_LA_mod > 0) diag_LA_mod(i,j) = eCD%LAmod
-        if (report_avg_its) then
+        if (do_avg_its) then
           OBL_its_col(i,j) = eCD%OBL_its ; OBL_count_col(i,j) = 1
           if (BBL_mixing) then
             BBL_its_col(i,j) = eCD%BBL_its ; BBL_count_col(i,j) = 1
@@ -877,7 +881,7 @@ subroutine energetic_PBL(h_3d, u_3d, v_3d, tv, fluxes, visc, dt, Kd_int, G, GV, 
         CS%ML_depth(i,j) = 0.0
         CS%BBL_depth(i,j) = 0.0
       endif
-    enddo ; enddo
+    enddo ! jj- and ii-loops over the columns in this block
 
   enddo ; enddo ! i-block and j-block loops
 
@@ -1039,7 +1043,7 @@ pure subroutine ePBL_column(h, dz, u, v, T0, S0, dSV_dT, dSV_dS, SpV_dt, TKE_for
                            intent(out)   :: mixlen !< The mixing length scale used in Kd [Z ~> m].
   type(energetic_PBL_CS),  intent(in)    :: CS     !< Energetic PBL control structure
   type(ePBL_column_diags), intent(inout) :: eCD    !< A container for passing around diagnostics.
-  type(wave_parameters_CS), intent(in), pointer :: Waves  !< Waves control structure for Langmuir turbulence
+  type(wave_parameters_CS), optional, intent(in) :: Waves !< Waves control structure for Langmuir turbulence
   type(ocean_grid_type),   intent(in)    :: G      !< The ocean's grid structure.
   integer,                 intent(in)    :: i      !< The i-index to work on (used for Waves)
   integer,                 intent(in)    :: j      !< The j-index to work on (used for Waves)
