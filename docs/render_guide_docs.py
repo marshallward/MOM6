@@ -1,9 +1,11 @@
 """Render the maintained manual with Docutils and standalone BibTeX support."""
 from html import escape
+import contextlib
 from pathlib import Path
 import re
 import shutil
 import zlib
+from urllib.parse import urlsplit
 
 from docutils import nodes
 from docutils.core import publish_doctree, publish_from_doctree
@@ -37,7 +39,23 @@ MANUAL_URL = 'https://mom6.readthedocs.io/en/main/'
 DOCS = Path(__file__).resolve().parent
 SCIENCE_SOURCES = science_sources(DOCS)
 SCIENCE_PAGES = {name: path.read_text(encoding='utf-8').splitlines()[2]
-                 for name, path in SCIENCE_SOURCES.items()}
+                  for name, path in SCIENCE_SOURCES.items()}
+
+# Shared chapters still use the legacy Doxygen-qualified labels. Only alias
+# audited destinations, and only when their owning API page is present.
+LEGACY_SECTIONS = {
+    'namespacemom__hor__visc_1section_horizontal_viscosity': ('mom_hor_visc', 'section_horizontal_viscosity'),
+    'namespacemom__meke_1section_meke': ('mom_meke', 'section_MEKE'),
+    'namespacemom__mixed__layer__restrat_1section_mle': ('mom_mixed_layer_restrat', 'section_mle'),
+    'namespacemom__interface__filter_1section_interface_filter': ('mom_interface_filter', 'section_interface_filter'),
+    'namespacemom__lateral__mixing__coeffs_1section_resolution_function':
+        ('mom_lateral_mixing_coeffs', 'section_Resolution_Function'),
+    'namespacetidal__forcing_1section_tides': ('mom_tidal_forcing', 'section_tides'),
+    'namespacemom__load__love__numbers_1section_love_numbers': ('mom_load_love_numbers', 'section_Love_numbers'),
+    'namespaceself__attr__load_1section_sal': ('mom_self_attr_load', 'section_SAL'),
+    'namespacemom__spherical__harmonics_1section_spherical_harmonics':
+        ('mom_spherical_harmonics', 'section_spherical_harmonics'),
+}
 
 
 def read_inventory(path):
@@ -79,8 +97,9 @@ class GuideInliner(Inliner):
 
 
 def chapter_destination(name, titles, inventory):
-    name = name.removesuffix('.rst')
+    name = name.removeprefix('/').removesuffix('.rst')
     local = name.removeprefix('api/generated/pages/')
+    local = local.removeprefix('api/generated/modules/')
     if local in titles:
         return local + '.html', titles[local]
     if name in inventory.get('std:doc', {}):
@@ -150,10 +169,19 @@ def section_links(document, depth):
     return result
 
 
-def render_guides(rst_dir, warning_stream, html_dir=None):
-    """Parse chapters, resolve site-wide references, then write HTML fragments."""
+def render_guides(rst_dir, warning_stream, html_dir=None, *, api_reader=None):
+    """Resolve chapters and optional API pages together before writing HTML.
+
+    Supplying an API reader includes the generated pages in the same reference
+    and citation index. The reader adds presentation transforms such as graphs.
+    """
     titles = {name: title for name, title in {**GUIDE_PAGES, **SCIENCE_PAGES}.items()
-              if (rst_dir / (name + '.rst')).is_file()}
+               if (rst_dir / (name + '.rst')).is_file()}
+    manual_pages = set(titles)
+    if api_reader is not None:
+        for path in rst_dir.glob('*.rst'):
+            if path.stem not in titles:
+                titles[path.stem] = path.stem
     if not titles:
         return {}
     inventory = read_inventory(DOCS / 'guide-inventory.inv')
@@ -166,8 +194,11 @@ def render_guides(rst_dir, warning_stream, html_dir=None):
     for name in titles:
         path = rst_dir / (name + '.rst')
         source = prepare_source(path.read_text(encoding='utf-8'), titles, inventory)
-        document = publish_doctree(source, source_path=str(path),
-                                  parser=Parser(inliner=GuideInliner()), settings_overrides=settings)
+        source_path = str(path.resolve())
+        with contextlib.chdir(rst_dir):
+            document = publish_doctree(source, source_path=source_path,
+                                      reader=api_reader() if api_reader and name not in manual_pages else None,
+                                      parser=Parser(inliner=GuideInliner()), settings_overrides=settings)
         documents[name] = document
         for label, target in document.nameids.items():
             if not document.nametypes.get(label) or target is None:
@@ -176,11 +207,16 @@ def render_guides(rst_dir, warning_stream, html_dir=None):
                 raise ValueError(f'Duplicate manual target: {label}')
             element = document.ids[target]
             heading = next(iter(element.findall(nodes.title)), None)
-            targets[label] = (name + '.html#' + target,
-                              heading.astext() if heading is not None else titles[name])
+            title = (heading.astext() if heading is not None else
+                     element.astext() if isinstance(element, nodes.rubric) else titles[name])
+            targets[label] = (name + '.html#' + target, title)
         for node in document.findall(nodes.inline):
             if node.get('manual_role') == 'cite':
                 keys.update(key.strip() for key in node['manual_text'].split(','))
+    for legacy, (page, label) in LEGACY_SECTIONS.items():
+        destination = targets.get(nodes.fully_normalize_name(label))
+        if destination is not None and destination[0].split('#')[0] == page + '.html':
+            targets.setdefault(legacy, destination)
     citations, bibliography_html = bibliography(keys)
     if keys and 'zzbibliography' not in documents:
         raise ValueError('Citations require the bibliography chapter')
@@ -229,12 +265,20 @@ def render_guides(rst_dir, warning_stream, html_dir=None):
                             link.parent.parent += outline
         for image in document.findall(nodes.image):
             uri = image['uri']
+            if urlsplit(uri).scheme or urlsplit(uri).netloc:
+                image['loading'] = 'link'
+                continue
+            if name not in manual_pages and uri.endswith('.svg'):
+                continue
+            if name not in manual_pages and not uri.startswith('images/'):
+                uri = 'images/' + uri
             if not uri.startswith('images/'):
                 raise ValueError(f'{name}: Unsupported manual image path: {uri}')
             original = rst_dir / uri
             if not original.is_file():
                 raise FileNotFoundError(original)
             image['uri'] = '_images/' + uri.removeprefix('images/')
+            image['loading'] = 'link'
             if html_dir is not None:
                 destination = html_dir / image['uri']
                 destination.parent.mkdir(parents=True, exist_ok=True)
@@ -242,6 +286,9 @@ def render_guides(rst_dir, warning_stream, html_dir=None):
         # publish_from_doctree uses the ordinary HTML5 writer; no global role or
         # directive registrations are changed for the subsequent API rendering.
         writer = Writer()
-        publish_from_doctree(document, writer=writer, settings_overrides=settings)
+        with contextlib.chdir(rst_dir):
+            publish_from_doctree(document, writer=writer,
+                                 settings_overrides={**settings, 'image_loading': 'embed'
+                                                     if name not in manual_pages else 'link'})
         bodies[name] = writer.parts['html_body']
     return bodies

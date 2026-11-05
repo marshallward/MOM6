@@ -44,6 +44,46 @@ class ApiDocumentationTests(unittest.TestCase):
                 self.assertFalse((cache / 'mathjax.js').exists())
                 self.assertFalse((root / 'fourth/mathjax.js').exists())
 
+    def test_legacy_science_links_prefer_audited_local_content(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / 'first.rst').write_text(
+                'First\n=====\n\n:ref:`namespacemom__meke_1section_MEKE`\n\n'
+                ':doc:`units </api/generated/modules/mom_unit_scaling>`\n')
+            (root / 'mom_meke.rst').write_text(
+                'MEKE\n====\n\n.. _section_MEKE:\n\nScience\n-------\n\nLocal science.\n')
+            (root / 'mom_unit_scaling.rst').write_text('Units\n=====\n\nLocal units.\n')
+            titles = {'first': 'First', 'mom_meke': 'MEKE', 'mom_unit_scaling': 'Units'}
+            with patch('render_guide_docs.GUIDE_PAGES', titles), patch('render_guide_docs.SCIENCE_PAGES', {}):
+                pages = render_guides(root, io.StringIO())
+                self.assertIn('href="mom_meke.html#section-meke"', pages['first'])
+                self.assertIn('href="mom_unit_scaling.html"', pages['first'])
+                self.assertNotIn('readthedocs', pages['first'])
+                # A section with the right label on the wrong page is not an alias.
+                (root / 'mom_meke.rst').rename(root / 'other.rst')
+                titles['other'] = titles.pop('mom_meke')
+                pages = render_guides(root, io.StringIO())
+                self.assertIn('https://mom6.readthedocs.io/', pages['first'])
+
+    def test_api_comment_references_share_manual_targets_and_bibliography(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / 'source'
+            source.mkdir()
+            (source / 'demo.F90').write_text(
+                'module demo\ncontains\n!> Follow \\cite Adcroft2019 and \\ref science.\n'
+                'subroutine run()\nend subroutine run\n'
+                '!> \\namespace demo\n!! \\section science Scientific details\n'
+                '!!\n!! \\f[ x = y^2 \\f]\nend module demo\n')
+            with contextlib.redirect_stdout(io.StringIO()):
+                build([source], root / 'site', graph_depth=0)
+            page = (root / 'site/html/demo.html').read_text()
+            self.assertIn('href="demo.html#science"', page)
+            self.assertIn('href="zzbibliography.html#cite-adcroft2019"', page)
+            self.assertIn('mathjax-3.2.2.js', page)
+            self.assertIn('Scientific details', page)
+            self.assertNotIn('\\namespace', page)
+
     def test_manual_references_citations_and_code_are_resolved_without_sphinx(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
