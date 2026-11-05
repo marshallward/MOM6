@@ -2,7 +2,7 @@ Experimental Flint API deployment
 =================================
 
 The ``Flint API documentation`` workflow builds the reference independently of
-the numerical and Doxygen checks. It scans ``src`` together with these selected
+the numerical checks. It scans ``src`` together with these selected
 configuration directories, using Flint's default preprocessor configuration:
 
 * ``config_src/drivers/solo_driver``
@@ -23,6 +23,15 @@ documented. ``reports/excluded-dependencies.txt`` records the excluded sources.
 
 Build and deploy stages
 -----------------------
+
+The ``Source verification`` workflow's ``check-docstrings`` job now uses the
+same pinned documentation tools instead of Doxygen/Sphinx. It runs the
+builder/renderer tests and a complete content build with ``--graph-depth 0``,
+including reference and HTML link validation. Graphviz is installed for the
+small graph fixtures in the tests; the deployment workflow generates the full
+set of diagrams. Check reports are retained as ``documentation-check-reports``
+even when the content build fails. The job identifier is unchanged for existing
+required-check configuration.
 
 Changes under ``src``, ``config_src``, ``pkg``, or ``docs`` (or to ``.gitmodules``) trigger a build
 on pushes and pull requests. The documentation checkout does not fetch
