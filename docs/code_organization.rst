@@ -21,8 +21,8 @@ The highest level of directories are:
 
 `docs/`
   The directory that contains this documentation, namely that beyond the
-  in-code API documentation. Some of the files are configuration files
-  needed for running doxygen and sphinx. Most documentation in this folder
+  in-code API documentation. It also contains the Flint/Docutils site builder
+  and its configuration. Most documentation in this folder
   is in the form of reStructuredText (.rst) files.
 
 `.testing/`

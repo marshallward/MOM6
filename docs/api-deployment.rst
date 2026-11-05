@@ -1,5 +1,5 @@
-Experimental Flint API deployment
-=================================
+Flint documentation build and deployment
+========================================
 
 The ``Flint API documentation`` workflow builds the reference independently of
 the numerical checks. It scans ``src`` together with these selected
@@ -48,8 +48,8 @@ The workflow can also be started manually from the Actions page. Each build:
   the maintained ``api-home.rst`` landing page and handwritten manual chapters.
 * Renders API pages and manual chapters with Docutils, using the same site
   theme. Fails on renderer warnings or broken page/anchor
-   links. External calls are grouped by dependency; unresolved symbols appear
-   only in build diagnostics, not in published call lists.
+  links. External calls are grouped by dependency; unresolved symbols appear
+  only in build diagnostics, not in published call lists.
 * Uploads ``flint-api-reference`` containing ``rst``, ``html``, and ``reports``
   directories. PR builds can be downloaded for local preview.
 
@@ -77,6 +77,20 @@ job also reports the actual page URL. To adopt the workflow in another fork,
 change the repository condition in ``.github/workflows/deploy-api.yml`` and
 configure Pages there.
 
+Read the Docs
+-------------
+
+``.readthedocs.yml`` uses custom build jobs to install the pinned dependencies
+and Graphviz, run ``docs/build_api_docs.py``, and copy the resulting HTML into
+``$READTHEDOCS_OUTPUT/html``. It does not invoke Sphinx or Doxygen. GitHub Pages
+and Read the Docs therefore publish the same site structure.
+
+The hosted build must be verified on Read the Docs after pushing this
+configuration. Version activation and hosting settings remain managed there.
+Older published versions keep their old builds. New versions use the standalone
+site's page paths; redirecting old ``api/generated/...`` URLs is separate from
+this build adapter.
+
 Local build
 -----------
 
@@ -96,12 +110,11 @@ subsequent build, or remove the previous generated build directory yourself.
 The home page introduces the documentation and links to the local science
 and user-guide chapter pages. The local module index is
 ``api-index.html``; module page URLs and procedure anchors are unchanged.
-Edit ``docs/api-home.rst`` to update the landing page. It uses ordinary reST
-and is independent of the existing Sphinx ``docs/index.rst``.
+Edit ``docs/api-home.rst`` to update the landing page. It uses ordinary reST.
 
 ``GUIDE_PAGES`` in ``render_guide_docs.py`` lists the 16 handwritten manual
 chapters and their navigation titles, including the bibliography. They use
-the same ``docs/*.rst`` sources as the existing manual, and appear under
+the maintained ``docs/*.rst`` sources, and appear under
 "User and science guide" rather than in the API module list. Docutils renders
 their HTML fragments for the existing MOM6 template. ``render_guide_docs.py``
 resolves chapter navigation, named references, and citations across the site.
@@ -109,11 +122,11 @@ resolves chapter navigation, named references, and citations across the site.
 The 44 detailed science pages are maintained directly in ``src/**/*.rst``,
 beside the implementation sources in their original ``.dox`` directories.
 Their former ``src/**/*.dox`` sources have been retired. Edit the reST files;
-neither Pandoc nor a Doxygen-to-reST converter is part of the build.
+these chapters require no markup conversion at build time.
 ``science-migration.json`` records the original paths, hashes, and conversion
 counts. Each new path is the original source directory plus the recorded page
 name and ``.rst`` extension. ``science_sources.py`` discovers these chapters
-for both builds. The migration preserved 493 inline formulae, 202 display equations,
+for the site builder. The migration preserved 493 inline formulae, 202 display equations,
 35 figure placements, ten tables, and the scientific prose and citations.
 
 Use standard ``:math:`` roles and ``.. math::`` directives for equations, with
@@ -121,14 +134,13 @@ explicit reST targets for equation references. Multiline equations use
 ``aligned``; keep their lines together without blank paragraphs. Reference links
 use descriptive names (or the cited paper's equation numbers), rather than
 unstable site-wide numbering. Figures use relative paths to ``docs/images/``
-from their source directories; both builds adjust these paths when staging.
+from their source directories; the builder adjusts these paths when staging.
 The site bundles MathJax 3.2.2 (``tex-svg-full.js`` and its Apache-2.0
 license in ``api_theme``), so equations render offline as well as online.
 
 The new site requires neither Sphinx nor Doxygen. All reST is rendered with
 Docutils. The existing ``toctree``, ``:ref:``, and ``:cite:`` source syntax is
-supported by the standalone manual frontend so the legacy manual can share
-the same sources. Chapter lists become ordinary links, with section links up
+supported by the standalone manual frontend. Chapter lists become ordinary links, with section links up
 to the requested depth. Named references resolve against explicit Docutils
 targets before consulting the published reference inventory. Unknown references
 fail the build.
@@ -152,14 +164,8 @@ inventory for omitted modules.
 Pybtex reads the existing BibTeX files and formats the cited entries in the
 ``plain`` style. Citations link to stable, key-based bibliography anchors.
 Missing citation keys and duplicate anchors fail the build. Pandoc and its
-``citeproc`` filter are not required. The legacy manual remains a separate
-Sphinx/Doxygen pipeline with its own ``requirements.txt`` dependencies.
-
-For the legacy manual, ``science_compat.py`` copies these same maintained sources
-into ``api/generated/pages`` after autosummary runs, adjusting image paths and
-adding legacy reference aliases. Before Doxygen runs, it writes a generated,
-link-only list of page names and anchors so Fortran comments can still refer to
-the science pages. Doxygen does not generate their scientific content.
+``citeproc`` filter are not required. The former Sphinx/Doxygen configuration,
+extensions, build targets, and equation postprocessor have been retired.
 
 References without local targets use the published manual via
 ``guide-inventory.inv``, a snapshot downloaded from
