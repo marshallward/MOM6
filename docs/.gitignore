@@ -1,4 +1,4 @@
-# Ignore doxygen output
+# Ignore residual outputs from the retired build (not source dependencies).
 doxygen
 doxygen.log
 APIs
@@ -6,7 +6,7 @@ MOM6.tags
 details/tutorial
 
 
-# Ignore sphinx-build output
+# Documentation build output, including residual legacy artifacts.
 _build
 api
 src
@@ -18,6 +18,6 @@ bib*.aux
 citelist.doc*
 
 
-# Python bytecode cache from the vendored _ext/autodoc_doxygen extension
+# Python bytecode cache
 __pycache__
 *.pyc

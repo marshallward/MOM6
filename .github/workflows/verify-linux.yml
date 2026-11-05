@@ -15,6 +15,7 @@ jobs:
 
   check-style-and-docstrings:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
 
     steps:
     - uses: actions/checkout@v7
@@ -24,26 +25,51 @@ jobs:
         ./.testing/trailer.py -e TEOS10 -l 120 src config_src 2>&1 | tee style_errors
       continue-on-error: true
 
-    - name: Install packages used when generating documentation
+    - uses: actions/setup-python@v6
+      with:
+        python-version: '3.13'
+
+    - name: Install documentation tools
+      run: python -m pip install -r docs/requirements-api.txt
+
+    - name: Install graph renderer for builder tests
       run: |
         sudo apt-get update
-        sudo apt-get install python3-sphinx python3-lxml perl
-        sudo apt-get install texlive-binaries texlive-base bibtool tex-common texlive-bibtex-extra
-        sudo apt-get install graphviz
+        sudo apt-get install -y graphviz
 
-    - name: Build doxygen HTML
-      run: |
-        cd docs
-        perl -e 'print "perl version $^V" . "\n"'
-        mkdir _build && make nortd DOXYGEN_RELEASE=Release_1_8_13 UPDATEHTMLEQS=Y
-        cat _build/doxygen_warn_nortd_log.txt
+    - name: Test documentation builder
+      id: documentation_tests
+      run: python -m unittest discover -s docs -p 'test_build_api_docs.py'
 
-    - name: Report doxygen or style errors
+    - name: Generate, render, and check documentation links
+      id: documentation_build
+      # The deployment workflow checks the full set of call diagrams.
+      run: python docs/build_api_docs.py --graph-depth 0
+
+    - name: Retain documentation diagnostics
+      if: always()
+      uses: actions/upload-artifact@v7
+      with:
+        name: documentation-check-reports
+        path: docs/_build/flint-api/reports/
+        if-no-files-found: ignore
+        retention-days: 14
+
+    - name: Report documentation and style checks
+      if: always()
       run: |
-        grep "warning:" docs/_build/doxygen_warn_nortd_log.txt | grep -v "as part of a" | tee doxy_errors
-        cat style_errors doxy_errors > all_errors
-        cat all_errors
-        test ! -s  all_errors
+        {
+          echo "Documentation check outcomes:"
+          echo "  builder tests: ${{ steps.documentation_tests.outcome }}"
+          echo "  documentation build: ${{ steps.documentation_build.outcome }}"
+          if [ -f docs/_build/flint-api/reports/summary.json ]; then
+            echo '```json'
+            cat docs/_build/flint-api/reports/summary.json
+            echo '```'
+          fi
+        } >> "$GITHUB_STEP_SUMMARY"
+        cat style_errors
+        test ! -s style_errors
 
   # Executables
 

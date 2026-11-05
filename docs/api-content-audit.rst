@@ -18,10 +18,11 @@ root-relative ``:doc:`` reference, supported by both renderers, rather than a
 hardcoded published URL.
 
 After these changes the full selected-source build has no scientific/API links
-to Read the Docs. Remaining old-site links are the shared navigation link to
-``https://mom6.readthedocs.io/`` on all 340 pages and the documentation home link
-in ``about.rst``. These belong to the subsequent publishing/entry-point switch.
-The inventory remains available for partial builds with omitted API modules.
+to Read the Docs. The redundant sidebar link to external "User documentation"
+has also been removed now that the guide is local. The documentation home link
+in ``about.rst`` still identifies Read the Docs as a hosting location.
+The migration inventory has since been removed. Missing local destinations now
+fail explicitly, including in partial builds with omitted API modules.
 
 Content evidence
 ----------------
@@ -80,14 +81,14 @@ Verification
 ------------
 
 * Nine builder/renderer tests pass, including local legacy-label resolution,
-  owning-page validation, partial-build fallback, and root-relative API chapter
+  owning-page validation, rejection of missing destinations, and root-relative API chapter
   links.
 * Fresh exact-pin build: 278 source files, 278 module pages, 340 HTML pages,
   125,233 checked links, and zero unresolved call references.
 * Graphs were disabled for this content audit; their layout is independent of
   reference resolution and scientific-comment conversion.
-* Scanning all generated HTML anchor URLs leaves only the two documentation
-  home URLs described above on Read the Docs.
+* The initial HTML scan left only two documentation home URLs on Read the Docs;
+  the redundant sidebar link was subsequently removed as described above.
 
 The remaining API completeness work (declaration details, undocumented
 arguments, source links, and comments outside extracted documentation) is

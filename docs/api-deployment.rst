@@ -1,8 +1,8 @@
-Experimental Flint API deployment
-=================================
+Flint documentation build and deployment
+========================================
 
 The ``Flint API documentation`` workflow builds the reference independently of
-the numerical and Doxygen checks. It scans ``src`` together with these selected
+the numerical checks. It scans ``src`` together with these selected
 configuration directories, using Flint's default preprocessor configuration:
 
 * ``config_src/drivers/solo_driver``
@@ -24,6 +24,15 @@ documented. ``reports/excluded-dependencies.txt`` records the excluded sources.
 Build and deploy stages
 -----------------------
 
+The ``Linux verification`` workflow's ``check-style-and-docstrings`` job uses the
+same pinned documentation tools instead of Doxygen/Sphinx. It runs the
+builder/renderer tests and a complete content build with ``--graph-depth 0``,
+including reference and HTML link validation. Graphviz is installed for the
+small graph fixtures in the tests; the deployment workflow generates the full
+set of diagrams. Check reports are retained as ``documentation-check-reports``
+even when the content build fails. The job identifier is unchanged for existing
+required-check configuration.
+
 Changes under ``src``, ``config_src``, ``pkg``, or ``docs`` (or to ``.gitmodules``) trigger a build
 on pushes and pull requests. The documentation checkout does not fetch
 submodules. Symlinks into the excluded dependency trees are ignored even when
@@ -39,8 +48,8 @@ The workflow can also be started manually from the Actions page. Each build:
   the maintained ``api-home.rst`` landing page and handwritten manual chapters.
 * Renders API pages and manual chapters with Docutils, using the same site
   theme. Fails on renderer warnings or broken page/anchor
-   links. External calls are grouped by dependency; unresolved symbols appear
-   only in build diagnostics, not in published call lists.
+  links. External calls are grouped by dependency; unresolved symbols appear
+  only in build diagnostics, not in published call lists.
 * Uploads ``flint-api-reference`` containing ``rst``, ``html``, and ``reports``
   directories. PR builds can be downloaded for local preview.
 
@@ -68,6 +77,20 @@ job also reports the actual page URL. To adopt the workflow in another fork,
 change the repository condition in ``.github/workflows/deploy-api.yml`` and
 configure Pages there.
 
+Read the Docs
+-------------
+
+``.readthedocs.yml`` uses custom build jobs to install the pinned dependencies
+and Graphviz, run ``docs/build_api_docs.py``, and copy the resulting HTML into
+``$READTHEDOCS_OUTPUT/html``. It does not invoke Sphinx or Doxygen. GitHub Pages
+and Read the Docs therefore publish the same site structure.
+
+The hosted build must be verified on Read the Docs after pushing this
+configuration. Version activation and hosting settings remain managed there.
+Older published versions keep their old builds. New versions use the standalone
+site's page paths; redirecting old ``api/generated/...`` URLs is separate from
+this build adapter.
+
 Local build
 -----------
 
@@ -87,12 +110,11 @@ subsequent build, or remove the previous generated build directory yourself.
 The home page introduces the documentation and links to the local science
 and user-guide chapter pages. The local module index is
 ``api-index.html``; module page URLs and procedure anchors are unchanged.
-Edit ``docs/api-home.rst`` to update the landing page. It uses ordinary reST
-and is independent of the existing Sphinx ``docs/index.rst``.
+Edit ``docs/api-home.rst`` to update the landing page. It uses ordinary reST.
 
 ``GUIDE_PAGES`` in ``render_guide_docs.py`` lists the 16 handwritten manual
 chapters and their navigation titles, including the bibliography. They use
-the same ``docs/*.rst`` sources as the existing manual, and appear under
+the maintained ``docs/*.rst`` sources, and appear under
 "User and science guide" rather than in the API module list. Docutils renders
 their HTML fragments for the existing MOM6 template. ``render_guide_docs.py``
 resolves chapter navigation, named references, and citations across the site.
@@ -100,11 +122,11 @@ resolves chapter navigation, named references, and citations across the site.
 The 44 detailed science pages are maintained directly in ``src/**/*.rst``,
 beside the implementation sources in their original ``.dox`` directories.
 Their former ``src/**/*.dox`` sources have been retired. Edit the reST files;
-neither Pandoc nor a Doxygen-to-reST converter is part of the build.
+these chapters require no markup conversion at build time.
 ``science-migration.json`` records the original paths, hashes, and conversion
 counts. Each new path is the original source directory plus the recorded page
 name and ``.rst`` extension. ``science_sources.py`` discovers these chapters
-for both builds. The migration preserved 493 inline formulae, 202 display equations,
+for the site builder. The migration preserved 493 inline formulae, 202 display equations,
 35 figure placements, ten tables, and the scientific prose and citations.
 
 Use standard ``:math:`` roles and ``.. math::`` directives for equations, with
@@ -112,7 +134,7 @@ explicit reST targets for equation references. Multiline equations use
 ``aligned``; keep their lines together without blank paragraphs. Reference links
 use descriptive names (or the cited paper's equation numbers), rather than
 unstable site-wide numbering. Figures use relative paths to ``docs/images/``
-from their source directories; both builds adjust these paths when staging.
+from their source directories; the builder adjusts these paths when staging.
 The renderer downloads MathJax 3.2.2 (``tex-svg-full.js`` and its Apache-2.0
 license) from version-pinned jsDelivr URLs and verifies their SHA-256 checksums.
 Verified assets are cached in ``docs/_build/assets`` and copied into the site's
@@ -124,11 +146,9 @@ in ``documentation_assets.py``; the third-party bundle is not stored in Git.
 
 The new site requires neither Sphinx nor Doxygen. All reST is rendered with
 Docutils. The existing ``toctree``, ``:ref:``, and ``:cite:`` source syntax is
-supported by the standalone manual frontend so the legacy manual can share
-the same sources. Chapter lists become ordinary links, with section links up
+supported by the standalone manual frontend. Chapter lists become ordinary links, with section links up
 to the requested depth. Named references resolve against explicit Docutils
-targets before consulting the published reference inventory. Unknown references
-fail the build.
+targets. Unknown references fail the build.
 
 Fortran comments remain in their existing Doxygen format. The builder explicitly
 selects Flint's ``doxygen`` comment frontend, which emits reST without running
@@ -139,33 +159,21 @@ migration is independent of replacing the build system. Unsupported Doxygen
 commands fail generation with the owning source file in the error.
 
 Generated API pages and manual chapters share the same citation and named-target
-index. References to sections present in API comments now resolve locally;
-the published inventory remains a fallback for destinations not yet generated.
+index. References to sections present in API comments resolve locally.
 The legacy-destination audit in ``api-content-audit.rst`` records the content
 checks and local mappings: the full selected-source build no longer uses the
-old site for scientific/API destinations. Partial builds can still use the
-inventory for omitted modules.
+old site for scientific/API destinations.
 
 Pybtex reads the existing BibTeX files and formats the cited entries in the
 ``plain`` style. Citations link to stable, key-based bibliography anchors.
 Missing citation keys and duplicate anchors fail the build. Pandoc and its
-``citeproc`` filter are not required. The legacy manual remains a separate
-Sphinx/Doxygen pipeline with its own ``requirements.txt`` dependencies.
+``citeproc`` filter are not required. The former Sphinx/Doxygen configuration,
+extensions, build targets, and equation postprocessor have been retired.
 
-For the legacy manual, ``science_compat.py`` copies these same maintained sources
-into ``api/generated/pages`` after autosummary runs, adjusting image paths and
-adding legacy reference aliases. Before Doxygen runs, it writes a generated,
-link-only list of page names and anchors so Fortran comments can still refer to
-the science pages. Doxygen does not generate their scientific content.
-
-References without local targets use the published manual via
-``guide-inventory.inv``, a snapshot downloaded from
-``https://mom6.readthedocs.io/en/main/objects.inv`` on 2026-11-03 (inventory
-project: MOM6, version: 0.2a3). This is link metadata, not a copy of those pages.
-Refresh that snapshot deliberately when adopting changed external destinations;
-normal builds require no network access for reference resolution. Unknown
-chapter destinations and unresolved references fail the build rather than
-silently producing guessed links.
+The saved old-site inventory has been removed. Reference resolution needs no
+network access and has no automatic external fallback. Unknown chapter
+destinations and unresolved references fail the build. Partial source selections
+must include the modules referenced by the maintained manual.
 
 Repeat ``--source DIRECTORY`` to supply a custom set of source roots instead of
 the defaults. For example, ``--source src`` restores a source-only reference.

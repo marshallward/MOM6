@@ -1,10 +1,9 @@
 About this documentation
 ========================
 
-MOM6 documentation is distributed over several formats and locations, with
-each site serving a different purpose. The science and user manual is hosted
-on Read the Docs. An experimental site combines a Flint-generated API reference
-with chapters being brought across from that manual.
+MOM6 documentation combines a Flint-generated API reference with the user and
+science guide. The same standalone HTML site can be published on GitHub Pages
+and Read the Docs.
 
 Here is where to find particular documentation:
 
@@ -22,14 +21,13 @@ User guide
   a high-level overview of the model, its scientific formulation, and its use.
 
   The user guide is written in reStructuredText (.rst files) that reside in ``docs/`` of the `MOM6 source code <https://github.com/mom-ocean/MOM6>`_.
-   Sphinx processes these files for Read the Docs. The experimental site renders
-   the same sources directly with Docutils, using Pybtex for citations and the
+   The site renders these sources directly with Docutils, using Pybtex for citations and the
    bibliography. It requires neither Sphinx nor Doxygen.
 
    The longer scientific chapters are maintained as ``.rst`` files alongside
    the Fortran source under ``src/``. These replace the former ``.dox`` files
-   and are shared by both documentation builds. MathJax renders their equations
-   in the browser; the experimental site bundles it for offline use.
+   and are included in the unified site. MathJax renders their equations
+   in the browser; the site bundles it for offline use.
 
 API reference
   The `experimental documentation site <https://marshallward.github.io/MOM6/>`_
@@ -38,7 +36,8 @@ API reference
   module, with expandable text views. These diagrams show possible calls,
   including private implementation procedures, rather than execution order.
 
-  Read the Docs also retains the existing Doxygen-based API reference.
+  Read the Docs uses the same builder; older published versions may retain the
+  former Doxygen-based API reference.
 
 Repository policies
   Policies governing how the repositories are organized and operated live at https://github.com/NOAA-GFDL/MOM6-examples/wiki/MOM6-repository-policies.
