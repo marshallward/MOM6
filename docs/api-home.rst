@@ -35,7 +35,8 @@ About this site
 
 This is an experimental documentation site. The manual chapters, detailed
 science pages, and bibliography are available here. References to scientific
-sections still embedded in Fortran comments open on Read the Docs.
+sections resolve locally when available, including sections embedded in Fortran
+comments; other references open on Read the Docs.
 
 The local API reference is generated from the source using Flint. Its
 module-grouped caller and callee diagrams have expandable text views and

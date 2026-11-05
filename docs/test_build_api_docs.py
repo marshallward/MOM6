@@ -14,6 +14,25 @@ from render_guide_docs import GUIDE_PAGES, SCIENCE_PAGES, render_guides
 
 
 class ApiDocumentationTests(unittest.TestCase):
+    def test_api_comment_references_share_manual_targets_and_bibliography(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / 'source'
+            source.mkdir()
+            (source / 'demo.F90').write_text(
+                'module demo\ncontains\n!> Follow \\cite Adcroft2019 and \\ref science.\n'
+                'subroutine run()\nend subroutine run\n'
+                '!> \\namespace demo\n!! \\section science Scientific details\n'
+                '!!\n!! \\f[ x = y^2 \\f]\nend module demo\n')
+            with contextlib.redirect_stdout(io.StringIO()):
+                build([source], root / 'site', graph_depth=0)
+            page = (root / 'site/html/demo.html').read_text()
+            self.assertIn('href="demo.html#science"', page)
+            self.assertIn('href="zzbibliography.html#cite-adcroft2019"', page)
+            self.assertIn('mathjax-3.2.2.js', page)
+            self.assertIn('Scientific details', page)
+            self.assertNotIn('\\namespace', page)
+
     def test_manual_references_citations_and_code_are_resolved_without_sphinx(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

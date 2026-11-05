@@ -160,6 +160,12 @@ investigation of the remaining roughly five-second overhead.
 Next steps
 ----------
 
+Deferred discussion (2026-11-04): Flint currently keeps the ``plain``, ``rst``,
+and ``doxygen`` comment frontends in ``flint/docgen/markup.py``; ``rst.py`` is
+the shared output writer. Consider moving the Doxygen frontend into a separate
+``doxygen.py`` later. The user accepts the current organization and wants to
+defer this refactoring.
+
 1. Transfer the intended commits and CSS rollback, and recreate the environment.
 2. Run the exact-pin builder tests and generate a fresh preview.
 3. Resume typography discussion only when requested; the current decision is

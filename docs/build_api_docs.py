@@ -202,8 +202,11 @@ def generate_reference(source, rst_dir, reports, *, graph_depth=1):
     graph_images = generate_graphs(index, rst_dir, depth=graph_depth)
     for module in modules:
         with (rst_dir / (module.name + '.rst')).open('w', encoding='utf-8') as stream:
-            write_module(stream, module, references=index, destinations=destinations,
-                         graph_images=graph_images)
+            try:
+                write_module(stream, module, references=index, destinations=destinations,
+                             graph_images=graph_images, markup='doxygen')
+            except ValueError as error:
+                raise ValueError(f'{owners.get(module.name.lower(), module.name)}: {error}') from error
     shutil.copyfile(Path(__file__).with_name('api-home.rst'), rst_dir / 'index.rst')
     for name in GUIDE_PAGES:
         shutil.copyfile(Path(__file__).with_name(name + '.rst'), rst_dir / (name + '.rst'))

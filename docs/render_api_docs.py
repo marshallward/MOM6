@@ -1,6 +1,5 @@
 """MOM6's HTML presentation layer for independently generated reST pages."""
 import argparse
-import contextlib
 from html import escape
 from html.parser import HTMLParser
 from pathlib import Path
@@ -10,7 +9,6 @@ import xml.etree.ElementTree as ET
 from urllib.parse import unquote
 
 from docutils import nodes
-from docutils.core import publish_parts
 from docutils.readers.standalone import Reader
 from docutils.transforms import Transform
 from render_guide_docs import GUIDE_PAGES, SCIENCE_PAGES, render_guides
@@ -140,7 +138,8 @@ def render_reference(rst_dir, html_dir, warning_stream):
         shutil.copyfile(THEME / name, assets / name)
     template = Template((THEME / 'page.html').read_text(encoding='utf-8'))
     files = sorted(rst_dir.glob('*.rst'), key=lambda path: path.stem.lower())
-    guide_bodies = render_guides(rst_dir, warning_stream, html_dir)
+    bodies = render_guides(rst_dir, warning_stream, html_dir, api_reader=GraphReader)
+    guide_bodies = {name: body for name, body in bodies.items() if name in {**GUIDE_PAGES, **SCIENCE_PAGES}}
     modules = [path.stem for path in files
                if path.stem not in ('index', 'api-index') and path.stem not in guide_bodies]
     labels = {}
@@ -156,20 +155,7 @@ def render_reference(rst_dir, html_dir, warning_stream):
         suffix = ' module reference'
         labels[path.stem] = title[:-len(suffix)] if title.endswith(suffix) else path.stem
     for path in files:
-        # publish_parts resolves embedded image paths against CWD. Inline SVG
-        # preserves clickable graph nodes without separate deployed assets.
-        source = path.read_text(encoding='utf-8')
-        source_path = str(path.resolve())
-        if path.stem in guide_bodies:
-            parts = {'html_body': guide_bodies[path.stem]}
-        else:
-            with contextlib.chdir(path.parent):
-                parts = publish_parts(source=source, source_path=source_path, reader=GraphReader(),
-                                      writer='html5', settings_overrides={
-                                          'warning_stream': warning_stream, 'halt_level': 2,
-                                          'stylesheet_path': [], 'embed_stylesheet': False,
-                                          'image_loading': 'embed',
-                                      })
+        parts = {'html_body': bodies[path.stem]}
         outline = Outline()
         outline.feed(parts['html_body'])
         navigation = []

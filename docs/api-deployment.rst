@@ -124,6 +124,18 @@ to the requested depth. Named references resolve against explicit Docutils
 targets before consulting the published reference inventory. Unknown references
 fail the build.
 
+Fortran comments remain in their existing Doxygen format. The builder explicitly
+selects Flint's ``doxygen`` comment frontend, which emits reST without running
+Doxygen or Pandoc. Equations, tables, references, and literal diagrams are
+interpreted during generation; source comments are not rewritten. Flint also
+supports explicit ``plain`` and native ``rst`` modes, so a future source-format
+migration is independent of replacing the build system. Unsupported Doxygen
+commands fail generation with the owning source file in the error.
+
+Generated API pages and manual chapters share the same citation and named-target
+index. References to sections present in API comments now resolve locally;
+the published inventory remains a fallback for destinations not yet generated.
+
 Pybtex reads the existing BibTeX files and formats the cited entries in the
 ``plain`` style. Citations link to stable, key-based bibliography anchors.
 Missing citation keys and duplicate anchors fail the build. Pandoc and its
@@ -136,8 +148,8 @@ adding legacy reference aliases. Before Doxygen runs, it writes a generated,
 link-only list of page names and anchors so Fortran comments can still refer to
 the science pages. Doxygen does not generate their scientific content.
 
-References to sections still embedded in Fortran documentation use the published
-manual via ``guide-inventory.inv``, a snapshot downloaded from
+References without local targets use the published manual via
+``guide-inventory.inv``, a snapshot downloaded from
 ``https://mom6.readthedocs.io/en/main/objects.inv`` on 2026-11-03 (inventory
 project: MOM6, version: 0.2a3). This is link metadata, not a copy of those pages.
 Refresh that snapshot deliberately when adopting changed external destinations;
