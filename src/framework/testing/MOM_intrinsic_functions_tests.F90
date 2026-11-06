@@ -134,10 +134,10 @@ end subroutine test_erfc_accuracy
 !> Regression cases near rounding midpoints, independently rounded with MPFR.
 !! The quad intrinsic is not a sufficient oracle for some tiny-input cases:
 !! its own rounding can place the reference exactly on a binary64 midpoint.
-!! Inputs are selected from the glibc/CORE-MATH difficult cases; see
-!! .testing/tools/erfc/hard-inputs.txt for the full set and the MPFR checker.
+!! Inputs include glibc/CORE-MATH difficult cases and constant-return transitions;
+!! see .testing/tools/erfc/ for the full sets and the MPFR checker.
 subroutine test_erfc_hard_rounding
-  integer(int64), parameter :: bits(2,10) = reshape([ &
+  integer(int64), parameter :: bits(2,16) = reshape([ &
       int(z'40348DE452FB1A15',int64), int(z'1983C2A1264045AD',int64), &
       int(z'BC9C5BF891B4EF6B',int64), int(z'3FF0000000000001',int64), &
       int(z'BCCFE777A3EB8D58',int64), int(z'3FF0000000000005',int64), &
@@ -147,17 +147,23 @@ subroutine test_erfc_hard_rounding
       int(z'3CD29C5B1F9EBD1E',int64), int(z'3FEFFFFFFFFFFFF5',int64), &
       int(z'3FBD4AF8ADB90116',int64), int(z'3FEBE2E345C31801',int64), &
       int(z'3FFAF08AE30C9364',int64), int(z'3F91AC47852096CB',int64), &
-      int(z'403A8F7BFBD15495',int64), int(z'000667BD620FD95B',int64) ], [2,10])
+      int(z'403A8F7BFBD15495',int64), int(z'000667BD620FD95B',int64), &
+      int(z'C017744F8F74E94A',int64), int(z'3FFFFFFFFFFFFFFF',int64), &
+      int(z'C017744F8F74E94B',int64), int(z'4000000000000000',int64), &
+      int(z'403B39DC41E48BFC',int64), int(z'0000000000000001',int64), &
+      int(z'403B39DC41E48BFD',int64), int(z'0000000000000000',int64), &
+      int(z'3C8C5BF891B4EF6A',int64), int(z'3FF0000000000000',int64), &
+      int(z'BC9C5BF891B4EF6A',int64), int(z'3FF0000000000000',int64) ], [2,16])
     !< Input and MPFR-rounded result bit patterns
-  real :: x(10), a(10) ! Inputs and elemental results [nondim]
+  real :: x(16), a(16) ! Inputs and elemental results [nondim]
   integer :: i ! Case index
 
   if (storage_size(0.) /= 64) return
-  do i=1,10
+  do i=1,size(x)
     x(i) = transfer(bits(1,i), 0.)
   enddo
   a(:) = erfc_repro(x(:))
-  do i=1,10
+  do i=1,size(x)
     call assert(transfer(a(i), 0_int64) == bits(2,i), 'erfc_repro hard case is not correctly rounded')
   enddo
 end subroutine test_erfc_hard_rounding

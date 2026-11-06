@@ -54,10 +54,18 @@ contains
 module procedure erfc_repro
   real, parameter :: ln2 = 0.693147180559945309417232121458176568
     !< Natural logarithm of two [nondim]
-  real, parameter :: zero_bound = sqrt(real(digits(real_mold) - minexponent(real_mold) + 2) * ln2)
-    !< Conservative positive bound beyond which erfc rounds to zero [nondim]
-  real, parameter :: two_bound = sqrt(real(digits(real_mold)) * ln2)
-    !< Conservative magnitude beyond which negative inputs round to two [nondim]
+  real, parameter :: zero_bound = merge(27.226017111108366, &
+      sqrt(real(digits(real_mold) - minexponent(real_mold) + 2) * ln2), digits(real_mold) == 53)
+    !< First binary64 input rounding to zero; conservative bound for other kinds [nondim]
+  real, parameter :: two_bound = merge(5.8635847487551684, &
+      sqrt(real(digits(real_mold)) * ln2), digits(real_mold) == 53)
+    !< First binary64 magnitude whose negative rounds to two [nondim]
+  real, parameter :: one_positive = merge(4.9195476884020702e-17, &
+      epsilon(real_mold) * 0.125, digits(real_mold) == 53)
+    !< Largest positive binary64 input rounding to one [nondim]
+  real, parameter :: one_negative = merge(9.8390953768041405e-17, &
+      epsilon(real_mold) * 0.125, digits(real_mold) == 53)
+    !< Largest negative binary64 magnitude rounding to one [nondim]
   real :: y, t, error, lower, upper ! Input, reduced argument, error budget, and rounded bounds [nondim]
   type(erfc_pair) :: square, scaled_erfc, exponential, value
     ! Compensated square, scaled complement, exponential mantissa, and result
@@ -86,7 +94,7 @@ module procedure erfc_repro
   endif
 
   y = abs(x)
-  if (y < epsilon(real_mold) * 0.125) then
+  if (x >= -one_negative .and. x <= one_positive) then
     ! Both signed zeros and tiny inputs round to one; avoid squaring subnormals.
     a = 1.
     return
@@ -113,14 +121,16 @@ module procedure erfc_repro
     bin = exponent(y)
     t = scale(y, 2-bin) - 3.
   endif
-  scaled_erfc = erfc_chebyshev(t, bin)
+  scaled_erfc = erfc_chebyshev(t, bin, x < 0.)
   square = erfc_multiply(erfc_pair(y, 0.), erfc_pair(y, 0.))
   call erfc_exp(erfc_pair(-square%hi, -square%lo), exponential, rescale)
   value = erfc_multiply(scaled_erfc, exponential)
   if (x < 0.) then
     ! Preserve the low part until after reflection, avoiding double rounding.
     value = erfc_pair(-scale(value%hi, rescale), -scale(value%lo, rescale))
-    error = scale(abs(value%hi), -72)
+    ! Less compensated Clenshaw arithmetic suffices for corrections to two.
+    ! A wider interval sends ambiguous results to the accurate fallback.
+    error = scale(abs(value%hi), -58)
     lower = erfc_round_sum(2., erfc_pair(value%hi, value%lo-error))
     upper = erfc_round_sum(2., erfc_pair(value%hi, value%lo+error))
   else
@@ -237,11 +247,13 @@ end function erfc_polynomial
 
 
 !> Mixed-precision Clenshaw evaluation of the scaled complementary error function.
-pure function erfc_chebyshev(t, bin) result(r)
+pure function erfc_chebyshev(t, bin, coarse) result(r)
   real, intent(in) :: t
     !< Reduced input in [-1,1] [nondim]
   integer, intent(in) :: bin
     !< Table interval
+  logical, intent(in) :: coarse
+    !< Compensate fewer stages for a correction to two
   type(erfc_pair) :: r, b1, b2, next
     !< Polynomial value and Clenshaw recurrence
 
@@ -249,13 +261,14 @@ pure function erfc_chebyshev(t, bin) result(r)
     !< Degrees placing discarded coefficient tails below 2^-80 relative
   real :: h1, h2, hnext
     ! Ordinary high-order recurrence [nondim]
-  integer :: i
-    ! Coefficient index
+  integer :: i, cutoff
+    ! Coefficient index and first ordinary stage
 
   h1 = 0.
   h2 = 0.
 
-  do i=degree(bin),12,-1
+  cutoff = merge(6, 12, coarse)
+  do i=degree(bin),cutoff,-1
     hnext = ((2.*t)*h1 - h2) + erfcx_hi(i,bin)
     h2 = h1
     h1 = hnext
@@ -264,7 +277,7 @@ pure function erfc_chebyshev(t, bin) result(r)
   b1 = erfc_pair(h1, 0.)
   b2 = erfc_pair(h2, 0.)
 
-  do i=11,1,-1
+  do i=cutoff-1,1,-1
     next = erfc_scalar_product(2.*t, b1)
     next = erfc_add(next, erfc_pair(-b2%hi, -b2%lo))
     ! Coefficient-tail bounds give abs(next%hi)/abs(coefficient) < 0.541.
