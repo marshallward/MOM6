@@ -3,12 +3,13 @@
 ! SPDX-License-Identifier: Apache-2.0
 
 !> Bitwise reproducible complementary error function.
-!! Near zero, evaluate erf(x)/x as a compensated Taylor polynomial.  Elsewhere,
+!! Near zero, evaluate erf(x)/x as a mixed-precision Taylor polynomial.  Elsewhere,
 !! approximate exp(x*x)*erfc(x) with piecewise Chebyshev polynomials, and retain
 !! hi/lo components through the exponential and final rounding.  Results near
 !! rounding midpoints use a three-component fallback with longer polynomials.
-!! The exponential
-!! shares exp_repro()'s range-reduction table, but retains extra precision.
+!! Small high-order terms use ordinary arithmetic; significant stages retain
+!! compensation. The exponential shares exp_repro()'s range-reduction table,
+!! but retains extra precision.
 !! Coefficients are generated with MPFR; see .testing/tools/erfc/generate.c.
 !! The accuracy target is binary64 default real.  Correct rounding is tested
 !! against MPFR, but has not been proved for every binary64 input.
@@ -84,14 +85,14 @@ module procedure erfc_repro
     return
   else if (y <= 0.46875) then
     square = erfc_multiply(erfc_pair(y, 0.), erfc_pair(y, 0.))
-    value = erfc_polynomial(square, erf_hi(0:20), erf_lo(0:20))
+    value = erfc_polynomial(square, erf_hi(0:15), erf_lo(0:15), 6)
     value = erfc_multiply(erfc_pair(-x, 0.), value)
-    a = erfc_round_sum(1., value)
-    ! A conservative working error budget for the compensated fast path.
+    ! Working error budget includes mixed-precision evaluation and truncation.
     ! Compare rounded interval endpoints before accepting a near-midpoint result.
-    error = scale(abs(value%hi), -90)
+    error = scale(abs(value%hi), -72)
     lower = erfc_round_sum(1., erfc_pair(value%hi, value%lo-error))
     upper = erfc_round_sum(1., erfc_pair(value%hi, value%lo+error))
+    a = lower
     if (lower /= upper) a = erfc_accurate(x)
     return
   endif
@@ -112,16 +113,15 @@ module procedure erfc_repro
   if (x < 0.) then
     ! Preserve the low part until after reflection, avoiding double rounding.
     value = erfc_pair(-scale(value%hi, rescale), -scale(value%lo, rescale))
-    a = erfc_round_sum(2., value)
-    error = scale(abs(value%hi), -90)
+    error = scale(abs(value%hi), -72)
     lower = erfc_round_sum(2., erfc_pair(value%hi, value%lo-error))
     upper = erfc_round_sum(2., erfc_pair(value%hi, value%lo+error))
   else
-    a = erfc_round(value, rescale)
-    error = scale(abs(value%hi), -90)
+    error = scale(abs(value%hi), -72)
     lower = erfc_round(erfc_pair(value%hi, value%lo-error), rescale)
     upper = erfc_round(erfc_pair(value%hi, value%lo+error), rescale)
   endif
+  a = lower
   if (lower /= upper) a = erfc_accurate(x)
 end procedure erfc_repro
 
@@ -161,36 +161,87 @@ pure function erfc_multiply(a, b) result(c)
   c%lo = (p - c%hi) + e
 end function erfc_multiply
 
-!> Evaluate a polynomial with compensated coefficients and Horner steps.
-pure function erfc_polynomial(z, ch, cl) result(r)
+!> Multiply a scalar and a compensated value, deferring normalization to erfc_add.
+!! Used only for bounded Clenshaw operands followed immediately by an addition.
+pure function erfc_scalar_product(a, b) result(c)
+  real, intent(in) :: a !< Scalar operand [nondim]
+  type(erfc_pair), intent(in) :: b !< Compensated operand
+  type(erfc_pair) :: c !< Unnormalized product
+  real, parameter :: splitter = scale(1., (digits(real_mold)+1)/2) + 1.
+    !< Exact splitter for Dekker's product residual [nondim]
+  real :: ah, al, bh, bl, t, p, e ! Split operands, product, and residual [nondim]
+
+  t = splitter * a
+  ah = t - (t - a)
+  al = a - ah
+  t = splitter * b%hi
+  bh = t - (t - b%hi)
+  bl = b%hi - bh
+  p = a * b%hi
+  e = (((ah * bh - p) + ah * bl) + al * bh) + al * bl
+  c%hi = p
+  c%lo = e + a * b%lo
+end function erfc_scalar_product
+
+!> Add compensated values using FastTwoSum when abs(a%hi) >= abs(b%hi).
+pure function erfc_dominant_add(a, b) result(c)
+  type(erfc_pair), intent(in) :: a, b !< Magnitude-ordered operands
+  type(erfc_pair) :: c !< Compensated sum
+  real :: s, e ! Leading sum and residual [nondim]
+
+  s = a%hi + b%hi
+  e = ((a%hi - s) + b%hi) + (a%lo + b%lo)
+  c%hi = s + e
+  c%lo = (s - c%hi) + e
+end function erfc_dominant_add
+
+!> Evaluate small high-order terms ordinarily, then use compensated Horner steps.
+pure function erfc_polynomial(z, ch, cl, cutoff) result(r)
   type(erfc_pair), intent(in) :: z !< Polynomial argument
   real, intent(in) :: ch(0:), cl(0:) !< Leading coefficients and residuals [nondim]
+  integer, intent(in) :: cutoff !< First ordinary stage; lower indices use compensation
   type(erfc_pair) :: r !< Polynomial value
+  real :: high ! Ordinary high-order polynomial [nondim]
   integer :: i ! Coefficient index
 
-  r = erfc_pair(ch(size(ch)-1), cl(size(cl)-1))
-  do i=size(ch)-2,0,-1
+  high = ch(size(ch)-1)
+  do i=size(ch)-2,cutoff,-1
+    high = ch(i) + z%hi * high
+  enddo
+  r = erfc_pair(high, 0.)
+  do i=cutoff-1,0,-1
     r = erfc_add(erfc_multiply(r, z), erfc_pair(ch(i), cl(i)))
   enddo
 end function erfc_polynomial
 
-!> Compensated Clenshaw evaluation of the scaled complementary error function.
+!> Mixed-precision Clenshaw evaluation of the scaled complementary error function.
 pure function erfc_chebyshev(t, bin) result(r)
   real, intent(in) :: t !< Reduced input in [-1,1] [nondim]
   integer, intent(in) :: bin !< Table interval
   type(erfc_pair) :: r, b1, b2, next !< Polynomial value and Clenshaw recurrence
+  integer, parameter :: degree(0:5) = [24, 22, 26, 29, 31, 31]
+    !< Degrees placing discarded coefficient tails below 2^-80 relative
+  real :: h1, h2, hnext ! Ordinary high-order recurrence [nondim]
   integer :: i ! Coefficient index
 
-  b1 = erfc_pair(0., 0.)
-  b2 = erfc_pair(0., 0.)
-  do i=48,1,-1
-    next = erfc_multiply(erfc_pair(2.*t, 0.), b1)
+  h1 = 0.
+  h2 = 0.
+  do i=degree(bin),12,-1
+    hnext = ((2.*t)*h1 - h2) + erfcx_hi(i,bin)
+    h2 = h1
+    h1 = hnext
+  enddo
+  b1 = erfc_pair(h1, 0.)
+  b2 = erfc_pair(h2, 0.)
+  do i=11,1,-1
+    next = erfc_scalar_product(2.*t, b1)
     next = erfc_add(next, erfc_pair(-b2%hi, -b2%lo))
-    next = erfc_add(next, erfc_pair(erfcx_hi(i,bin), erfcx_lo(i,bin)))
+    ! Coefficient-tail bounds give abs(next%hi)/abs(coefficient) < 0.541.
+    next = erfc_dominant_add(erfc_pair(erfcx_hi(i,bin), erfcx_lo(i,bin)), next)
     b2 = b1
     b1 = next
   enddo
-  r = erfc_multiply(erfc_pair(t, 0.), b1)
+  r = erfc_scalar_product(t, b1)
   r = erfc_add(r, erfc_pair(-b2%hi, -b2%lo))
   r = erfc_add(r, erfc_pair(erfcx_hi(0,bin), erfcx_lo(0,bin)))
 end function erfc_chebyshev
@@ -220,7 +271,7 @@ pure subroutine erfc_exp(x, a, k)
   r = erfc_add(x, erfc_pair(-z * ln2_hi, 0.))
   correction = erfc_multiply(erfc_pair(-z, 0.), erfc_pair(ln2_lo, ln2_tail))
   r = erfc_add(r, correction)
-  a = erfc_polynomial(r, exp_hi(0:12), exp_lo(0:12))
+  a = erfc_polynomial(r, exp_hi(0:7), exp_lo(0:7), 3)
   table = erfc_multiply(erfc_pair(idiv_scale_lookup(j), 0.), &
       erfc_pair(1., idiv_residual_lookup(j)))
   a = erfc_multiply(a, table)
