@@ -11,11 +11,11 @@ on ``mom6.readthedocs.io``. Nine were inventory fallbacks from
 ``parameterizations_lateral.rst``; one was a hardcoded link in
 ``src/framework/Testing.rst``. All ten destinations have local content.
 
-The standalone renderer now maps the nine audited Doxygen-qualified section
-labels to their local targets, checking the owning module page. This preserves
-the shared chapters' legacy Sphinx references. The Testing chapter uses a
-root-relative ``:doc:`` reference, supported by both renderers, rather than a
-hardcoded published URL.
+The migration initially mapped the nine audited Doxygen-qualified section
+labels to their local targets while both builds coexisted. The chapters now
+reference the source section labels directly, and that alias map has been
+removed. The Testing chapter likewise uses a direct ``:doc:`` reference to
+``mom_unit_scaling`` rather than a hardcoded published URL or generated path.
 
 After these changes the full selected-source build has no scientific/API links
 to Read the Docs. The redundant sidebar link to external "User documentation"
@@ -77,8 +77,8 @@ found 88 explicit section/subsection/anchor command occurrences. Every named
 target appears in generated reST. This is a structural coverage check, not a
 claim that every API declaration or unmarked source comment is documented.
 
-Verification
-------------
+Verification at the original audit
+----------------------------------
 
 * Nine builder/renderer tests pass, including local legacy-label resolution,
   owning-page validation, rejection of missing destinations, and root-relative API chapter

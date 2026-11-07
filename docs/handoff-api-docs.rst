@@ -103,13 +103,12 @@ Behavior to preserve
   ``bind(c)``, are documented even without bodies. Dummy procedures are arguments,
   not published call targets.
 * Exclude GSW/CVMix implementations, including TEOS10 symlinks, but retain MOM6
-  wrappers. Classify external ownership through actual USE associations and
-  configured dependency modules, not symbol-prefix guesses.
-* External calls have separate initially collapsed library groups. Unknown calls
+  wrappers. Identify external references through actual USE associations with
+  unindexed modules, not symbol-prefix guesses or required ownership lists.
+* External calls have separate initially collapsed module groups. Unknown calls
   remain in build diagnostics rather than being assigned guessed targets.
 * Optional missing dependency metadata retains default dependency exclusions.
-  Older Flint without ``Reference.unindexed_module`` is supported and reports
-  ``potential_external_references: null``.
+  The builder targets the pinned Flint API rather than older-version fallbacks.
 
 Source selection and deployment
 -------------------------------

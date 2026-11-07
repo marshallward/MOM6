@@ -141,25 +141,24 @@ def render_reference(rst_dir, html_dir, warning_stream):
     template = Template((THEME / 'page.html').read_text(encoding='utf-8'))
     files = sorted(rst_dir.glob('*.rst'), key=lambda path: path.stem.lower())
     bodies = render_guides(rst_dir, warning_stream, html_dir, api_reader=GraphReader)
-    guide_bodies = {name: body for name, body in bodies.items() if name in {**GUIDE_PAGES, **SCIENCE_PAGES}}
+    guide_titles = {**GUIDE_PAGES, **SCIENCE_PAGES}
     modules = [path.stem for path in files
-               if path.stem not in ('index', 'api-index') and path.stem not in guide_bodies]
+               if path.stem not in ('index', 'api-index') and path.stem not in guide_titles]
     labels = {}
     for path in files:
-        if path.stem in guide_bodies:
-            labels[path.stem] = {**GUIDE_PAGES, **SCIENCE_PAGES}[path.stem]
+        if path.stem in guide_titles:
+            labels[path.stem] = guide_titles[path.stem]
             continue
-        # Flint emits an overlined document title. Read only that header rather
-        # than retaining all rendered pages just to build the sidebar.
+        # Flint emits an overlined document title; its spelling labels the sidebar.
         with path.open(encoding='utf-8') as stream:
             next(stream, '')
             title = next(stream, '').strip()
         suffix = ' module reference'
         labels[path.stem] = title[:-len(suffix)] if title.endswith(suffix) else path.stem
     for path in files:
-        parts = {'html_body': bodies[path.stem]}
+        body = bodies[path.stem]
         outline = Outline()
-        outline.feed(parts['html_body'])
+        outline.feed(body)
         navigation = []
         for name in modules:
             current = ' aria-current="page"' if name == path.stem else ''
@@ -169,7 +168,7 @@ def render_reference(rst_dir, html_dir, warning_stream):
             f'{escape(label)}</a></li>' for target, kind, label in outline.items)
         home = path.stem == 'index'
         module_index = path.stem == 'api-index'
-        guide = path.stem in guide_bodies
+        guide = path.stem in guide_titles
         guides = []
         for name, label in GUIDE_PAGES.items():
             if name in labels:
@@ -178,11 +177,11 @@ def render_reference(rst_dir, html_dir, warning_stream):
         title = ('MOM6 documentation' if home else
                  'MOM6 API reference' if module_index else labels[path.stem])
         page = template.substitute(
-            title=escape(title), body=parts['html_body'], modules='\n'.join(navigation),
+            title=escape(title), body=body, modules='\n'.join(navigation),
             guides='\n'.join(guides),
             contents=contents,
             math_script=('<script defer src="assets/mathjax-3.2.2.js"></script>'
-                         if 'class="math"' in parts['html_body'] else ''),
+                         if 'class="math"' in body else ''),
             page_class=('home-page' if home else 'module-index' if module_index else
                         'guide-page' if guide else 'module-page'),
             breadcrumb='Home' if home else 'API reference' if module_index else escape(labels[path.stem]),

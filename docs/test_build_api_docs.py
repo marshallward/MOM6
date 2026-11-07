@@ -10,13 +10,22 @@ from unittest.mock import patch
 
 from build_api_docs import build as build_site, check_links, generate_reference
 from documentation_assets import install_mathjax
-from flint.docgen.references import Reference
 from render_api_docs import render_reference
-from render_guide_docs import GUIDE_PAGES, SCIENCE_PAGES, LEGACY_SECTIONS, render_guides
+from render_guide_docs import GUIDE_PAGES, SCIENCE_PAGES, render_guides
 
 
-MANUAL_API_FIXTURES = {page: label for page, label in LEGACY_SECTIONS.values()}
-MANUAL_API_FIXTURES['mom_unit_scaling'] = None
+MANUAL_API_FIXTURES = {
+    'mom_hor_visc': 'section_horizontal_viscosity',
+    'mom_meke': 'section_MEKE',
+    'mom_mixed_layer_restrat': 'section_mle',
+    'mom_interface_filter': 'section_interface_filter',
+    'mom_lateral_mixing_coeffs': 'section_Resolution_Function',
+    'mom_tidal_forcing': 'section_tides',
+    'mom_load_love_numbers': 'section_Love_numbers',
+    'mom_self_attr_load': 'section_SAL',
+    'mom_spherical_harmonics': 'section_spherical_harmonics',
+    'mom_unit_scaling': None,
+}
 
 
 def build(*args, **kwargs):
@@ -68,12 +77,12 @@ class ApiDocumentationTests(unittest.TestCase):
                 self.assertFalse((cache / 'mathjax.js').exists())
                 self.assertFalse((root / 'fourth/mathjax.js').exists())
 
-    def test_legacy_science_links_prefer_audited_local_content(self):
+    def test_science_links_resolve_direct_section_labels(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / 'first.rst').write_text(
-                'First\n=====\n\n:ref:`namespacemom__meke_1section_MEKE`\n\n'
-                ':doc:`units </api/generated/modules/mom_unit_scaling>`\n')
+                'First\n=====\n\n:ref:`section_MEKE`\n\n'
+                ':doc:`units <mom_unit_scaling>`\n')
             (root / 'mom_meke.rst').write_text(
                 'MEKE\n====\n\n.. _section_MEKE:\n\nScience\n-------\n\nLocal science.\n')
             (root / 'mom_unit_scaling.rst').write_text('Units\n=====\n\nLocal units.\n')
@@ -83,13 +92,13 @@ class ApiDocumentationTests(unittest.TestCase):
                 self.assertIn('href="mom_meke.html#section-meke"', pages['first'])
                 self.assertIn('href="mom_unit_scaling.html"', pages['first'])
                 self.assertNotIn('readthedocs', pages['first'])
-                # A section with the right label on the wrong page is not an alias.
+                # References follow the label when its owning page changes.
                 (root / 'mom_meke.rst').rename(root / 'other.rst')
                 titles['other'] = titles.pop('mom_meke')
-                with self.assertRaisesRegex(ValueError, 'Unknown manual reference'):
-                    render_guides(root, io.StringIO())
+                pages = render_guides(root, io.StringIO())
+                self.assertIn('href="other.html#section-meke"', pages['first'])
                 (root / 'first.rst').write_text(
-                    'First\n=====\n\n:doc:`/api/generated/modules/missing`\n')
+                    'First\n=====\n\n:doc:`missing`\n')
                 with self.assertRaisesRegex(ValueError, 'Unknown manual chapter'):
                     render_guides(root, io.StringIO())
 
@@ -213,7 +222,6 @@ class ApiDocumentationTests(unittest.TestCase):
             self.assertEqual(no_config['external_references'], 2)
             self.assertEqual(no_config['unresolved_references'], 0)
             self.assertEqual(no_config['external_libraries'], {})
-            self.assertEqual(no_config['potential_external_references'], 0)
             self.assertIn('gsw_mod_toolbox::gsw_rho',
                           (root / 'without-config/reports/external.txt').read_text())
             self.assertNotIn('Warning:', warnings.getvalue())

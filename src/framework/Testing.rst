@@ -121,7 +121,7 @@ or for adding diagnostics:
    call register_diag_field(..., "u", ... , &
          conversion=US%L_T_to_m_s)
 
-See also: :doc:`mom_unit_scaling </api/generated/modules/mom_unit_scaling>`
+See also: :doc:`mom_unit_scaling`
 
 .. _Rotations:
 

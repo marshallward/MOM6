@@ -14,7 +14,7 @@ from urllib.parse import unquote, urlsplit
 
 import flint
 from flint.docgen.model import iter_module_documentation
-from flint.docgen.references import HtmlDestinations, Reference, ReferenceIndex, anchor
+from flint.docgen.references import HtmlDestinations, ReferenceIndex, anchor
 from flint.docgen.graphs import call_graph, write_dot
 from flint.docgen.rst import write_module
 from render_api_docs import GUIDE_PAGES, render_reference
@@ -182,16 +182,6 @@ def generate_reference(source, rst_dir, reports, *, graph_depth=1):
     (reports / 'unresolved.txt').write_text(
         ''.join(message + '\n' for message in index.diagnostics), encoding='utf-8')
     external_counts = {}
-    potential_external = (sum(bool(ref.unindexed_module) and ref.external is None
-                              for calls in index.calls.values() for ref in calls)
-                          if hasattr(Reference, 'unindexed_module') else None)
-    if potential_external:
-        print(f'Warning: {potential_external} call references import symbols from unindexed modules; '
-              f'they may be external dependencies or omitted project sources. See {reports / "unresolved.txt"}.')
-    elif potential_external is None and index.diagnostics:
-        print(f'Warning: {len(index.diagnostics)} unresolved call references; some may be external '
-              'dependencies. This Flint revision does not report unindexed-module provenance. '
-              f'See {reports / "unresolved.txt"}.')
     with (reports / 'external.txt').open('w', encoding='utf-8') as stream:
         for scope, calls in index.calls.items():
             for ref in calls:
@@ -236,7 +226,6 @@ def generate_reference(source, rst_dir, reports, *, graph_depth=1):
             'external_references': sum(ref.external is not None
                                        for calls in index.calls.values() for ref in calls),
             'external_libraries': external_counts,
-            'potential_external_references': potential_external,
             'unresolved_references': len(index.diagnostics)}
 
 

@@ -37,23 +37,7 @@ GUIDE_PAGES = {
 DOCS = Path(__file__).resolve().parent
 SCIENCE_SOURCES = science_sources(DOCS)
 SCIENCE_PAGES = {name: path.read_text(encoding='utf-8').splitlines()[2]
-                  for name, path in SCIENCE_SOURCES.items()}
-
-# Shared chapters still use the legacy Doxygen-qualified labels. Only alias
-# audited destinations, and only when their owning API page is present.
-LEGACY_SECTIONS = {
-    'namespacemom__hor__visc_1section_horizontal_viscosity': ('mom_hor_visc', 'section_horizontal_viscosity'),
-    'namespacemom__meke_1section_meke': ('mom_meke', 'section_MEKE'),
-    'namespacemom__mixed__layer__restrat_1section_mle': ('mom_mixed_layer_restrat', 'section_mle'),
-    'namespacemom__interface__filter_1section_interface_filter': ('mom_interface_filter', 'section_interface_filter'),
-    'namespacemom__lateral__mixing__coeffs_1section_resolution_function':
-        ('mom_lateral_mixing_coeffs', 'section_Resolution_Function'),
-    'namespacetidal__forcing_1section_tides': ('mom_tidal_forcing', 'section_tides'),
-    'namespacemom__load__love__numbers_1section_love_numbers': ('mom_load_love_numbers', 'section_Love_numbers'),
-    'namespaceself__attr__load_1section_sal': ('mom_self_attr_load', 'section_SAL'),
-    'namespacemom__spherical__harmonics_1section_spherical_harmonics':
-        ('mom_spherical_harmonics', 'section_spherical_harmonics'),
-}
+                 for name, path in SCIENCE_SOURCES.items()}
 
 
 class GuideInliner(Inliner):
@@ -80,15 +64,13 @@ class GuideInliner(Inliner):
 
 def chapter_destination(name, titles):
     name = name.removeprefix('/').removesuffix('.rst')
-    local = name.removeprefix('api/generated/pages/')
-    local = local.removeprefix('api/generated/modules/')
-    if local in titles:
-        return local + '.html', titles[local]
+    if name in titles:
+        return name + '.html', titles[name]
     raise ValueError(f'Unknown manual chapter: {name}')
 
 
 def prepare_source(source, titles):
-    """Express legacy navigation and bibliography directives as Docutils nodes."""
+    """Express chapter navigation and bibliography directives as Docutils nodes."""
     def toctree(match):
         lines = [line.strip() for line in match[0].splitlines()[1:] if line.strip()]
         depth = next((int(line.split(':')[-1]) for line in lines if line.startswith(':maxdepth:')), 1)
@@ -192,10 +174,6 @@ def render_guides(rst_dir, warning_stream, html_dir=None, *, api_reader=None):
         for node in document.findall(nodes.inline):
             if node.get('manual_role') == 'cite':
                 keys.update(key.strip() for key in node['manual_text'].split(','))
-    for legacy, (page, label) in LEGACY_SECTIONS.items():
-        destination = targets.get(nodes.fully_normalize_name(label))
-        if destination is not None and destination[0].split('#')[0] == page + '.html':
-            targets.setdefault(legacy, destination)
     citations, bibliography_html = bibliography(keys)
     if keys and 'zzbibliography' not in documents:
         raise ValueError('Citations require the bibliography chapter')
@@ -261,8 +239,7 @@ def render_guides(rst_dir, warning_stream, html_dir=None, *, api_reader=None):
                 destination = html_dir / image['uri']
                 destination.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copyfile(original, destination)
-        # publish_from_doctree uses the ordinary HTML5 writer; no global role or
-        # directive registrations are changed for the subsequent API rendering.
+        # Use the ordinary HTML5 writer without global role/directive registrations.
         writer = Writer()
         with contextlib.chdir(rst_dir):
             publish_from_doctree(document, writer=writer,
