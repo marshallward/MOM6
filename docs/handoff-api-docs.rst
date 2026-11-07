@@ -84,7 +84,7 @@ Important implementation files
 * ``docs/test_build_api_docs.py``: six builder/renderer tests.
 * ``docs/api-dependencies.toml``: dependency source-tree exclusions.
 * ``docs/api-deployment.rst``: detailed publishing and dependency policy.
-* ``.github/workflows/deploy-api.yml``: GitHub Pages build/deploy.
+* ``.github/workflows/docs-and-style.yml``: source checks and GitHub Pages build/deploy.
 * Flint ``flint/docgen/``: documentation model, resolution, destinations, reST.
 * Flint ``flint/macros.py`` and ``flint/lexer.py``: preprocessing support.
 

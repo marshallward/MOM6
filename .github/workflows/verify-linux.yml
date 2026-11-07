@@ -11,66 +11,6 @@ env:
   MOM_TARGET_LOCAL_BRANCH: ${{ github.base_ref }}
 
 jobs:
-  # Documentation
-
-  check-style-and-docstrings:
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-
-    steps:
-    - uses: actions/checkout@v7
-
-    - name: Check white space (non-blocking)
-      run: |
-        ./.testing/trailer.py -e TEOS10 -l 120 src config_src 2>&1 | tee style_errors
-      continue-on-error: true
-
-    - uses: actions/setup-python@v6
-      with:
-        python-version: '3.13'
-
-    - name: Install documentation tools
-      run: python -m pip install -r docs/requirements-api.txt
-
-    - name: Install graph renderer for builder tests
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y graphviz
-
-    - name: Test documentation builder
-      id: documentation_tests
-      run: python -m unittest discover -s docs -p 'test_build_api_docs.py'
-
-    - name: Generate, render, and check documentation links
-      id: documentation_build
-      # The deployment workflow checks the full set of call diagrams.
-      run: python docs/build_api_docs.py --graph-depth 0
-
-    - name: Retain documentation diagnostics
-      if: always()
-      uses: actions/upload-artifact@v7
-      with:
-        name: documentation-check-reports
-        path: docs/_build/flint-api/reports/
-        if-no-files-found: ignore
-        retention-days: 14
-
-    - name: Report documentation and style checks
-      if: always()
-      run: |
-        {
-          echo "Documentation check outcomes:"
-          echo "  builder tests: ${{ steps.documentation_tests.outcome }}"
-          echo "  documentation build: ${{ steps.documentation_build.outcome }}"
-          if [ -f docs/_build/flint-api/reports/summary.json ]; then
-            echo '```json'
-            cat docs/_build/flint-api/reports/summary.json
-            echo '```'
-          fi
-        } >> "$GITHUB_STEP_SUMMARY"
-        cat style_errors
-        test ! -s style_errors
-
   # Executables
 
   build-symmetric:

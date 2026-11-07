@@ -50,6 +50,8 @@ Authoring
 See ``api-deployment.rst`` for source selection, dependencies, rendering,
 validation, and GitHub Actions deployment. ``api-content-audit.rst`` records
 the audit of scientific destinations formerly linked to the old site.
+``documentation-checks.rst`` describes the separate API documentation-presence
+check run by source verification.
 
 For running MOM6 within CESM, see the `NCAR quick start guide
 <https://github.com/ESCOMP/MOM_interface/wiki/Quick-Start>`_.

@@ -24,14 +24,17 @@ documented. ``reports/excluded-dependencies.txt`` records the excluded sources.
 Build and deploy stages
 -----------------------
 
-The ``Linux verification`` workflow's ``check-style-and-docstrings`` job uses the
+The ``Documentation and style`` workflow's ``check-style-and-docstrings`` job uses the
 same pinned documentation tools instead of Doxygen/Sphinx. It runs the
-builder/renderer tests and a complete content build with ``--graph-depth 0``,
-including reference and HTML link validation. Graphviz is installed for the
-small graph fixtures in the tests; the deployment workflow generates the full
-set of diagrams. Check reports are retained as ``documentation-check-reports``
-even when the content build fails. The job identifier is unchanged for existing
-required-check configuration.
+``flint check-docs`` source-documentation check, alongside the existing whitespace
+check. Missing required descriptions fail the job. Reports are retained as
+``docstring-check-reports`` even on failure. It does not generate a site or need
+Graphviz. After source checks pass, the same workflow runs builder/renderer tests,
+the complete site build, and reference/link/diagram validation, then deploys from
+eligible branches. Linux verification handles compilation and numerical tests.
+Required-check configuration should use ``Check source style and documentation``.
+See ``documentation-checks.rst`` for
+the completeness policy and local command.
 
 Changes under ``src``, ``config_src``, ``pkg``, or ``docs`` (or to ``.gitmodules``) trigger a build
 on pushes and pull requests. The documentation checkout does not fetch
@@ -74,7 +77,7 @@ deployment without merging into ``dev/gfdl``. A qualifying push will publish
 the site at ``https://marshallward.github.io/MOM6/``. Manual dispatch is also
 available once the workflow exists on the default branch. The deployment
 job also reports the actual page URL. To adopt the workflow in another fork,
-change the repository condition in ``.github/workflows/deploy-api.yml`` and
+change the repository condition in ``.github/workflows/docs-and-style.yml`` and
 configure Pages there.
 
 Read the Docs
