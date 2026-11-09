@@ -688,19 +688,23 @@ subroutine energetic_PBL(h_3d, u_3d, v_3d, tv, fluxes, visc, dt, Kd_int, G, GV, 
       SpV_dt(:) = 0.0
       if ((dt > 0.0) .and. GV%Boussinesq .or. .not.allocated(tv%SpV_avg)) then
         if (CS%answer_date < 20240101) then
+          !$omp loop bind(thread)
           do K=1,nz+1 ; SpV_dt(K) = 1.0 / (dt*GV%Rho0) ; enddo
         else
+          !$omp loop bind(thread)
           do K=1,nz+1 ; SpV_dt(K) = I_rho0dt ; enddo
         endif
       endif
 
       if (G%mask2dT(i,j) > 0.0) then
+        !$omp loop bind(thread)
         do k=1,nz
           h(k) = h_blk(ii,jj,k) ; dz(k) = dz_blk(ii,jj,k)
           u(k) = u_blk(ii,jj,k) ; v(k) = v_blk(ii,jj,k)
           T0(k) = T0_blk(ii,jj,k) ; S0(k) = S0_blk(ii,jj,k) ; TKE_forcing(k) = TKE_forcing_blk(ii,jj,k)
           dSV_dT_1d(k) = dSV_dT_blk(ii,jj,k) ; dSV_dS_1d(k) = dSV_dS_blk(ii,jj,k)
         enddo
+        !$omp loop bind(thread)
         do K=1,nz+1 ; Kd(K) = 0.0 ; enddo
 
         if (associated(fluxes%ustar) .and. (GV%Boussinesq .or. .not.associated(fluxes%tau_mag))) then
@@ -720,6 +724,7 @@ subroutine energetic_PBL(h_3d, u_3d, v_3d, tv, fluxes, visc, dt, Kd_int, G, GV, 
 
         if (allocated(tv%SpV_avg) .and. .not.GV%Boussinesq) then
           SpV_dt(1) = tv%SpV_avg(i,j,1) * I_dt
+          !$omp loop bind(thread)
           do K=2,nz
             SpV_dt(K) = 0.5*(tv%SpV_avg(i,j,k-1) + tv%SpV_avg(i,j,k)) * I_dt
           enddo
@@ -748,8 +753,10 @@ subroutine energetic_PBL(h_3d, u_3d, v_3d, tv, fluxes, visc, dt, Kd_int, G, GV, 
         MLD_in = MLD_io
 
         if (CS%answer_date < 20240101) then
+          !$omp loop bind(thread)
           do K=1,nz+1 ; SpV_dt_cf(K) = (US%Z_to_m**3*US%s_to_T**3) * SpV_dt(K) ; enddo
         else
+          !$omp loop bind(thread)
           do K=1,nz+1 ; SpV_dt_cf(K) = SpV_dt(K) ; enddo
         endif
         if (stoch_CS%pert_epbl) then
@@ -762,9 +769,12 @@ subroutine energetic_PBL(h_3d, u_3d, v_3d, tv, fluxes, visc, dt, Kd_int, G, GV, 
                            u_star, u_star_mean, mech_TKE, dt, MLD_io, Kd, mixvel, mixlen, GV, &
                            US, CS, eCD, Waves, G, i, j)
         endif
-        if (CS%id_Kd_ePBL_col_by_col > 0) then ; do K=1,nz+1
-          diag_Kd_ePBL_col_by_col(i,j,K) = Kd(K)
-        enddo ; endif
+        if (CS%id_Kd_ePBL_col_by_col > 0) then
+          !$omp loop bind(thread)
+          do K=1,nz+1
+            diag_Kd_ePBL_col_by_col(i,j,K) = Kd(K)
+          enddo
+        endif
 
         if (BBL_mixing) then
           if (CS%MLD_iteration_guess .and. (CS%BBL_depth(i,j) > 0.0)) BBLD_io = CS%BBL_depth(i,j)
@@ -792,15 +802,20 @@ subroutine energetic_PBL(h_3d, u_3d, v_3d, tv, fluxes, visc, dt, Kd_int, G, GV, 
                                u_star_BBL, u_star_BBL_z_t, BBL_buoy_flux(i,j), Kd_BBL, BBLD_io, mixvel_BBL, &
                                mixlen_BBL, GV, US, CS, eCD)
 
+          !$omp loop bind(thread)
           do K=1,nz+1 ; Kd(K) = Kd(K) + Kd_BBL(K) ; enddo
-          if (CS%id_Kd_BBL > 0) then ; do K=1,nz+1
-            Kd_BBL_3d(i,j,K) = Kd_BBL(K)
-          enddo ; endif
+          if (CS%id_Kd_BBL > 0) then
+            !$omp loop bind(thread)
+            do K=1,nz+1
+              Kd_BBL_3d(i,j,K) = Kd_BBL(K)
+            enddo
+          endif
           if (CS%id_ustar_BBL > 0) diag_ustar_BBL(i,j) = u_star_BBL
           if ((CS%id_BBL_decay_scale > 0) .and. (CS%TKE_decay * absf > 0)) &
             diag_BBL_decay_scale(i,j) = u_star_BBL / (CS%TKE_decay * absf)
         endif
 
+        !$omp loop bind(thread)
         do K=1,nz+1 ; Kd_int(i,j,K) = Kd(K) ; enddo
         CS%ML_depth(i,j) = MLD_io
         CS%BBL_depth(i,j) = BBLD_io
@@ -814,19 +829,31 @@ subroutine energetic_PBL(h_3d, u_3d, v_3d, tv, fluxes, visc, dt, Kd_int, G, GV, 
           diag_TKE_mech_decay(i,j) = diag_TKE_mech_decay(i,j) + eCD%dTKE_mech_decay
           diag_TKE_conv_decay(i,j) = diag_TKE_conv_decay(i,j) + eCD%dTKE_conv_decay
         endif
-        if (CS%debug .or. (CS%id_Mixing_Length > 0)) then ; do K=1,nz+1
-          diag_Mixing_Length(i,j,K) = mixlen(K)
-        enddo ; endif
-        if (CS%debug .or. (CS%id_Velocity_Scale > 0)) then ; do K=1,nz+1
-          diag_Velocity_Scale(i,j,K) = mixvel(K)
-        enddo ; endif
+        if (CS%debug .or. (CS%id_Mixing_Length > 0)) then
+          !$omp loop bind(thread)
+          do K=1,nz+1
+            diag_Mixing_Length(i,j,K) = mixlen(K)
+          enddo
+        endif
+        if (CS%debug .or. (CS%id_Velocity_Scale > 0)) then
+          !$omp loop bind(thread)
+          do K=1,nz+1
+            diag_Velocity_Scale(i,j,K) = mixvel(K)
+          enddo
+        endif
         if (BBL_mixing) then
-          if (CS%debug .or. (CS%id_BBL_Mix_Length>0)) then ; do k=1,nz
-            BBL_Mix_Length(i,j,k) = mixlen_BBL(k)
-          enddo ; endif
-          if (CS%debug .or. (CS%id_BBL_Vel_Scale>0)) then ; do k=1,nz
-            BBL_Vel_Scale(i,j,k) = mixvel_BBL(k)
-          enddo ; endif
+          if (CS%debug .or. (CS%id_BBL_Mix_Length>0)) then
+            !$omp loop bind(thread)
+            do k=1,nz
+              BBL_Mix_Length(i,j,k) = mixlen_BBL(k)
+            enddo
+          endif
+          if (CS%debug .or. (CS%id_BBL_Vel_Scale>0)) then
+            !$omp loop bind(thread)
+            do k=1,nz
+              BBL_Vel_Scale(i,j,k) = mixvel_BBL(k)
+            enddo
+          endif
           if (CS%id_TKE_BBL>0) diag_TKE_BBL(i,j) = diag_TKE_BBL(i,j) + BBL_TKE
         endif
         if (CS%id_mstar_sfc > 0) diag_mstar_sfc(i,j) = eCD%mstar
@@ -844,10 +871,12 @@ subroutine energetic_PBL(h_3d, u_3d, v_3d, tv, fluxes, visc, dt, Kd_int, G, GV, 
         if (CS%options_diff > 0) then
           if (CS%options_diff < 4) then
             BLD_1 = MLD_in ; BLD_2 = MLD_in
+            !$omp loop bind(thread)
             do K=1,nz+1 ; SpV_dt_tmp(K) = SpV_scale1 * SpV_dt(K) ; enddo
             call ePBL_column(h, dz, u, v, T0, S0, dSV_dT_1d, dSV_dS_1d, SpV_dt_tmp, TKE_forcing, &
                              B_flux, absf, u_star, u_star_mean, mech_TKE, dt, BLD_1, Kd_1, &
                              mixvel, mixlen, GV, US, CS_tmp1, eCD_tmp, Waves, G, i, j)
+            !$omp loop bind(thread)
             do K=1,nz+1 ; SpV_dt_tmp(K) = SpV_scale2 * SpV_dt(K) ; enddo
             call ePBL_column(h, dz, u, v, T0, S0, dSV_dT_1d, dSV_dS_1d, SpV_dt_tmp, TKE_forcing, &
                              B_flux, absf, u_star, u_star_mean, mech_TKE, dt, BLD_2, Kd_2, &
@@ -868,6 +897,7 @@ subroutine energetic_PBL(h_3d, u_3d, v_3d, tv, fluxes, visc, dt, Kd_int, G, GV, 
           endif
 
           if (CS%id_opt_diff_Kd_ePBL > 0) then
+            !$omp loop bind(thread)
             do K=1,nz+1 ; diff_Kd(i,j,K) = Kd_1(K) - Kd_2(K) ; enddo
           endif
           if (CS%id_opt_maxdiff_Kd_ePBL > 0) then
@@ -877,6 +907,7 @@ subroutine energetic_PBL(h_3d, u_3d, v_3d, tv, fluxes, visc, dt, Kd_int, G, GV, 
           if (CS%id_opt_diff_hML_depth > 0) diff_hML_depth(i,j) = BLD_1 - BLD_2
         endif
       else
+        !$omp loop bind(thread)
         do K=1,nz+1 ; Kd_int(i,j,K) = 0. ; enddo
         CS%ML_depth(i,j) = 0.0
         CS%BBL_depth(i,j) = 0.0
