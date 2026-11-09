@@ -515,36 +515,9 @@ subroutine energetic_PBL(h_3d, u_3d, v_3d, tv, fluxes, visc, dt, Kd_int, G, GV, 
   BBL_mixing = ((CS%ePBL_BBL_effic > 0.0) .or. (CS%ePBL_tidal_effic > 0.0) .or. CS%ePBL_BBL_use_mstar)
   do_avg_its = report_avg_its
 
-  ! Zero out diagnostics before accumulation.
-  if (CS%TKE_diagnostics) then
-    !!OMP parallel do default(shared)
-    do j=js,je ; do i=is,ie
-      diag_TKE_wind(i,j) = 0.0 ; diag_TKE_MKE(i,j) = 0.0
-      diag_TKE_conv(i,j) = 0.0 ; diag_TKE_forcing(i,j) = 0.0
-      diag_TKE_mixing(i,j) = 0.0 ; diag_TKE_mech_decay(i,j) = 0.0
-      diag_TKE_conv_decay(i,j) = 0.0 !; diag_TKE_unbalanced(i,j) = 0.0
-    enddo ; enddo
-    if (BBL_mixing) then
-      !!OMP parallel do default(shared)
-      do j=js,je ; do i=is,ie
-        diag_TKE_BBL(i,j) = 0.0 ; diag_TKE_BBL_mixing(i,j) = 0.0
-        diag_TKE_BBL_decay(i,j) = 0.0
-      enddo ; enddo
-    endif
-  endif
-  if (CS%debug .or. (CS%id_Mixing_Length>0)) diag_Mixing_Length(:,:,:) = 0.0
-  if (CS%debug .or. (CS%id_Velocity_Scale>0)) diag_Velocity_Scale(:,:,:) = 0.0
-  if (CS%id_Kd_ePBL_col_by_col > 0) diag_Kd_ePBL_col_by_col(:,:,:) = 0.0
-  if (report_avg_its) then
-    OBL_its_col(:,:) = 0 ; OBL_count_col(:,:) = 0
-    BBL_its_col(:,:) = 0 ; BBL_count_col(:,:) = 0
-  endif
-  if (BBL_mixing) then
-    if (CS%debug .or. (CS%id_BBL_Mix_Length>0)) BBL_Mix_Length(:,:,:) = 0.0
-    if (CS%debug .or. (CS%id_BBL_Vel_Scale>0)) BBL_Vel_Scale(:,:,:) = 0.0
-    if (CS%id_Kd_BBL > 0) Kd_BBL_3d(:,:,:) = 0.0
-    if (CS%id_ustar_BBL > 0) diag_ustar_BBL(:,:) = 0.0
-    if (CS%id_BBL_decay_scale > 0) diag_BBL_decay_scale(:,:) = 0.0
+  ! The column loop zeros the diagnostics it accumulates into.  These two are not set by ePBL.
+  if (CS%TKE_diagnostics .and. BBL_mixing) then
+    diag_TKE_BBL_mixing(:,:) = 0.0 ; diag_TKE_BBL_decay(:,:) = 0.0
   endif
 
   ! CS_tmp is used to test sensitivity to parameter setting changes.
@@ -572,9 +545,6 @@ subroutine energetic_PBL(h_3d, u_3d, v_3d, tv, fluxes, visc, dt, Kd_int, G, GV, 
     ! This logic is needed because the scaling of SpV_dt changes with answer date.
     if (CS_tmp1%answer_date < 20240101) SpV_scale1 = US%m_to_Z**3 * US%T_to_s**3
     if (CS_tmp2%answer_date < 20240101) SpV_scale2 = US%m_to_Z**3 * US%T_to_s**3
-    if (CS%id_opt_diff_Kd_ePBL > 0)    diff_Kd(:,:,:) = 0.0
-    if (CS%id_opt_maxdiff_Kd_ePBL > 0) max_abs_diff_Kd(:,:) = 0.0
-    if (CS%id_opt_diff_hML_depth > 0)  diff_hML_depth(:,:) = 0.0
   endif
 
   !!OMP parallel do default(private) shared(js,je,nz,is,ie,h_3d,u_3d,v_3d,tv,dt,I_dt,BBL_mixing, &
@@ -588,22 +558,6 @@ subroutine energetic_PBL(h_3d, u_3d, v_3d, tv, fluxes, visc, dt, Kd_int, G, GV, 
   !$omp   diag_LA_mod, diag_ustar, diff_Kd, max_abs_diff_Kd, diff_hML_depth, &
   !$omp   OBL_its_col, OBL_count_col, BBL_its_col, BBL_count_col)
   !$omp target enter data map(to: CS_tmp1, CS_tmp2)
-
-  !$omp target update to(diag_TKE_wind, diag_TKE_MKE, diag_TKE_conv, diag_TKE_forcing, &
-  !$omp   diag_TKE_mixing, diag_TKE_mech_decay, diag_TKE_conv_decay) if (CS%TKE_diagnostics)
-  !$omp target update to(diag_TKE_BBL) if (CS%TKE_diagnostics .and. BBL_mixing)
-  !$omp target update to(diag_Mixing_Length) if (CS%debug .or. (CS%id_Mixing_Length>0))
-  !$omp target update to(diag_Velocity_Scale) if (CS%debug .or. (CS%id_Velocity_Scale>0))
-  !$omp target update to(diag_Kd_ePBL_col_by_col) if (CS%id_Kd_ePBL_col_by_col > 0)
-  !$omp target update to(OBL_its_col, OBL_count_col, BBL_its_col, BBL_count_col) if (report_avg_its)
-  !$omp target update to(BBL_Mix_Length) if (BBL_mixing .and. (CS%debug .or. (CS%id_BBL_Mix_Length>0)))
-  !$omp target update to(BBL_Vel_Scale) if (BBL_mixing .and. (CS%debug .or. (CS%id_BBL_Vel_Scale>0)))
-  !$omp target update to(Kd_BBL_3d) if (BBL_mixing .and. (CS%id_Kd_BBL > 0))
-  !$omp target update to(diag_ustar_BBL) if (BBL_mixing .and. (CS%id_ustar_BBL > 0))
-  !$omp target update to(diag_BBL_decay_scale) if (BBL_mixing .and. (CS%id_BBL_decay_scale > 0))
-  !$omp target update to(diff_Kd) if ((CS%options_diff > 0) .and. (CS%id_opt_diff_Kd_ePBL > 0))
-  !$omp target update to(max_abs_diff_Kd) if ((CS%options_diff > 0) .and. (CS%id_opt_maxdiff_Kd_ePBL > 0))
-  !$omp target update to(diff_hML_depth) if ((CS%options_diff > 0) .and. (CS%id_opt_diff_hML_depth > 0))
 
   call thickness_to_dz(h_3d, tv, dz_3d, G, GV, US, is=is, ie=ie, js=js, je=je, do_offload=.true.)
 
@@ -948,6 +902,49 @@ pure subroutine ePBL_block_column(ii, jj, i, j, nib, njb, h_blk, dz_blk, u_blk, 
   integer :: k, nz  ! Vertical index and number of layers
 
   nz = GV%ke
+
+  ! Zero this column's diagnostics, so that land columns are also set.
+  if (CS%TKE_diagnostics) then
+    diag_TKE_wind(i,j) = 0.0 ; diag_TKE_MKE(i,j) = 0.0
+    diag_TKE_conv(i,j) = 0.0 ; diag_TKE_forcing(i,j) = 0.0
+    diag_TKE_mixing(i,j) = 0.0 ; diag_TKE_mech_decay(i,j) = 0.0
+    diag_TKE_conv_decay(i,j) = 0.0
+    if (BBL_mixing) diag_TKE_BBL(i,j) = 0.0
+  endif
+  if (CS%debug .or. (CS%id_Mixing_Length>0)) then
+    do K=1,nz+1 ; diag_Mixing_Length(i,j,K) = 0.0 ; enddo
+  endif
+  if (CS%debug .or. (CS%id_Velocity_Scale>0)) then
+    do K=1,nz+1 ; diag_Velocity_Scale(i,j,K) = 0.0 ; enddo
+  endif
+  if (CS%id_Kd_ePBL_col_by_col > 0) then
+    do K=1,nz+1 ; diag_Kd_ePBL_col_by_col(i,j,K) = 0.0 ; enddo
+  endif
+  if (do_avg_its) then
+    OBL_its_col(i,j) = 0 ; OBL_count_col(i,j) = 0
+    BBL_its_col(i,j) = 0 ; BBL_count_col(i,j) = 0
+  endif
+  if (BBL_mixing) then
+    if (CS%debug .or. (CS%id_BBL_Mix_Length>0)) then
+      do K=1,nz+1 ; BBL_Mix_Length(i,j,K) = 0.0 ; enddo
+    endif
+    if (CS%debug .or. (CS%id_BBL_Vel_Scale>0)) then
+      do K=1,nz+1 ; BBL_Vel_Scale(i,j,K) = 0.0 ; enddo
+    endif
+    if (CS%id_Kd_BBL > 0) then
+      do K=1,nz+1 ; Kd_BBL_3d(i,j,K) = 0.0 ; enddo
+    endif
+    if (CS%id_ustar_BBL > 0) diag_ustar_BBL(i,j) = 0.0
+    if (CS%id_BBL_decay_scale > 0) diag_BBL_decay_scale(i,j) = 0.0
+  endif
+  if (CS%options_diff > 0) then
+    if (CS%id_opt_diff_Kd_ePBL > 0) then
+      do K=1,nz+1 ; diff_Kd(i,j,K) = 0.0 ; enddo
+    endif
+    if (CS%id_opt_maxdiff_Kd_ePBL > 0) max_abs_diff_Kd(i,j) = 0.0
+    if (CS%id_opt_diff_hML_depth > 0) diff_hML_depth(i,j) = 0.0
+  endif
+
   SpV_dt(:) = 0.0
   if ((dt > 0.0) .and. GV%Boussinesq .or. .not.allocated(tv%SpV_avg)) then
     if (CS%answer_date < 20240101) then
