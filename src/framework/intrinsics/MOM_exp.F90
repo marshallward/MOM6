@@ -30,6 +30,19 @@ contains
 !!
 !! Compute exp(x) with bitwise reproducibility across platforms.
 module procedure exp_repro
+  a = exp_kernel(x)
+end procedure exp_repro
+
+!> Internal power exponential, retaining the argument residual in range reduction.
+module procedure exp_repro_extended
+  a = exp_kernel(x, xlo)
+end procedure exp_repro_extended
+
+!> Shared exponential kernel; omitting the residual preserves exp_repro arithmetic.
+pure function exp_kernel(x, xlo) result(a)
+  real, intent(in) :: x !< Leading argument [nondim]
+  real, optional, intent(in) :: xlo !< Small residual, used only by pow_repro [nondim]
+  real :: a !< Exponential of the argument and optional residual [nondim]
   real, parameter :: I_ln2 = 1.44269504088896340735992468100189214
     !< 1 / ln2: 1.4426950408889634073599... [nondim]
 
@@ -146,6 +159,7 @@ module procedure exp_repro
   ! Since Z ~ x N / ln2, the terms in r will nearly cancel and there is some
   ! expected loss of precision.  To compensate, we use a Cody-Waite correction.
   r = (xc - Z * ln2_ndiv_hi) - Z * ln2_ndiv_lo
+  if (present(xlo)) r = r + xlo
 
   ! 3. Polynomial approximation
   ! ---------------------------
@@ -187,7 +201,7 @@ module procedure exp_repro
   ! - Extreme values of K have already been filtered out by the min/max step.
   fb = ishft(int(expbias, int_rsize) - j, expbit)
   a = a * transfer(fb, real_mold)
-end procedure exp_repro
+end function exp_kernel
 
 
 !> Remez polynomial estimate of (exp(x) - 1) / x over [-ln2/256, ln2/256].

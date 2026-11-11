@@ -11,7 +11,7 @@ use iso_fortran_env, only : int32, int64
 
 implicit none ; private
 
-public :: invcosh, cuberoot, exp_repro, log_repro
+public :: invcosh, cuberoot, exp_repro, log_repro, pow_repro
 public :: intrinsic_functions_unit_tests
 
 interface
@@ -36,6 +36,25 @@ interface
     real :: a
       !< log(x) [nondim]
   end function log_repro
+
+  !> Reproducible real power, implemented in submodule MOM_pow.
+  !! Uses a compensated logarithm, product, and exponential with explicit
+  !! special cases and fast paths for squares, reciprocals and repeated roots.
+  !! Results are near roundoff accuracy, but are not guaranteed correctly rounded.
+  !! Requires IEEE binary64 default real, round-to-nearest, gradual underflow,
+  !! and compiler options preserving parentheses and disabling contraction.
+  elemental module function pow_repro(a, b) result(p)
+    real, intent(in) :: a !< Base [nondim]
+    real, intent(in) :: b !< Exponent [nondim]
+    real :: p !< a raised to b [nondim]
+  end function pow_repro
+
+  !> Internal exponential of a high/low argument for the power kernel.
+  elemental module function exp_repro_extended(x, xlo) result(a)
+    real, intent(in) :: x !< Leading part of the argument [nondim]
+    real, intent(in) :: xlo !< Small additive residual of the argument [nondim]
+    real :: a !< exp(x + xlo) [nondim]
+  end function exp_repro_extended
 end interface
 
 real, parameter :: real_mold = 0.

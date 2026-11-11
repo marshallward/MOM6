@@ -2,11 +2,11 @@
 ! See the LICENSE file for licensing information.
 ! SPDX-License-Identifier: Apache-2.0
 
-!> Timing tests for MOM_intrinsic_functions (exp_repro, log_repro)
+!> Timing tests for MOM_intrinsic_functions (exp_repro, log_repro, pow_repro)
 program time_MOM_intrinsic_functions
 
 use, intrinsic :: iso_fortran_env, only : int64, real64
-use MOM_intrinsic_functions, only : exp_repro, log_repro
+use MOM_intrinsic_functions, only : exp_repro, log_repro, pow_repro
 
 implicit none
 
@@ -288,6 +288,77 @@ print '("log adjusted slowdown factor:", t30, f8.2, "x")', &
     (t_log_repro_scalar - t_scalar_baseline) &
       / (t_log_scalar - t_scalar_baseline)
 
+call time_power('general exponents', 0)
+call time_power('eighth roots', 1)
+call time_power('small integer powers', 2)
+
 deallocate(x, x_log, val)
+
+contains
+
+!> Compare power implementations on general, root, and integral-power inputs.
+subroutine time_power(label, category)
+  character(len=*), intent(in) :: label !< Input category label
+  integer, intent(in) :: category !< General (0), root (1), or integer (2)
+  real :: powers(npts), results(npts)
+    ! Exponents and results [nondim]
+  real, volatile :: checksum, sx, sy, sb
+    ! Observable checksum and scalar dependency-chain operands [nondim]
+  real(kind=real64) :: elapsed
+    ! Wall-clock nanoseconds per evaluation [wall-clock nanoseconds]
+  integer(kind=int64) :: start, finish
+    ! Clock counts
+  integer :: method, iteration, k
+  character(len=25), parameter :: names(4) = &
+      [character(len=25) :: 'intrinsic **', 'pow_repro', 'exp_repro(b*log_repro(a))', 'sqrt(sqrt(sqrt(a)))']
+
+  powers(:) = 0.37 + (0.01 * x(:))
+  if (category == 1) powers(:) = 0.125
+  if (category == 2) powers(:) = 3.
+  print '(/,a,a)', '=== power timing: ', label
+  do method=1,4
+    if (method == 4 .and. category /= 1) cycle
+    do iteration=-2,niter
+      if (iteration == 1) call system_clock(count=start)
+      select case (method)
+      case (1)
+        results(:) = x_log(:)**powers(:)
+      case (2)
+        results(:) = pow_repro(x_log(:), powers(:))
+      case (3)
+        results(:) = exp_repro(powers(:) * log_repro(x_log(:)))
+      case (4)
+        results(:) = sqrt(sqrt(sqrt(x_log(:))))
+      end select
+      checksum = results(1 + mod(abs(iteration), npts))
+    enddo
+    call system_clock(count=finish)
+    elapsed = real(finish - start, real64) * t_cycle / (niter * npts)
+    print '(a25,a,f8.2,a,es12.5)', names(method), ' array: ', elapsed, ' ns, check: ', checksum
+
+    do iteration=-2,niter
+      if (iteration == 1) call system_clock(count=start)
+      sx = 1.125
+      sb = powers(1)
+      do k=1,npts
+        select case (method)
+        case (1)
+          sy = sx**sb
+        case (2)
+          sy = pow_repro(sx, sb)
+        case (3)
+          sy = exp_repro(sb * log_repro(sx))
+        case (4)
+          sy = sqrt(sqrt(sqrt(sx)))
+        end select
+        sx = sx + (1.e-7 * (sy - 1.))
+        if (sx > 1.5) sx = sx - 0.5
+      enddo
+    enddo
+    call system_clock(count=finish)
+    elapsed = real(finish - start, real64) * t_cycle / (niter * npts)
+    print '(a25,a,f8.2,a,es12.5)', names(method), ' scalar:', elapsed, ' ns, check: ', sy
+  enddo ! method loop
+end subroutine time_power
 
 end program time_MOM_intrinsic_functions

@@ -21,6 +21,7 @@ use MOM_unit_testing, only : TestSuite
 use MOM_intrinsic_functions, only : exp_repro, log_repro
 use MOM_exp_repro_tests, only : add_exp_repro_tests
 use MOM_log_repro_tests, only : add_log_repro_tests
+use MOM_pow_repro_tests, only : add_pow_repro_tests
 
 implicit none ; private
 
@@ -225,6 +226,7 @@ subroutine run_intrinsic_functions_tests
 
   call add_exp_repro_tests(suite)
   call add_log_repro_tests(suite)
+  call add_pow_repro_tests(suite)
 
   ! exp_repro/log_repro consistency tests
   call suite%add(test_exp_log_inverse_property, "test_exp_log_inverse_property")
