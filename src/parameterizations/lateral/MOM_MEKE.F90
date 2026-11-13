@@ -59,6 +59,7 @@ integer, parameter :: EKE_DBCLIENT = 3 !< Infer EKE using a neural network
 type, public :: MEKE_CS ; private
   logical :: initialized = .false. !< True if this control structure has been initialized.
   ! Parameters
+  integer :: answer_date !< The vintage of the arithmetic used to calculate MEKE vertical structure factors.
   real :: MEKE_FrCoeff  !< Efficiency of conversion of ME into MEKE [nondim]
   real :: MEKE_bhFrCoeff!< Efficiency of conversion of ME into MEKE by the biharmonic dissipation [nondim]
   real :: MEKE_GMcoeff  !< Efficiency of conversion of PE into MEKE [nondim]
@@ -1350,16 +1351,26 @@ pure subroutine MEKE_lengthScales_0d(CS, US, area, beta, depth_tot, Rd_dx, SN, E
   ! gamma_b^2 is the ratio of bottom eddy energy to mean column eddy energy
   ! used in calculating bottom drag
   bottomFac2 = CS%MEKE_CD_SCALE**2
-  ! The 0.8 power is computed as exp(0.8*log(x)) with the reproducible exp and log, since the
-  ! intrinsic power function differs between CPU and GPU in the last bit.
-  if (Lfrict*CS%MEKE_Cb>0.) &
-    bottomFac2 = bottomFac2 + 1./exp_repro(0.8*log_repro( 1. + CS%MEKE_Cb*(Ldeform/Lfrict) ))
+  if (Lfrict*CS%MEKE_Cb>0.) then
+    if (CS%answer_date >= 20261113) then
+      ! Use reproducible exp and log to avoid platform-dependent fractional powers.
+      bottomFac2 = bottomFac2 + 1./exp_repro(0.8*log_repro( 1. + CS%MEKE_Cb*(Ldeform/Lfrict) ))
+    else
+      bottomFac2 = bottomFac2 + 1./( 1. + CS%MEKE_Cb*(Ldeform/Lfrict) )**0.8
+    endif
+  endif
   bottomFac2 = max(bottomFac2, CS%MEKE_min_gamma)
   ! gamma_t^2 is the ratio of barotropic eddy energy to mean column eddy energy
   ! used in the velocity scale for diffusivity
   barotrFac2 = 1.
-  ! The 0.25 power is two square roots, which are correctly rounded on all platforms.
-  if (Lfrict*CS%MEKE_Ct>0.) barotrFac2 = 1. / sqrt(sqrt( 1. + CS%MEKE_Ct*(Ldeform/Lfrict) ))
+  if (Lfrict*CS%MEKE_Ct>0.) then
+    if (CS%answer_date >= 20261113) then
+      ! Compute the quarter power with two correctly rounded square roots.
+      barotrFac2 = 1. / sqrt(sqrt( 1. + CS%MEKE_Ct*(Ldeform/Lfrict) ))
+    else
+      barotrFac2 = 1. / ( 1. + CS%MEKE_Ct*(Ldeform/Lfrict) )**0.25
+    endif
+  endif
   barotrFac2 = max(barotrFac2, CS%MEKE_min_gamma)
   if (CS%use_old_lscale) then
     if (CS%Rd_as_max_scale) then
@@ -1419,6 +1430,7 @@ logical function MEKE_init(Time, G, GV, US, param_file, diag, dbcomms_CS, CS, ME
   character(len=200) :: eke_filename, eke_varname, inputdir
   character(len=16) :: eke_source_str
   integer :: i, j, is, ie, js, je, isd, ied, jsd, jed
+  integer :: default_answer_date ! The default setting for the various ANSWER_DATE flags.
   logical :: laplacian, biharmonic, coldStart
   ! This include declares and sets the variable "version".
 # include "version_variable.h"
@@ -1436,6 +1448,14 @@ logical function MEKE_init(Time, G, GV, US, param_file, diag, dbcomms_CS, CS, ME
                  default=.false.)
   if (.not. MEKE_init) return
   CS%initialized = .true.
+  call get_param(param_file, mdl, "DEFAULT_ANSWER_DATE", default_answer_date, &
+                 "This sets the default value for the various _ANSWER_DATE parameters.", &
+                 default=20261112, do_not_log=.true.)
+  call get_param(param_file, mdl, "MEKE_ANSWER_DATE", CS%answer_date, &
+                 "The vintage of the arithmetic used to calculate MEKE vertical structure factors. "//&
+                 "Values below 20261113 use the original fractional powers. Values of 20261113 "//&
+                 "or later use reproducible exp and log for the 0.8 power and two square roots "//&
+                 "for the 0.25 power.", default=default_answer_date)
   call get_param(param_file, mdl, "MEKE_IN_DYNAMICS", meke_in_dynamics, &
                  "If true, step MEKE forward with the dynamics "// &
                  "otherwise with the tracer timestep.", &
@@ -2540,4 +2560,3 @@ end subroutine MEKE_end
 !! and Arnold first stability theorem. Ocean Modelling, 32, 188--204, http://doi.org/10.1016/j.ocemod.2010.02.001 .
 
 end module MOM_MEKE
-
