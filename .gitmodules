@@ -4,3 +4,6 @@
 [submodule "pkg/GSW-Fortran"]
 	path = pkg/GSW-Fortran
 	url = https://github.com/mom-ocean/GSW-Fortran.git
+[submodule "pkg/test-drive"]
+	path = pkg/test-drive
+	url = https://github.com/fortran-lang/test-drive.git

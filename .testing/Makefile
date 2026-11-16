@@ -278,9 +278,18 @@ $(BUILD)/timing/Makefile: MOM_ACFLAGS += --with-driver=timing_tests
 
 
 # Build executables
+$(BUILD)/unit/test_MOM_string_functions: TESTDRIVE_BUILD = $(abspath $(BUILD)/unit/test-drive)
+$(BUILD)/unit/test_MOM_string_functions: $(BUILD)/unit/test-drive/libtest-drive.a
+
+$(BUILD)/unit/test-drive/libtest-drive.a: $(BUILD)/unit/Makefile FORCE
+	$(MAKE) -C $(BUILD)/unit build-testdrive \
+	  TESTDRIVE_SOURCE=$(abspath $(CODEBASE)/pkg/test-drive) \
+	  TESTDRIVE_BUILD=$(abspath $(BUILD)/unit/test-drive)
+
 .NOTPARALLEL:$(foreach e,$(UNIT_EXECS),$(BUILD)/unit/$(e))
 $(BUILD)/unit/test_%: $(BUILD)/unit/Makefile FORCE
-	cd $(@D) && $(TIME) $(MAKE) $(@F)
+	cd $(@D) && $(TIME) $(MAKE) $(@F) \
+	  $(if $(TESTDRIVE_BUILD),TESTDRIVE_BUILD=$(TESTDRIVE_BUILD))
 
 $(BUILD)/unit/Makefile: \
   $(foreach e,$(UNIT_EXECS),../config_src/drivers/unit_tests/$(e).F90)
