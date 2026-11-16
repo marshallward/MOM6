@@ -28,9 +28,9 @@ Usage
 ``make -j run.unit``
    Run the unit test programs from config_src/drivers/unit_tests in $(WORKSPACE)/work/unit
 
-The string-function unit test uses test-drive, built with CMake using the
-MOM6 unit-test compiler and flags (except coverage instrumentation). Initialize
-the test-only dependency before building unit tests::
+Some unit tests use test-drive, built with CMake using the MOM6 unit-test
+compiler and flags (except coverage instrumentation). Initialize the test-only
+dependency before building unit tests::
 
    git submodule update --init pkg/test-drive
 
