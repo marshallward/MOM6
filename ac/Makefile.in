@@ -26,7 +26,8 @@ FCFLAGS += -I$(TESTDRIVE_BUILD)/include
 LIBS += $(TESTDRIVE_BUILD)/libtest-drive.a
 test_MOM_string_functions.o MOM_string_functions_tests.o \
 test_MOM_array_transform.o MOM_array_transform_tests.o \
-test_numerical_testing_type.o numerical_testing_type_tests.o: $(TESTDRIVE_BUILD)/libtest-drive.a
+test_numerical_testing_type.o numerical_testing_type_tests.o \
+test_MOM_ANN.o MOM_ANN_tests.o: $(TESTDRIVE_BUILD)/libtest-drive.a
 endif
 
 -include Makefile.dep
