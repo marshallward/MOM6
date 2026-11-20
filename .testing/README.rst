@@ -28,6 +28,15 @@ Usage
 ``make -j run.unit``
    Run the unit test programs from config_src/drivers/unit_tests in $(WORKSPACE)/work/unit
 
+Some unit tests use test-drive, built with CMake using the MOM6 unit-test
+compiler and flags (except coverage instrumentation). Initialize the test-only
+dependency before building unit tests::
+
+   git submodule update --init pkg/test-drive
+
+Normal MOM6 builds do not require test-drive or CMake. The existing
+``DO_UNIT_TESTS`` model-startup checks remain available.
+
 ``make -j build.timing``
    Build the timing test programs in config_src/drivers/timing_tests
 

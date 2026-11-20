@@ -277,6 +277,7 @@ jobs:
 
       - name: Compile MOM6 unit tests
         run: |
+          git submodule update --init pkg/test-drive
           make -C .testing -j build/unit/test_MOM_file_parser
           make -C .testing -j build.unit
 

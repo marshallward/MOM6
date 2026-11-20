@@ -21,7 +21,27 @@ LIBS = @LIBS@
 MAKEDEP_FLAGS = @MAKEDEP_FLAGS@
 MAKEDEP_DIRS = @MAKEDEP_DIRS@
 
+ifneq ($(TESTDRIVE_BUILD),)
+FCFLAGS += -I$(TESTDRIVE_BUILD)/include
+LIBS += $(TESTDRIVE_BUILD)/libtest-drive.a
+test_MOM_string_functions.o MOM_string_functions_tests.o \
+test_MOM_array_transform.o MOM_array_transform_tests.o \
+test_numerical_testing_type.o numerical_testing_type_tests.o \
+test_MOM_ANN.o MOM_ANN_tests.o: $(TESTDRIVE_BUILD)/libtest-drive.a
+endif
+
 -include Makefile.dep
+
+.PHONY: build-testdrive
+build-testdrive:
+	@test -f "$(TESTDRIVE_SOURCE)/CMakeLists.txt" || \
+	  { echo "Initialize test-drive: git submodule update --init pkg/test-drive" >&2; exit 1; }
+	cmake -S "$(TESTDRIVE_SOURCE)" -B "$(TESTDRIVE_BUILD)" \
+	  -DCMAKE_Fortran_COMPILER="$(FC)" \
+	  -DCMAKE_Fortran_FLAGS="$(filter-out --coverage -fprofile-arcs -ftest-coverage,$(FCFLAGS))" \
+	  -DCMAKE_BUILD_TYPE=Debug -DCMAKE_Fortran_FLAGS_DEBUG= \
+	  -DBUILD_SHARED_LIBS=OFF -DTESTDRIVE_BUILD_TESTING=OFF
+	cmake --build "$(TESTDRIVE_BUILD)" --target test-drive-lib
 
 # Generate Makefile from template
 Makefile: @srcdir@/ac/Makefile.in config.status
