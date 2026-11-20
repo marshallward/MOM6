@@ -393,8 +393,6 @@ subroutine energetic_PBL(h_3d, u_3d, v_3d, tv, fluxes, visc, dt, Kd_int, G, GV, 
                            intent(in)    :: buoy_flux !< The surface buoyancy flux [Z2 T-3 ~> m2 s-3].
   real, dimension(SZI_(G),SZJ_(G)), &
                            intent(in)    :: BBL_buoy_flux !< The bottom buoyancy flux [Z2 T-3 ~> m2 s-3].
-  ! Waves and stoch_CS are not pointers so that the device column loop can find their mapped copies.
-  ! A disassociated Waves pointer passed by the caller makes Waves absent.
   type(wave_parameters_CS), optional, intent(in) :: Waves !< Waves control structure for Langmuir turbulence
   type(stochastic_CS),     intent(in)    :: stoch_CS  !< The control structure returned by a previous
 
@@ -490,8 +488,10 @@ subroutine energetic_PBL(h_3d, u_3d, v_3d, tv, fluxes, visc, dt, Kd_int, G, GV, 
     BBL_its_col, BBL_count_col    ! The bottom boundary layer iteration count and column count [nondim].
   integer :: i, j, k, is, ie, js, je, nz, ii, jj, iie, jje
   integer :: isb, jsb, ieb, jeb, nii, njj
+  integer :: isd, ied, jsd, jed
 
   is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec ; nz = GV%ke
+  isd = G%isd ; ied = G%ied ; jsd = G%jsd ; jed = G%jed
   nii = merge(ie-is+1, CS%niblock, CS%niblock==0)
   njj = merge(je-js+1, CS%njblock, CS%njblock==0)
 
@@ -515,7 +515,7 @@ subroutine energetic_PBL(h_3d, u_3d, v_3d, tv, fluxes, visc, dt, Kd_int, G, GV, 
   BBL_mixing = ((CS%ePBL_BBL_effic > 0.0) .or. (CS%ePBL_tidal_effic > 0.0) .or. CS%ePBL_BBL_use_mstar)
   do_avg_its = report_avg_its
 
-  ! The column loop zeros the diagnostics it accumulates into.  These two are not set by ePBL.
+  ! These two diagnostics are not set by ePBL, and stay on the host.
   if (CS%TKE_diagnostics .and. BBL_mixing) then
     diag_TKE_BBL_mixing(:,:) = 0.0 ; diag_TKE_BBL_decay(:,:) = 0.0
   endif
@@ -558,6 +558,86 @@ subroutine energetic_PBL(h_3d, u_3d, v_3d, tv, fluxes, visc, dt, Kd_int, G, GV, 
   !$omp   diag_LA_mod, diag_ustar, diff_Kd, max_abs_diff_Kd, diff_hML_depth, &
   !$omp   OBL_its_col, OBL_count_col, BBL_its_col, BBL_count_col)
   !$omp target enter data map(to: CS_tmp1, CS_tmp2)
+
+  ! Zero out diagnostics before accumulation.
+  if (CS%TKE_diagnostics) then
+    do concurrent (j=js:je, i=is:ie)
+      diag_TKE_wind(i,j) = 0.0 ; diag_TKE_MKE(i,j) = 0.0
+      diag_TKE_conv(i,j) = 0.0 ; diag_TKE_forcing(i,j) = 0.0
+      diag_TKE_mixing(i,j) = 0.0 ; diag_TKE_mech_decay(i,j) = 0.0
+      diag_TKE_conv_decay(i,j) = 0.0 !; diag_TKE_unbalanced(i,j) = 0.0
+    enddo
+    if (BBL_mixing) then
+      do concurrent (j=js:je, i=is:ie)
+        diag_TKE_BBL(i,j) = 0.0
+      enddo
+    endif
+  endif
+  if (CS%debug .or. (CS%id_Mixing_Length>0)) then
+    do concurrent (K=1:nz+1, j=jsd:jed, i=isd:ied)
+      diag_Mixing_Length(i,j,K) = 0.0
+    enddo
+  endif
+  if (CS%debug .or. (CS%id_Velocity_Scale>0)) then
+    do concurrent (K=1:nz+1, j=jsd:jed, i=isd:ied)
+      diag_Velocity_Scale(i,j,K) = 0.0
+    enddo
+  endif
+  if (CS%id_Kd_ePBL_col_by_col > 0) then
+    do concurrent (K=1:nz+1, j=jsd:jed, i=isd:ied)
+      diag_Kd_ePBL_col_by_col(i,j,K) = 0.0
+    enddo
+  endif
+  if (report_avg_its) then
+    do concurrent (j=jsd:jed, i=isd:ied)
+      OBL_its_col(i,j) = 0 ; OBL_count_col(i,j) = 0
+      BBL_its_col(i,j) = 0 ; BBL_count_col(i,j) = 0
+    enddo
+  endif
+  if (BBL_mixing) then
+    if (CS%debug .or. (CS%id_BBL_Mix_Length>0)) then
+      do concurrent (K=1:nz+1, j=jsd:jed, i=isd:ied)
+        BBL_Mix_Length(i,j,K) = 0.0
+      enddo
+    endif
+    if (CS%debug .or. (CS%id_BBL_Vel_Scale>0)) then
+      do concurrent (K=1:nz+1, j=jsd:jed, i=isd:ied)
+        BBL_Vel_Scale(i,j,K) = 0.0
+      enddo
+    endif
+    if (CS%id_Kd_BBL > 0) then
+      do concurrent (K=1:nz+1, j=jsd:jed, i=isd:ied)
+        Kd_BBL_3d(i,j,K) = 0.0
+      enddo
+    endif
+    if (CS%id_ustar_BBL > 0) then
+      do concurrent (j=jsd:jed, i=isd:ied)
+        diag_ustar_BBL(i,j) = 0.0
+      enddo
+    endif
+    if (CS%id_BBL_decay_scale > 0) then
+      do concurrent (j=jsd:jed, i=isd:ied)
+        diag_BBL_decay_scale(i,j) = 0.0
+      enddo
+    endif
+  endif
+  if (CS%options_diff > 0) then
+    if (CS%id_opt_diff_Kd_ePBL > 0) then
+      do concurrent (K=1:nz+1, j=jsd:jed, i=isd:ied)
+        diff_Kd(i,j,K) = 0.0
+      enddo
+    endif
+    if (CS%id_opt_maxdiff_Kd_ePBL > 0) then
+      do concurrent (j=jsd:jed, i=isd:ied)
+        max_abs_diff_Kd(i,j) = 0.0
+      enddo
+    endif
+    if (CS%id_opt_diff_hML_depth > 0) then
+      do concurrent (j=jsd:jed, i=isd:ied)
+        diff_hML_depth(i,j) = 0.0
+      enddo
+    endif
+  endif
 
   call thickness_to_dz(h_3d, tv, dz_3d, G, GV, US, is=is, ie=ie, js=js, je=je, do_offload=.true.)
 
@@ -902,48 +982,6 @@ pure subroutine ePBL_block_column(ii, jj, i, j, nib, njb, h_blk, dz_blk, u_blk, 
   integer :: k, nz  ! Vertical index and number of layers
 
   nz = GV%ke
-
-  ! Zero this column's diagnostics, so that land columns are also set.
-  if (CS%TKE_diagnostics) then
-    diag_TKE_wind(i,j) = 0.0 ; diag_TKE_MKE(i,j) = 0.0
-    diag_TKE_conv(i,j) = 0.0 ; diag_TKE_forcing(i,j) = 0.0
-    diag_TKE_mixing(i,j) = 0.0 ; diag_TKE_mech_decay(i,j) = 0.0
-    diag_TKE_conv_decay(i,j) = 0.0
-    if (BBL_mixing) diag_TKE_BBL(i,j) = 0.0
-  endif
-  if (CS%debug .or. (CS%id_Mixing_Length>0)) then
-    do K=1,nz+1 ; diag_Mixing_Length(i,j,K) = 0.0 ; enddo
-  endif
-  if (CS%debug .or. (CS%id_Velocity_Scale>0)) then
-    do K=1,nz+1 ; diag_Velocity_Scale(i,j,K) = 0.0 ; enddo
-  endif
-  if (CS%id_Kd_ePBL_col_by_col > 0) then
-    do K=1,nz+1 ; diag_Kd_ePBL_col_by_col(i,j,K) = 0.0 ; enddo
-  endif
-  if (do_avg_its) then
-    OBL_its_col(i,j) = 0 ; OBL_count_col(i,j) = 0
-    BBL_its_col(i,j) = 0 ; BBL_count_col(i,j) = 0
-  endif
-  if (BBL_mixing) then
-    if (CS%debug .or. (CS%id_BBL_Mix_Length>0)) then
-      do K=1,nz+1 ; BBL_Mix_Length(i,j,K) = 0.0 ; enddo
-    endif
-    if (CS%debug .or. (CS%id_BBL_Vel_Scale>0)) then
-      do K=1,nz+1 ; BBL_Vel_Scale(i,j,K) = 0.0 ; enddo
-    endif
-    if (CS%id_Kd_BBL > 0) then
-      do K=1,nz+1 ; Kd_BBL_3d(i,j,K) = 0.0 ; enddo
-    endif
-    if (CS%id_ustar_BBL > 0) diag_ustar_BBL(i,j) = 0.0
-    if (CS%id_BBL_decay_scale > 0) diag_BBL_decay_scale(i,j) = 0.0
-  endif
-  if (CS%options_diff > 0) then
-    if (CS%id_opt_diff_Kd_ePBL > 0) then
-      do K=1,nz+1 ; diff_Kd(i,j,K) = 0.0 ; enddo
-    endif
-    if (CS%id_opt_maxdiff_Kd_ePBL > 0) max_abs_diff_Kd(i,j) = 0.0
-    if (CS%id_opt_diff_hML_depth > 0) diff_hML_depth(i,j) = 0.0
-  endif
 
   SpV_dt(:) = 0.0
   if ((dt > 0.0) .and. GV%Boussinesq .or. .not.allocated(tv%SpV_avg)) then
