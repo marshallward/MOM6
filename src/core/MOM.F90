@@ -236,7 +236,7 @@ type, public :: MOM_control_struct ; private
   real :: time_in_thermo_cycle !< The running time of the current time-stepping
                     !! cycle in calls that step the thermodynamics [T ~> s].
 
-  type(ocean_grid_type) :: G_in                   !< Input grid metric
+  type(ocean_grid_type), allocatable :: G_in      !< Input grid metric
   type(ocean_grid_type), pointer :: G => NULL()   !< Model grid metric
   logical :: rotate_index = .false.   !< True if index map is rotated
   logical :: homogenize_forcings = .false. !< True if all inputs are homogenized
@@ -2929,6 +2929,7 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, &
 #else
   symmetric = .false.
 #endif
+  allocate(CS%G_in)
   G_in => CS%G_in
 #ifdef STATIC_MEMORY_
   call MOM_domains_init(G_in%domain, param_file, symmetric=symmetric, &
@@ -3462,6 +3463,25 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, &
     else ; CS%G%Domain_aux => CS%G%Domain ; endif
     G%ke = GV%ke
   endif
+
+  !$omp target enter data map(to: CS%G_in)
+  if (CS%rotate_index) then
+    !$omp target enter data map(to: CS%G)
+  endif
+  !$omp target enter data map(to: G%dxT, G%dxCu, G%dxCv, G%dxBu)
+  !$omp target enter data map(to: G%dyT, G%dyCu, G%dyCv, G%dyBu)
+  !$omp target enter data map(to: G%dx_Cv, G%dy_Cu)
+  !$omp target enter data map(to: G%IdxT, G%IdxCu, G%IdxCv, G%IdxBu)
+  !$omp target enter data map(to: G%IdyT, G%IdyCu, G%IdyCv, G%IdyBu)
+  !$omp target enter data map(to: G%mask2dBu, G%mask2dT)
+  !$omp target enter data map(to: G%areaT, G%areaCu, G%areaCv)
+  !$omp target enter data map(to: G%IareaT, G%IareaCu, G%IareaCv, G%IareaBu)
+  !$omp target enter data map(to: G%bathyT)
+  !$omp target enter data map(to: G%CoriolisBu, G%Coriolis2Bu)
+  !$omp target enter data map(to: G%mask2dCu, G%mask2dCv)
+  !$omp target enter data map(to: G%OBCmaskCu, G%OBCmaskCv)
+  !$omp target enter data map(to: G%IdxCu_OBCmask, G%IdyCv_OBCmask)
+  !$omp target enter data map(to: G%meanSL)
 
   ! At this point, all user-modified initialization code has been called.  The
   ! remainder of this subroutine is controlled by the parameters that have
@@ -4735,6 +4755,24 @@ subroutine MOM_end(CS)
   if (associated(CS%OBC)) call open_boundary_end(CS%OBC)
 
   call verticalGridEnd(CS%GV)
+  !$omp target exit data map(delete: CS%G%dxT, CS%G%dxCu, CS%G%dxCv, CS%G%dxBu)
+  !$omp target exit data map(delete: CS%G%dyT, CS%G%dyCu, CS%G%dyCv, CS%G%dyBu)
+  !$omp target exit data map(delete: CS%G%dx_Cv, CS%G%dy_Cu)
+  !$omp target exit data map(delete: CS%G%IdxT, CS%G%IdxCu, CS%G%IdxCv, CS%G%IdxBu)
+  !$omp target exit data map(delete: CS%G%IdyT, CS%G%IdyCu, CS%G%IdyCv, CS%G%IdyBu)
+  !$omp target exit data map(delete: CS%G%mask2dBu, CS%G%mask2dT)
+  !$omp target exit data map(delete: CS%G%areaT, CS%G%areaCu, CS%G%areaCv)
+  !$omp target exit data map(delete: CS%G%IareaT, CS%G%IareaCu, CS%G%IareaCv, CS%G%IareaBu)
+  !$omp target exit data map(delete: CS%G%bathyT)
+  !$omp target exit data map(delete: CS%G%CoriolisBu, CS%G%Coriolis2Bu)
+  !$omp target exit data map(delete: CS%G%mask2dCu, CS%G%mask2dCv)
+  !$omp target exit data map(delete: CS%G%OBCmaskCu, CS%G%OBCmaskCv)
+  !$omp target exit data map(delete: CS%G%IdxCu_OBCmask, CS%G%IdyCv_OBCmask)
+  !$omp target exit data map(delete: CS%G%meanSL)
+  if (CS%rotate_index) then
+    !$omp target exit data map(delete: CS%G)
+  endif
+  !$omp target exit data map(delete: CS%G_in)
   call MOM_grid_end(CS%G)
 
   if (CS%debug .or. CS%G%symmetric) &
