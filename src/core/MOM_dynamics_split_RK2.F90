@@ -244,7 +244,7 @@ type, public :: MOM_dyn_split_RK2_CS ; private
   !> A pointer to the continuity control structure
   type(continuity_CS) :: continuity_CSp
   !> The CoriolisAdv control structure
-  type(CoriolisAdv_CS) :: CoriolisAdv
+  type(CoriolisAdv_CS), allocatable :: CoriolisAdv
   !> A pointer to the PressureForce control structure
   type(PressureForce_CS) :: PressureForce_CSp
   !> A pointer to a structure containing interface height diffusivities
@@ -1248,6 +1248,7 @@ subroutine register_restarts_dyn_split_RK2(HI, GV, US, param_file, CS, restart_C
     return
   endif
   allocate(CS)
+  !$omp target enter data map(alloc: CS)
 
   ALLOC_(CS%diffu(IsdB:IedB,jsd:jed,nz)) ; CS%diffu(:,:,:) = 0.0
   ALLOC_(CS%diffv(isd:ied,JsdB:JedB,nz)) ; CS%diffv(:,:,:) = 0.0
@@ -1593,9 +1594,13 @@ subroutine initialize_dyn_split_RK2(u, v, h, tv, uh, vh, eta, Time, G, GV, US, p
 
   call continuity_init(Time, G, GV, US, param_file, diag, CS%continuity_CSp, CS%OBC)
   cont_stencil = continuity_stencil(CS%continuity_CSp)
+
+  allocate(CS%CoriolisAdv)
+  !$omp target enter data map(alloc: CS%CoriolisAdv)
   call CoriolisAdv_init(Time, G, GV, US, param_file, diag, CS%ADp, CS%CoriolisAdv)
   cor_stencil = CoriolisAdv_stencil(CS%CoriolisAdv)
   dyn_h_stencil = max(cont_stencil, CoriolisAdv_stencil(CS%CoriolisAdv))
+
   if (CS%calculate_SAL) call SAL_init(h, tv, G, GV, US, param_file, CS%SAL_CSp, restart_CS)
   if (CS%use_tides) call tidal_forcing_init(Time, G, US, param_file, CS%tides_CSp)
   if (CS%use_HA) then
@@ -1939,6 +1944,8 @@ subroutine end_dyn_split_RK2(CS)
   if (CS%calculate_SAL) call SAL_end(CS%SAL_CSp)
   if (CS%use_tides) call tidal_forcing_end(CS%tides_CSp)
   call CoriolisAdv_end(CS%CoriolisAdv)
+  !$omp target exit data map(delete: CS%CoriolisAdv)
+  deallocate(CS%CoriolisAdv)
 
   DEALLOC_(CS%diffu) ; DEALLOC_(CS%diffv)
   DEALLOC_(CS%CAu)   ; DEALLOC_(CS%CAv)
@@ -1958,6 +1965,7 @@ subroutine end_dyn_split_RK2(CS)
   call dealloc_BT_cont_type(CS%BT_cont)
   deallocate(CS%AD_pred)
 
+  !$omp target exit data map(delete: CS)
   deallocate(CS)
 end subroutine end_dyn_split_RK2
 

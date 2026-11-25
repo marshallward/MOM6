@@ -2,6 +2,8 @@
 ! See the LICENSE file for licensing information.
 ! SPDX-License-Identifier: Apache-2.0
 
+#include "do_concurrent_compat.h"
+
 !> Accelerations due to the Coriolis force and momentum advection
 module MOM_CoriolisAdv
 
@@ -178,7 +180,38 @@ subroutine CorAdCalc(u, v, h, uh, vh, CAu, CAv, OBC, AD, G, GV, US, CS, pbv, Wav
   nkk = CS%nkblock
   if (nkk == 0) nkk = GV%ke
 
+  if (CS%Coriolis_En_Dis) then
+    !$omp target enter data map(to: pbv)
+    !$omp target enter data map(to: pbv%por_face_areaU, pbv%por_face_areaV)
+  endif
+
+  if (present(Waves)) then
+    if (associated(Waves)) then
+      if (Waves%Stokes_VF) then
+        !$omp target enter data map(to: Waves)
+        !$omp target enter data map(to: Waves%us_x, Waves%us_y)
+      endif
+    endif
+  endif
+
+  ! Preserve untouched halo values.
+  !$omp target data map(to: u, v, h, uh, vh, AD) map(tofrom: CAu, CAv)
   call CorAdCalc_block(u, v, h, uh, vh, CAu, CAv, OBC, AD, G, GV, US, CS, nkk, pbv, Waves)
+  !$omp end target data
+
+  if (CS%Coriolis_En_Dis) then
+    !$omp target exit data map(delete: pbv%por_face_areaU, pbv%por_face_areaV)
+    !$omp target exit data map(delete: pbv)
+  endif
+
+  if (present(Waves)) then
+    if (associated(Waves)) then
+      if (Waves%Stokes_VF) then
+        !$omp target exit data map(delete: Waves%us_x, Waves%us_y)
+        !$omp target exit data map(delete: Waves)
+      endif
+    endif
+  endif
 end subroutine CorAdCalc
 
 
@@ -333,11 +366,18 @@ subroutine CorAdCalc_block(u, v, h, uh, vh, CAu, CAv, OBC, AD, G, GV, US, CS, nk
     Is_q = G%IscB - 1 ; Ie_q = G%IecB + 1 ; Js_q = G%JscB - 1 ; Je_q = G%JecB + 1
   endif
 
-  do j=Js_q,Je_q+1 ; do I=Is_q,Ie_q+1
+  !$omp target enter data map(alloc: Area_h, Area_q, hArea_u, hArea_v)
+  !$omp target enter data map(alloc: dvdx, dudy)
+  !$omp target enter data map(alloc: rel_vort, abs_vort, q, Ih_q)
+  !$omp target enter data map(alloc: KE, KEx, KEy)
+
+  do concurrent (j=Js_q:Je_q+1, I=Is_q:Ie_q+1)
     Area_h(i,j) = G%mask2dT(i,j) * G%areaT(i,j)
-  enddo ; enddo
+  enddo
 
   if (associated(OBC)) then
+    !$omp target update from(Area_h)
+
     do n=1,OBC%number_of_segments
       if (.not. OBC%segment(n)%on_pe) cycle
       I = OBC%segment(n)%HI%IsdB ; J = OBC%segment(n)%HI%JsdB
@@ -359,17 +399,57 @@ subroutine CorAdCalc_block(u, v, h, uh, vh, CAu, CAv, OBC, AD, G, GV, US, CS, nk
         enddo
       endif
     enddo
+
+    !$omp target update to(Area_h)
   endif
 
-  do J=Js_q,Je_q ; do I=Is_q,Ie_q
+  do concurrent (J=Js_q:Je_q, I=Is_q:Ie_q)
     Area_q(i,j) = (Area_h(i,j) + Area_h(i+1,j+1)) + &
                   (Area_h(i+1,j) + Area_h(i,j+1))
-  enddo ; enddo
+  enddo
 
   Stokes_VF = .false.
   if (present(Waves)) then ; if (associated(Waves)) then
     Stokes_VF = Waves%Stokes_VF
   endif ; endif
+
+  if (Stokes_VF) then
+    if (CS%id_CAuS>0 .or. CS%id_CAvS>0) then
+      !$omp target enter data map(alloc: dvSdx, duSdy, stk_vort, qS, CAuS, CAvS)
+    endif
+  endif
+
+  if (CS%Coriolis_En_Dis) then
+    !$omp target enter data map(alloc: uh_center, vh_center, uh_min, uh_max, vh_min, vh_max)
+  endif
+
+  if (CS%id_rv > 0) then
+    !$omp target enter data map(alloc: RV)
+  endif
+  if (CS%id_PV > 0) then
+    !$omp target enter data map(alloc: PV)
+  endif
+  if (associated(AD%rv_x_v) .or. associated(AD%rv_x_u)) then
+    !$omp target enter data map(alloc: q2)
+  endif
+
+  if (associated(AD%gradKEu)) then
+    !$omp target enter data map(alloc: AD%gradKEu)
+  endif
+  if (associated(AD%gradKEv)) then
+    !$omp target enter data map(alloc: AD%gradKEv)
+  endif
+  if (associated(AD%rv_x_u)) then
+    !$omp target enter data map(alloc: AD%rv_x_u)
+  endif
+  if (associated(AD%rv_x_v)) then
+    !$omp target enter data map(alloc: AD%rv_x_v)
+  endif
+
+  if ((CS%Coriolis_Scheme == ARAKAWA_HSU90) .or. &
+      (CS%Coriolis_Scheme == ARAKAWA_LAMB81) .or. (CS%Coriolis_Scheme == AL_BLEND)) then
+    !$omp target enter data map(alloc: a, b, c, d, ep_u, ep_v)
+  endif
 
   ! Hoist AL_BLEND k-independent scalars out of the block loop.
   Fe_m2 = 0. ; rat_lin = 0.
@@ -395,62 +475,67 @@ subroutine CorAdCalc_block(u, v, h, uh, vh, CAu, CAv, OBC, AD, G, GV, US, CS, nk
     ! First calculate the contributions to the circulation around the q-point.
     if (Stokes_VF) then
       if (CS%id_CAuS>0 .or. CS%id_CAvS>0) then
-        do kk=1,kke ; do J=Js_q,Je_q ; do I=Is_q,Ie_q
+        do concurrent (kk=1:kke, J=Js_q:Je_q, I=Is_q:Ie_q) DO_LOCALITY(local(k))
           k = ksb + kk - 1
           dvSdx(I,J,kk) = (-Waves%us_y(i+1,J,k) * G%dyCv(i+1,J)) &
               - (-Waves%us_y(i,J,k) * G%dyCv(i,J))
           duSdy(I,J,kk) = (-Waves%us_x(I,j+1,k) * G%dxCu(I,j+1)) &
               - (-Waves%us_x(I,j,k) * G%dxCu(I,j))
-        enddo ; enddo ; enddo
+        enddo
       endif
       if (.not. Waves%Passive_Stokes_VF) then
-        do kk=1,kke ; do J=Js_q,Je_q ; do I=Is_q,Ie_q
+        do concurrent (kk=1:kke, J=Js_q:Je_q, I=Is_q:Ie_q) DO_LOCALITY(local(k))
           k = ksb + kk - 1
           dvdx(I,J,kk) = ((v(i+1,J,k) - Waves%us_y(i+1,J,k)) * G%dyCv(i+1,J)) &
               - ((v(i,J,k) - Waves%us_y(i,J,k)) * G%dyCv(i,J))
           dudy(I,J,kk) = ((u(I,j+1,k) - Waves%us_x(I,j+1,k)) * G%dxCu(I,j+1)) &
               - ((u(I,j,k) - Waves%us_x(I,j,k)) * G%dxCu(I,j))
-        enddo ; enddo ; enddo
+        enddo
       else
-        do kk=1,kke ; do J=Js_q,Je_q ; do I=Is_q,Ie_q
+        do concurrent (kk=1:kke, J=Js_q:Je_q, I=Is_q:Ie_q) DO_LOCALITY(local(k))
           k = ksb + kk - 1
           dvdx(I,J,kk) = (v(i+1,J,k) * G%dyCv(i+1,J)) - (v(i,J,k) * G%dyCv(i,J))
           dudy(I,J,kk) = (u(I,j+1,k) * G%dxCu(I,j+1)) - (u(I,j,k) * G%dxCu(I,j))
-        enddo ; enddo ; enddo
+        enddo
       endif
     else
-      do kk=1,kke ; do J=Js_q,Je_q ; do I=Is_q,Ie_q
+      do concurrent (kk=1:kke, J=Js_q:Je_q, I=Is_q:Ie_q) DO_LOCALITY(local(k))
         k = ksb + kk - 1
         dvdx(I,J,kk) = (v(i+1,J,k) * G%dyCv(i+1,J)) - (v(i,J,k) * G%dyCv(i,J))
         dudy(I,J,kk) = (u(I,j+1,k) * G%dxCu(I,j+1)) - (u(I,j,k) * G%dxCu(I,j))
-      enddo ; enddo ; enddo
+      enddo
     endif
 
-    do kk=1,kke ; do J=Js_q,Je_q ; do i=Is_q,Ie_q+1
+    do concurrent (kk=1:kke, J=Js_q:Je_q, i=Is_q:Ie_q+1) DO_LOCALITY(local(k))
       k = ksb + kk - 1
       hArea_v(i,J,kk) = 0.5 * ((Area_h(i,j) * h(i,j,k)) + (Area_h(i,j+1) * h(i,j+1,k)))
-    enddo ; enddo ; enddo
+    enddo
 
-    do kk=1,kke ; do j=Js_q,Je_q+1 ; do I=Is_q,Ie_q
+    do concurrent (kk=1:kke, j=Js_q:Je_q+1, I=Is_q:Ie_q) DO_LOCALITY(local(k))
       k = ksb + kk - 1
       hArea_u(I,j,kk) = 0.5 * ((Area_h(i,j) * h(i,j,k)) + (Area_h(i+1,j) * h(i+1,j,k)))
-    enddo ; enddo ; enddo
+    enddo
 
     if (CS%Coriolis_En_Dis) then
-      do kk=1,kke ; do j=Jsq,Jeq+1 ; do I=is-1,ie
+      do concurrent (kk=1:kke, J=Jsq:Jeq+1, I=is-1:ie) DO_LOCALITY(local(k))
         k = ksb + kk - 1
         uh_center(I,j,kk) = 0.5 * ((G%dy_Cu(I,j) * pbv%por_face_areaU(I,j,k)) * u(I,j,k)) * (h(i,j,k) + h(i+1,j,k))
-      enddo ; enddo ; enddo
+      enddo
 
-      do kk=1,kke ; do J=js-1,je ; do i=Isq,Ieq+1
+      do concurrent (kk=1:kke, J=js-1:je, i=Isq:Ieq+1) DO_LOCALITY(local(k))
         k = ksb + kk - 1
         vh_center(i,J,kk) = 0.5 * ((G%dx_Cv(i,J) * pbv%por_face_areaV(i,J,k)) * v(i,J,k)) * (h(i,j,k) + h(i,j+1,k))
-      enddo ; enddo ; enddo
+      enddo
     endif
 
     ! Adjust circulation components to relative vorticity and thickness projected onto
     ! velocity points on open boundaries.
     if (associated(OBC)) then
+      !$omp target update from(dvdx, dudy, hArea_u, hArea_v)
+      if (CS%Coriolis_En_Dis) then
+        !$omp target update from(uh_center, vh_center)
+      endif
+
       do kk=1,kke
         k = ksb + kk - 1
 
@@ -590,43 +675,52 @@ subroutine CorAdCalc_block(u, v, h, uh, vh, CAu, CAv, OBC, AD, G, GV, US, CS, nk
           endif
         enddo
       enddo
+
+      !$omp target update to(dvdx, dudy, hArea_u, hArea_v)
+      if (CS%Coriolis_En_Dis) then
+        !$omp target update to(uh_center, vh_center)
+      endif
     endif
 
     if (CS%no_slip) then
-      do kk=1,kke ; do J=Js_q,Je_q ; do I=Is_q,Ie_q
+      do concurrent (kk=1:kke, J=Js_q:Je_q, I=Is_q:Ie_q)
         rel_vort(I,J,kk) = (2. - G%mask2dBu(I,J)) * (dvdx(I,J,kk) - dudy(I,J,kk)) * G%IareaBu(I,J)
-      enddo ; enddo ; enddo
+      enddo
 
       if (Stokes_VF) then
         if (CS%id_CAuS>0 .or. CS%id_CAvS>0) then
-          do kk=1,kke ; do J=Jsq-1,Jeq+1 ; do I=Isq-1,Ieq+1
+          do concurrent (kk=1:kke, J=Jsq-1:Jeq+1, I=Isq-1:Ieq+1)
             stk_vort(I,J,kk) = (2. - G%mask2dBu(I,J)) * (dvSdx(I,J,kk) - duSdy(I,J,kk)) * G%IareaBu(I,J)
-          enddo ; enddo ; enddo
+          enddo
         endif
       endif
     else
-      do kk=1,kke ; do J=Js_q,Je_q ; do I=Is_q,Ie_q
+      do concurrent (kk=1:kke, J=Js_q:Je_q, I=Is_q:Ie_q)
         rel_vort(I,J,kk) = G%mask2dBu(I,J) * (dvdx(I,J,kk) - dudy(I,J,kk)) * G%IareaBu(I,J)
-      enddo ; enddo ; enddo
+      enddo
 
       if (Stokes_VF) then
         if (CS%id_CAuS>0 .or. CS%id_CAvS>0) then
-          do kk=1,kke ; do J=Jsq-1,Jeq+1 ; do I=Isq-1,Ieq+1
-            stk_vort(I,J,kk) = (2.0 - G%mask2dBu(I,J)) * (dvSdx(I,J,kk) - duSdy(I,J,kk)) * G%IareaBu(I,J)
-          enddo ; enddo ; enddo
+          do concurrent (kk=1:kke, J=Jsq-1:Jeq+1, I=Isq-1:Ieq+1)
+            stk_vort(I,J,kk) = (2. - G%mask2dBu(I,J)) * (dvSdx(I,J,kk) - duSdy(I,J,kk)) * G%IareaBu(I,J)
+          enddo
         endif
       endif
     endif
 
-    do kk=1,kke ; do J=Js_q,Je_q ; do I=Is_q,Ie_q
+    do concurrent (kk=1:kke, J=Js_q:Je_q, I=Is_q:Ie_q)
       abs_vort(I,J,kk) = G%CoriolisBu(I,J) + rel_vort(I,J,kk)
-    enddo ; enddo ; enddo
+    enddo
 
-    do kk=1,kke ; do J=Js_q,Je_q ; do I=Is_q,Ie_q
+    do concurrent (kk=1:kke, J=Js_q:Je_q, I=Is_q:Ie_q) DO_LOCALITY(local(hArea_q))
       hArea_q = (hArea_u(I,j,kk) + hArea_u(I,j+1,kk)) + (hArea_v(i,J,kk) + hArea_v(i+1,J,kk))
       Ih_q(I,J,kk) = Area_q(I,J) / (hArea_q + vol_neglect)
       q(I,J,kk) = abs_vort(I,J,kk) * Ih_q(I,J,kk)
-    enddo ; enddo ; enddo
+    enddo
+
+    if (use_weno) then
+      !$omp target update from(q, Ih_q, abs_vort, hArea_u, hArea_v, Area_q)
+    endif
 
     ! NOTE: `h_q` is only used by WENO, with redundant hArea_q calculation.
     ! It may be preferable to use two full kernels under if-else.
@@ -639,30 +733,30 @@ subroutine CorAdCalc_block(u, v, h, uh, vh, CAu, CAv, OBC, AD, G, GV, US, CS, nk
 
     if (Stokes_VF) then
       if (CS%id_CAuS>0 .or. CS%id_CAvS>0) then
-        do kk=1,kke ; do J=js-1,Jeq ; do I=is-1,Ieq
+        do concurrent (kk=1:kke, J=js-1:Jeq, I=is-1:Ieq)
           qS(I,J,kk) = stk_vort(I,J,kk) * Ih_q(I,J,kk)
-        enddo ; enddo ; enddo
+        enddo
       endif
     endif
 
     if (CS%id_rv > 0) then
-      do kk=1,kke ; do J=Jsq-1,Jeq+1 ; do I=Isq-1,Ieq+1
+      do concurrent (kk=1:kke, J=Jsq-1:Jeq+1, I=Isq-1:Ieq+1) DO_LOCALITY(local(k))
         k = ksb + kk - 1
         RV(I,J,k) = rel_vort(I,J,kk)
-      enddo ; enddo ; enddo
+      enddo
     endif
 
     if (CS%id_PV > 0) then
-      do kk=1,kke ; do J=Jsq-1,Jeq+1 ; do I=Isq-1,Ieq+1
+      do concurrent (kk=1:kke, J=Jsq-1:Jeq+1, I=Isq-1:Ieq+1) DO_LOCALITY(local(k))
         k = ksb + kk - 1
         PV(I,J,k) = q(I,J,kk)
-      enddo ; enddo ; enddo
+      enddo
     endif
 
     if (associated(AD%rv_x_v) .or. associated(AD%rv_x_u)) then
-      do kk=1,kke ; do J=Jsq-1,Jeq+1 ; do I=Isq-1,Ieq+1
+      do concurrent (kk=1:kke, J=Jsq-1:Jeq+1, I=Isq-1:Ieq+1)
         q2(I,J,kk) = rel_vort(I,J,kk) * Ih_q(I,J,kk)
-      enddo ; enddo ; enddo
+      enddo
     endif
 
     !   a, b, c, and d are combinations of neighboring potential
@@ -670,26 +764,27 @@ subroutine CorAdCalc_block(u, v, h, uh, vh, CAu, CAv, OBC, AD, G, GV, US, CS, nk
     ! scheme.  All are defined at u grid points.
 
     if (CS%Coriolis_Scheme == ARAKAWA_HSU90) then
-      do kk=1,kke ; do j=Jsq,Jeq+1 ; do I=is-1,Ieq
+      do concurrent (kk=1:kke, j=Jsq:Jeq+1, I=is-1:Ieq)
         a(I,j,kk) = (q(I,J,kk) + (q(I+1,J,kk) + q(I,J-1,kk))) * C1_12
         d(I,j,kk) = ((q(I,J,kk) + q(I+1,J-1,kk)) + q(I,J-1,kk)) * C1_12
-      enddo ; enddo ; enddo
+      enddo
 
-      do kk=1,kke ; do j=Jsq,Jeq+1 ; do I=Isq,Ieq
+      do concurrent (kk=1:kke, j=Jsq:Jeq+1, I=Isq:Ieq)
         b(I,j,kk) = (q(I,J,kk) + (q(I-1,J,kk) + q(I,J-1,kk))) * C1_12
         c(I,j,kk) = ((q(I,J,kk) + q(I-1,J-1,kk)) + q(I,J-1,kk)) * C1_12
-      enddo ; enddo ; enddo
+      enddo
     elseif (CS%Coriolis_Scheme == ARAKAWA_LAMB81) then
-      do kk=1,kke ; do j=Jsq,Jeq+1 ; do I=Isq,Ieq+1
+      do concurrent (kk=1:kke, j=Jsq:Jeq+1, I=Isq:Ieq+1)
         a(I-1,j,kk) = (2. * (q(I,J,kk) + q(I-1,J-1,kk)) + (q(I-1,J,kk) + q(I,J-1,kk))) * C1_24
         d(I-1,j,kk) = ((q(I,J,kk) + q(I-1,J-1,kk)) + 2. * (q(I-1,J,kk) + q(I,J-1,kk))) * C1_24
         b(I,j,kk) =   ((q(I,J,kk) + q(I-1,J-1,kk)) + 2. * (q(I-1,J,kk) + q(I,J-1,kk))) * C1_24
         c(I,j,kk) =   (2. * (q(I,J,kk) + q(I-1,J-1,kk)) + (q(I-1,J,kk) + q(I,J-1,kk))) * C1_24
         ep_u(i,j,kk) = ((q(I,J,kk) - q(I-1,J-1,kk)) + (q(I-1,J,kk) - q(I,J-1,kk))) * C1_24
         ep_v(i,j,kk) = (-(q(I,J,kk) - q(I-1,J-1,kk)) + (q(I-1,J,kk) - q(I,J-1,kk))) * C1_24
-      enddo ; enddo ; enddo
+      enddo
     elseif (CS%Coriolis_Scheme == AL_BLEND) then
-      do kk=1,kke ; do j=Jsq,Jeq+1 ; do I=Isq,Ieq+1
+      do concurrent (kk=1:kke, j=Jsq:Jeq+1, I=Isq:Ieq+1) &
+          DO_LOCALITY(local(min_Ihq, max_Ihq, rat_m1, AL_wt, Sad_wt))
         min_Ihq = MIN(Ih_q(I-1,J-1,kk), Ih_q(I,J-1,kk), Ih_q(I-1,J,kk), Ih_q(I,J,kk))
         max_Ihq = MAX(Ih_q(I-1,J-1,kk), Ih_q(I,J-1,kk), Ih_q(I-1,J,kk), Ih_q(I,J,kk))
 
@@ -727,14 +822,14 @@ subroutine CorAdCalc_block(u, v, h, uh, vh, CAu, CAv, OBC, AD, G, GV, US, CS, nk
                          2. * (q(I,J,kk) + q(I-1,J-1,kk)) ) * C1_24
         ep_u(i,j,kk) = AL_wt  * ((q(I,J,kk) - q(I-1,J-1,kk)) + (q(I-1,J,kk) - q(I,J-1,kk))) * C1_24
         ep_v(i,j,kk) = AL_wt * (-(q(I,J,kk) - q(I-1,J-1,kk)) + (q(I-1,J,kk) - q(I,J-1,kk))) * C1_24
-      enddo ; enddo ; enddo
+      enddo
     endif
 
     if (CS%Coriolis_En_Dis) then
     !  c1 = 1.0-1.5*RANGE ; c2 = 1.0-RANGE ; c3 = 2.0 ; slope = 0.5
       c1 = 1.0-1.5*0.5 ; c2 = 1.0-0.5 ; c3 = 2.0 ; slope = 0.5
 
-      do kk=1,kke ; do j=Jsq,Jeq+1 ; do I=is-1,ie
+      do concurrent (kk=1:kke, j=Jsq:Jeq+1, I=is-1:ie) DO_LOCALITY(local(k, uhc, uhm))
         k = ksb + kk - 1
 
         uhc = uh_center(I,j,kk)
@@ -756,9 +851,9 @@ subroutine CorAdCalc_block(u, v, h, uh, vh, CAu, CAv, OBC, AD, G, GV, US, CS, nk
         else
           uh_max(I,j,kk) = uhm ; uh_min(I,j,kk) = uhc
         endif
-      enddo ; enddo ; enddo
+      enddo
 
-      do kk=1,kke ; do J=js-1,je ; do i=Isq,Ieq+1
+      do concurrent (kk=1:kke, J=js-1:je, i=Isq:Ieq+1) DO_LOCALITY(local(k, vhc, vhm))
         k = ksb + kk - 1
 
         vhc = vh_center(i,J,kk)
@@ -780,7 +875,7 @@ subroutine CorAdCalc_block(u, v, h, uh, vh, CAu, CAv, OBC, AD, G, GV, US, CS, nk
         else
           vh_max(i,J,kk) = vhm ; vh_min(i,J,kk) = vhc
         endif
-      enddo ; enddo ; enddo
+      enddo
     endif
 
     ! Calculate KE and the gradient of KE
@@ -792,7 +887,7 @@ subroutine CorAdCalc_block(u, v, h, uh, vh, CAu, CAv, OBC, AD, G, GV, US, CS, nk
     if (CS%Coriolis_Scheme == SADOURNY75_ENERGY) then
       if (CS%Coriolis_En_Dis) then
         ! Energy dissipating biased scheme, Hallberg 200x
-        do kk=1,kke ; do j=js,je ; do I=Isq,Ieq
+        do concurrent (kk=1:kke, j=js:je, I=Isq:Ieq) DO_LOCALITY(local(k, temp1, temp2))
           k = ksb + kk - 1
 
           if (q(I,J,kk) * u(I,j,k) == 0.0) then
@@ -812,36 +907,37 @@ subroutine CorAdCalc_block(u, v, h, uh, vh, CAu, CAv, OBC, AD, G, GV, US, CS, nk
             temp2 = q(I,J-1,kk) * (vh_min(i,j-1,kk) + vh_min(i+1,j-1,kk))
           endif
           CAu(I,j,k) = 0.25 * G%IdxCu(I,j) * (temp1 + temp2)
-        enddo ; enddo ; enddo
+        enddo
       else
         ! Energy conserving scheme, Sadourny 1975
-        do kk=1,kke ; do j=js,je ; do I=Isq,Ieq
+        do concurrent (kk=1:kke, j=js:je, I=Isq:Ieq) DO_LOCALITY(local(k))
           k = ksb + kk - 1
           CAu(I,j,k) = 0.25 * &
               ((q(I,J,kk) * (vh(i+1,J,k) + vh(i,J,k))) &
                + (q(I,J-1,kk) * (vh(i,J-1,k) + vh(i+1,J-1,k)))) * G%IdxCu(I,j)
-        enddo ; enddo ; enddo
+        enddo
       endif
     elseif (CS%Coriolis_Scheme == SADOURNY75_ENSTRO) then
-      do kk=1,kke ; do j=js,je ; do I=Isq,Ieq
+      do concurrent (kk=1:kke, j=js:je, I=Isq:Ieq) DO_LOCALITY(local(k))
         k = ksb + kk - 1
         CAu(I,j,k) = 0.125 * (G%IdxCu(I,j) * (q(I,J,kk) + q(I,J-1,kk))) * &
             ((vh(i+1,J,k) + vh(i,J,k)) + (vh(i,J-1,k) + vh(i+1,J-1,k)))
-      enddo ; enddo ; enddo
+      enddo
     elseif ((CS%Coriolis_Scheme == ARAKAWA_HSU90) .or. &
             (CS%Coriolis_Scheme == ARAKAWA_LAMB81) .or. &
             (CS%Coriolis_Scheme == AL_BLEND)) then
       ! (Global) Energy and (Local) Enstrophy conserving, Arakawa & Hsu 1990
-      do kk=1,kke ; do j=js,je ; do I=Isq,Ieq
+      do concurrent (kk=1:kke, j=js:je, I=Isq:Ieq) DO_LOCALITY(local(k))
         k = ksb + kk - 1
         CAu(I,j,k) = (((a(I,j,kk) * vh(i+1,J,k)) + (c(I,j,kk) * vh(i,J-1,k))) &
             + ((b(I,j,kk) * vh(i,J,k)) + (d(I,j,kk) * vh(i+1,J-1,k)))) * G%IdxCu(I,j)
-      enddo ; enddo ; enddo
+      enddo
     elseif (CS%Coriolis_Scheme == ROBUST_ENSTRO) then
       ! An enstrophy conserving scheme robust to vanishing layers
       ! Note: Heffs are in lieu of h_at_v that should be returned by the
       !       continuity solver. AJA
-      do kk=1,kke ; do j=js,je ; do I=Isq,Ieq
+      do concurrent (kk=1:kke, j=js:je, I=Isq:Ieq) &
+          DO_LOCALITY(local(k, Heff1, Heff2, Heff3, Heff4, VHeff, QVHeff))
         k = ksb + kk - 1
 
         Heff1 = abs(vh(i,J,k) * G%IdxCv(i,J)) / (eps_vel + abs(v(i,J,k)))
@@ -868,7 +964,7 @@ subroutine CorAdCalc_block(u, v, h, uh, vh, CAu, CAv, OBC, AD, G, GV, US, CS, nk
           CAu(I,j,k) = (QVHeff / (h_tiny + ((Heff1 + Heff4) + (Heff2 + Heff3)))) &
               * G%IdxCu(I,j)
         endif
-      enddo ; enddo ; enddo
+      enddo
     elseif (CS%Coriolis_Scheme == wenovi7th_PV_ENSTRO) then
       do kk=1,kke ; do j=js,je ; do I=Isq,Ieq
         k = ksb + kk - 1
@@ -986,27 +1082,32 @@ subroutine CorAdCalc_block(u, v, h, uh, vh, CAu, CAv, OBC, AD, G, GV, US, CS, nk
     ! Add in the additional terms with Arakawa & Lamb.
     if ((CS%Coriolis_Scheme == ARAKAWA_LAMB81) .or. &
         (CS%Coriolis_Scheme == AL_BLEND)) then
-      do kk=1,kke ; do j=js,je ; do I=Isq,Ieq
+      do concurrent (kk=1:kke, j=js:je, I=Isq:Ieq) DO_LOCALITY(local(k))
         k = ksb + kk - 1
         CAu(I,j,k) = CAu(I,j,k) &
             + ((ep_u(i,j,kk) * uh(I-1,j,k)) - (ep_u(i+1,j,kk) * uh(I+1,j,k))) * G%IdxCu(I,j)
-      enddo ; enddo ; enddo
+      enddo
     endif
 
     if (Stokes_VF) then
       if (CS%id_CAuS>0 .or. CS%id_CAvS>0) then
         ! Computing the diagnostic Stokes contribution to CAu
-        do kk=1,kke ; do j=js,je ; do I=Isq,Ieq
+        do concurrent (kk=1:kke, j=js:je, I=Isq:Ieq) DO_LOCALITY(local(k))
           k = ksb + kk - 1
           CAuS(I,j,k) = 0.25 &
               * ((qS(I,J,kk) * (vh(i+1,J,k) + vh(i,J,k))) &
                  + (qS(I,J-1,kk) * (vh(i,J-1,k) + vh(i+1,J-1,k)))) * G%IdxCu(I,j)
-        enddo ; enddo ; enddo
+        enddo
       endif
     endif
 
+    if (use_weno) then
+      !$omp target update to(CAu(:,:,ksb:keb))
+    endif
+
     if (CS%bound_Coriolis) then
-      do kk=1,kke ; do j=js,je ; do I=Isq,Ieq
+      do concurrent (kk=1:kke, j=js:je, I=Isq:Ieq) &
+          DO_LOCALITY(local(k, fv1, fv2, fv3, fv4, max_fv, min_fv))
         k = ksb + kk - 1
 
         fv1 = abs_vort(I,J,kk) * v(i+1,J,k)
@@ -1019,20 +1120,20 @@ subroutine CorAdCalc_block(u, v, h, uh, vh, CAu, CAv, OBC, AD, G, GV, US, CS, nk
 
         CAu(I,j,k) = min(CAu(I,j,k), max_fv)
         CAu(I,j,k) = max(CAu(I,j,k), min_fv)
-      enddo ; enddo ; enddo
+      enddo
     endif
 
     ! Term - d(KE)/dx.
-    do kk=1,kke ; do j=js,je ; do I=Isq,Ieq
+    do concurrent (kk=1:kke, j=js:je, I=Isq:Ieq) DO_LOCALITY(local(k))
       k = ksb + kk - 1
       CAu(I,j,k) = CAu(I,j,k) - KEx(I,j,kk)
-    enddo ; enddo ; enddo
+    enddo
 
     if (associated(AD%gradKEu)) then
-      do kk=1,kke ; do j=js,je ; do I=Isq,Ieq
+      do concurrent (kk=1:kke, j=js:je, I=Isq:Ieq) DO_LOCALITY(local(k))
         k = ksb + kk - 1
         AD%gradKEu(I,j,k) = -KEx(I,j,kk)
-      enddo ; enddo ; enddo
+      enddo
     endif
 
     ! Calculate the tendencies of meridional velocity due to the Coriolis
@@ -1041,7 +1142,7 @@ subroutine CorAdCalc_block(u, v, h, uh, vh, CAu, CAv, OBC, AD, G, GV, US, CS, nk
     if (CS%Coriolis_Scheme == SADOURNY75_ENERGY) then
       if (CS%Coriolis_En_Dis) then
         ! Energy dissipating biased scheme, Hallberg 200x
-        do kk=1,kke ; do J=Jsq,Jeq ; do i=is,ie
+        do concurrent (kk=1:kke, J=Jsq:Jeq, i=is:ie) DO_LOCALITY(local(k, temp1, temp2))
           k = ksb + kk - 1
 
           if (q(I-1,J,kk) * v(i,J,k) == 0.0) then
@@ -1065,36 +1166,37 @@ subroutine CorAdCalc_block(u, v, h, uh, vh, CAu, CAv, OBC, AD, G, GV, US, CS, nk
           endif
 
           CAv(i,J,k) = -0.25 * G%IdyCv(i,J) * (temp1 + temp2)
-        enddo ; enddo ; enddo
+        enddo
       else
         ! Energy conserving scheme, Sadourny 1975
-        do kk=1,kke ; do J=Jsq,Jeq ; do i=is,ie
+        do concurrent (kk=1:kke, J=Jsq:Jeq, i=is:ie) DO_LOCALITY(local(k))
           k = ksb + kk - 1
           CAv(i,J,k) = -0.25 &
               * ((q(I-1,J,kk) * (uh(I-1,j,k) + uh(I-1,j+1,k))) &
                  + (q(I,J,kk) * (uh(I,j,k) + uh(I,j+1,k)))) * G%IdyCv(i,J)
-        enddo ; enddo ; enddo
+        enddo
       endif
     elseif (CS%Coriolis_Scheme == SADOURNY75_ENSTRO) then
-      do kk=1,kke ; do J=Jsq,Jeq ; do i=is,ie
+      do concurrent (kk=1:kke, J=Jsq:Jeq, i=is:ie) DO_LOCALITY(local(k))
         k = ksb + kk - 1
         CAv(i,J,k) = -0.125 * (G%IdyCv(i,J) * (q(I-1,J,kk) + q(I,J,kk))) &
             * ((uh(I-1,j,k) + uh(I-1,j+1,k)) + (uh(I,j,k) + uh(I,j+1,k)))
-      enddo ; enddo ; enddo
+      enddo
     elseif ((CS%Coriolis_Scheme == ARAKAWA_HSU90) .or. &
             (CS%Coriolis_Scheme == ARAKAWA_LAMB81) .or. &
             (CS%Coriolis_Scheme == AL_BLEND)) then
       ! (Global) Energy and (Local) Enstrophy conserving, Arakawa & Hsu 1990
-      do kk=1,kke ; do J=Jsq,Jeq ; do i=is,ie
+      do concurrent (kk=1:kke, J=Jsq:Jeq, i=is:ie) DO_LOCALITY(local(k))
         k = ksb + kk - 1
         CAv(i,J,k) = -(((a(I-1,j,kk) * uh(I-1,j,k)) + (c(I,j+1,kk) * uh(I,j+1,k))) &
             + ((b(I,j,kk) * uh(I,j,k)) + (d(I-1,j+1,kk) * uh(I-1,j+1,k)))) * G%IdyCv(i,J)
-      enddo ; enddo ; enddo
+      enddo
     elseif (CS%Coriolis_Scheme == ROBUST_ENSTRO) then
       ! An enstrophy conserving scheme robust to vanishing layers
       ! Note: Heffs are in lieu of h_at_u that should be returned by the
       !       continuity solver. AJA
-      do kk=1,kke ; do J=Jsq,Jeq ; do i=is,ie
+      do concurrent (kk=1:kke, J=Jsq:Jeq, i=is:ie) &
+          DO_LOCALITY(local(k, Heff1, Heff2, Heff3, Heff4, UHeff, QUHeff))
         k = ksb + kk - 1
 
         Heff1 = abs(uh(I,j,k) * G%IdyCu(I,j)) / (eps_vel+abs(u(I,j,k)))
@@ -1121,7 +1223,7 @@ subroutine CorAdCalc_block(u, v, h, uh, vh, CAu, CAv, OBC, AD, G, GV, US, CS, nk
           CAv(i,J,k) = -QUHeff &
               / (h_tiny + ((Heff1 + Heff4) + (Heff2 + Heff3)) ) * G%IdyCv(i,J)
         endif
-      enddo ; enddo ; enddo
+      enddo
     ! Calculate the tendencies of meridional velocity due to the Coriolis
     ! force and momentum advection.  On a Cartesian grid, this is
     !     CAv = - q * uh - d(KE)/dy.
@@ -1238,27 +1340,32 @@ subroutine CorAdCalc_block(u, v, h, uh, vh, CAu, CAv, OBC, AD, G, GV, US, CS, nk
     ! Add in the additonal terms with Arakawa & Lamb.
     if ((CS%Coriolis_Scheme == ARAKAWA_LAMB81) .or. &
         (CS%Coriolis_Scheme == AL_BLEND)) then
-      do kk=1,kke ; do J=Jsq,Jeq ; do i=is,ie
+      do concurrent (kk=1:kke, J=Jsq:Jeq, i=is:ie) DO_LOCALITY(local(k))
         k = ksb + kk - 1
         CAv(i,J,k) = CAv(i,J,k) &
             + ((ep_v(i,j,kk) * vh(i,J-1,k)) - (ep_v(i,j+1,kk) * vh(i,J+1,k))) * G%IdyCv(i,J)
-      enddo ; enddo ; enddo
+      enddo
     endif
 
     if (Stokes_VF) then
       if (CS%id_CAuS>0 .or. CS%id_CAvS>0) then
         ! Computing the diagnostic Stokes contribution to CAv
-        do kk=1,kke ; do J=Jsq,Jeq ; do i=is,ie
+        do concurrent (kk=1:kke, J=Jsq:Jeq, i=is:ie) DO_LOCALITY(local(k))
           k = ksb + kk - 1
           CAvS(i,J,k) = 0.25 &
               * ((qS(I,J,kk) * (uh(I,j+1,k) + uh(I,j,k))) &
                  + (qS(I-1,J,kk) * (uh(I-1,j,k) + uh(I-1,j+1,k)))) * G%IdyCv(i,J)
-        enddo ; enddo ; enddo
+        enddo
       endif
     endif
 
+    if (use_weno) then
+      !$omp target update to(CAv(:,:,ksb:keb))
+    endif
+
     if (CS%bound_Coriolis) then
-      do kk=1,kke ; do J=Jsq,Jeq ; do i=is,ie
+      do concurrent (kk=1:kke, J=Jsq:Jeq, i=is:ie) &
+          DO_LOCALITY(local(k, fu1, fu2, fu3, fu4, max_fu, min_fu))
         k = ksb + kk - 1
 
         fu1 = -abs_vort(I,J,kk) * u(I,j+1,k)
@@ -1271,66 +1378,113 @@ subroutine CorAdCalc_block(u, v, h, uh, vh, CAu, CAv, OBC, AD, G, GV, US, CS, nk
 
         CAv(I,j,k) = min(CAv(I,j,k), max_fu)
         CAv(I,j,k) = max(CAv(I,j,k), min_fu)
-      enddo ; enddo ; enddo
+      enddo
     endif
 
     ! Term - d(KE)/dy.
-    do kk=1,kke ; do J=Jsq,Jeq ; do i=is,ie
+    do concurrent (kk=1:kke, J=Jsq:Jeq, i=is:ie) DO_LOCALITY(local(k))
       k = ksb + kk - 1
       CAv(i,J,k) = CAv(i,J,k) - KEy(i,J,kk)
-    enddo ; enddo ; enddo
+    enddo
     if (associated(AD%gradKEv)) then
-      do kk=1,kke ; do J=Jsq,Jeq ; do i=is,ie
+      do concurrent (kk=1:kke, J=Jsq:Jeq, i=is:ie) DO_LOCALITY(local(k))
         k = ksb + kk - 1
         AD%gradKEv(i,J,k) = -KEy(i,J,kk)
-      enddo ; enddo ; enddo
+      enddo
     endif
 
     if (associated(AD%rv_x_u) .or. associated(AD%rv_x_v)) then
       ! Calculate the Coriolis-like acceleration due to relative vorticity.
       if (CS%Coriolis_Scheme == SADOURNY75_ENERGY) then
         if (associated(AD%rv_x_u)) then
-          do kk=1,kke ; do J=Jsq,Jeq ; do i=is,ie
+          do concurrent (kk=1:kke, J=Jsq:Jeq, i=is:ie) DO_LOCALITY(local(k))
             k = ksb + kk - 1
             AD%rv_x_u(i,J,k) = -0.25 &
                 * ((q2(I-1,j,kk) * (uh(I-1,j,k) + uh(I-1,j+1,k))) &
                    + (q2(I,j,kk) * (uh(I,j,k) + uh(I,j+1,k)))) * G%IdyCv(i,J)
-          enddo ; enddo ; enddo
+          enddo
         endif
 
         if (associated(AD%rv_x_v)) then
-          do kk=1,kke ; do j=js,je ; do I=Isq,Ieq
+          do concurrent (kk=1:kke, j=js:je, I=Isq:Ieq) DO_LOCALITY(local(k))
             k = ksb + kk - 1
             AD%rv_x_v(I,j,k) = 0.25 &
                 * ((q2(I,j,kk) * (vh(i+1,J,k) + vh(i,J,k))) &
                    + (q2(I,j-1,kk) * (vh(i,J-1,k) + vh(i+1,J-1,k)))) * G%IdxCu(I,j)
-          enddo ; enddo ; enddo
+          enddo
         endif
       else
         if (associated(AD%rv_x_u)) then
-          do kk=1,kke ; do J=Jsq,Jeq ; do i=is,ie
+          do concurrent (kk=1:kke, J=Jsq:Jeq, i=is:ie) DO_LOCALITY(local(k))
             k = ksb + kk - 1
             AD%rv_x_u(i,J,k) = -G%IdyCv(i,J) * C1_12 * &
               (((((q2(I,J,kk) + q2(I-1,J-1,kk)) + q2(I-1,J,kk)) * uh(I-1,j,k)) + &
                 (((q2(I-1,J,kk) + q2(I,J+1,kk)) + q2(I,J,kk)) * uh(I,j+1,k))) + &
                ((((q2(I-1,J,kk) + q2(I,J-1,kk)) + q2(I,J,kk)) * uh(I,j,k))+ &
                 (((q2(I,J,kk) + q2(I-1,J+1,kk)) + q2(I-1,J,kk)) * uh(I-1,j+1,k))))
-          enddo ; enddo ; enddo
+          enddo
         endif
 
         if (associated(AD%rv_x_v)) then
-          do kk=1,kke ; do j=js,je ; do I=Isq,Ieq
+          do concurrent (kk=1:kke, j=js:je, I=Isq:Ieq) DO_LOCALITY(local(k))
             k = ksb + kk - 1
             AD%rv_x_v(I,j,k) = G%IdxCu(I,j) * C1_12 * &
               (((((q2(I+1,J,kk) + q2(I,J-1,kk)) + q2(I,J,kk)) * vh(i+1,J,k)) + &
                 (((q2(I-1,J-1,kk) + q2(I,J,kk)) + q2(I,J-1,kk)) * vh(i,J-1,k))) + &
                ((((q2(I-1,J,kk) + q2(I,J-1,kk)) + q2(I,J,kk)) * vh(i,J,k)) + &
                 (((q2(I+1,J-1,kk) + q2(I,J,kk)) + q2(I,J-1,kk)) * vh(i+1,J-1,k))))
-          enddo ; enddo ; enddo
+          enddo
         endif
       endif
     endif
   enddo ! end of ksb block loop.
+
+  !$omp target exit data map(delete: Area_h, Area_q, dvdx, dudy, hArea_u, hArea_v)
+  !$omp target exit data map(delete: rel_vort, abs_vort, q, Ih_q, KE, KEx, KEy)
+
+  if (CS%id_rv > 0) then
+    !$omp target exit data map(from: RV)
+  endif
+  if (CS%id_PV > 0) then
+    !$omp target exit data map(from: PV)
+  endif
+  if (associated(AD%rv_x_v) .or. associated(AD%rv_x_u)) then
+    !$omp target exit data map(delete: q2)
+  endif
+
+  if (associated(AD%gradKEu)) then
+    !$omp target exit data map(from: AD%gradKEu)
+  endif
+  if (associated(AD%gradKEv)) then
+    !$omp target exit data map(from: AD%gradKEv)
+  endif
+  if (associated(AD%rv_x_u)) then
+    !$omp target exit data map(from: AD%rv_x_u)
+  endif
+  if (associated(AD%rv_x_v)) then
+    !$omp target exit data map(from: AD%rv_x_v)
+  endif
+
+  if ((CS%Coriolis_Scheme == ARAKAWA_HSU90) .or. &
+      (CS%Coriolis_Scheme == ARAKAWA_LAMB81) .or. (CS%Coriolis_Scheme == AL_BLEND)) then
+    !$omp target exit data map(delete: a, b, c, d, ep_u, ep_v)
+  endif
+
+  if (CS%Coriolis_En_Dis) then
+    !$omp target exit data map(delete: uh_center, vh_center, uh_min, uh_max, vh_min, vh_max)
+  endif
+
+  if (Stokes_VF) then
+    if (CS%id_CAuS>0 .or. CS%id_CAvS>0) then
+      if (CS%id_CAuS > 0) then
+        !$omp target update from(CAuS)
+      endif
+      if (CS%id_CAvS > 0) then
+        !$omp target update from(CAvS)
+      endif
+      !$omp target exit data map(delete: dvSdx, duSdy, stk_vort, qS, CAuS, CAvS)
+    endif
+  endif
 
   ! Here the various Coriolis-related derived quantities are offered for averaging.
   if (query_averaging_enabled(CS%diag)) then
@@ -1407,35 +1561,37 @@ subroutine gradKE(u, v, h, KE, KEx, KEy, ksb, keb, nkk, G, GV, US, CS)
     ! The following calculation of Kinetic energy includes the metric terms
     ! identified in Arakawa & Lamb 1982 as important for KE conservation.  It
     ! also includes the possibility of partially-blocked tracer cell faces.
-    do kk=1,kke ; do j=Jsq,Jeq+1 ; do i=Isq,Ieq+1
+    do concurrent (kk=1:kke, j=Jsq:Jeq+1, i=Isq:Ieq+1) DO_LOCALITY(local(k))
       k = ksb + kk - 1
       KE(i,j,kk) = ( ( (G%areaCu( I ,j)*(u( I ,j,k)*u( I ,j,k))) + &
                        (G%areaCu(I-1,j)*(u(I-1,j,k)*u(I-1,j,k))) ) + &
                      ( (G%areaCv(i, J )*(v(i, J ,k)*v(i, J ,k))) + &
                        (G%areaCv(i,J-1)*(v(i,J-1,k)*v(i,J-1,k))) ) )*0.25*G%IareaT(i,j)
-    enddo ; enddo ; enddo
+    enddo
   elseif (CS%KE_Scheme == KE_SIMPLE_GUDONOV) then
     ! The following discretization of KE is based on the one-dimensional Gudonov
     ! scheme which does not take into account any geometric factors
-    do kk=1,kke ; do j=Jsq,Jeq+1 ; do i=Isq,Ieq+1
+    do concurrent (kk=1:kke, j=Jsq:Jeq+1, i=Isq:Ieq+1) &
+        DO_LOCALITY(local(k, up, um, vp, vm, up2, um2, vp2, vm2))
       k = ksb + kk - 1
       up = 0.5*( u(I-1,j,k) + ABS( u(I-1,j,k) ) ) ; up2 = up*up
       um = 0.5*( u( I ,j,k) - ABS( u( I ,j,k) ) ) ; um2 = um*um
       vp = 0.5*( v(i,J-1,k) + ABS( v(i,J-1,k) ) ) ; vp2 = vp*vp
       vm = 0.5*( v(i, J ,k) - ABS( v(i, J ,k) ) ) ; vm2 = vm*vm
       KE(i,j,kk) = ( max(up2,um2) + max(vp2,vm2) ) *0.5
-    enddo ; enddo ; enddo
+    enddo
   elseif (CS%KE_Scheme == KE_GUDONOV) then
     ! The following discretization of KE is based on the one-dimensional Gudonov
     ! scheme but has been adapted to take horizontal grid factors into account
-    do kk=1,kke ; do j=Jsq,Jeq+1 ; do i=Isq,Ieq+1
+    do concurrent (kk=1:kke, j=Jsq:Jeq+1, i=Isq:Ieq+1) &
+        DO_LOCALITY(local(k, up, um, vp, vm, up2a, um2a, vp2a, vm2a))
       k = ksb + kk - 1
       up = 0.5*( u(I-1,j,k) + ABS( u(I-1,j,k) ) ) ; up2a = up*up*G%areaCu(I-1,j)
       um = 0.5*( u( I ,j,k) - ABS( u( I ,j,k) ) ) ; um2a = um*um*G%areaCu( I ,j)
       vp = 0.5*( v(i,J-1,k) + ABS( v(i,J-1,k) ) ) ; vp2a = vp*vp*G%areaCv(i,J-1)
       vm = 0.5*( v(i, J ,k) - ABS( v(i, J ,k) ) ) ; vm2a = vm*vm*G%areaCv(i, J )
       KE(i,j,kk) = ( max(um2a,up2a) + max(vm2a,vp2a) )*0.5*G%IareaT(i,j)
-    enddo ; enddo ; enddo
+    enddo
   elseif (CS%KE_Scheme == KE_UP3) then
     ! The following discretization of KE is based on the one-dimensional third-order
     ! upwind scheme which does not take horizontal grid factors into account
@@ -1523,15 +1679,19 @@ subroutine gradKE(u, v, h, KE, KEx, KEy, ksb, keb, nkk, G, GV, US, CS)
     enddo
   endif
 
+  if (CS%KE_Scheme == KE_UP3) then
+    !$omp target update to(KE)
+  endif
+
   ! Term - d(KE)/dx.
-  do kk=1,kke ; do j=js,je ; do I=Isq,Ieq
+  do concurrent (kk=1:kke, j=js:je, I=Isq:Ieq)
     KEx(I,j,kk) = (KE(i+1,j,kk) - KE(i,j,kk)) * G%IdxCu_OBCmask(I,j)
-  enddo ; enddo ; enddo
+  enddo
 
   ! Term - d(KE)/dy.
-  do kk=1,kke ; do J=Jsq,Jeq ; do i=is,ie
+  do concurrent (kk=1:kke, J=Jsq:Jeq, i=is:ie)
     KEy(i,J,kk) = (KE(i,j+1,kk) - KE(i,j,kk)) * G%IdyCv_OBCmask(i,J)
-  enddo ; enddo ; enddo
+  enddo
 end subroutine gradKE
 
 !> Reconstruct the scalar (e.g., pv, vorticity) onto point i-1/2 using a third-order upwind scheme
@@ -2330,6 +2490,7 @@ subroutine CoriolisAdv_init(Time, G, GV, US, param_file, diag, AD, CS)
     call safe_alloc_ptr(AD%diag_hv, isd, ied, JsdB, JedB, nz)
   endif
 
+  !$omp target update to(CS)
 end subroutine CoriolisAdv_init
 
 !> Destructor for coriolisadv_cs
