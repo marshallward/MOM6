@@ -1861,7 +1861,12 @@ subroutine horizontal_viscosity_block(u, v, h, uh, vh, diffu, diffv, MEKE, VarMi
 
     if (CS%id_FrictWork_bh>0 .or. CS%id_FrictWorkIntz_bh > 0 .or. allocated(MEKE%mom_src_bh) &
         .or. (allocated(MEKE%mom_src) .and. MEKE%backscatter_Ro_c /= 0.)) then
-      if (CS%FrictWork_bug) then
+      if (.not. CS%biharmonic) then
+        do kk=1,kke ; do j=js,je ; do i=is,ie
+          k = ksb + kk - 1
+          FrictWork_bh(i,j,k) = 0.
+        enddo ; enddo ; enddo
+      elseif (CS%FrictWork_bug) then
         ! Diagnose   bhstr_xx*d_x u - bhstr_yy*d_y v + bhstr_xy*(d_y u + d_x v)
         ! This is the old formulation that includes energy diffusion !cyc
         do kk=1,kke ; do j=js,je ; do i=is,ie
