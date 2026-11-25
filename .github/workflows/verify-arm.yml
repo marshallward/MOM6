@@ -73,6 +73,8 @@ jobs:
 
   build-openmp:
     runs-on: ubuntu-24.04-arm
+    outputs:
+      compiled: ${{ steps.compile.outcome == 'success' }}
 
     steps:
       - uses: actions/checkout@v7
@@ -86,12 +88,23 @@ jobs:
           make -C .testing -j2 PKG= build/deps/lib/libcvmix.a
 
       - name: Compile MOM6 supporting OpenMP
+        id: compile
+        # Temporarily non-blocking: older GCC rejects allocatable-component mappings.
+        continue-on-error: true
         run: make -C .testing -j2 build/openmp/MOM6
 
+      - name: Report unavailable OpenMP build
+        if: steps.compile.outcome == 'failure'
+        run: |
+          echo "::warning::ARM OpenMP compilation failed; OpenMP testing is skipped."
+          echo "ARM OpenMP compilation failed (temporarily non-blocking). See the compile log. OpenMP testing is skipped." >> "$GITHUB_STEP_SUMMARY"
+
       - name: Prepare artifact
+        if: steps.compile.outcome == 'success'
         run: tar -cf mom6-openmp.tar .testing/build/openmp/MOM6
 
       - uses: actions/upload-artifact@v7
+        if: steps.compile.outcome == 'success'
         with:
           name: mom6-openmp-artifact
           path: mom6-openmp.tar
@@ -315,6 +328,7 @@ jobs:
   test-openmp:
     runs-on: ubuntu-24.04-arm
     needs: [build-symmetric, build-openmp]
+    if: needs.build-openmp.outputs.compiled == 'true'
 
     steps:
       - uses: actions/checkout@v7

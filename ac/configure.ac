@@ -203,6 +203,7 @@ AS_IF(
   [test "$enable_openmp" = yes], [
   FCFLAGS="$FCFLAGS $OPENMP_FCFLAGS"
   LDFLAGS="$LDFLAGS $OPENMP_FCFLAGS"
+  MOM6_FC_OPENMP_DTYPE_ALLOCS
 ])
 
 
