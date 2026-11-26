@@ -379,8 +379,8 @@ subroutine horizontal_viscosity_block(u, v, h, uh, vh, diffu, diffv, MEKE, VarMi
   real, dimension(SZI_(G),SZJB_(G),nkk) :: &
     Del2v, &      ! The v-component of the Laplacian of velocity [L-1 T-1 ~> m-1 s-1]
     h_v           ! Thickness interpolated to v points [H ~> m or kg m-2].
-  real, dimension(SZI_(G),SZJB_(G)) :: &
-    dudx_bt, dvdy_bt ! components in the barotropic horizontal tension [T-1 ~> s-1]
+  real, dimension(SZI_(G),SZJ_(G)) :: &
+    dudx_bt, dvdy_bt ! Components of barotropic horizontal tension at h points [T-1 ~> s-1]
   real, dimension(SZI_(G),SZJ_(G),nkk) :: &
     sh_xx, &      ! horizontal tension (du/dx - dv/dy) including metric terms [T-1 ~> s-1]
     sh_xx_smooth  ! horizontal tension from smoothed velocity including metric terms [T-1 ~> s-1]
@@ -2634,10 +2634,10 @@ subroutine hor_visc_GME_setup(G, GV, US, CS, h, BT, TD, nkk, dudx_bt, &
   type(barotropic_CS),           optional, intent(in) :: BT !< Barotropic control structure
   type(thickness_diffuse_CS),    optional, intent(in) :: TD !< Thickness diffusion control structure
   integer,                       intent(in)    :: nkk !< The k-block size used to size the following arrays [nondim]
-  real, dimension(SZI_(G),SZJB_(G)), &
+  real, dimension(SZI_(G),SZJ_(G)), &
                                   intent(out)   :: dudx_bt !< x-component in the barotropic
                                                        !! horizontal tension [T-1 ~> s-1]
-  real, dimension(SZI_(G),SZJB_(G)), &
+  real, dimension(SZI_(G),SZJ_(G)), &
                                   intent(out)   :: dvdy_bt !< y-component in the barotropic
                                                        !! horizontal tension [T-1 ~> s-1]
   real, dimension(SZIB_(G),SZJB_(G)), &
