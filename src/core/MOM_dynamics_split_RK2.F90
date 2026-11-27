@@ -64,7 +64,7 @@ use MOM_open_boundary,         only : open_boundary_zero_normal_flow, open_bound
 use MOM_open_boundary,         only : open_boundary_test_extern_h, update_OBC_ramp
 use MOM_open_boundary,         only : update_segment_thickness_reservoirs
 use MOM_PressureForce,         only : PressureForce, PressureForce_CS
-use MOM_PressureForce,         only : PressureForce_init
+use MOM_PressureForce,         only : PressureForce_init, PressureForce_end
 use MOM_set_visc,              only : set_viscous_ML, set_visc_CS
 use MOM_stochastics,           only : stochastic_CS
 use MOM_thickness_diffuse,     only : thickness_diffuse_CS
@@ -245,8 +245,8 @@ type, public :: MOM_dyn_split_RK2_CS ; private
   type(continuity_CS) :: continuity_CSp
   !> The CoriolisAdv control structure
   type(CoriolisAdv_CS), allocatable :: CoriolisAdv
-  !> A pointer to the PressureForce control structure
-  type(PressureForce_CS) :: PressureForce_CSp
+  !> The PressureForce control structure
+  type(PressureForce_CS), allocatable :: PressureForce_CSp
   !> A pointer to a structure containing interface height diffusivities
   type(vertvisc_CS),      pointer :: vertvisc_CSp      => NULL()
   !> A pointer to the set_visc control structure
@@ -1609,8 +1609,12 @@ subroutine initialize_dyn_split_RK2(u, v, h, tv, uh, vh, eta, Time, G, GV, US, p
   else
     HA_CSp => NULL()
   endif
+
+  allocate(CS%PressureForce_CSp)
+  !$omp target enter data map(alloc: CS%PressureForce_CSp)
   call PressureForce_init(Time, G, GV, US, param_file, diag, CS%PressureForce_CSp, CS%ADp, &
                           CS%SAL_CSp, CS%tides_CSp)
+
   !$omp target enter data map(alloc: CS%hor_visc)
   call hor_visc_init(Time, G, GV, US, param_file, diag, CS%hor_visc, ADp=CS%ADp)
   call vertvisc_init(MIS, Time, G, GV, US, param_file, diag, CS%ADp, dirs, &
@@ -1936,6 +1940,10 @@ end subroutine initialize_dyn_split_RK2
 subroutine end_dyn_split_RK2(CS)
   type(MOM_dyn_split_RK2_CS), pointer :: CS  !< module control structure
 
+  call PressureForce_end(CS%PressureForce_CSp)
+  !$omp target exit data map(delete: CS%PressureForce_CSp)
+  deallocate(CS%PressureForce_CSp)
+
   call barotropic_end(CS%barotropic_CSp)
 
   call vertvisc_end(CS%vertvisc_CSp)
@@ -1943,8 +1951,10 @@ subroutine end_dyn_split_RK2(CS)
 
   call hor_visc_end(CS%hor_visc)
   !$omp target exit data map(delete: CS%hor_visc)
+
   if (CS%calculate_SAL) call SAL_end(CS%SAL_CSp)
   if (CS%use_tides) call tidal_forcing_end(CS%tides_CSp)
+
   call CoriolisAdv_end(CS%CoriolisAdv)
   !$omp target exit data map(delete: CS%CoriolisAdv)
   deallocate(CS%CoriolisAdv)

@@ -25,7 +25,7 @@ implicit none ; private
 
 #include <MOM_memory.h>
 
-public PressureForce, PressureForce_init
+public PressureForce, PressureForce_init, PressureForce_end
 
 !> Pressure force control structure
 type, public :: PressureForce_CS ; private
@@ -65,8 +65,23 @@ subroutine PressureForce(h, tv, PFu, PFv, G, GV, US, CS, ALE_CSp, ADp, p_atm, pb
 
   if (CS%Analytic_FV_PGF) then
     if (GV%Boussinesq) then
+      ! Copy output arrays in because only the computational domain is overwritten.
+      !$omp target data map(to: h, PFu, PFv)
+      if (present(pbce)) then
+        if (.not.associated(tv%eqn_of_state)) then
+          !$omp target enter data map(to: pbce)
+        endif
+      endif
       call PressureForce_FV_Bouss(h, tv, PFu, PFv, G, GV, US, CS%PressureForce_FV, &
                                    ALE_CSp, ADp, p_atm, pbce, eta)
+      !$omp target update from(PFu, PFv)
+      if (present(pbce)) then
+        if (.not.associated(tv%eqn_of_state)) then
+          !$omp target update from(pbce)
+          !$omp target exit data map(release: pbce)
+        endif
+      endif
+      !$omp end target data
     else
       call PressureForce_FV_nonBouss(h, tv, PFu, PFv, G, GV, US, CS%PressureForce_FV, &
                                       ALE_CSp, ADp, p_atm, pbce, eta)
@@ -107,7 +122,10 @@ subroutine PressureForce_init(Time, G, GV, US, param_file, diag, CS, ADp, SAL_CS
                  "possibility of numerical thermobaric instability, as "//&
                  "described in Adcroft et al., O. Mod. (2008).", default=.true.)
 
+  !$omp target update to(CS)
+
   if (CS%Analytic_FV_PGF) then
+    !$omp target enter data map(alloc: CS%PressureForce_FV)
     call PressureForce_FV_init(Time, G, GV, US, param_file, diag, &
              CS%PressureForce_FV, ADp, SAL_CSp, tides_CSp)
   else
@@ -115,6 +133,17 @@ subroutine PressureForce_init(Time, G, GV, US, param_file, diag, CS, ADp, SAL_CS
              CS%PressureForce_Mont, SAL_CSp, tides_CSp)
   endif
 end subroutine PressureForce_init
+
+
+!> Deallocate device instances of pressure force control structure.
+subroutine PressureForce_end(CS)
+  type(PressureForce_CS), intent(in) :: CS
+    !< Pressure force control structure
+
+  if (CS%Analytic_FV_PGF) then
+    !$omp target exit data map(release: CS%PressureForce_FV)
+  endif
+end subroutine PressureForce_end
 
 !> \namespace mom_pressureforce
 !!

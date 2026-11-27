@@ -575,7 +575,14 @@ subroutine PressureForce_Mont_Bouss(h, tv, PFu, PFv, G, GV, US, CS, p_atm, pbce,
   endif ! use_EOS
 
   if (present(pbce)) then
-    call Set_pbce_Bouss(e, tv_tmp, G, GV, US, CS%Rho0, CS%GFS_scale, pbce, rho_star)
+    if (use_EOS) then
+      call Set_pbce_Bouss(e, tv_tmp, G, GV, US, CS%Rho0, CS%GFS_scale, pbce, rho_star)
+    else
+      !$omp target data map(to: e, pbce)
+      call Set_pbce_Bouss(e, tv_tmp, G, GV, US, CS%Rho0, CS%GFS_scale, pbce, rho_star)
+      !$omp target update from(pbce)
+      !$omp end target data
+    endif
   endif
 
 !    Calculate the pressure force. On a Cartesian grid,
@@ -666,8 +673,8 @@ subroutine Set_pbce_Bouss(e, tv, G, GV, US, Rho0, GFS_scale, pbce, rho_star)
                               optional, intent(in)  :: rho_star !< The layer densities (maybe compressibility
                                                             !! compensated), times g/rho_0 [L2 Z-1 T-2 ~> m s-2].
 
-  ! Local variables
   real :: Ihtot(SZI_(G))     ! The inverse of the sum of the layer thicknesses [H-1 ~> m-1 or m2 kg-1].
+  real :: Ihtot_h(SZI_(G),SZJ_(G)) ! Inverse column depth for the non-EOS device recurrence [Z-1 ~> m-1].
   real :: press(SZI_(G))     ! Interface pressure [R L2 T-2 ~> Pa].
   real :: T_int(SZI_(G))     ! Interface temperature [C ~> degC]
   real :: S_int(SZI_(G))     ! Interface salinity [S ~> ppt]
@@ -733,20 +740,22 @@ subroutine Set_pbce_Bouss(e, tv, G, GV, US, Rho0, GFS_scale, pbce, rho_star)
         enddo
       enddo ! end of j loop
     endif
-  else ! not use_EOS
-    !$OMP parallel do default(shared) private(Ihtot)
-    do j=Jsq,Jeq+1
-      do i=Isq,Ieq+1
-        Ihtot(i) = 1.0 / ((e(i,j,1)-e(i,j,nz+1)) + dz_neglect)
+  else
+    !$omp target data map(alloc: Ihtot_h)
+    do concurrent (j=Jsq:Jeq+1)
+      do concurrent (i=Isq:Ieq+1)
+        Ihtot_h(i,j) = 1. / ((e(i,j,1) - e(i,j,nz+1)) + dz_neglect)
         pbce(i,j,1) = GV%g_prime(1) * GV%H_to_Z
       enddo
-      do k=2,nz ; do i=Isq,Ieq+1
-        pbce(i,j,k) = pbce(i,j,k-1) + &
-                      (GV%g_prime(K)*GV%H_to_Z) * ((e(i,j,K) - e(i,j,nz+1)) * Ihtot(i))
-      enddo ; enddo
-    enddo ! end of j loop
-  endif ! use_EOS
-
+      do k=2,nz
+        do concurrent (i=Isq:Ieq+1)
+          pbce(i,j,k) = pbce(i,j,k-1) + (GV%g_prime(K) * GV%H_to_Z) &
+              * ((e(i,j,K) - e(i,j,nz+1)) * Ihtot_h(i,j))
+        enddo
+      enddo
+    enddo
+    !$omp end target data
+  endif
 end subroutine Set_pbce_Bouss
 
 !> Determines the partial derivative of the acceleration due
