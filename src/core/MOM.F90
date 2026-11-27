@@ -3563,6 +3563,10 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, &
    call callTree_waypoint("returned from ALE_init() (initialize_MOM)")
    call ALE_updateVerticalGridType( CS%ALE_CSp, GV )
   endif
+
+  !$omp target enter data map(to: CS%GV)
+  !$omp target enter data map(to: GV%g_prime, GV%Rlay, GV%sLayer, GV%sInterface)
+
   ! The basic state variables have now been fully initialized, so update their halos and
   ! calculate any derived thermodynmics quantities.
 
@@ -4755,6 +4759,8 @@ subroutine MOM_end(CS)
   if (associated(CS%update_OBC_CSp)) call OBC_register_end(CS%update_OBC_CSp)
   if (associated(CS%OBC)) call open_boundary_end(CS%OBC)
 
+  !$omp target exit data map(delete: CS%GV%g_prime, CS%GV%Rlay, CS%GV%sLayer, CS%GV%sInterface)
+  !$omp target exit data map(delete: CS%GV)
   call verticalGridEnd(CS%GV)
   !$omp target exit data map(delete: CS%G%dxT, CS%G%dxCu, CS%G%dxCv, CS%G%dxBu)
   !$omp target exit data map(delete: CS%G%dyT, CS%G%dyCu, CS%G%dyCv, CS%G%dyBu)
