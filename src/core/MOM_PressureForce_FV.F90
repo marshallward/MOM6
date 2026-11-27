@@ -5,6 +5,8 @@
 !> Finite volume pressure gradient (integrated by quadrature or analytically)
 module MOM_PressureForce_FV
 
+#include "do_concurrent_compat.h"
+
 use MOM_debugging, only : hchksum, uvchksum
 use MOM_diag_mediator, only : post_data, register_diag_field
 use MOM_diag_mediator, only : safe_alloc_ptr, diag_ctrl, time_type
@@ -104,6 +106,8 @@ type, public :: PressureForce_FV_CS ; private
   integer :: id_sal_v = -1 !< Diagnostic identifier
   integer :: id_tides_u = -1 !< Diagnostic identifier
   integer :: id_tides_v = -1 !< Diagnostic identifier
+  integer :: nkblock
+    !< Vertical block size for pressure integrals; 0 uses the full column.
   type(SAL_CS), pointer :: SAL_CSp => NULL() !< SAL control structure
   type(tidal_forcing_CS), pointer :: tides_CSp => NULL() !< Tides control structure
 end type PressureForce_FV_CS
@@ -982,8 +986,6 @@ subroutine PressureForce_FV_Bouss(h, tv, PFu, PFv, G, GV, US, CS, ALE_CSp, ADp, 
   real, dimension(SZI_(G)) :: &
     Rho_cv_BL   ! The coordinate potential density in the deepest variable
                 ! density near-surface layer [R ~> kg m-3].
-  real, dimension(SZI_(G),SZJ_(G)) :: &
-    dz_geo      ! The change in geopotential thickness through a layer [L2 T-2 ~> m2 s-2].
   real, dimension(SZI_(G),SZJ_(G),SZK_(GV)+1) :: &
     pa          ! The pressure anomaly (i.e. pressure + g*RHO_0*e) at the
                 ! the interface atop a layer [R L2 T-2 ~> Pa].
@@ -1101,9 +1103,12 @@ subroutine PressureForce_FV_Bouss(h, tv, PFu, PFv, G, GV, US, CS, ALE_CSp, ADp, 
   integer, dimension(2) :: EOSdom_u ! The i-computational domain for the equation of state at u-velocity points
   integer, dimension(2) :: EOSdom_v ! The i-computational domain for the equation of state at v-velocity points
   integer :: is, ie, js, je, Isq, Ieq, Jsq, Jeq, nz, nkmb
+  integer :: nkk            ! Number of vertical levels in each pressure integral block.
   integer :: i, j, k, m
 
   is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec ; nz = GV%ke
+  nkk = CS%nkblock
+  if (nkk == 0) nkk = nz
   nkmb=GV%nk_rho_varies
   Isq = G%IscB ; Ieq = G%IecB ; Jsq = G%JscB ; Jeq = G%JecB
   EOSdom(1) = Isq - (G%isd-1) ;  EOSdom(2) = G%iec+1 - (G%isd-1)
@@ -1208,7 +1213,7 @@ subroutine PressureForce_FV_Bouss(h, tv, PFu, PFv, G, GV, US, CS, ALE_CSp, ADp, 
     !$omp target update to(e(:,:,nz+1))
   endif
 
-  do concurrent (j=Jsq:Jeq+1)
+  do concurrent (j=Jsq:Jeq+1) DO_LOCALITY(local(k))
     do k=nz,1,-1
       do concurrent (i=Isq:Ieq+1)
         e(i,j,K) = e(i,j,K+1) + h(i,j,k)*GV%H_to_Z
@@ -1299,14 +1304,10 @@ subroutine PressureForce_FV_Bouss(h, tv, PFu, PFv, G, GV, US, CS, ALE_CSp, ADp, 
   endif
 
   !$omp target enter data map(alloc: dpa, intz_dpa, intx_dpa, inty_dpa)
-  if (.not.use_EOS) then
-    !$omp target enter data map(alloc: dz_geo)
-  endif
-
-  do k=1,nz
-    ! Calculate 4 integrals through the layer that are required in the
-    ! subsequent calculation.
-    if (use_EOS) then
+  ! Calculate 4 integrals through the layer that are required in the
+  ! subsequent calculation.
+  if (use_EOS) then
+    do k=1,nz
       ! The following routine computes the integrals that are needed to
       ! calculate the pressure gradient force. Linear profiles for T and S are
       ! assumed when regridding is activated. Otherwise, the previous version
@@ -1346,31 +1347,14 @@ subroutine PressureForce_FV_Bouss(h, tv, PFu, PFv, G, GV, US, CS, ALE_CSp, ADp, 
         call diagnose_mass_weight_Z(e(:,:,K), e(:,:,K+1), G%bathyT, e(:,:,1), dz_neglect, CS%MassWghtInterp, &
                                     G%HI, MassWt_u(:,:,k), MassWt_v(:,:,k), &
                                     MassWghtInterpVanOnly=CS%MassWghtInterpVanOnly, h_nv=CS%h_nonvanished)
-    else
-      do concurrent (j=Jsq:Jeq+1, i=Isq:Ieq+1)
-        dz_geo(i,j) = GV%g_Earth * GV%H_to_Z*h(i,j,k)
-        dpa(i,j,k) = (GV%Rlay(k) - rho_ref) * dz_geo(i,j)
-        intz_dpa(i,j,k) = 0.5*(GV%Rlay(k) - rho_ref) * dz_geo(i,j)*h(i,j,k)
-      enddo
-
-      do concurrent (j=js:je, I=Isq:Ieq)
-        intx_dpa(I,j,k) = 0.5*(GV%Rlay(k) - rho_ref) * (dz_geo(i,j) + dz_geo(i+1,j))
-      enddo
-
-      do concurrent (J=Jsq:Jeq, i=is:ie)
-        inty_dpa(i,J,k) = 0.5*(GV%Rlay(k) - rho_ref) * (dz_geo(i,j) + dz_geo(i,j+1))
-      enddo
-    endif
-  enddo
-
-  if (use_EOS) then
+    enddo ! k-loop for EOS density integrals
     !$omp target update to(dpa, intz_dpa, intx_dpa, inty_dpa)
   else
-    !$omp target exit data map(delete: dz_geo)
+    call int_Rlay_dz(h, rho_ref, dpa, intz_dpa, intx_dpa, inty_dpa, G, GV, nkk)
   endif
 
   ! Set the pressure anomalies at the interfaces.
-  do concurrent (j=Jsq:Jeq+1)
+  do concurrent (j=Jsq:Jeq+1) DO_LOCALITY(local(k))
     do k=1,nz
       do concurrent (i=Isq:Ieq+1)
         pa(i,j,K+1) = pa(i,j,K) + dpa(i,j,k)
@@ -1591,14 +1575,14 @@ subroutine PressureForce_FV_Bouss(h, tv, PFu, PFv, G, GV, US, CS, ALE_CSp, ADp, 
     enddo
   endif
 
-  do concurrent (j=js:je)
+    do concurrent (j=js:je) DO_LOCALITY(local(k))
     do k=1,nz
       do concurrent (I=Isq:Ieq)
         intx_pa(I,j,K+1) = intx_pa(I,j,K) + intx_dpa(I,j,k)
       enddo
     enddo
   enddo
-  do concurrent (J=Jsq:Jeq)
+    do concurrent (J=Jsq:Jeq) DO_LOCALITY(local(k))
     do k=1,nz
       do concurrent (i=is:ie)
         inty_pa(i,J,K+1) = inty_pa(i,J,K) + inty_dpa(i,J,k)
@@ -2097,6 +2081,64 @@ subroutine PressureForce_FV_Bouss(h, tv, PFu, PFv, G, GV, US, CS, ALE_CSp, ADp, 
   endif
 end subroutine PressureForce_FV_Bouss
 
+!> Calculates pressure anomaly integrals for uniform-density layers using
+!! vertical blocks.  The caller maps h and the four integral arrays; this
+!! routine owns only its block-sized scratch.
+subroutine int_Rlay_dz(h, rho_ref, dpa, intz_dpa, intx_dpa, inty_dpa, G, GV, nkk)
+  type(ocean_grid_type), intent(in) :: G
+    !< Ocean grid structure
+  type(verticalGrid_type), intent(in) :: GV
+    !< Vertical grid structure
+  real, intent(in) :: h(SZI_(G),SZJ_(G),SZK_(GV))
+    !< Layer thickness [H ~> m or kg m-2]
+  real, intent(in) :: rho_ref
+    !< Reference density subtracted from layer density [R ~> kg m-3]
+  real, intent(inout) :: dpa(SZI_(G),SZJ_(G),SZK_(GV))
+    !< Pressure anomaly change across each layer [R L2 T-2 ~> Pa]
+  real, intent(inout) :: intz_dpa(SZI_(G),SZJ_(G),SZK_(GV))
+    !< Vertical pressure anomaly integral [R L2 H T-2 ~> Pa m]
+  real, intent(inout) :: intx_dpa(SZIB_(G),SZJ_(G),SZK_(GV))
+    !< Zonal integral divided by grid spacing [R L2 T-2 ~> Pa]
+  real, intent(inout) :: inty_dpa(SZI_(G),SZJB_(G),SZK_(GV))
+    !< Meridional integral divided by grid spacing [R L2 T-2 ~> Pa]
+  integer, intent(in) :: nkk
+    !< Number of vertical levels in each block [nondim]
+
+  real :: dz_geo(SZI_(G),SZJ_(G),nkk)
+    ! Geopotential thickness change through a layer [L2 T-2 ~> m2 s-2]
+  integer :: is, ie, js, je, Isq, Ieq, Jsq, Jeq, nz
+    ! Computational domain bounds
+  integer :: i, j, k, kk
+    ! Horizontal, vertical and block-local indices.
+  integer :: ksb, keb, kke
+    ! First/last layer and number of layers in the current block.
+
+  is = G%isc ; ie = G%iec ; js = G%jsc ; je = G%jec ; nz = GV%ke
+  Isq = G%IscB ; Ieq = G%IecB ; Jsq = G%JscB ; Jeq = G%JecB
+
+  !$omp target data map(alloc: dz_geo)
+  do ksb=1,nz,nkk
+    keb = min(ksb + nkk - 1, nz)
+    kke = keb - ksb + 1
+
+    do concurrent (kk=1:kke, j=Jsq:Jeq+1, i=Isq:Ieq+1) DO_LOCALITY(local(k))
+      k = ksb + kk - 1
+      dz_geo(i,j,kk) = GV%g_Earth * GV%H_to_Z*h(i,j,k)
+      dpa(i,j,k) = (GV%Rlay(k) - rho_ref) * dz_geo(i,j,kk)
+      intz_dpa(i,j,k) = 0.5*(GV%Rlay(k) - rho_ref) * dz_geo(i,j,kk)*h(i,j,k)
+    enddo
+    do concurrent (kk=1:kke, j=js:je, I=Isq:Ieq) DO_LOCALITY(local(k))
+      k = ksb + kk - 1
+      intx_dpa(I,j,k) = 0.5*(GV%Rlay(k) - rho_ref) * (dz_geo(i,j,kk) + dz_geo(i+1,j,kk))
+    enddo
+    do concurrent (kk=1:kke, J=Jsq:Jeq, i=is:ie) DO_LOCALITY(local(k))
+      k = ksb + kk - 1
+      inty_dpa(i,J,k) = 0.5*(GV%Rlay(k) - rho_ref) * (dz_geo(i,j,kk) + dz_geo(i,j+1,kk))
+    enddo
+  enddo ! ksb-loop over vertical blocks
+  !$omp end target data
+end subroutine int_Rlay_dz
+
 !> Initializes the finite volume pressure gradient control structure
 subroutine PressureForce_FV_init(Time, G, GV, US, param_file, diag, CS, ADp, SAL_CSp, tides_CSp)
   type(time_type), target,    intent(in)    :: Time !< Current model time
@@ -2138,6 +2180,13 @@ subroutine PressureForce_FV_init(Time, G, GV, US, param_file, diag, CS, ADp, SAL
 
   mdl = "MOM_PressureForce_FV"
   call log_version(param_file, mdl, version, "")
+  call get_param(param_file, mdl, "PRESSURE_NKBLOCK", CS%nkblock, &
+                 "Number of vertical levels per block for pressure integrals. "//&
+                 "A value of 0 uses the full vertical column.", &
+                 default=1, layoutParam=.true.)
+  if (CS%nkblock < 0) &
+    call MOM_error(FATAL, "MOM_PressureForce_FV_init: PRESSURE_NKBLOCK must be nonnegative.")
+
   call get_param(param_file, mdl, "DEBUG", CS%debug, &
                  "If true, write out verbose debugging data.", &
                  default=.false., debuggingParam=.true., do_not_log=.true.)
