@@ -230,7 +230,7 @@ type, public :: MOM_dyn_split_RK2_CS ; private
                                          !! accelerations in the momentum equations,
                                          !! which can later be used to calculate
                                          !! derived diagnostics like energy budgets.
-  type(accel_diag_ptrs), pointer :: AD_pred => NULL() !< A structure pointing to the various
+  type(accel_diag_ptrs), allocatable :: AD_pred !< A structure pointing to the various
                                          !! predictor step accelerations in the momentum equations,
                                          !! which can be used to debug truncations.
   type(cont_diag_ptrs), pointer  :: CDp => NULL()  !< A structure with pointers to various
@@ -623,6 +623,9 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
 
 
   call cpu_clock_begin(id_clock_pass)
+  ! Remnants are device-produced, but halo exchange and downstream consumers
+  ! still use host storage until device-aware communication is enabled.
+  !$omp target update from(CS%visc_rem_u, CS%visc_rem_v)
   if (G%nonblocking_updates) then
     call complete_group_pass(CS%pass_eta, G%Domain)
     call start_group_pass(CS%pass_visc_rem, G%Domain)
@@ -649,6 +652,7 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
 
   if (G%nonblocking_updates) &
     call complete_group_pass(CS%pass_visc_rem, G%Domain, clock=id_clock_pass)
+  !$omp target update to(CS%visc_rem_u, CS%visc_rem_v)
 
 ! u_accel_bt = layer accelerations due to barotropic solver
   if (associated(CS%BT_cont) .or. CS%BT_use_layer_fluxes) then
@@ -761,10 +765,12 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
     call vertFPmix(up, vp, uold, vold, hbl, h, forces, dt_pred, lFPpost, CS%Cemp_NL,  &
                    G, GV, US, CS%vertvisc_CSp, CS%OBC, waves=waves)
     call vertvisc(up, vp, h, forces, visc, dt_pred, CS%OBC, CS%AD_pred, CS%CDp, G, &
-                  GV, US, CS%vertvisc_CSp, CS%taux_bot, CS%tauy_bot, fpmix=CS%fpmix, waves=waves)
+                  GV, US, CS%vertvisc_CSp, CS%taux_bot, CS%tauy_bot, fpmix=CS%fpmix, waves=waves, &
+                  return_bottom_stress=CS%split_bottom_stress)
   else
     call vertvisc(up, vp, h, forces, visc, dt_pred, CS%OBC, CS%AD_pred, CS%CDp, G, &
-                  GV, US, CS%vertvisc_CSp, CS%taux_bot, CS%tauy_bot, waves=waves)
+                  GV, US, CS%vertvisc_CSp, CS%taux_bot, CS%tauy_bot, waves=waves, &
+                  return_bottom_stress=CS%split_bottom_stress)
   endif
 
   if (showCallTree) call callTree_wayPoint("done with vertvisc (step_MOM_dyn_split_RK2)")
@@ -780,7 +786,9 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
   endif
   call cpu_clock_end(id_clock_vertvisc)
 
+  !$omp target update from(CS%visc_rem_u, CS%visc_rem_v)
   call do_group_pass(CS%pass_visc_rem, G%Domain, clock=id_clock_pass)
+  !$omp target update to(CS%visc_rem_u, CS%visc_rem_v)
   if (G%nonblocking_updates) then
     call complete_group_pass(CS%pass_uvp, G%Domain, clock=id_clock_pass)
   else
@@ -1016,11 +1024,13 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
     call vertFPmix(u_inst, v_inst, uold, vold, hbl, h, forces, dt, lFPpost, CS%Cemp_NL, &
                    G, GV, US, CS%vertvisc_CSp, CS%OBC, Waves=Waves)
     call vertvisc(u_inst, v_inst, h, forces, visc, dt, CS%OBC, CS%ADp, CS%CDp, G, GV, US, &
-         CS%vertvisc_CSp, CS%taux_bot, CS%tauy_bot, fpmix=CS%fpmix, waves=waves)
+         CS%vertvisc_CSp, CS%taux_bot, CS%tauy_bot, fpmix=CS%fpmix, waves=waves, &
+         return_bottom_stress=CS%split_bottom_stress)
 
   else
     call vertvisc(u_inst, v_inst, h, forces, visc, dt, CS%OBC, CS%ADp, CS%CDp, G, GV, US, &
-                  CS%vertvisc_CSp, CS%taux_bot, CS%tauy_bot, waves=waves)
+                  CS%vertvisc_CSp, CS%taux_bot, CS%tauy_bot, waves=waves, &
+                  return_bottom_stress=CS%split_bottom_stress)
   endif
 
   if (G%nonblocking_updates) then
@@ -1038,7 +1048,9 @@ subroutine step_MOM_dyn_split_RK2(u_inst, v_inst, h, tv, visc, Time_local, dt, f
     h_av(i,j,k) = h(i,j,k)
   enddo ; enddo ; enddo
 
+  !$omp target update from(CS%visc_rem_u, CS%visc_rem_v)
   call do_group_pass(CS%pass_visc_rem, G%Domain, clock=id_clock_pass)
+  !$omp target update to(CS%visc_rem_u, CS%visc_rem_v)
   if (G%nonblocking_updates) then
     call complete_group_pass(CS%pass_uv, G%Domain, clock=id_clock_pass)
   else
@@ -1266,6 +1278,7 @@ subroutine register_restarts_dyn_split_RK2(HI, GV, US, param_file, CS, restart_C
 
   allocate(CS%taux_bot(IsdB:IedB,jsd:jed), source = 0.0)
   allocate(CS%tauy_bot(isd:ied,JsdB:JedB), source = 0.0)
+  !$omp target enter data map(to: CS%taux_bot, CS%tauy_bot)
 
   thickness_units = get_thickness_units(GV)
   flux_units = get_flux_units(GV)
@@ -1545,6 +1558,7 @@ subroutine initialize_dyn_split_RK2(u, v, h, tv, uh, vh, eta, Time, G, GV, US, p
   ALLOC_(CS%vhbt(isd:ied,JsdB:JedB))          ; CS%vhbt(:,:)         = 0.0
   ALLOC_(CS%visc_rem_u(IsdB:IedB,jsd:jed,nz)) ; CS%visc_rem_u(:,:,:) = 0.0
   ALLOC_(CS%visc_rem_v(isd:ied,JsdB:JedB,nz)) ; CS%visc_rem_v(:,:,:) = 0.0
+  !$omp target enter data map(to: CS%visc_rem_u, CS%visc_rem_v)
   ALLOC_(CS%eta_PF(isd:ied,jsd:jed))          ; CS%eta_PF(:,:)       = 0.0
   ALLOC_(CS%pbce(isd:ied,jsd:jed,nz))         ; CS%pbce(:,:,:)       = 0.0
 
@@ -1933,6 +1947,10 @@ subroutine initialize_dyn_split_RK2(u, v, h, tv, uh, vh, eta, Time, G, GV, US, p
   id_clock_btstep     = cpu_clock_id('(Ocean barotropic mode stepping)', grain=CLOCK_MODULE)
   id_clock_btforce    = cpu_clock_id('(Ocean barotropic forcing calc)',  grain=CLOCK_MODULE)
 
+  ! Restart registration precedes restart reads; refresh the owner mappings
+  ! with the restored bottom stresses before the first timestep.
+  !$omp target update to(CS%taux_bot, CS%tauy_bot)
+  !$omp target enter data map(to: CS%AD_pred)
 end subroutine initialize_dyn_split_RK2
 
 
@@ -1959,16 +1977,24 @@ subroutine end_dyn_split_RK2(CS)
   !$omp target exit data map(delete: CS%CoriolisAdv)
   deallocate(CS%CoriolisAdv)
 
+  !$omp target exit data map(release: CS%AD_pred)
   DEALLOC_(CS%diffu) ; DEALLOC_(CS%diffv)
   DEALLOC_(CS%CAu)   ; DEALLOC_(CS%CAv)
   DEALLOC_(CS%CAu_pred) ; DEALLOC_(CS%CAv_pred)
   DEALLOC_(CS%PFu)   ; DEALLOC_(CS%PFv)
 
-  if (associated(CS%taux_bot)) deallocate(CS%taux_bot)
-  if (associated(CS%tauy_bot)) deallocate(CS%tauy_bot)
+  if (associated(CS%taux_bot)) then
+    !$omp target exit data map(release: CS%taux_bot)
+    deallocate(CS%taux_bot)
+  endif
+  if (associated(CS%tauy_bot)) then
+    !$omp target exit data map(release: CS%tauy_bot)
+    deallocate(CS%tauy_bot)
+  endif
 
   DEALLOC_(CS%uhbt) ; DEALLOC_(CS%vhbt)
   DEALLOC_(CS%u_accel_bt) ; DEALLOC_(CS%v_accel_bt)
+  !$omp target exit data map(release: CS%visc_rem_u, CS%visc_rem_v)
   DEALLOC_(CS%visc_rem_u) ; DEALLOC_(CS%visc_rem_v)
 
   DEALLOC_(CS%eta) ; DEALLOC_(CS%eta_PF) ; DEALLOC_(CS%pbce)

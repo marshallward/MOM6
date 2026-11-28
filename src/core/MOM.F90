@@ -263,7 +263,7 @@ type, public :: MOM_control_struct ; private
                     !! have been stored for use in diagnostics.
 
   type(diag_ctrl)     :: diag !< structure to regulate diagnostic output timing
-  type(vertvisc_type) :: visc !< structure containing vertical viscosities,
+  type(vertvisc_type), allocatable :: visc !< structure containing vertical viscosities,
                     !! bottom drag viscosities, and related fields
   type(MEKE_type) :: MEKE   !< Fields related to the Mesoscale Eddy Kinetic Energy
   logical :: adiabatic !< If true, there are no diapycnal mass fluxes, and no calls
@@ -346,7 +346,7 @@ type, public :: MOM_control_struct ; private
   real, dimension(:,:), pointer :: frac_shelf_h => NULL() !< fraction of total area occupied
   !! by ice shelf [nondim]
   real, dimension(:,:), pointer :: mass_shelf => NULL() !< Mass of ice shelf [R Z ~> kg m-2]
-  type(accel_diag_ptrs) :: ADp  !< structure containing pointers to accelerations,
+  type(accel_diag_ptrs), allocatable :: AD  !< structure containing pointers to accelerations,
                                 !! for derived diagnostics (e.g., energy budgets)
   type(cont_diag_ptrs)  :: CDp  !< structure containing pointers to continuity equation
                                 !! terms, for derived diagnostics (e.g., energy budgets)
@@ -1071,7 +1071,7 @@ subroutine step_MOM(forces_in, fluxes_in, sfc_state, Time_start, time_int_in, CS
       ! Diagnostics that require the complete state to be up-to-date can be calculated.
 
       call enable_averages(CS%t_dyn_rel_diag, Time_local, CS%diag)
-      call calculate_diagnostic_fields(u, v, h, CS%uh, CS%vh, CS%tv, CS%ADp,  &
+      call calculate_diagnostic_fields(u, v, h, CS%uh, CS%vh, CS%tv, CS%AD,  &
                           CS%CDp, p_surf, CS%t_dyn_rel_diag, CS%diag_pre_sync,&
                           G, GV, US, CS%diagnostics_CSp)
       call post_tracer_diagnostics_at_sync(CS%Tracer_reg, h, CS%diag_pre_sync, CS%diag, G, GV, CS%t_dyn_rel_diag)
@@ -1771,7 +1771,7 @@ subroutine step_MOM_thermo(CS, G, GV, US, u, v, h, tv, fluxes, dtdia, &
 
     call cpu_clock_begin(id_clock_diabatic)
 
-    call diabatic(u, v, h, tv, CS%Hml, fluxes, CS%visc, CS%ADp, CS%CDp, dtdia, &
+    call diabatic(u, v, h, tv, CS%Hml, fluxes, CS%visc, CS%AD, CS%CDp, dtdia, &
                   Time_end_thermo, G, GV, US, CS%diabatic_CSp, CS%stoch_CS, CS%OBC, Waves)
     fluxes%fluxes_used = .true.
 
@@ -3119,16 +3119,17 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, &
   CS%t_dyn_rel_adv = 0.0 ; CS%t_dyn_rel_thermo = 0.0 ; CS%t_dyn_rel_diag = 0.0
   CS%n_dyn_steps_in_adv = 0
 
+  allocate(CS%AD)
   if (debug_truncations) then
     allocate(CS%u_prev(IsdB:IedB,jsd:jed,nz), source=0.0)
     allocate(CS%v_prev(isd:ied,JsdB:JedB,nz), source=0.0)
     MOM_internal_state%u_prev => CS%u_prev
     MOM_internal_state%v_prev => CS%v_prev
-    call safe_alloc_ptr(CS%ADp%du_dt_visc,IsdB,IedB,jsd,jed,nz)
-    call safe_alloc_ptr(CS%ADp%dv_dt_visc,isd,ied,JsdB,JedB,nz)
+    call safe_alloc_ptr(CS%AD%du_dt_visc,IsdB,IedB,jsd,jed,nz)
+    call safe_alloc_ptr(CS%AD%dv_dt_visc,isd,ied,JsdB,JedB,nz)
     if (.not.CS%adiabatic) then
-      call safe_alloc_ptr(CS%ADp%du_dt_dia,IsdB,IedB,jsd,jed,nz)
-      call safe_alloc_ptr(CS%ADp%dv_dt_dia,isd,ied,JsdB,JedB,nz)
+      call safe_alloc_ptr(CS%AD%du_dt_dia,IsdB,IedB,jsd,jed,nz)
+      call safe_alloc_ptr(CS%AD%dv_dt_dia,isd,ied,JsdB,JedB,nz)
     endif
   endif
 
@@ -3195,6 +3196,8 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, &
                             CS%tracer_Reg, restart_CSp)
 
   call MEKE_alloc_register_restart(HI, US, param_file, CS%MEKE, restart_CSp)
+  allocate(CS%visc)
+  !$omp target enter data map(alloc: CS%visc)
   call set_visc_register_restarts(HI, G, GV, US, param_file, CS%visc, restart_CSp, use_ice_shelf)
   call mixedlayer_restrat_register_restarts(HI, GV, US, param_file, &
            CS%mixedlayer_restrat_CSp, restart_CSp)
@@ -3667,14 +3670,14 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, &
     if (CS%use_alt_split) then
       call initialize_dyn_split_RK2b(CS%u, CS%v, CS%h, CS%tv, CS%uh, CS%vh, eta, Time, &
               G, GV, US, param_file, diag, CS%dyn_split_RK2b_CSp, CS%HA_CSp, restart_CSp, &
-              CS%dt, CS%ADp, CS%CDp, MOM_internal_state, CS%VarMix, CS%MEKE, &
+              CS%dt, CS%AD, CS%CDp, MOM_internal_state, CS%VarMix, CS%MEKE, &
               CS%thickness_diffuse_CSp, CS%OBC, CS%update_OBC_CSp, CS%ALE_CSp, CS%set_visc_CSp, &
               CS%visc, dirs, CS%ntrunc, CS%pbv, calc_dtbt=calc_dtbt, &
               cont_stencil=CS%cont_stencil, dyn_h_stencil=CS%dyn_h_stencil)
     else
       call initialize_dyn_split_RK2(CS%u, CS%v, CS%h, CS%tv, CS%uh, CS%vh, eta, Time, &
               G, GV, US, param_file, diag, CS%dyn_split_RK2_CSp, CS%HA_CSp, restart_CSp, &
-              CS%dt, CS%ADp, CS%CDp, MOM_internal_state, CS%VarMix, CS%MEKE, &
+              CS%dt, CS%AD, CS%CDp, MOM_internal_state, CS%VarMix, CS%MEKE, &
               CS%thickness_diffuse_CSp, CS%OBC, CS%update_OBC_CSp, CS%ALE_CSp, CS%set_visc_CSp, &
               CS%visc, dirs, CS%ntrunc, CS%pbv, calc_dtbt=calc_dtbt, &
               cont_stencil=CS%cont_stencil, dyn_h_stencil=CS%dyn_h_stencil)
@@ -3700,13 +3703,13 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, &
   elseif (CS%use_RK2) then
     call initialize_dyn_unsplit_RK2(CS%u, CS%v, CS%h, CS%tv, Time, G, GV,  &
             US, param_file, diag, CS%dyn_unsplit_RK2_CSp,                  &
-            CS%ADp, CS%CDp, MOM_internal_state, CS%OBC,                    &
+            CS%AD, CS%CDp, MOM_internal_state, CS%OBC,                    &
             CS%update_OBC_CSp, CS%ALE_CSp, CS%set_visc_CSp, CS%visc, dirs, &
             CS%ntrunc, cont_stencil=CS%cont_stencil, dyn_h_stencil=CS%dyn_h_stencil)
   else
     call initialize_dyn_unsplit(CS%u, CS%v, CS%h, CS%tv, Time, G, GV,      &
             US, param_file, diag, CS%dyn_unsplit_CSp,                      &
-            CS%ADp, CS%CDp, MOM_internal_state, CS%OBC,                    &
+            CS%AD, CS%CDp, MOM_internal_state, CS%OBC,                    &
             CS%update_OBC_CSp, CS%ALE_CSp, CS%set_visc_CSp, CS%visc, dirs, &
             CS%ntrunc, cont_stencil=CS%cont_stencil, dyn_h_stencil=CS%dyn_h_stencil)
   endif
@@ -3769,7 +3772,7 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, &
       call pass_var(CS%visc%h_ML, G%domain, halo=1)
   endif
 
-  call MOM_diagnostics_init(MOM_internal_state, CS%ADp, CS%CDp, Time, G, GV, US, &
+  call MOM_diagnostics_init(MOM_internal_state, CS%AD, CS%CDp, Time, G, GV, US, &
                             param_file, diag, CS%diagnostics_CSp, CS%tv)
   call diag_copy_diag_to_storage(CS%diag_pre_sync, CS%h, CS%diag)
 
@@ -3779,7 +3782,7 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, &
                                CS%tracer_flow_CSp)
   else
     call diabatic_driver_init(Time, G, GV, US, param_file, CS%use_ALE_algorithm, diag, &
-                              CS%ADp, CS%CDp, CS%diabatic_CSp, CS%tracer_flow_CSp, &
+                              CS%AD, CS%CDp, CS%diabatic_CSp, CS%tracer_flow_CSp, &
                               CS%sponge_CSp, CS%ALE_sponge_CSp, CS%oda_incupd_CSp, CS%int_tide_CSp)
   endif
 
@@ -3923,6 +3926,28 @@ subroutine initialize_MOM(Time, Time_init, param_file, dirs, CS, &
 
   ! initialize stochastic physics
   call stochastics_init(CS%dt_therm, CS%G, CS%GV, US, CS%stoch_CS, param_file, diag, Time)
+
+  ! All modules have now associated their diagnostic fields.  The borrowed
+  ! timestepper aliases refer to this separately allocated owner.
+  !$omp target enter data map(to: CS%AD)
+  if (associated(CS%AD%du_dt_visc)) then
+    !$omp target enter data map(to: CS%AD%du_dt_visc)
+  endif
+  if (associated(CS%AD%dv_dt_visc)) then
+    !$omp target enter data map(to: CS%AD%dv_dt_visc)
+  endif
+  if (associated(CS%AD%du_dt_visc_gl90)) then
+    !$omp target enter data map(to: CS%AD%du_dt_visc_gl90)
+  endif
+  if (associated(CS%AD%dv_dt_visc_gl90)) then
+    !$omp target enter data map(to: CS%AD%dv_dt_visc_gl90)
+  endif
+  if (associated(CS%AD%du_dt_str)) then
+    !$omp target enter data map(to: CS%AD%du_dt_str)
+  endif
+  if (associated(CS%AD%dv_dt_str)) then
+    !$omp target enter data map(to: CS%AD%dv_dt_str)
+  endif
 
   call callTree_leave("initialize_MOM()")
   call cpu_clock_end(id_clock_init) ; call cpu_clock_end(id_clock_ocean)
@@ -4707,7 +4732,27 @@ subroutine MOM_end(CS)
     deallocate(CS%diabatic_CSp)
   endif
 
-  call MOM_diagnostics_end(CS%diagnostics_CSp, CS%ADp, CS%CDp)
+  ! Release persistent friction diagnostic mappings before diagnostics_end
+  ! deallocates their host storage.
+  if (associated(CS%AD%du_dt_visc)) then
+    !$omp target exit data map(release: CS%AD%du_dt_visc)
+  endif
+  if (associated(CS%AD%dv_dt_visc)) then
+    !$omp target exit data map(release: CS%AD%dv_dt_visc)
+  endif
+  if (associated(CS%AD%du_dt_visc_gl90)) then
+    !$omp target exit data map(release: CS%AD%du_dt_visc_gl90)
+  endif
+  if (associated(CS%AD%dv_dt_visc_gl90)) then
+    !$omp target exit data map(release: CS%AD%dv_dt_visc_gl90)
+  endif
+  if (associated(CS%AD%du_dt_str)) then
+    !$omp target exit data map(release: CS%AD%du_dt_str)
+  endif
+  if (associated(CS%AD%dv_dt_str)) then
+    !$omp target exit data map(release: CS%AD%dv_dt_str)
+  endif
+  call MOM_diagnostics_end(CS%diagnostics_CSp, CS%AD, CS%CDp)
 
   if (CS%offline_tracer_mode) call offline_transport_end(CS%offline_CSp)
 
@@ -4720,6 +4765,8 @@ subroutine MOM_end(CS)
   else
     call end_dyn_unsplit(CS%dyn_unsplit_CSp)
   endif
+  !$omp target exit data map(release: CS%AD)
+  deallocate(CS%AD)
 
   if (CS%use_particles) then
     call particles_end(CS%particles, CS%h)
@@ -4730,6 +4777,8 @@ subroutine MOM_end(CS)
   if (CS%interface_filter) call interface_filter_end(CS%interface_filter_CSp, CS%CDp)
   call VarMix_end(CS%VarMix)
   call set_visc_end(CS%visc, CS%set_visc_CSp)
+  !$omp target exit data map(release: CS%visc)
+  deallocate(CS%visc)
   call MEKE_end(CS%MEKE)
 
   if (associated(CS%tv%internal_heat)) deallocate(CS%tv%internal_heat)

@@ -1150,6 +1150,26 @@ subroutine set_viscous_BBL(u, v, h, tv, visc, G, GV, US, CS, pbv)
     endif ; enddo ! end of i loop
   enddo ; enddo ! end of m & j loops
 
+  ! These producers still run on the host; refresh the persistent device inputs.
+  if (allocated(visc%Ray_u)) then
+    !$omp target update to(visc%Ray_u)
+  endif
+  if (allocated(visc%Ray_v)) then
+    !$omp target update to(visc%Ray_v)
+  endif
+  if (allocated(visc%bbl_thick_u)) then
+    !$omp target update to(visc%bbl_thick_u)
+  endif
+  if (allocated(visc%bbl_thick_v)) then
+    !$omp target update to(visc%bbl_thick_v)
+  endif
+  if (allocated(visc%Kv_bbl_u)) then
+    !$omp target update to(visc%Kv_bbl_u)
+  endif
+  if (allocated(visc%Kv_bbl_v)) then
+    !$omp target update to(visc%Kv_bbl_v)
+  endif
+
 ! Offer diagnostics for averaging
   if (CS%id_bbl_thick_u > 0) &
     call post_data(CS%id_bbl_thick_u, visc%bbl_thick_u, CS%diag)
@@ -2150,18 +2170,30 @@ subroutine set_viscous_ML(u, v, h, tv, forces, visc, dt, G, GV, US, CS)
   if (associated(forces%frac_shelf_u)) then
     ! This configuration has ice shelves, and the appropriate variables need to be
     ! allocated.  If the arrays have already been allocated, these calls do nothing.
-    if (.not.allocated(visc%taux_shelf)) &
+    if (.not.allocated(visc%taux_shelf)) then
       allocate(visc%taux_shelf(G%IsdB:G%IedB, G%jsd:G%jed), source=0.0)
-    if (.not.allocated(visc%tauy_shelf)) &
+      !$omp target enter data map(to: visc%taux_shelf)
+    endif
+    if (.not.allocated(visc%tauy_shelf)) then
       allocate(visc%tauy_shelf(G%isd:G%ied, G%JsdB:G%JedB), source=0.0)
-    if (.not.allocated(visc%tbl_thick_shelf_u)) &
+      !$omp target enter data map(to: visc%tauy_shelf)
+    endif
+    if (.not.allocated(visc%tbl_thick_shelf_u)) then
       allocate(visc%tbl_thick_shelf_u(G%IsdB:G%IedB, G%jsd:G%jed), source=0.0)
-    if (.not.allocated(visc%tbl_thick_shelf_v)) &
+      !$omp target enter data map(to: visc%tbl_thick_shelf_u)
+    endif
+    if (.not.allocated(visc%tbl_thick_shelf_v)) then
       allocate(visc%tbl_thick_shelf_v(G%isd:G%ied, G%JsdB:G%JedB), source=0.0)
-    if (.not.allocated(visc%kv_tbl_shelf_u)) &
+      !$omp target enter data map(to: visc%tbl_thick_shelf_v)
+    endif
+    if (.not.allocated(visc%kv_tbl_shelf_u)) then
       allocate(visc%kv_tbl_shelf_u(G%IsdB:G%IedB, G%jsd:G%jed), source=0.0)
-    if (.not.allocated(visc%kv_tbl_shelf_v)) &
+      !$omp target enter data map(to: visc%kv_tbl_shelf_u)
+    endif
+    if (.not.allocated(visc%kv_tbl_shelf_v)) then
       allocate(visc%kv_tbl_shelf_v(G%isd:G%ied, G%JsdB:G%JedB), source=0.0)
+      !$omp target enter data map(to: visc%kv_tbl_shelf_v)
+    endif
 
     !  With a linear drag law under shelves, the friction velocity is already known.
 !    if (CS%linear_drag) ustar(:) = cdrag_sqrt_H*CS%drag_bg_vel
@@ -2753,6 +2785,26 @@ subroutine set_viscous_ML(u, v, h, tv, forces, visc, dt, G, GV, US, CS)
     endif ! do_any_shelf
 
   enddo ! J-loop at v-points
+
+  ! Keep the host ML/shelf producers coherent with their device consumers.
+  if (allocated(visc%nkml_visc_u)) then
+    !$omp target update to(visc%nkml_visc_u)
+  endif
+  if (allocated(visc%nkml_visc_v)) then
+    !$omp target update to(visc%nkml_visc_v)
+  endif
+  if (allocated(visc%tbl_thick_shelf_u)) then
+    !$omp target update to(visc%tbl_thick_shelf_u)
+  endif
+  if (allocated(visc%tbl_thick_shelf_v)) then
+    !$omp target update to(visc%tbl_thick_shelf_v)
+  endif
+  if (allocated(visc%Kv_tbl_shelf_u)) then
+    !$omp target update to(visc%Kv_tbl_shelf_u)
+  endif
+  if (allocated(visc%Kv_tbl_shelf_v)) then
+    !$omp target update to(visc%Kv_tbl_shelf_v)
+  endif
 
   if (CS%debug) then
     if (allocated(visc%nkml_visc_u) .and. allocated(visc%nkml_visc_v)) &
@@ -3354,6 +3406,45 @@ subroutine set_visc_init(Time, G, GV, US, param_file, diag, visc, CS, restart_CS
   call register_restart_field_as_obsolete('Kd_turb','Kd_shear', restart_CS)
   call register_restart_field_as_obsolete('Kv_turb','Kv_shear', restart_CS)
 
+  ! MOM owns the separately allocated container.  Attach components only after
+  ! restart values, pointer associations and the initial halo passes are ready.
+  !$omp target update to(visc)
+  if (associated(visc%Kv_shear)) then
+    !$omp target enter data map(to: visc%Kv_shear)
+  endif
+  if (associated(visc%Kv_shear_Bu)) then
+    !$omp target enter data map(to: visc%Kv_shear_Bu)
+  endif
+  if (allocated(visc%bbl_thick_u)) then
+    !$omp target enter data map(to: visc%bbl_thick_u)
+  endif
+  if (allocated(visc%bbl_thick_v)) then
+    !$omp target enter data map(to: visc%bbl_thick_v)
+  endif
+  if (allocated(visc%Kv_bbl_u)) then
+    !$omp target enter data map(to: visc%Kv_bbl_u)
+  endif
+  if (allocated(visc%Kv_bbl_v)) then
+    !$omp target enter data map(to: visc%Kv_bbl_v)
+  endif
+  if (allocated(visc%Ray_u)) then
+    !$omp target enter data map(to: visc%Ray_u)
+  endif
+  if (allocated(visc%Ray_v)) then
+    !$omp target enter data map(to: visc%Ray_v)
+  endif
+  if (allocated(visc%nkml_visc_u)) then
+    !$omp target enter data map(to: visc%nkml_visc_u)
+  endif
+  if (allocated(visc%nkml_visc_v)) then
+    !$omp target enter data map(to: visc%nkml_visc_v)
+  endif
+  if (allocated(visc%taux_shelf)) then
+    !$omp target enter data map(to: visc%taux_shelf)
+  endif
+  if (allocated(visc%tauy_shelf)) then
+    !$omp target enter data map(to: visc%tauy_shelf)
+  endif
 end subroutine set_visc_init
 
 !> This subroutine dellocates any memory in the set_visc control structure.
@@ -3362,6 +3453,55 @@ subroutine set_visc_end(visc, CS)
                                              !! related fields.  Elements are deallocated here.
   type(set_visc_CS),   intent(inout) :: CS   !< The control structure returned by a previous
                                              !! call to set_visc_init.
+
+  if (allocated(visc%bbl_thick_u)) then
+    !$omp target exit data map(release: visc%bbl_thick_u)
+  endif
+  if (allocated(visc%bbl_thick_v)) then
+    !$omp target exit data map(release: visc%bbl_thick_v)
+  endif
+  if (allocated(visc%Kv_bbl_u)) then
+    !$omp target exit data map(release: visc%Kv_bbl_u)
+  endif
+  if (allocated(visc%Kv_bbl_v)) then
+    !$omp target exit data map(release: visc%Kv_bbl_v)
+  endif
+  if (allocated(visc%Ray_u)) then
+    !$omp target exit data map(release: visc%Ray_u)
+  endif
+  if (allocated(visc%Ray_v)) then
+    !$omp target exit data map(release: visc%Ray_v)
+  endif
+  if (allocated(visc%nkml_visc_u)) then
+    !$omp target exit data map(release: visc%nkml_visc_u)
+  endif
+  if (allocated(visc%nkml_visc_v)) then
+    !$omp target exit data map(release: visc%nkml_visc_v)
+  endif
+  if (associated(visc%Kv_shear)) then
+    !$omp target exit data map(release: visc%Kv_shear)
+  endif
+  if (associated(visc%Kv_shear_Bu)) then
+    !$omp target exit data map(release: visc%Kv_shear_Bu)
+  endif
+  if (allocated(visc%taux_shelf)) then
+    !$omp target exit data map(release: visc%taux_shelf)
+  endif
+  if (allocated(visc%tauy_shelf)) then
+    !$omp target exit data map(release: visc%tauy_shelf)
+  endif
+  if (allocated(visc%tbl_thick_shelf_u)) then
+    !$omp target exit data map(release: visc%tbl_thick_shelf_u)
+  endif
+  if (allocated(visc%tbl_thick_shelf_v)) then
+    !$omp target exit data map(release: visc%tbl_thick_shelf_v)
+  endif
+  if (allocated(visc%Kv_tbl_shelf_u)) then
+    !$omp target exit data map(release: visc%Kv_tbl_shelf_u)
+  endif
+  if (allocated(visc%Kv_tbl_shelf_v)) then
+    !$omp target exit data map(release: visc%Kv_tbl_shelf_v)
+  endif
 
   if (allocated(visc%bbl_thick_u)) deallocate(visc%bbl_thick_u)
   if (allocated(visc%bbl_thick_v)) deallocate(visc%bbl_thick_v)
